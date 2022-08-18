@@ -1,0 +1,16 @@
+out/
+.bsp/
+.idea/
+.mill-bin/
+
+# vim misc
+*.orig
+*.swp
+# idea
+.idea_modules
+
+# test_run_dir
+*test_run_dir/
+
+# MacOS
+*.DS_Store
