@@ -212,7 +212,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   dir_result_buffer.io.enq.valid:= directory.io.result.valid && (directory.io.result.bits.hit)
   dir_result_buffer.io.enq.bits:=directory.io.result.bits
-  dir_result_buffer.io.deq.ready:= !schedule.d.valid
+  dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
 
 
   directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free)

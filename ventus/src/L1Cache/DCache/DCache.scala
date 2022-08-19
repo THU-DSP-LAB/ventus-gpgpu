@@ -93,10 +93,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     queues     ******
   val coreRsp_Q_entries :Int = NLanes
-  val coreRsp_Q = Module(new Queue(new DCacheCoreRsp,entries = coreRsp_Q_entries,flow=false,pipe=true))
+  val coreRsp_Q = Module(new Queue(new DCacheCoreRsp,entries = coreRsp_Q_entries,flow=false,pipe=false))
   //this queue also work as a pipeline reg, so cannot flow
   val coreRsp_QAlmstFull = Wire(Bool())
-  val memRsp_Q = Module(new Queue(new DCacheMemRsp,entries = 2,flow=false,pipe=true))
+  val memRsp_Q = Module(new Queue(new DCacheMemRsp,entries = 2,flow=false,pipe=false))
   //flow will make predecessor read hit conflict with successor memRsp
   val memRsp_Q_st1 = memRsp_Q.io.deq.bits
 
@@ -143,7 +143,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     pipeline regs      ******
   cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire())
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(next = io.coreReq.fire(),enable = MshrAccess.io.missReq.ready)
+  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.fire(),MshrAccess.io.missReq.ready)
   //RegEnable indicate whether the signal is consumed
   val wayIdxAtHit_st1 = Wire(UInt(WayIdxBits.W))
   wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
@@ -191,7 +191,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       memRspData_st1(iinB)(iofB) := memRsp_Q_st1.d_data((iinB*NBanks+iofB).asUInt)
     }
   }
-  memRspData_st2 := RegEnable(next = memRspData_st1,enable = memRsp_Q.io.deq.fire() || (memRsp_Q.io.deq.valid && BankConfArb.io.bankConflict))
+  memRspData_st2 := RegEnable(memRspData_st1,memRsp_Q.io.deq.fire() || (memRsp_Q.io.deq.valid && BankConfArb.io.bankConflict))
 
   // ******     mshrAccess      ******
   MshrAccess.io.missReq.valid := cacheMiss_st1 &

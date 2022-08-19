@@ -203,7 +203,7 @@ trait HasPipelineReg{ this: CTA_IO =>
     when(!(!io.out.ready && valids.drop(i).reduce(_&&_) )){ valids(i) := valids(i-1) }
   }
 
-  def PipelineReg[T<:Data](i: Int)(next: T) = RegEnable(next, valids(i-1) && !(!io.out.ready && valids.drop(i).reduce(_&&_) ))
+  def PipelineReg[T<:Data](i: Int)(next: T) = RegEnable(next,valids(i-1) && !(!io.out.ready && valids.drop(i).reduce(_&&_) ))
   def S1Reg[T<:Data](next: T):T = PipelineReg[T](1)(next)
   def S2Reg[T<:Data](next: T):T = PipelineReg[T](2)(next)
   def S3Reg[T<:Data](next: T):T = PipelineReg[T](3)(next)

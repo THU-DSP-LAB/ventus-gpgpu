@@ -35,9 +35,9 @@ class ExternalMemModel(params: InclusiveCacheParameters_lite)(implicit p: Parame
   val ExtMemLatency = 20
 
   val memory1 = Mem(ExtMemSize1*ExtMemBlockWords,UInt(ExtMemWordLength.W))
-  loadMemoryFromFile(memory1,"/home/ykx/playground/playground/txt/example_vid_sum.vmem")//TODO ykx notice here
+  loadMemoryFromFile(memory1,"./ventus/txt/example_vid_sum.vmem")//TODO ykx notice here
   val memory2 = Mem(ExtMemSize2*ExtMemBlockWords,UInt(ExtMemWordLength.W))
-  loadMemoryFromFile(memory2,"/home/ykx/playground/playground/txt/single_read.data")//TODO ykx notice here
+  loadMemoryFromFile(memory2,"./ventus/txt/single_read.data")//TODO ykx notice here
 
   val readVec = Wire(Vec(ExtMemBlockWords,UInt(ExtMemWordLength.W)))
   val writeVec = Wire(Vec(ExtMemBlockWords,UInt(ExtMemWordLength.W)))

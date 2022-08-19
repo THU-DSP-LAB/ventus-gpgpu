@@ -42,7 +42,7 @@ class warp_scheduler extends Module{
   io.CTA2csr.valid:=io.warpReq.valid
 
 
-  io.flush.valid:=(io.branch.fire()&io.branch.bits.jump) | warp_end
+  io.flush.valid:=(io.branch.fire()&io.branch.bits.jump) | warp_end//(暂定barrier不flush)
   io.flush.bits:=Mux((io.branch.fire()&io.branch.bits.jump),io.branch.bits.wid,warp_end_id)
   io.flushCache.valid:=io.pc_rsp.valid&io.pc_rsp.bits.status(0)
   io.flushCache.bits:=io.pc_rsp.bits.warpid
@@ -52,7 +52,7 @@ class warp_scheduler extends Module{
   //val warp_memory_idle=Reg(Vec(num_warp,Bool()))
   //val warp_barrier_array=RegInit(0.U(num_warp.W))
   //val block_warp_waiting=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W)))) // if meet barrier, switch and set 1. all 1 -> all 0.
-  val warp_init_addr=(VecInit(Seq.fill(num_thread)(0.U(32.W))))
+  val warp_init_addr=(VecInit(Seq.fill(num_thread)(0.U(32.W))))//,172.U,176.U) //初值怎么传进去，这是个问题？建议走CSR，并且是vec version的
   pcControl.foreach{
     x=>{
       x.New_PC:=io.branch.bits.new_pc
