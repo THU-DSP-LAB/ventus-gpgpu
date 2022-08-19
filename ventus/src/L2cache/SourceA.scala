@@ -54,7 +54,7 @@ class SourceA(params: InclusiveCacheParameters_lite) extends Module
 //io. a.bits.size    := UInt(params.offsetBits)
   io.a.bits.source  := io.req.bits.source
   io.a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, io.req.bits.offset) //offset
-  io.a.bits.mask    :=FillInterleaved(params.micro.writeBytes,io.req.bits.mask) //mask
+  io.a.bits.mask    :=io.req.bits.mask//mask
   io.a.bits.data    := io.req.bits.data
   io.a.bits.size    :=io.req.bits.size
 }

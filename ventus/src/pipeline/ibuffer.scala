@@ -3,7 +3,6 @@ package pipeline
 import chisel3._
 import chisel3.util._
 import parameters._
-import utils.QueueWithFlush
 
 
 
@@ -17,7 +16,7 @@ class instbuffer extends Module{
   //val fifo=VecInit(Seq.fill(num_warp)(Module(new QueueWithFlush((new CtrlSigs),2,hasFlush = true)).io))
   io.in.ready:=false.B
   val fifo=(0 until num_warp).map(i=>{
-    val x_single=Module(new QueueWithFlush(new CtrlSigs,num_ibuffer,hasFlush=true))
+    val x_single=Module(new Queue(new CtrlSigs,num_ibuffer,hasFlush=true))
       io.ibuffer_ready(i):=x_single.io.enq.ready
       x_single.io.enq.bits:=io.in.bits
       x_single.io.enq.valid:=Mux((i.asUInt()===io.in.bits.wid),io.in.valid,false.B)

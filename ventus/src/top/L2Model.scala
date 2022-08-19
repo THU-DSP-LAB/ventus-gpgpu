@@ -235,9 +235,9 @@ class L2ModelWithName(val inst_filepath:String,val data_filepath:String, val acc
   memRspBefore.d_data := readVec
   memRspBefore.d_source := io.memReq.bits.a_source
   val memRspAfter = Wire(new L2ModelL1Rsp)
-  memRspAfter := ShiftRegister(memRspBefore, access_time, en=memRsp_Q.io.enq.ready)
+  memRspAfter := ShiftRegister(memRspBefore, access_time, memRsp_Q.io.enq.ready)
 
-  memRsp_Q.io.enq.valid := ShiftRegister(io.memReq.fire() & io.memReq.bits.a_opcode===4.U,access_time,en=memRsp_Q.io.enq.ready)
+  memRsp_Q.io.enq.valid := ShiftRegister(io.memReq.fire() & io.memReq.bits.a_opcode===4.U,access_time,memRsp_Q.io.enq.ready)
   memRsp_Q.io.enq.bits := memRspAfter
   io.memReq.ready := io.memReq_ready && memRsp_Q.io.enq.ready
 

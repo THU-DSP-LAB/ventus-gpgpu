@@ -12,7 +12,7 @@ class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
     test(new GPGPU_ExtMemWrapper()).withAnnotations(Seq(WriteVcdAnnotation)) { c =>
 
 
-      c.clock.step(600)
+      c.clock.step(60)
     }
   }
 }
