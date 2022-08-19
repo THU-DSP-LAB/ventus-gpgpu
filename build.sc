@@ -10,6 +10,8 @@ import $file.dependencies.chisel3.build
 import $file.dependencies.firrtl.build
 import $file.dependencies.treadle.build
 import $file.dependencies.`chisel-testers2`.build
+import $file.dependencies.cde.build
+import $file.dependencies.`berkeley-hardfloat`.build
 import $file.dependencies.`rocket-chip`.common
 
 // Global Scala Version
@@ -145,7 +147,7 @@ object myhardfloat extends dependencies.`berkeley-hardfloat`.build.hardfloat {
   }
 }
 
-object playground extends CommonModule {
+object ventus extends CommonModule {
   override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache, mychiseltest)
 
   // add some scala ivy module you like here.
