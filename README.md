@@ -11,7 +11,7 @@ Chisel development environment config tutorial comes from [chipsalliance/playgro
 1. Init and update dependences
 
 ```shell
-cd ventus gpgpu
+cd ventus-gpgpu
 make init
 make patch
 ```
