@@ -1,0 +1,164 @@
+package pipeline
+
+import chisel3._
+import chisel3.util._
+import parameters._
+
+class warp_scheduler extends Module{
+  val io = IO(new Bundle{
+    val pc_reset = Input(Bool())
+    val warpReq=Flipped(Decoupled(new warpReqData))
+    val warpRsp=Decoupled(new warpRspData)
+    val wg_id_lookup=Output(UInt(depth_warp.W))
+    val wg_id_tag=Input(UInt(TAG_WIDTH.W))
+    val pc_req=Decoupled(new ICachePipeReq_np)
+    val pc_rsp=Flipped(Valid(new ICachePipeRsp_np))
+    val branch = Flipped(DecoupledIO(new BranchCtrl))
+    val warp_control=Flipped(DecoupledIO(new warpSchedulerExeData))
+    val issued_warp=Flipped(Valid(UInt(depth_warp.W)))
+    val scoreboard_busy=Input(UInt(num_warp.W))
+    val exe_busy=Input(UInt(num_warp.W))
+    //val pc_icache_ready=Input(Vec(num_warp,Bool()))
+    val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W)))
+    val warp_ready=Output(UInt(num_warp.W))
+    val flush=(ValidIO(UInt(depth_warp.W)))
+    val flushCache=(ValidIO(UInt(depth_warp.W)))
+    val CTA2csr=ValidIO(new warpReqData)
+    //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
+    //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
+  })
+
+  val warp_end=io.warp_control.fire()&io.warp_control.bits.ctrl.simt_stack_op
+  val warp_end_id=io.warp_control.bits.ctrl.wid
+
+  io.branch.ready:= !io.flushCache.valid
+  io.warp_control.ready:= !io.branch.fire() & !io.flushCache.valid
+
+  io.warpReq.ready:=true.B
+  io.warpRsp.valid:=warp_end // always ready.
+  io.warpRsp.bits.wid:=warp_end_id
+
+  io.CTA2csr.bits:=io.warpReq.bits
+  io.CTA2csr.valid:=io.warpReq.valid
+
+
+  io.flush.valid:=(io.branch.fire()&io.branch.bits.jump) | warp_end
+  io.flush.bits:=Mux((io.branch.fire()&io.branch.bits.jump),io.branch.bits.wid,warp_end_id)
+  io.flushCache.valid:=io.pc_rsp.valid&io.pc_rsp.bits.status(0)
+  io.flushCache.bits:=io.pc_rsp.bits.warpid
+
+  val pcControl=VecInit(Seq.fill(num_warp)(Module(new PCcontrol()).io))
+  //val pcReplay=VecInit(pcControl.map(x=>RegEnable(x.PC_next,(x.PC_src===2.U)&(!x.PC_replay))))
+  //val warp_memory_idle=Reg(Vec(num_warp,Bool()))
+  //val warp_barrier_array=RegInit(0.U(num_warp.W))
+  //val block_warp_waiting=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W)))) // if meet barrier, switch and set 1. all 1 -> all 0.
+  val warp_init_addr=(VecInit(Seq.fill(num_thread)(0.U(32.W))))
+  pcControl.foreach{
+    x=>{
+      x.New_PC:=io.branch.bits.new_pc
+      x.PC_replay:=true.B
+      x.PC_src:=0.U
+    }
+  }
+  val pc_ready=Wire(Vec(num_warp,Bool()))
+
+  val current_warp=RegInit(0.U(depth_warp.W))
+  val next_warp=WireInit(current_warp)
+  current_warp:=next_warp
+  pcControl(next_warp).PC_replay:= (!io.pc_req.ready)|(!pc_ready(next_warp))
+  pcControl(next_warp).PC_src:=2.U
+  //when(io.ldst.switch){warp_memory_idle(io.ldst.warp_id):=true.B}//or current warp id?
+  //when(io.ldst.data_back){warp_memory_idle(io.ldst.warp_id):=false.B}
+  io.pc_req.bits.addr:=pcControl(next_warp).PC_next
+  io.pc_req.bits.warpid:=next_warp
+
+  io.wg_id_lookup:=Mux(io.warp_control.bits.ctrl.barrier,warp_end_id,0.U)
+
+  val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
+  val warp_bar_exp=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
+  //val warp_bar_cur_next=warp_bar_cur
+  //val warp_bar_exp_next=warp_bar_exp
+  val warp_bar_lock=RegInit(VecInit(Seq.fill(num_block)(false.B))) //equals to "active block"
+  val new_wg_id=io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
+  val new_wf_id=io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(WF_COUNT_WIDTH_PER_WG-1,0)
+  val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
+  val end_wg_id=io.wg_id_tag(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
+  val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
+  val warp_bar_data=RegInit(0.U(num_warp.W))
+  val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
+
+  when(io.warpReq.fire){
+    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
+    when(!warp_bar_lock(new_wg_id)){
+      warp_bar_exp(new_wg_id):= Fill(num_warp_in_a_block,1.U(1.W))>>(num_warp_in_a_block.asUInt-new_wg_wf_count)
+      warp_bar_cur(new_wg_id):= 0.U
+    }
+  }
+  when(io.warpRsp.fire){
+    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<end_wf_id)).asUInt
+    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpReq.bits.wid)).asUInt
+  }
+  warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
+  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){
+    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
+    warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
+    when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt())===warp_bar_exp(end_wg_id)){
+      warp_bar_cur(end_wg_id):=0.U
+      warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
+    }
+  }
+
+
+
+  val warp_active=RegInit(0.U(num_warp.W))
+  //val warp_blocking=RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+
+
+
+  warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt()&Fill(num_warp,io.warpReq.fire()))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt() )).asUInt
+  val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
+  io.warp_ready:=warp_ready
+  for (i<- num_warp-1 to 0 by -1){
+    pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) //& io.pc_icache_ready(i)
+    //when(pcControl(i).PC_next>=172.U){pc_ready(i):=false.B}
+    when(pc_ready(i)){next_warp:=i.asUInt()}
+  }
+  io.pc_req.valid:=pc_ready(next_warp)
+  //now issued_warp is not used. That is, fetch and issue are decoupled.
+  //when(io.issued_warp.valid&warp_ready(io.issued_warp.bits)){
+    //next_warp:=io.issued_warp.bits
+  //}
+  //lock one warp to execute
+  //next_warp:=0.U
+  if(SINGLE_INST) next_warp:=0.U
+
+
+
+  when(io.pc_rsp.valid&io.pc_rsp.bits.status(0)){//miss acknowledgement
+    pcControl(io.pc_rsp.bits.warpid).PC_replay:=false.B
+    pcControl(io.pc_rsp.bits.warpid).PC_src:=1.U
+    pcControl(io.pc_rsp.bits.warpid).New_PC:=io.pc_rsp.bits.addr//pcReplay(io.pc_rsp.bits.warpid)
+  }
+
+  when(io.branch.fire()&io.branch.bits.jump){
+    pcControl(io.branch.bits.wid).PC_replay:=false.B
+    pcControl(io.branch.bits.wid).PC_src:=1.U
+    pcControl(io.branch.bits.wid).New_PC:=io.branch.bits.new_pc
+    //PC:=io.branch.bits.new_pc
+    when(io.branch.bits.wid===next_warp){
+    io.pc_req.valid:=false.B}
+  }
+
+
+  when(io.warpReq.fire()){
+    pcControl(io.warpReq.bits.wid).PC_replay:=false.B
+    pcControl(io.warpReq.bits.wid).PC_src:=1.U
+    pcControl(io.warpReq.bits.wid).New_PC:=io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch
+  }
+
+
+  when(io.pc_reset){
+    pcControl.zipWithIndex.foreach{case(x,b)=>{x.PC_src:=1.U;x.New_PC:=warp_init_addr(b);x.PC_replay:=false.B} }
+    io.pc_req.valid:=false.B
+  }
+}
