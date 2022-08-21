@@ -84,7 +84,11 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   val entryStatus = Module(new getEntryStatus(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
 
-  entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_===io.missRspIn.bits.blockAddr))) & entry_valid
+  val missRspBusy = RegInit(false.B)//missRspIn_fire || (!io.missRsp.blockAddr.ready)
+
+  val firedRspInBlockAddr = RegEnable(io.missRspIn.bits.blockAddr,io.missRspIn.fire())
+  val muxedRspInBlockAddr = Mux(missRspBusy,firedRspInBlockAddr,io.missRspIn.bits.blockAddr)//存在多subentry时使用寄存的值
+  entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_===muxedRspInBlockAddr))) & entry_valid
   assert(PopCount(entryMatchMissRsp) <= 1.U)
   entryMatchMissReq := Reverse(Cat(blockAddr_Access.map(_===io.missReq.bits.blockAddr))) & entry_valid
   assert(PopCount(entryMatchMissReq) <= 1.U)
@@ -93,7 +97,6 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   val primary_miss = !secondary_miss
 
   //  ******     update MSHR when missReq     ******
-  val missRspBusy = RegInit(false.B)//missRspIn_fire || (!io.missRsp.blockAddr.ready)
   io.missReq.ready := !(((entryStatus.io.full || missRspBusy || io.missRspIn.valid) && primary_miss) ||
     (subentryStatus.io.full && secondary_miss))
   //missRsp + secondary miss holding at st1 should be accept

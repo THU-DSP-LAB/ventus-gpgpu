@@ -7,7 +7,7 @@ import L1Cache.DCache.DCacheModule
 import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite}
 import config.config.Parameters
 
-class ExternalMemModel(params: InclusiveCacheParameters_lite)(implicit p: Parameters) extends DCacheModule {
+class ExternalMemModel(C: TestCase#Props, params: InclusiveCacheParameters_lite)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle{
     val memReq = Flipped(DecoupledIO(new TLBundleA_lite(params)))
     val memRsp= DecoupledIO(new TLBundleD_lite(params))
@@ -18,7 +18,7 @@ class ExternalMemModel(params: InclusiveCacheParameters_lite)(implicit p: Parame
   io.memReq.ready := io.memReq_ready
 
   // ***** model params *****
-  val ExtMemBlockWords = BlockWords//ljz check the equality of "params.beatBytes/4"
+  val ExtMemBlockWords = BlockWords
   val ExtMemWordLength = WordLength
 
   //整个External Memory model划分成了两个独立的存储空间
@@ -35,9 +35,9 @@ class ExternalMemModel(params: InclusiveCacheParameters_lite)(implicit p: Parame
   val ExtMemLatency = 20
 
   val memory1 = Mem(ExtMemSize1*ExtMemBlockWords,UInt(ExtMemWordLength.W))
-  loadMemoryFromFile(memory1,"./ventus/txt/example_vid_sum.vmem")//TODO ykx notice here
+  loadMemoryFromFile(memory1,C.inst_filepath)
   val memory2 = Mem(ExtMemSize2*ExtMemBlockWords,UInt(ExtMemWordLength.W))
-  loadMemoryFromFile(memory2,"./ventus/txt/single_read.data")//TODO ykx notice here
+  loadMemoryFromFile(memory2,C.data_filepath)
 
   val readVec = Wire(Vec(ExtMemBlockWords,UInt(ExtMemWordLength.W)))
   val writeVec = Wire(Vec(ExtMemBlockWords,UInt(ExtMemWordLength.W)))
