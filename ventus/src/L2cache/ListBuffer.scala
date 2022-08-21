@@ -52,9 +52,9 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
   val tail  = Mem(params.queues, UInt(params.entryBits.W))
   val used  = RegInit(0.U(params.entries.W))
   val next  = Mem(params.entries, UInt(params.entryBits.W))
-  val data  = Mem(params.entries, UInt(params.data_width.W))//todo //对应具体entries
+  val data  = Mem(params.entries, UInt(params.data_width.W))//对应具体entries
 
-  val freeOH = (~(leftOR((~used).asUInt()) << 1)).asUInt() & (~used).asUInt() //关键这个是什么
+  val freeOH = (~(leftOR((~used).asUInt()) << 1)).asUInt() & (~used).asUInt()
   val freeIdx = OHToUInt(freeOH)
 
   val valid_set = WireInit(0.U(params.queues.W))
@@ -117,7 +117,7 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
         valid_clr_2 := UIntToOH(io.pop2.get.bits, params.queues)
       }
       head.write(io.pop2.get.bits, Mux(io.push.fire() && push_valid && push_tail === pop_head2, freeIdx, next.read(pop_head2)))
-    } //这里面可能有问题就是同时write pop1，pop2两个的情况
+    } 
   }
   // Empty bypass changes no state
   when ((!params.bypass).asBool() || !io.pop.valid || pop_valid || pop_valid2.orR()) {

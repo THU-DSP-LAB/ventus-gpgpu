@@ -30,7 +30,6 @@ class ExternalMemModel(C: TestCase#Props, params: InclusiveCacheParameters_lite)
   assert(ExtMemBase1 <= ExtMemBase2,"ExtMemBase1 > ExtMemBase2")
   assert(ExtMemBase1 + ExtMemSize1 <= ExtMemBase2,"space overlap in ExtMem")
 
-  //ljz check the equality of "params.data_bits" and "ExtMemBlockWords*ExtMemWordLength"
   def get_ExtMemBlockAddr(addr: UInt) = (addr >> (log2Up(ExtMemBlockWords)+2)).asUInt()
   val ExtMemLatency = 20
 

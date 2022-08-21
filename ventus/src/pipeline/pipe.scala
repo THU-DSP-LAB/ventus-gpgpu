@@ -5,14 +5,14 @@ import chisel3._
 import chisel3.util._
 import parameters._
 
-class ICachePipeReq_np extends Bundle {//InstructionCache Pipeline Request
+class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
-  val warpid = UInt(depth_warp.W)// Should be parameterized
+  val warpid = UInt(depth_warp.W)
 }
-class ICachePipeRsp_np extends Bundle{//InstructionCache Pipeline Response
+class ICachePipeRsp_np extends Bundle{
   val addr = UInt(32.W)
   val data = UInt(32.W)
-  val warpid = UInt(depth_warp.W)// Should be parameterized
+  val warpid = UInt(depth_warp.W)
   val status = UInt(2.W)
 }
 
@@ -85,14 +85,8 @@ class pipe extends Module{
   //flush:=(warp_sche.io.branch.fire()&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
 
-  //pcfifo.io.flush:=warp_sche.io.flush
-  //pcfifo.io.icachereq.bits:=io.icache_req.bits
-  //pcfifo.io.icachereq.valid:=io.icache_req.fire()
-  //pcfifo.io.icachersp_valid:=io.icache_rsp.fire()
-  //pcfifo.io.icachersp_ibuffer_ready:=ibuffer.io.in.ready
-  //pcfifo.io.icachersp_wid:=io.icache_rsp.bits.warpid
 
-  control.io.pc:=io.icache_rsp.bits.addr//pcfifo.io.pc_rsp
+  control.io.pc:=io.icache_rsp.bits.addr
   control.io.inst:=io.icache_rsp.bits.data
   control.io.wid:=io.icache_rsp.bits.warpid
 
@@ -253,16 +247,6 @@ class pipe extends Module{
   wb.io.in_v(2)<>lsu2wb.io.out_v
   wb.io.in_v(3)<>sfu.io.out_v
   wb.io.in_v(4)<>mul.io.out_v
-/*
-  mul.io.out_v.ready:=false.B
-  mul.io.out_x.ready:=false.B
-  val a=Counter(10)
-  a.inc()
-  when(a.value>5.U){
-    mul.io.out_v.ready:=true.B
-    mul.io.out_x.ready:=true.B
-  }*/
 
-  //scoreb.io.if_ready:= !(scoreb.io.delay|issue_stall)
   issue_stall:=(~issue.io.in.ready).asBool()//scoreb.io.delay | issue.io.in.ready
 }

@@ -28,12 +28,12 @@ class TLBundleA_lite(params: InclusiveCacheParameters_lite) extends Bundle
   val address= UInt(params.addressBits.W)
   val mask =UInt((params.cache.beatBytes/params.micro.writeBytes).W)
   val data=UInt(params.data_bits.W)
-  //override def cloneType: TLBundleA_lite.this.type = new TLBundleA_lite(params).asInstanceOf[this.type]
+
 }
 
 
 
-//如果要去主存找数据，block=true，data输入，parameter都需要关注
+
 class SourceA(params: InclusiveCacheParameters_lite) extends Module
 {
   val io = IO(new Bundle() {
@@ -41,20 +41,15 @@ class SourceA(params: InclusiveCacheParameters_lite) extends Module
     val a = Decoupled(new TLBundleA_lite(params))
   })
 
-  // ready must be a register, because we derive valid from ready
-//  require (!params.micro.outerBuf.a.pipe && params.micro.outerBuf.a.isDefined)
 
-//  val a = Wire(new TLBundleA_lite(params))
-//  io.a <> a
 
   io.req.ready := io.a.ready
   io.a.valid := io.req.valid
   io.a.bits.opcode  := io.req.bits.opcode
-//io.  a.bits.param   := io.req.bits.param
-//io. a.bits.size    := UInt(params.offsetBits)
+
   io.a.bits.source  := io.req.bits.source
-  io.a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, io.req.bits.offset) //offset
-  io.a.bits.mask    :=io.req.bits.mask//mask
+  io.a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, io.req.bits.offset)
+  io.a.bits.mask    :=io.req.bits.mask
   io.a.bits.data    := io.req.bits.data
   io.a.bits.size    :=io.req.bits.size
 }

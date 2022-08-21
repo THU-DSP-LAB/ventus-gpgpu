@@ -129,11 +129,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     w.tag === tag  && (!setQuash) && w.valid//这个相当于read到了read出来的tag，但是不是bypass情况
 
   }.reverse)
-  //  val dirtys =Cat(ways.map { case (w) =>
-  //    w.dirty=== true.B //这个相当于read到了read出来的tag，但是不是bypass情况
-  //
-  //  }.reverse)
-  //  val dirty= dirtys(victimWay) //todo
+
 
 
   cc_dir.io.r.req.valid := ren && (!(setQuash_1&&tagMatch_1)) //在非bypass情况下fire才会读
@@ -145,22 +141,21 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val hitWay = Wire(UInt(2.W))
   hitWay:= OHToUInt(hits)
   val writeSet1 = RegNext(io.write.bits.set)
-  //  val writeWay2 =Valid(writeWay1)
-  //  writeWay2.valid:=true.B
+
   for((repl, i) <- replacer_array.zipWithIndex){
     when(wen1&&i.U===writeSet1){
-      repl.access(writeWay1)//在bypass情况下似乎更新会有问
+      repl.access(writeWay1)
     }.elsewhen(ren1&&i.U===set&&hit){
       repl.access(hitWay)
     }
-  }  //如果同时允许MSHR的写以及sinkA的读有可能会死锁？？？？或者就没必要这么做
+  }  
 
   cc_dir.io.w.req.valid :=  wen_new
   cc_dir.io.w.req.bits.apply(
     setIdx=Mux(wipeDone, io.write.bits.set, wipeSet),
     data=Mux(wipeDone, io.write.bits.data.asUInt, 0.U),
     waymask=UIntToOH(io.write.bits.way, 2) | Fill(2, !wipeDone))//就是写对应的way，如果reset全写
-  //  val ren2=RegNext(ren1)
+
   io.read.ready:= (wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) //also fire when bypass
   io.result.valid := ren1
   io.result.bits.hit  := hit ||(setQuash && tagMatch)

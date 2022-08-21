@@ -24,9 +24,9 @@ import freechips.rocketchip.util._
 import TLMessages._
 import TLPermissions._
 
-//class SourceDRequest(params: InclusiveCacheParameters) extends DirectoryResult(params)
+
 class SourceDRequest_lite(params: InclusiveCacheParameters_lite) extends DirectoryResult_lite(params){
-  //override def cloneType: SourceDRequest_lite.this.type = new SourceDRequest_lite(params).asInstanceOf[this.type]
+
 }
 class TLBundleD_lite(params: InclusiveCacheParameters_lite) extends Bundle
 {
@@ -34,7 +34,7 @@ class TLBundleD_lite(params: InclusiveCacheParameters_lite) extends Bundle
   val size=UInt(params.size_bits.W)
   val source=UInt(params.source_bits.W)
   val data  = UInt(params.data_bits.W)
-  //override def cloneType: TLBundleD_lite.this.type = new TLBundleD_lite(params).asInstanceOf[this.type]
+
 }
 class TLBundleD_lite_plus(params: InclusiveCacheParameters_lite)extends TLBundleD_lite(params)
 {
@@ -49,14 +49,12 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 {
   val io = IO(new Bundle {
 
-    val req = Flipped(Decoupled(new TLBundleD_lite_withid(params))) //from dir
+    val req = Flipped(Decoupled(new TLBundleD_lite_withid(params))) 
     val d = Decoupled(new TLBundleD_lite_plus(params))
-    // Put data from SinkA
-    val pb_pop = Decoupled(new PutBufferPop(params))
-    val pb_beat = Input(new PutBufferAEntry(params)) //todo 事实上需要fifo功能
-    //用来解决写回的问题，writebuffer
 
-    // Access to the BankedStore
+    val pb_pop = Decoupled(new PutBufferPop(params))
+    val pb_beat = Input(new PutBufferAEntry(params)) 
+ 
     val bs_radr = Decoupled(new BankedStoreInnerAddress(params))
     val bs_rdat = Input(  new BankedStoreInnerDecoded(params))
     val bs_wadr = Decoupled(new BankedStoreInnerAddress(params))
@@ -64,8 +62,8 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val a       = Decoupled(new FullRequest(params))
   })
 
-  ///data initialization
-  io.pb_pop.valid:=  io.req.fire()&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  && !io.req.bits.from_mem && io.req.bits.hit//todo 应该再把数据buffer住往后流水
+
+  io.pb_pop.valid:=  io.req.fire()&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  && !io.req.bits.from_mem && io.req.bits.hit
   io.pb_pop.bits.index:=io.req.bits.put
   val pb_beat_reg_init=WireInit(0.U.asTypeOf(new PutBufferAEntry(params)))
   val pb_beat_reg=RegInit(pb_beat_reg_init)
@@ -83,13 +81,13 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   val busy = RegInit(false.B)
 
   val pb_beat =Mux(io.req.fire(), io.pb_beat, pb_beat_reg)
-  val s1_req =Mux(io.req.fire(), io.req.bits, s1_req_reg)  //stall if busy,此时fire已经数据进来了
+  val s1_req =Mux(io.req.fire(), io.req.bits, s1_req_reg)  //stall if busy
   val s1_need_w =(s1_req.opcode===PutFullData || s1_req.opcode===PutPartialData) && !s1_req.from_mem &&s1_req.hit
 
-  val s1_need_r =(s1_req.opcode===Get) //对应为read
+  val s1_need_r =(s1_req.opcode===Get) 
 
 
-  val s1_valid_r = s1_need_r// //读的时候把数据送过去
+  val s1_valid_r = s1_need_r
 
 
   val read_sent_reg=RegInit(false.B)
@@ -125,7 +123,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   }
   val write_sent=Mux(io.req.fire(),false.B,write_sent_reg)
 
-//对于回来的dirty数据再考虑写以及发送至sourceA
+
 
 
 
@@ -186,13 +184,13 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,AccessAck)
   io.d.bits.size    := s_final_req.size
   io.d.bits.data    :=Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况不需要
-  io.d.bits.address      := params.expandAddress(s_final_req.tag, s_final_req.set,s_final_req.offset) //offset
+  io.d.bits.address      := params.expandAddress(s_final_req.tag, s_final_req.set,s_final_req.offset)
 ////将读出的数据返回给sourceA
 
 
-  io.a.valid      := (s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData) &&(!sourceA_sent)//
+  io.a.valid      := (s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData) &&(!sourceA_sent)
   io.a.bits       := s1_req
-//  io.a.bits.mask  :=
+
   io.a.bits.data  := Mux((s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData),s1_req.data,pb_beat.data)
   io.a.bits.opcode:= PutFullData
 

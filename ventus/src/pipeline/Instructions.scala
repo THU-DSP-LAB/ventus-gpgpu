@@ -1,3 +1,8 @@
+
+// This file comes from RocketChip. For more details and licences,
+// see https://github.com/chipsalliance/rocket-chip/blob/master/src/main/scala/rocket/Instructions.scala 
+
+
 package pipeline
 
 import chisel3.util.BitPat

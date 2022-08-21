@@ -9,7 +9,7 @@ import scala.util.Random._
 /*
 ==== Supported Instructions ====
 RV32I except:
-lb lh lbu lhu sb sh fence(.i) ecall/ebreak csr_
+ecall/ebreak
 */
 object ALUOps {
   val SZ_ALU_FUNC = 5

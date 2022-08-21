@@ -14,13 +14,7 @@ import L2cache._
 import CTA._
 import axi._
 import freechips.rocketchip.amba.axi4._
-//object ICache_gen extends App{
-//  val L1param = (new MyConfig).toInstance
-//val L2param = InclusiveCacheParameters_lite(CacheParameters(2,4,2,blockBytes=128,beatBytes=128),InclusiveCacheMicroParameters(writeBytes = 4,4,2,8,2),false)
-//
-// // (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_hh109()(L1param))
-//  (new chisel3.stage.ChiselStage).emitVerilog(new Scheduler(L2param))
-//}
+
 class host2CTA_data extends Bundle{
   val host_wg_id            = (UInt(WG_ID_WIDTH.W))
   val host_num_wf           = (UInt(WF_COUNT_WIDTH.W))

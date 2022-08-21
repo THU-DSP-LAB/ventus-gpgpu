@@ -145,7 +145,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
 
     val select = UIntToOH(a(bankBits-1, 0), numBanks/ports)
     val ready  = Cat(Seq.tabulate(numBanks/ports) { i => !(out.bankSum((i+1)*ports-1, i*ports) &m).orR } .reverse)
-    b.ready := true.B //ready(a(bankBits-1, 0))
+    b.ready := true.B 
 
     out.wen      := write
     out.index    := a >> bankBits   //width=rowbits
@@ -166,7 +166,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
   val sourceD_wreq = req(io.sourceD_wadr, W, io.sourceD_wdat.data)
 
   // See the comments above for why this prioritization is used
-  val reqs = Seq(sinkD_req, sourceD_wreq, sourceD_rreq) //有优先级区别！todo
+  val reqs = Seq(sinkD_req, sourceD_wreq, sourceD_rreq) //有优先级区别
 
   // Connect priorities; note that even if a request does not go through due to failing
   // to obtain a needed subbank, it still blocks overlapping lower priority requests.
