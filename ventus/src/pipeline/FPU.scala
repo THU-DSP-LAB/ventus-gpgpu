@@ -1,3 +1,7 @@
+
+// FPU design comes from https://github.com/ljwljwljwljw/FPU
+// Multiplier is replaced with 2-stage ArrayMultiplier by XiangShan
+
 package pipeline
 
 import chisel3._
@@ -11,10 +15,6 @@ convert: vfcvt._
 move: fmv
 optional? :(fsgn{}, mad ...)
 */
-
-
-
-
 
 
 class RoundingUnit(fracWidth: Int) extends Module{
@@ -329,19 +329,7 @@ class FPU_FMA extends FPUSubModule with HasPipelineReg1{
   io.out.bits.flags:=Cat(s5_invalid,false.B,s5_overflow,s5_underflow,s5_inexact).asTypeOf(new Fflags)
   io.out.bits.result:=result
 
-  //val result_reg=Module(new Queue(new FPUoutput,1,flow=true))
-  //result_reg.io.enq.bits.result := result
-  //result_reg.io.enq.bits.flags.invalid := s5_invalid
-  //result_reg.io.enq.bits.flags.inexact := s5_inexact
-  //result_reg.io.enq.bits.flags.overflow := s5_overflow
-  //result_reg.io.enq.bits.flags.underflow := s5_underflow
-  //result_reg.io.enq.bits.flags.infinite := false.B
-  //result_reg.io.enq.valid:=io.in.valid
-  //io.in.ready:=result_reg.io.enq.ready
-  //// combinational logic:
-  ////io.out.valid := result_reg.io.deq.valid
-  //io.out.bits:=result_reg.io.deq.bits
-  //result_reg.io.deq.ready:=io.out.ready
+
 }
 
 class FPU_CMP extends FPUSubModule{

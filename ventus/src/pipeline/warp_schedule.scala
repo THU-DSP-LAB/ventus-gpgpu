@@ -67,8 +67,6 @@ class warp_scheduler extends Module{
   current_warp:=next_warp
   pcControl(next_warp).PC_replay:= (!io.pc_req.ready)|(!pc_ready(next_warp))
   pcControl(next_warp).PC_src:=2.U
-  //when(io.ldst.switch){warp_memory_idle(io.ldst.warp_id):=true.B}//or current warp id?
-  //when(io.ldst.data_back){warp_memory_idle(io.ldst.warp_id):=false.B}
   io.pc_req.bits.addr:=pcControl(next_warp).PC_next
   io.pc_req.bits.warpid:=next_warp
 
@@ -111,7 +109,6 @@ class warp_scheduler extends Module{
 
 
   val warp_active=RegInit(0.U(num_warp.W))
-  //val warp_blocking=RegInit(VecInit(Seq.fill(num_warp)(false.B)))
 
 
 
@@ -119,15 +116,10 @@ class warp_scheduler extends Module{
   val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
   io.warp_ready:=warp_ready
   for (i<- num_warp-1 to 0 by -1){
-    pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) //& io.pc_icache_ready(i)
-    //when(pcControl(i).PC_next>=172.U){pc_ready(i):=false.B}
+    pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 
     when(pc_ready(i)){next_warp:=i.asUInt()}
   }
   io.pc_req.valid:=pc_ready(next_warp)
-  //now issued_warp is not used. That is, fetch and issue are decoupled.
-  //when(io.issued_warp.valid&warp_ready(io.issued_warp.bits)){
-    //next_warp:=io.issued_warp.bits
-  //}
   //lock one warp to execute
   //next_warp:=0.U
   if(SINGLE_INST) next_warp:=0.U

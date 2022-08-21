@@ -5,29 +5,6 @@ import chisel3._
 import chisel3.util._
 import IDecode._
 
-/*object parameters{
-  def num_warp = 4
-  def depth_warp: Int = log2Ceil(num_warp)
-  def num_thread = 8
-  def depth_thread: Int = log2Ceil(num_thread)
-  def xLen = 32 // data length 32-bit
-  def lsu_nMshrEntry = 16
-  def dcache_TagBits = 10
-  def dcache_SetIdxBits = 11
-  def dcache_BlockOffsetBits = 9
-  def BytesOfWord = 4
-}*/
-
-
-//class WriteBackControl extends Bundle{
-//  val wb_wfd_rd = Vec(num_thread,UInt(xLen.W))
-//  val wb_wxd_rd = UInt(xLen.W)
-//  val wfd_mask = Vec(num_thread,Bool())
-//  val wfd = Bool()
-//  val wxd = Bool()
-//  val reg_idxw = UInt(5.W)
-//  val warp_id = UInt(depth_warp.W)
-//}
 class toShared extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val addr = Vec(num_thread, UInt(xLen.W))
