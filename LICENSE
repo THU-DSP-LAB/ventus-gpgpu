@@ -52,8 +52,8 @@
 
 3， 请将如下声明文本放入每个源文件的头部注释中。
 
-Copyright (c) [Year] [name of copyright holder]
-[Software Name] is licensed under Mulan PSL v2.
+Copyright (c) 2021-2022 International Innovation Center of Tsinghua University, Shanghai
+Ventus is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
          http://license.coscl.org.cn/MulanPSL2
@@ -113,8 +113,8 @@ To apply the Mulan PSL v2 to your work, for easy identification by recipients, y
 Fill in the blanks in following statement, including insert your software name, the year of the first publication of your software, and your name identified as the copyright owner;
 Create a file named "LICENSE" which contains the whole context of this License in the first directory of your software package;
 Attach the statement to the appropriate annotated syntax at the beginning of each source file.
-Copyright (c) [Year] [name of copyright holder]
-[Software Name] is licensed under Mulan PSL v2.
+Copyright (c) 2021-2022 International Innovation Center of Tsinghua University, Shanghai
+Ventus is licensed under Mulan PSL v2.
 You can use this software according to the terms and conditions of the Mulan PSL v2.
 You may obtain a copy of Mulan PSL v2 at:
          http://license.coscl.org.cn/MulanPSL2
