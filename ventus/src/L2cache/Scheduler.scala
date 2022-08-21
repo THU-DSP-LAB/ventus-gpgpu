@@ -203,7 +203,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.pop.bits  := mshr_select
 
 
-  request.ready := mshr_free && requests.io.push.ready &&(directory.io.read.ready || directory.io.write.ready)//&& (~requests.used)//目前仅考虑mshr有资源的情况ready
+  request.ready := mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready))//&& (~requests.used)//目前仅考虑mshr有资源的情况ready
 
 
 

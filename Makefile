@@ -24,7 +24,10 @@ compile:
 	mill -i -j 0 __.compile
 
 test:
-	mill -i -j 0 sanitytests.rocketchip
+	mill ventus.tests
+
+verilog:
+	mill ventus.run
 
 clean:
 	git clean -fd

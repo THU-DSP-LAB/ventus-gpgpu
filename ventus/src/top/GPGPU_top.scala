@@ -291,16 +291,27 @@ class SM2L2Arbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Parameter
     Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
   // ****************
 }
-
-class CPUtest extends Module{
+class TestCase(val name: String, inst: String, data: String, warp: Int, thread: Int, start_pc: Int, cycles: Int){
+  //val props = ("./txt/" + name + "/" + inst, "./txt/" + name + "/" + data, warp, thread, start_pc))
+  class Props{
+    val inst_filepath = "./ventus/txt/" + name + "/" + inst
+    val data_filepath = "./ventus/txt/" + name + "/" + data
+    val num_warp = TestCase.this.warp
+    val num_thread = TestCase.this.thread
+    val start_pc = TestCase.this.start_pc
+    val cycles = TestCase.this.cycles
+  }
+  val props = new Props
+}
+class CPUtest(C: TestCase#Props) extends Module{
   val io=IO(new Bundle{
     val host2cta=Decoupled(new host2CTA_data)
     val cta2host=Flipped(Decoupled(new CTA2host_data))
   })
-  val num_of_block = 2.U
+  val num_of_block = 1.U
   io.host2cta.valid:=false.B
   io.host2cta.bits.host_wg_id:=0.U
-  io.host2cta.bits.host_num_wf:=3.U // two warps
+  io.host2cta.bits.host_num_wf:=C.num_warp.U
   io.host2cta.bits.host_wf_size:=num_thread.asUInt()
   io.host2cta.bits.host_start_pc:=0.U // start pc
   io.host2cta.bits.host_vgpr_size_total:= 64.U
@@ -309,7 +320,7 @@ class CPUtest extends Module{
   io.host2cta.bits.host_gds_size_total:= 128.U
   io.host2cta.bits.host_vgpr_size_per_wf:=32.U
   io.host2cta.bits.host_sgpr_size_per_wf:=32.U
-  io.host2cta.bits.host_gds_baseaddr := sharemem_size.U + 4.U
+  io.host2cta.bits.host_gds_baseaddr := sharemem_size.U
 
   val cnt=Counter(16)
   io.host2cta.bits.host_wg_id:=Cat(cnt.value + 3.U,0.U(CU_ID_WIDTH.W))

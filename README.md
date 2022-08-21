@@ -16,4 +16,20 @@ make init
 make patch
 ```
 
-2. to generate verilog file, use `mill ventus.run`, to run tests use `mill ventus.tests`
+2. IDE support  `make bsp # generate IDE bsp`
+3. to generate verilog file, use `make verilog`. The output file is `GPGPU_axi_top.v`
+4. to run tests, use `make tests`. 
+
+## Acknowledgement
+
+We refer to some open-source design when developing Ventus GPGPU.
+
+| Sub module    | Source                                                  | Detail                                                       |
+| ------------- | ------------------------------------------------------- | ------------------------------------------------------------ |
+| CTA scheduler |                                                         | We refer to code and design in miaow, adding                 |
+| L2Cache       | https://github.com/chipsalliance/rocket-chip            | Our L2Cache design is inspired by Sifive's block-inclusivicache and RocketChip |
+| Multiplier    | [XiangShan](https://github.com/OpenXiangShan/XiangShan) | We reused Array Multiplier in XiangShan. FPU design is also inspired by XiangShan. |
+|               |                                                         |                                                              |
+
+
+
