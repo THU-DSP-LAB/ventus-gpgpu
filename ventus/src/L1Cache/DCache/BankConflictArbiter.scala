@@ -14,22 +14,6 @@ import chisel3._
 import chisel3.util._
 import config.config.Parameters
 
-/*Version Note
-
-* This version plan to implement support of
-* merging non-conflict byte WRITE req from different Lane to same bank,
-* but finally fail to achieve, means this req have to be arbitrated as
-* conflict, thus conduct in 2 cycles.
-*
-* This version cant merge READ req to the same exact addr, these identical
-* reqs would pitifully be split into multiple cycles
-*
-* This version suppose NLanes = NBanks, to change this
-* DataCrossbar can be used as bidirectional
-* modify assignments of bankOffset & perBankReqCount,
-* modify ConflictBankReq_w
-*/
-
 class ByteEn1HConvertor(BytesOfWord:Int=4) extends Module{
   //wordOffset one-hot converter, based on Byte Enable signal and wordOffset
   def WordOffsetBits = log2Up(BytesOfWord)
