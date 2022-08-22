@@ -5,15 +5,15 @@ Copyright 2021-2022 by International Innovation Center of Tsinghua University, S
 ## Architecture
 
 The micro-architecture overview of Ventus(承影) is shown below.
-Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/Ventus-GPGPU-doc.md). English version to be continue.
+Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/Ventus-GPGPU-doc.md). English version will come soon.
 
 ![](./docs/images/ventus_arch.png)
 
-for ISA simulator and riscv-gnu-toolchain, see [ventus-gpgpu-isa-simulator](https://github.com/THU-DSP-LAB/ventus-gpgpu-isa-simulator) and [ventus-riscv-gnu-toolchain](https://github.com/THU-DSP-LAB/riscv-gnu-toolchain)
+For ISA simulator and riscv-gnu-toolchain, see [ventus-gpgpu-isa-simulator](https://github.com/THU-DSP-LAB/ventus-gpgpu-isa-simulator) and [ventus-riscv-gnu-toolchain](https://github.com/THU-DSP-LAB/riscv-gnu-toolchain)
 
 ## Quick Start
 
-Chisel development environment config tutorial comes from [chipsalliance/playground: chipyard in mill :P](https://github.com/chipsalliance/playground)
+The tutorial of Chisel development environment configuration comes from [chipsalliance/playground: chipyard in mill :P](https://github.com/chipsalliance/playground)
 
 0. Install dependencies and setup environments: 
 - Arch Linux `pacman -Syu --noconfirm make parallel wget cmake ninja mill dtc verilator git llvm clang lld protobuf antlr4 numactl`
