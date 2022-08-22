@@ -51,7 +51,7 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
   })
 
   // No restrictions on buffer
-  val d = params.micro.outerBuf.d(io.d)
+  val d = io.d
 
   io.source := Mux(d.valid, d.bits.source, RegEnable(d.bits.source, d.valid))
   val full_mask=FillInterleaved(params.micro.writeBytes*8,io.pb_beat.mask)
