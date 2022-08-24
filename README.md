@@ -2,6 +2,9 @@
 GPGPU processor supporting RISCV-V extension, developed with Chisel HDL.
 
 Copyright 2021-2022 by International Innovation Center of Tsinghua University, Shanghai
+
+We are calling for contributors. If you are interested in Ventus GPGPU, please contact yangkx20@mails.tsinghua.edu.cn
+“承影”在RVV编译器工具链、验证环境开发和硬件设计方面还有很多不足，如果您有意愿参与到“承影”的开发中，欢迎在github上pull request，也欢迎联系 yangkx20@mails.tsinghua.edu.cn
 ## Architecture
 
 The micro-architecture overview of Ventus(承影) is shown below.
