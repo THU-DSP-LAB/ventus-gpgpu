@@ -1,18 +1,22 @@
 // import Mill dependency
+import os.Path
 import mill._
 import mill.define.Sources
 import mill.modules.Util
 import scalalib._
 // support BSP
 import mill.bsp._
+import publish._
+import coursier.maven.MavenRepository
 // input build.sc from each repositories.
-import $file.dependencies.chisel3.build
-import $file.dependencies.firrtl.build
-import $file.dependencies.treadle.build
-import $file.dependencies.`chisel-testers2`.build
+//import $file.dependencies.chisel3.build
+//import $file.dependencies.firrtl.build
+//import $file.dependencies.treadle.build
+//import $file.dependencies.`chisel-testers2`.build
 import $file.dependencies.cde.build
-import $file.dependencies.`berkeley-hardfloat`.build
 import $file.dependencies.`rocket-chip`.common
+import $file.dependencies.`berkeley-hardfloat`.build
+import $file.dependencies.`rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build
 
 // Global Scala Version
 object ivys {
@@ -30,6 +34,11 @@ object ivys {
   val playjson =ivy"com.typesafe.play::play-json:2.6.10"
   val spire = ivy"org.typelevel::spire:0.16.2"
   val breeze = ivy"org.scalanlp::breeze:1.1"
+
+  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0"
+  val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0"
+  val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.5.0"
+  val chiselCirct = ivy"com.sifive::chisel-circt:0.4.0"
 }
 
 object helper {
@@ -38,72 +47,47 @@ object helper {
 
 // For modules not support mill yet, need to have a ScalaModule depend on our own repositories.
 trait CommonModule extends ScalaModule {
+  // def repositoriesTask = T.task { super.repositoriesTask() ++ Seq(
+  //   MavenRepository("https://maven.aliyun.com/repository/central")
+  // ) }
+
   override def scalaVersion = ivys.sv
 
-  override def scalacPluginClasspath = T { super.scalacPluginClasspath() ++ Agg(
-    mychisel3.plugin.jar()
-  ) }
-
-  override def scalacOptions = T {
-    super.scalacOptions() ++ Agg(s"-Xplugin:${mychisel3.plugin.jar().path}", "-P:chiselplugin:genBundleElements")
-  }
-
-  override def moduleDeps: Seq[ScalaModule] = Seq(mychisel3)
+  override def ivyDeps = Agg(
+    ivys.chisel3,
+    ivys.chiseltest,
+    ivys.chiselCirct
+  )
 
   override def compileIvyDeps = Agg(ivys.macroParadise)
 
-  override def scalacPluginIvyDeps = Agg(ivys.macroParadise)
-}
-
-
-// Chips Alliance
-
-object myfirrtl extends dependencies.firrtl.build.firrtlCrossModule(ivys.sv) {
-  override def millSourcePath = os.pwd / "dependencies" / "firrtl"
-  override def ivyDeps = super.ivyDeps() ++ Agg(
-    ivys.pprint
+  override def scalacPluginIvyDeps = Agg(
+    ivys.macroParadise,
+    ivys.chisel3Plugin
   )
-  override val checkSystemAntlr4Version = false
-  override val checkSystemProtocVersion = false
-  override val protocVersion = os.proc("protoc", "--version").call().out.text.dropRight(1).split(' ').last
-  override val antlr4Version = os.proc("antlr4").call().out.text.split('\n').head.split(' ').last
-}
 
-object mychisel3 extends dependencies.chisel3.build.chisel3CrossModule(ivys.sv) {
-  override def millSourcePath = os.pwd / "dependencies" / "chisel3"
-
-  def firrtlModule: Option[PublishModule] = Some(myfirrtl)
-
-  def treadleModule: Option[PublishModule] = Some(mytreadle)
-
-  def chiseltestModule: Option[PublishModule] = Some(mychiseltest)
-}
-
-object mytreadle extends dependencies.treadle.build.treadleCrossModule(ivys.sv) {
-  override def millSourcePath = os.pwd /  "dependencies" / "treadle"
-
-  def firrtlModule: Option[PublishModule] = Some(myfirrtl)
+  override def scalacOptions = Seq("-Xsource:2.11")
 }
 
 object mycde extends dependencies.cde.build.cde(ivys.sv) with PublishModule {
+  // def repositoriesTask = T.task { super.repositoriesTask() ++ Seq(
+  //   MavenRepository("https://maven.aliyun.com/repository/central")
+  // ) }
   override def millSourcePath = os.pwd /  "dependencies" / "cde" / "cde"
 }
 
 object myrocketchip extends dependencies.`rocket-chip`.common.CommonRocketChip {
+  // def repositoriesTask = T.task { super.repositoriesTask() ++ Seq(
+  //   MavenRepository("https://maven.aliyun.com/repository/central")
+  // ) }
   // TODO: FIX
   override def scalacOptions = T {
-    Seq("-Xsource:2.11", s"-Xplugin:${mychisel3.plugin.jar().path}", "-P:chiselplugin:genBundleElements")
+    Seq("-Xsource:2.11")
   }
-
-  override def scalacPluginClasspath = T { super.scalacPluginClasspath() ++ Agg(
-    mychisel3.plugin.jar()
-  ) }
 
   override def millSourcePath = os.pwd /  "dependencies" / "rocket-chip"
 
   override def scalaVersion = ivys.sv
-
-  def chisel3Module: Option[PublishModule] = Some(mychisel3)
 
   def hardfloatModule: PublishModule = myhardfloat
 
@@ -121,46 +105,46 @@ object inclusivecache extends CommonModule {
   override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip)
 }
 
-// UCB
-
-object mychiseltest extends dependencies.`chisel-testers2`.build.chiseltestCrossModule(ivys.sv) {
-  override def millSourcePath = os.pwd /  "dependencies" / "chisel-testers2"
-
-  def chisel3Module: Option[PublishModule] = Some(mychisel3)
-
-  def treadleModule: Option[PublishModule] = Some(mytreadle)
-}
-
 object myhardfloat extends dependencies.`berkeley-hardfloat`.build.hardfloat {
+  // def repositoriesTask = T.task { super.repositoriesTask() ++ Seq(
+  //   MavenRepository("https://maven.aliyun.com/repository/central")
+  // ) }
+
   override def millSourcePath = os.pwd /  "dependencies" / "berkeley-hardfloat"
 
   override def scalaVersion = ivys.sv
 
-  def chisel3Module: Option[PublishModule] = Some(mychisel3)
-
-  override def scalacPluginClasspath = T { super.scalacPluginClasspath() ++ Agg(
-    mychisel3.plugin.jar()
-  ) }
-
-  override def scalacOptions = T {
-    Seq("-Xsource:2.11", s"-Xplugin:${mychisel3.plugin.jar().path}", "-P:chiselplugin:genBundleElements")
-  }
+  def chisel3PluginIvyDeps = Agg(ivys.chisel3Plugin)
 }
 
 object ventus extends CommonModule {
-  override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache, mychiseltest)
+
+  override def forkArgs = Seq("-Xmx4G", "-Xss128m")
+
+  override def scalacOptions = Seq(
+    "-Xsource:2.11",
+    "-language:reflectiveCalls",
+    //"-deprecation",
+    //"-feature",
+    "-Xcheckinit"//,
+    // Enables autoclonetype2 in 3.4.x (on by default in 3.5)
+    //"-P:chiselplugin:useBundlePlugin"
+  )
+  
+  override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache)
 
   // add some scala ivy module you like here.
-  override def ivyDeps = Agg(
+  override def ivyDeps = super.ivyDeps() ++ Agg(
     ivys.oslib,
     ivys.pprint
   )
 
   // use scalatest as your test framework
   object tests extends Tests with TestModule.ScalaTest {
-    override def ivyDeps = Agg(
+
+    override def ivyDeps = super.ivyDeps() ++ Agg(
+      ivys.chiseltest,
       ivys.scalatest
     )
-    override def moduleDeps = super.moduleDeps ++ Seq(mychiseltest)
   }
 }
