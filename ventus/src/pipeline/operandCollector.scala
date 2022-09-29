@@ -29,6 +29,132 @@ class WriteScalarCtrl extends Bundle{
   val warp_id=UInt(depth_warp.W)
 }
 
+// One of the number of num_warp collector Units, instantiating this class in operand collector for num_warps.
+class CtrlSigsInputCU extends Bundle{
+  val wid = Input(UInt(depth_warp.W))
+  val decode = Input(UInt(6.W))
+  val regId = Input(Vec(4, UInt(5.W)))
+}
+class collectorUnit extends Module{
+  val io = IO(new Bundle{
+    val ctrlSigsInput = Flipped(Decoupled(new CtrlSigsInputCU))
+    val bankIn = Flipped(Decoupled(UInt(xLen.W)))
+    val issue = Decoupled(Vec(4, UInt(xLen.W)))
+    val outArbiterIO = Decoupled(new Bundle{
+      val rsAddr = Vec(4, UInt(depth_regBank.W))
+      val bankID = Vec(4, UInt(log2Ceil(num_bank).W))
+    })
+
+    //    val ready = Input(Bool())
+  })
+  val wid = Reg(UInt(depth_warp.W))
+  //  val decode = Reg(UInt(6.W))
+  val ready = RegInit(0.U(3.W))
+  val valid = RegInit(0.U(3.W))
+  val regId = Vec(4, RegInit(UInt(5.W), 0.U))
+  val rsReg = Vec(4, RegInit(UInt(xLen.W), 0.U))
+
+
+  val s_idle :: s_add :: s_out :: Nil = Enum(3)
+  val state = RegInit(s_idle)
+
+  io.bankIn.ready := state===s_add
+  io.outArbiterIO.ready := (state===s_idle && io.ctrlSigsInput.fire)
+  io.issue.valid := state===s_out
+  io.ctrlSigsInput.ready := (state===s_idle && !valid.asUInt.orR)
+
+  val bankIdLookup = (0 until num_warp+32).map { x =>
+    (x -> x % num_bank)
+  }.map { x => (x._1.U -> x._2.U)
+  }
+  val addrLookup = (0 until 32).map { x =>
+    (x -> x % (num_bank))
+  }.map {x => (x._1.U -> x._2.U)}
+
+  when(state === s_idle) {
+    when(io.ctrlSigsInput.fire && !valid.asUInt.orR){
+      state := s_add
+    }.otherwise{state := s_idle}
+  }.elsewhen (state === s_add) {
+    when(valid.asUInt =/= ready.asUInt ) {
+      state := s_add
+      //    }.elsewhen(io.bankIn.fire){
+      //      state := s_out
+    }.otherwise{state := s_idle}
+  }.elsewhen(state === s_out) {
+    when(io.issue.ready){
+      state := s_idle
+    }.otherwise{state := s_out}
+  }.otherwise{state := s_idle}
+
+  switch(state){
+    is(s_idle){
+      when(io.ctrlSigsInput.fire){
+        wid := io.ctrlSigsInput.bits.wid
+        regId := io.ctrlSigsInput.bits.regId
+        //        decode := io.ctrlSigsInput.bits.decode
+        valid := "b111".U
+        ready := "b000".U
+        for(i <- 0 until 4){
+          io.outArbiterIO.bits.bankID(i) := MuxLookup(io.ctrlSigsInput.bits.regId(i), 0.U, bankIdLookup)
+          io.outArbiterIO.bits.rsAddr(i) := MuxLookup(io.ctrlSigsInput.bits.regId(i), 0.U, addrLookup) + wid*(32/num_bank).U
+        }
+      }
+    }
+    is(s_add){
+      when(io.bankIn.fire){
+        ready := Cat((ready << 1)(2,1), 1.U(1.W))
+        rsReg(PriorityEncoder(~ready)) := io.bankIn.bits
+      }
+    }
+    is(s_out){
+      when(io.issue.fire){
+        io.issue.bits := rsReg
+      }
+    }
+  }
+}
+
+class operandArbiter extends Module{
+  val io = IO(new Bundle{
+    val readArbiterIO = Vec(num_collectorUnit, Flipped(Decoupled(new Bundle {
+      val rsAddr = Vec(4, UInt(depth_regBank.W))
+      val bankID = Vec(4, UInt(log2Ceil(num_bank).W))
+    })))
+    val readAddr = Output(Vec(num_bank, UInt(depth_regBank.W))) //address of registers to be read that in bank
+    val readchosen = Output(Vec(num_bank, UInt((4*num_collectorUnit).W)))// which operand read request is chosen
+    //    val writeArbiterIO = Decoupled(/*write arbiter, TBD   */)
+
+  })
+
+  //  val bankArbiter = Seq.fill(num_bank, new RRArbiter(UInt(depth_regBank.W), 3*num_collectorUnit))
+  val bankArbiter = for(i<-0 until num_bank)yield{
+    val x = Module(new RRArbiter(UInt(depth_regBank.W), 4*num_collectorUnit))
+    x
+  }
+  val vecRsIO = Vec(4* num_collectorUnit, UInt(depth_regBank.W))
+
+  val vecBankIDIO = Vec(4*num_collectorUnit, UInt(log2Ceil(num_bank).W))
+  //flatten readArbiterIO
+  for (i <-0 until num_collectorUnit) for (j<-0 until 4){
+    vecRsIO(i*4+j) := io.readArbiterIO(i).bits.rsAddr(j)
+    vecBankIDIO(i*4+j) := io.readArbiterIO(i).bits.bankID(j)
+  }
+
+  for (i <- 0 until num_bank){
+    //    mapping input signals from collector units to inputs of Arbiters
+    bankArbiter(i).io.in := vecRsIO.map(x => Decoupled(x))
+  }
+  //elaborate valid port of readArbiters
+  bankArbiter.foreach(x => {
+    for(i <- 0 until 4*num_collectorUnit) {
+      x.io.in(i).valid := io.readArbiterIO(i).valid && vecBankIDIO(i).asBool()
+    }
+  })
+  io.readAddr := VecInit(bankArbiter.map(x => x.io.out.bits))
+  io.readchosen := VecInit(bankArbiter.map(x => x.io.chosen))
+
+}
 
 class operandCollector extends Module{
   val io=IO(new Bundle {
@@ -40,15 +166,23 @@ class operandCollector extends Module{
     val mask=Output(Vec(num_thread,Bool()))
     val writeScalarCtrl=Flipped(DecoupledIO(new WriteScalarCtrl)) //should be used as decoupledIO
     val writeVecCtrl=Flipped(DecoupledIO(new WriteVecCtrl))
-    })
-  val vectorRegFile=VecInit(Seq.fill(num_warp)(Module(new FloatRegFile).io))
-  val scalarRegFile=VecInit(Seq.fill(num_warp)(Module(new RegFile).io))
+  })
+
+
+
+
+
+  val vectorRegFile=VecInit(Seq.fill(num_bank)(Module(new FloatRegFileBank).io))
+  val scalarRegFile=VecInit(Seq.fill(num_bank)(Module(new RegFileBank).io))
   val imm=Module(new ImmGen())
+
+  val collectorUnitIO=VecInit(Seq.fill(num_warp)(new collectorUnit))
+
   imm.io.inst:=io.control.inst
   imm.io.sel:=io.control.sel_imm
 
-  vectorRegFile.foreach(x=>{
-    x.rs1idx:=io.control.reg_idx1
+  vectorRegFile.zipWithIndex.foreach((x, i) => {
+    x._1.rsidx:=io.control.reg_idx1
     x.rs2idx:=io.control.reg_idx2
     x.rs3idx:=io.control.reg_idx3
     x.rdidx:=io.writeVecCtrl.bits.reg_idxw
@@ -61,7 +195,7 @@ class operandCollector extends Module{
     y.rs1idx:=io.control.reg_idx1
     y.rs2idx:=io.control.reg_idx2
     y.rs3idx:=io.control.reg_idx3
-    y.rdidx:=io.writeScalarCtrl.bits.reg_idxw
+    y.rdIdx:=io.writeScalarCtrl.bits.reg_idxw
     y.rd:=io.writeScalarCtrl.bits.wb_wxd_rd
     y.rdwen:=false.B
     //y.rdwen:=io.writeCtrl.wxd
@@ -80,3 +214,4 @@ class operandCollector extends Module{
   })
 
 }
+
