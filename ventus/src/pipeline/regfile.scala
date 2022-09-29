@@ -15,57 +15,52 @@ import chisel3.util.{Cat, MuxLookup}
 import IDecode._
 import parameters._
 
-class RegFileIO extends Bundle  {
+class RegFileBankIO extends Bundle  {
   val x1     = Output(UInt(xLen.W))//x1 CSR
-  val rs1    = Output(UInt(xLen.W))
-  val rs2    = Output(UInt(xLen.W))
-  val rs3    = Output(UInt(xLen.W))
-  val rs1idx = Input(UInt(5.W))
-  val rs2idx = Input(UInt(5.W))
-  val rs3idx = Input(UInt(5.W))
+  val rs     = Output(UInt(xLen.W))
+  val rsIdx  = Input(UInt(5.W))
   val rd     = Input(UInt(xLen.W))
-  val rdidx  = Input(UInt(5.W))
+  val rdIdx  = Input(UInt(5.W))
   val rdwen  = Input(Bool())
+  val ready  = Output(Bool())
 }
 
-class RegFile extends Module  {
-  val io = IO(new RegFileIO())
-  val regs = Mem(32, UInt(xLen.W))
-  io.rs1 := Mux(((io.rs1idx===io.rdidx)&io.rdwen),io.rd,Mux(io.rs1idx.orR, regs(io.rs1idx), 0.U))
-  io.rs2 := Mux(((io.rs2idx===io.rdidx)&io.rdwen),io.rd,Mux(io.rs2idx.orR, regs(io.rs2idx), 0.U))
-  io.rs3 := Mux(((io.rs3idx===io.rdidx)&io.rdwen),io.rd,Mux(io.rs3idx.orR, regs(io.rs3idx), 0.U))
+class RegFileBank extends Module  {
+  val io = IO(new RegFileBankIO())
+  val regs = Mem(32*num_warp/num_bank, UInt(xLen.W))
+  io.rs := Mux(((io.rsIdx===io.rdIdx)&io.rdwen),io.rd,Mux(io.rsIdx.orR, regs(io.rsIdx), 0.U))
+  io.ready := true.B
   io.x1 := regs(1.U)
-  when (io.rdwen & io.rdidx.orR) {
-    regs(io.rdidx) := io.rd
+  when (io.rdwen & io.rdIdx.orR) {
+    regs(io.rdIdx) := io.rd
   }
 }
 
-class FloatRegFileIO extends Bundle  {
+class FloatRegFileBankIO extends Bundle  {
   val v0     = Output(Vec(num_thread,UInt((xLen).W)))//mask v0
-  val rs1    = Output(Vec(num_thread,UInt((xLen).W)))
-  val rs2    = Output(Vec(num_thread,UInt((xLen).W)))
-  val rs3    = Output(Vec(num_thread,UInt((xLen).W)))
-  val rs1idx = Input(UInt(5.W))
-  val rs2idx = Input(UInt(5.W))
-  val rs3idx = Input(UInt(5.W))
+  val rs     = Output(Vec(num_thread,UInt((xLen).W)))
+  val rsidx  = Input(UInt(5.W))
   val rd     = Input(Vec(num_thread,UInt((xLen).W)))
   val rdidx  = Input(UInt(5.W))
   val rdwen  = Input(Bool())
   val rdwmask = Input(Vec(num_thread,Bool()))
 }
 
-class FloatRegFile extends Module  {
-  val io = IO(new FloatRegFileIO)
-  val regs = Mem(32, Vec(num_thread,UInt(xLen.W)))
+
+
+
+class FloatRegFileBank extends Module  {
+  val io = IO(new FloatRegFileBankIO)
+  val regs = SyncReadMem(32*num_warp/num_bank, Vec(num_thread,UInt(xLen.W)))  //Register files of all warps are divided to number of bank
   val internalMask = Wire(Vec(num_thread, Bool()))
-  io.rs1 := Mux(((io.rs1idx===io.rdidx)&io.rdwen),io.rd,regs(io.rs1idx))
-  io.rs2 := Mux(((io.rs2idx===io.rdidx)&io.rdwen),io.rd,regs(io.rs2idx))
-  io.rs3 := Mux(((io.rs3idx===io.rdidx)&io.rdwen),io.rd,regs(io.rs3idx))
+
+  io.rs := regs.read(io.rsidx)
+  //  io.rs := Mux(((io.rsIdx===io.rdIdx)&io.rdwen),io.rd,regs(io.rsIdx))
   io.v0 := regs(0.U)
   //for (i <- 0 until num_thread){internalMask(i) := io.rdwmask(i).asBool()}
   internalMask:=io.rdwmask
   when (io.rdwen ) {
-    //regs(io.rdidx) := io.rd
+    //regs(io.rdIdx) := io.rd
     regs.write(io.rdidx, io.rd, internalMask)
   }
 }
