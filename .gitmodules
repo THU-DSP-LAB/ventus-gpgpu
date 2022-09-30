@@ -10,3 +10,7 @@
 [submodule "dependencies/berkeley-hardfloat"]
 	path = dependencies/berkeley-hardfloat
 	url = git@github.com:ucb-bar/berkeley-hardfloat.git
+[submodule "dependencies/fpuv2"]
+	path = dependencies/fpuv2
+	url = git@github.com:liuxd17thu/fpuv2.git
+	branch = master
