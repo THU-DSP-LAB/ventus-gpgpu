@@ -142,7 +142,7 @@ object ventus extends CommonModule {
 
   // use scalatest as your test framework
   object tests extends Tests with TestModule.ScalaTest {
-
+    override def moduleDeps = super.moduleDeps ++ Seq(dependencies.`fpuv2`.build.fpuv2.test)
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivys.chiseltest,
       ivys.scalatest
