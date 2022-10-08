@@ -36,10 +36,10 @@ object FPUOps{
   def FN_FSGNJN   = 21.U(6.W) // 010 101
   def FN_FSGNJX   = 20.U(6.W) // 010 100
 
-  def FN_F2I      = 24.U(6.W) // 011 000
-  def FN_F2IU     = 25.U(6.W) // 011 001
-  def FN_I2F      = 32.U(6.W) // 100 000
-  def FN_IU2F     = 33.U(6.W) // 100 001
+  def FN_F2IU = 24.U(6.W) // 011 000
+  def FN_F2I = 25.U(6.W) // 011 001
+  def FN_IU2F = 32.U(6.W) // 100 000
+  def FN_I2F = 33.U(6.W) // 100 001
 }
 
 class FloatPoint(val expWidth: Int, val fracWidth: Int) extends Bundle{
@@ -102,33 +102,51 @@ abstract class FPUSubModule extends Module with HasUIntToSIntHelper{
   })
 }
 
-trait HasPipelineReg1{ this: FPUSubModule =>
-  def latency: Int
+class RoundingUnit(fracWidth: Int) extends Module{
+  import RoundingMode._
+  val io = IO(new Bundle{
+    val in = Input(new Bundle{
+      val rm = UInt(3.W)
+      val frac = UInt(fracWidth.W)
+      val sign, guard, round, sticky = Bool()
+    })
+    val out = Output(new Bundle{
+      val fracRounded = UInt(fracWidth.W)
+      val inexact = Bool()
+      val fracCout = Bool()
+      val roundUp = Bool()
+    })
+  })
 
-  //val ready = Wire(Bool())
-  //val cnt = RegInit(0.U((log2Up(latency)+1).W))
-
-  //ready := (cnt < latency.U) || (cnt === latency.U && io.out.ready)
-  //cnt := cnt + io.in.fire() - io.out.fire()
-
-  val valids = io.in.valid +: Array.fill(latency)(RegInit(false.B))
-  for(i <- 1 to latency){
-    when(!(!io.out.ready && valids.drop(i).reduce(_&&_) )){ valids(i) := valids(i-1) }
-  }
-
-  def regEnable(i: Int): Bool = valids(i-1) && !(!io.out.ready && valids.drop(i).reduce(_&&_) )
-
-
-  def PipelineReg[T<:Data](i: Int)(next: T) = RegEnable(next, valids(i-1) && !(!io.out.ready && valids.drop(i).reduce(_&&_) ))
-  def S1Reg[T<:Data](next: T):T = PipelineReg[T](1)(next)
-  def S2Reg[T<:Data](next: T):T = PipelineReg[T](2)(next)
-  def S3Reg[T<:Data](next: T):T = PipelineReg[T](3)(next)
-  def S4Reg[T<:Data](next: T):T = PipelineReg[T](4)(next)
-  def S5Reg[T<:Data](next: T):T = PipelineReg[T](5)(next)
-
-  io.in.ready := !(!io.out.ready && valids.drop(1).reduce(_&&_))
-  io.out.valid := valids.last
+  val inexact = io.in.guard | io.in.round | io.in.sticky
+  val lsb = io.in.frac(0)
+  val roundUp = MuxLookup(io.in.rm, false.B, Seq(
+    RNE -> (io.in.guard && (io.in.round | io.in.sticky | lsb)),
+    RTZ -> false.B,
+    RUP -> (inexact & (!io.in.sign)),
+    RDN -> (inexact & io.in.sign),
+    RMM -> io.in.guard
+  ))
+  val fracRoundUp = io.in.frac +& 1.U
+  val cout = fracRoundUp(fracWidth)
+  val fracRounded = Mux(roundUp, fracRoundUp(fracWidth-1,0), io.in.frac)
+  io.out.inexact := inexact
+  io.out.fracRounded := fracRounded
+  io.out.fracCout := cout & roundUp
+  io.out.roundUp := roundUp
 }
+//fake Array Multiplier
+class ArrayMultiplier1(width: Int) extends Module{   //width = 25
+  val io = IO(new Bundle{
+    val a, b = Input(UInt(width.W))
+    val carry, sum = Output(UInt((2*width).W))
+  })
+  val (a, b) = (io.a, io.b)
+  val (sum, carry) = (a*b, 0.U)
+  io.sum := sum
+  io.carry := carry
+}
+
 
 object ShiftRightJam{
   def apply(x: UInt, shiftAmt: UInt, w: Int): UInt = {

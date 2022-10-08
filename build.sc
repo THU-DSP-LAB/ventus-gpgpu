@@ -17,6 +17,7 @@ import $file.dependencies.cde.build
 import $file.dependencies.`rocket-chip`.common
 import $file.dependencies.`berkeley-hardfloat`.build
 import $file.dependencies.`rocket-chip`.`api-config-chipsalliance`.`build-rules`.mill.build
+import $file.dependencies.`fpuv2`.build
 
 // Global Scala Version
 object ivys {
@@ -131,7 +132,7 @@ object ventus extends CommonModule {
     //"-P:chiselplugin:useBundlePlugin"
   )
   
-  override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache)
+  override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache, dependencies.`fpuv2`.build.fpuv2)
 
   // add some scala ivy module you like here.
   override def ivyDeps = super.ivyDeps() ++ Agg(
@@ -141,7 +142,7 @@ object ventus extends CommonModule {
 
   // use scalatest as your test framework
   object tests extends Tests with TestModule.ScalaTest {
-
+    override def moduleDeps = super.moduleDeps ++ Seq(dependencies.`fpuv2`.build.fpuv2.test)
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivys.chiseltest,
       ivys.scalatest
