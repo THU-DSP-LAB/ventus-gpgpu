@@ -33,7 +33,7 @@ object TestCaseList{
 class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
   "first_test" in {
     val caseName = "saxpy2"
-    test(new GPGPU_ExtMemWrapper(TestCaseList(caseName))).withAnnotations(Seq(WriteVcdAnnotation)) { c =>
+    test(new GPGPU_ExtMemWrapper(TestCaseList(caseName)))/*.withAnnotations(Seq(WriteVcdAnnotation))*/ { c =>
       c.clock.setTimeout(0)
       c.clock.step(TestCaseList(caseName).cycles)
     }

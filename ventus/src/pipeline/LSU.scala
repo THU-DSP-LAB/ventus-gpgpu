@@ -288,9 +288,9 @@ class LSU2WB extends Module{
   io.out_x.bits.wb_wxd_rd:=io.lsu_rsp.bits.data(0)
   io.out_v.bits.warp_id:=io.lsu_rsp.bits.tag.warp_id
   io.out_v.bits.reg_idxw:=io.lsu_rsp.bits.tag.reg_idxw
-  io.out_v.bits.wfd:=io.lsu_rsp.bits.tag.wfd
-  io.out_v.bits.wfd_mask:=io.lsu_rsp.bits.tag.mask
-  io.out_v.bits.wb_wfd_rd:=io.lsu_rsp.bits.data
+  io.out_v.bits.wvd:=io.lsu_rsp.bits.tag.wfd
+  io.out_v.bits.wvd_mask:=io.lsu_rsp.bits.tag.mask
+  io.out_v.bits.wb_wvd_rd:=io.lsu_rsp.bits.data
   when(io.lsu_rsp.bits.tag.wxd){
     io.out_x.valid:=io.lsu_rsp.valid
     io.out_v.valid:=false.B

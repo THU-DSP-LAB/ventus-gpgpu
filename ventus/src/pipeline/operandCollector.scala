@@ -6,9 +6,9 @@ import parameters._
 import IDecode._
 
 class WriteVecCtrl extends Bundle{
-  val wb_wfd_rd=(Vec(num_thread,UInt(xLen.W)))
-  val wfd_mask=Vec(num_thread,Bool())
-  val wfd=Bool()
+  val wb_wvd_rd=(Vec(num_thread,UInt(xLen.W)))
+  val wvd_mask=Vec(num_thread,Bool())
+  val wvd=Bool()
   val reg_idxw=UInt(5.W)
   val warp_id=UInt(depth_warp.W)
 }
@@ -219,9 +219,9 @@ class operandCollector extends Module{
     x.rs2idx:=io.control.reg_idx2
     x.rs3idx:=io.control.reg_idx3
     x.rdidx:=io.writeVecCtrl.bits.reg_idxw
-    x.rd:=io.writeVecCtrl.bits.wb_wfd_rd
+    x.rd:=io.writeVecCtrl.bits.wb_wvd_rd
     x.rdwen:=false.B
-    x.rdwmask:=io.writeVecCtrl.bits.wfd_mask
+    x.rdwmask:=io.writeVecCtrl.bits.wvd_mask
     //y.rdwen:=io.writeCtrl.wfd
   })
   scalarRegFile.foreach(y=>{
@@ -233,7 +233,7 @@ class operandCollector extends Module{
     y.rdwen:=false.B
     //y.rdwen:=io.writeCtrl.wxd
   })
-  vectorRegFile(io.writeVecCtrl.bits.warp_id).rdwen:=io.writeVecCtrl.bits.wfd&io.writeVecCtrl.valid
+  vectorRegFile(io.writeVecCtrl.bits.warp_id).rdwen:=io.writeVecCtrl.bits.wvd&io.writeVecCtrl.valid
   scalarRegFile(io.writeScalarCtrl.bits.warp_id).rdwen:=io.writeScalarCtrl.bits.wxd&io.writeScalarCtrl.valid
   io.writeScalarCtrl.ready:=true.B
   io.writeVecCtrl.ready:=true.B
