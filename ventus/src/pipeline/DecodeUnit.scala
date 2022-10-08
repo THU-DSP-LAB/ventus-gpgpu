@@ -122,10 +122,10 @@ object IDecode //extends DecodeConstants
   def FN_FSGNJN   = 21.U(6.W) // 010 101
   def FN_FSGNJX   = 20.U(6.W) // 010 100
 
-  def FN_F2I      = 24.U(6.W) // 011 000
-  def FN_F2IU     = 25.U(6.W) // 011 001
-  def FN_I2F      = 32.U(6.W) // 100 000
-  def FN_IU2F     = 33.U(6.W) // 100 001
+  def FN_F2IU      = 24.U(6.W) // 011 000
+  def FN_F2I     = 25.U(6.W) // 011 001
+  def FN_IU2F      = 32.U(6.W) // 100 000
+  def FN_I2F     = 33.U(6.W) // 100 001
 
   // for SFU
   def FN_DIV      = 0.U(6.W)

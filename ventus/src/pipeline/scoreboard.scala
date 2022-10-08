@@ -88,7 +88,7 @@ class Scoreboard extends Module{
   val beqReg=new ScoreboardUtil(1)
   val fenceReg=new ScoreboardUtil(1)
   vectorReg.set(io.if_fire & io.if_ctrl.wfd,io.if_ctrl.reg_idxw)
-  vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wfd,io.wb_v_ctrl.reg_idxw)
+  vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wvd,io.wb_v_ctrl.reg_idxw)
   scalarReg.set(io.if_fire & io.if_ctrl.wxd,io.if_ctrl.reg_idxw)
   scalarReg.clear(io.wb_x_fire & io.wb_x_ctrl.wxd,io.wb_x_ctrl.reg_idxw)
   beqReg.set(io.if_fire & ((io.if_ctrl.branch=/=0.U)|(io.if_ctrl.barrier)),0.U)
