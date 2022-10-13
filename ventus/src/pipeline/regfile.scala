@@ -1,67 +1,72 @@
-/*
- * Copyright (c) 2021-2022 International Innovation Center of Tsinghua University, Shanghai
- * Ventus is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *          http://license.coscl.org.cn/MulanPSL2
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details. */
 package pipeline
 
 import chisel3._
-import chisel3.util.{Cat, MuxLookup}
+import chisel3.util.{Cat, MuxLookup, is, switch}
 import IDecode._
 import parameters._
 
 class RegFileBankIO extends Bundle  {
-  val x1     = Output(UInt(xLen.W))//x1 CSR
   val rs     = Output(UInt(xLen.W))
-  val rsIdx  = Input(UInt(5.W))
+  val rsidx  = Input(UInt(depth_regBank.W))
   val rd     = Input(UInt(xLen.W))
-  val rdIdx  = Input(UInt(5.W))
+  val rdidx  = Input(UInt(depth_regBank.W))
   val rdwen  = Input(Bool())
-  val ready  = Output(Bool())
+  //val ready  = Output(Bool())
 }
 
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
-  val regs = Mem(32*num_warp/num_bank, UInt(xLen.W))
-  io.rs := Mux(((io.rsIdx===io.rdIdx)&io.rdwen),io.rd,Mux(io.rsIdx.orR, regs(io.rsIdx), 0.U))
-  io.ready := true.B
-  io.x1 := regs(1.U)
-  when (io.rdwen & io.rdIdx.orR) {
-    regs(io.rdIdx) := io.rd
+  val regs = SyncReadMem(32*num_warp/num_bank, UInt(xLen.W))
+  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,Mux(io.rsidx.orR, regs.read(io.rsidx), 0.U))
+  //io.ready := true.B
+  when (io.rdwen & io.rdidx.orR) {
+    regs.write(io.rdidx, io.rd)
   }
 }
 
-class FloatRegFileBankIO extends Bundle  {
+class FloatRegFileBankIO(val unified: Boolean) extends Bundle  {
   val v0     = Output(Vec(num_thread,UInt((xLen).W)))//mask v0
   val rs     = Output(Vec(num_thread,UInt((xLen).W)))
-  val rsidx  = Input(UInt(5.W))
+  val rsidx  = Input(UInt(depth_regBank.W))
   val rd     = Input(Vec(num_thread,UInt((xLen).W)))
-  val rdidx  = Input(UInt(5.W))
+  val rdidx  = Input(UInt(depth_regBank.W))
   val rdwen  = Input(Bool())
   val rdwmask = Input(Vec(num_thread,Bool()))
+  val rsType = if(unified) Some(Input(UInt(2.W))) else None
 }
-
-
-
-
 class FloatRegFileBank extends Module  {
-  val io = IO(new FloatRegFileBankIO)
+  val io = IO(new FloatRegFileBankIO(false))
   val regs = SyncReadMem(32*num_warp/num_bank, Vec(num_thread,UInt(xLen.W)))  //Register files of all warps are divided to number of bank
   val internalMask = Wire(Vec(num_thread, Bool()))
 
-  io.rs := regs.read(io.rsidx)
-  //  io.rs := Mux(((io.rsIdx===io.rdIdx)&io.rdwen),io.rd,regs(io.rsIdx))
-  io.v0 := regs(0.U)
-  //for (i <- 0 until num_thread){internalMask(i) := io.rdwmask(i).asBool()}
+  //  io.rs := regs.read(io.rsidx)
+  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,regs.read(io.rsidx))
+  io.v0 := regs.read(0.U)
   internalMask:=io.rdwmask
   when (io.rdwen ) {
-    //regs(io.rdIdx) := io.rd
     regs.write(io.rdidx, io.rd, internalMask)
+  }
+}
+class unifiedBank extends Module  {
+  val io = IO(new FloatRegFileBankIO(true))
+  val regs = SyncReadMem(32*num_warp/num_bank, Vec(num_thread+1, UInt(xLen.W)))  //integrating scalar bank and vector bank, the most significant 32bit is scalar data
+  val internalMask = Wire(Vec(num_thread, Bool()))
+  switch(io.rsType.get){
+    is(1.U){//scalar
+      io.rs(0) := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd(0), Mux(io.rsidx.orR, regs.read(io.rsidx)(num_thread+1), 0.U))
+      when(io.rdwen & io.rdidx.orR) {
+        regs(io.rdidx)(num_thread+1) := io.rd(0)
+      }
+    }
+    is(2.U){//vector
+      io.rs := Mux(((io.rsidx===io.rdidx) & io.rdwen),io.rd,regs.read(io.rsidx).dropRight(1))
+      io.v0 := regs.read(0.U)
+      internalMask:=io.rdwmask
+      when (io.rdwen) {
+        regs.write(io.rdidx, VecInit(io.rd++Seq.fill(1)(0.U(xLen.W))), internalMask)
+        val x = regs(io.rdidx)
+      }
+    }
   }
 }
 
