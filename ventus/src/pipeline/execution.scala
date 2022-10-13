@@ -10,6 +10,7 @@
  * See the Mulan PSL v2 for more details. */
 package pipeline
 
+import FPUv2.utils.TestFPUCtrl
 import chisel3._
 import chisel3.util._
 import parameters._
@@ -66,7 +67,7 @@ class vMULexe extends Module{
     mul(x).in.bits.ctrl := io.in.bits.ctrl
     mul(x).in.bits.mask := io.in.bits.mask
     mul(x).in.valid:=io.in.valid
-    result_v.io.enq.bits.wb_wfd_rd(x) := mul(x).out.bits.result
+    result_v.io.enq.bits.wb_wvd_rd(x) := mul(x).out.bits.result
     mul(x).out.ready:=Mux(mul(x).out.bits.ctrl.wxd,result_x.io.enq.ready,result_v.io.enq.ready)
     when(io.in.bits.ctrl.reverse){
       mul(x).in.bits.a:=io.in.bits.in2(x)
@@ -77,8 +78,8 @@ class vMULexe extends Module{
 
   result_v.io.enq.bits.warp_id:=mul(0).out.bits.ctrl.wid
   result_v.io.enq.bits.reg_idxw:=mul(0).out.bits.ctrl.reg_idxw
-  result_v.io.enq.bits.wfd:=mul(0).out.bits.ctrl.wfd
-  result_v.io.enq.bits.wfd_mask:=mul(0).out.bits.mask
+  result_v.io.enq.bits.wvd:=mul(0).out.bits.ctrl.wfd
+  result_v.io.enq.bits.wvd_mask:=mul(0).out.bits.mask
 
   result_x.io.enq.bits.warp_id:=mul(0).out.bits.ctrl.wid
   result_x.io.enq.bits.reg_idxw:=mul(0).out.bits.ctrl.reg_idxw
@@ -106,7 +107,7 @@ class vALUexe extends Module{
     alu(x).in2:=io.in.bits.in2(x)
     alu(x).in3:=io.in.bits.in3(x)
     alu(x).func:=io.in.bits.ctrl.alu_fn(4,0)
-    result.io.enq.bits.wb_wfd_rd(x):=alu(x).out
+    result.io.enq.bits.wb_wvd_rd(x):=alu(x).out
     when(io.in.bits.ctrl.reverse){
       alu(x).in1:=io.in.bits.in2(x)
       alu(x).in2:=io.in.bits.in1(x)
@@ -118,29 +119,29 @@ class vALUexe extends Module{
       }.otherwise({
         when(io.in.bits.ctrl.alu_fn===FN_VMXNOR){alu(x).func:=FN_XOR(4,0)}
           .otherwise(alu(x).func:=Cat(3.U(4.W),io.in.bits.ctrl.alu_fn(0)))
-        result.io.enq.bits.wb_wfd_rd(x):=(~alu(x).out)
+        result.io.enq.bits.wb_wvd_rd(x):=(~alu(x).out)
       })
     }
     when(io.in.bits.ctrl.alu_fn===FN_VID){
-      result.io.enq.bits.wb_wfd_rd(x):=x.asUInt()
+      result.io.enq.bits.wb_wvd_rd(x):=x.asUInt()
     }
     when(io.in.bits.ctrl.alu_fn===FN_VMERGE){
-      result.io.enq.bits.wb_wfd_rd(x):=Mux(io.in.bits.mask(x),io.in.bits.in1(x),io.in.bits.in2(x))
-      result.io.enq.bits.wfd_mask(x):=true.B
+      result.io.enq.bits.wb_wvd_rd(x):=Mux(io.in.bits.mask(x),io.in.bits.in1(x),io.in.bits.in2(x))
+      result.io.enq.bits.wvd_mask(x):=true.B
     }
   })
   when(io.in.bits.ctrl.writemask){
-    result.io.enq.bits.wb_wfd_rd(0):=Mux(io.in.bits.ctrl.readmask,alu(0).out,VecInit((0 until num_thread).map(x=>{Mux(io.in.bits.mask(x),alu(x).out(0),0.U)})).asUInt)
-    result.io.enq.bits.wfd_mask(0):=1.U
+    result.io.enq.bits.wb_wvd_rd(0):=Mux(io.in.bits.ctrl.readmask,alu(0).out,VecInit((0 until num_thread).map(x=>{Mux(io.in.bits.mask(x),alu(x).out(0),0.U)})).asUInt)
+    result.io.enq.bits.wvd_mask(0):=1.U
     when((io.in.bits.ctrl.alu_fn===FN_VMNAND)|(io.in.bits.ctrl.alu_fn===FN_VMNOR)|(io.in.bits.ctrl.alu_fn===FN_VMXNOR)){
-      result.io.enq.bits.wb_wfd_rd(0):=VecInit((0 until num_thread).map(x=>{Mux(io.in.bits.mask(x),!alu(x).out(0),false.B)})).asUInt
+      result.io.enq.bits.wb_wvd_rd(0):=VecInit((0 until num_thread).map(x=>{Mux(io.in.bits.mask(x),!alu(x).out(0),false.B)})).asUInt
     }
   }
 
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  result.io.enq.bits.wfd:=io.in.bits.ctrl.wfd
-  result.io.enq.bits.wfd_mask:=io.in.bits.mask
+  result.io.enq.bits.wvd:=io.in.bits.ctrl.wfd
+  result.io.enq.bits.wvd_mask:=io.in.bits.mask
   result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wfd&(!io.in.bits.ctrl.simt_stack)
 
   result2simt.io.enq.bits.wid:=io.in.bits.ctrl.wid
@@ -162,61 +163,50 @@ class FPUexe extends Module{
     val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
-  val fpu=VecInit(Seq.fill(num_thread)((Module(new ScalarFPU())).io))
-  val result_x=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
-  val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
-  (0 until num_thread).foreach(x=> {
-    fpu(x).in.bits.a := io.in.bits.in1(x)
-    fpu(x).in.bits.b := io.in.bits.in2(x)
-    fpu(x).in.bits.c := io.in.bits.in3(x)
-    fpu(x).in.bits.fpuop := io.in.bits.ctrl.alu_fn
-    fpu(x).in.bits.rm := io.rm
-    fpu(x).in.valid:=io.in.valid
-    result_v.io.enq.bits.wb_wfd_rd(x) := fpu(x).out.bits.result
-    //when(io.in.bits.ctrl.alu_fn===)
-    when(io.in.bits.ctrl.reverse) {
-      fpu(x).in.bits.a := io.in.bits.in2(x)
-      fpu(x).in.bits.b := io.in.bits.in1(x)
+
+  val fpu = Module(new FPUv2.VectorFPU(8, 24, num_thread, num_thread, new TestFPUCtrl(depth_warp, num_thread)))
+  (0 until num_thread).foreach{ x =>
+    fpu.io.in.bits.data(x).a := io.in.bits.in1(x)
+    fpu.io.in.bits.data(x).b := io.in.bits.in2(x)
+    fpu.io.in.bits.data(x).c := io.in.bits.in3(x)
+    fpu.io.in.bits.data(x).rm := io.rm
+    when(io.in.bits.ctrl.reverse){
+      fpu.io.in.bits.data(x).a := io.in.bits.in2(x)
+      fpu.io.in.bits.data(x).b := io.in.bits.in1(x)
     }
+    fpu.io.in.bits.data(x).op := io.in.bits.ctrl.alu_fn
     when((io.in.bits.ctrl.alu_fn===FN_VFMADD)|(io.in.bits.ctrl.alu_fn===FN_VFMSUB)|(io.in.bits.ctrl.alu_fn===FN_VFNMADD)|(io.in.bits.ctrl.alu_fn===FN_VFNMSUB)){
-      fpu(x).in.bits.fpuop:=io.in.bits.ctrl.alu_fn-10.U
-      fpu(x).in.bits.a := io.in.bits.in1(x)
-      fpu(x).in.bits.b := io.in.bits.in3(x)
-      fpu(x).in.bits.c := io.in.bits.in2(x)
+      fpu.io.in.bits.data(x).op := io.in.bits.ctrl.alu_fn-10.U
+      fpu.io.in.bits.data(x).a := io.in.bits.in1(x)
+      fpu.io.in.bits.data(x).b := io.in.bits.in3(x)
+      fpu.io.in.bits.data(x).c := io.in.bits.in2(x)
     }
-  })
+  }
+  fpu.io.in.bits.ctrl.wvd := io.in.bits.ctrl.wfd
+  fpu.io.in.bits.ctrl.wxd := io.in.bits.ctrl.wxd
+  fpu.io.in.bits.ctrl.regIndex := io.in.bits.ctrl.reg_idxw
+  fpu.io.in.bits.ctrl.warpID := io.in.bits.ctrl.wid
+  fpu.io.in.bits.ctrl.vecMask := io.in.bits.mask.asUInt
 
-  val ctrl_fma=Module(new Queue(new ctrl_fpu,5,flow=true))
-  val ctrl_else=Module(new Queue(new ctrl_fpu,1,flow=true))
-  ctrl_fma.io.enq.bits.ctrl:=io.in.bits.ctrl
-  ctrl_fma.io.enq.bits.mask:=io.in.bits.mask
-  ctrl_fma.io.enq.valid:=fpu(0).in.fire & fpu(0).in.bits.fpuop(5,3) === 0.U
-  ctrl_fma.io.deq.ready:=fpu(0).out.fire & fpu(0).select === 0.U
-  ctrl_else.io.enq.bits.ctrl:=io.in.bits.ctrl
-  ctrl_else.io.enq.bits.mask:=io.in.bits.mask
-  ctrl_else.io.enq.valid:=fpu(0).in.fire & fpu(0).in.bits.fpuop(5,3) =/= 0.U
-  ctrl_else.io.deq.ready:=fpu(0).out.fire & fpu(0).select =/= 0.U
-  val ctrl=Mux(fpu(0).select===0.U,ctrl_fma.io.deq.bits,ctrl_else.io.deq.bits)
-  (0 until num_thread).foreach(x=> {
-    fpu(x).out.ready:=Mux(ctrl.ctrl.wxd,result_x.io.enq.ready,result_v.io.enq.ready)
-  })
+  fpu.io.in.valid := io.in.valid
+  io.in.ready := fpu.io.in.ready
 
-  result_v.io.enq.bits.warp_id:=ctrl.ctrl.wid
-  result_v.io.enq.bits.reg_idxw:=ctrl.ctrl.reg_idxw
-  result_v.io.enq.bits.wfd:=ctrl.ctrl.wfd
-  result_v.io.enq.bits.wfd_mask:=ctrl.mask
-
-  result_x.io.enq.bits.warp_id:=ctrl.ctrl.wid
-  result_x.io.enq.bits.reg_idxw:=ctrl.ctrl.reg_idxw
-  result_x.io.enq.bits.wxd:=ctrl.ctrl.wxd
-  result_x.io.enq.bits.wb_wxd_rd:=fpu(0).out.bits.result
-
-  result_v.io.enq.valid:=fpu(0).out.valid&ctrl.ctrl.wfd
-  result_x.io.enq.valid:=fpu(0).out.valid&ctrl.ctrl.wxd
-  io.in.ready:=fpu(0).in.ready//Mux(io.in.bits.ctrl.wfd,result_v.io.enq.ready,Mux(io.in.bits.ctrl.wxd,result_x.io.enq.ready,true.B))
-  io.out_v<>result_v.io.deq
-  io.out_x<>result_x.io.deq
+  (0 until num_thread).foreach{ x =>
+    io.out_v.bits.wb_wvd_rd(x) := fpu.io.out.bits.data(x).result(31,0)
+  }
+  io.out_x.bits.wb_wxd_rd := fpu.io.out.bits.data(0).result(31,0)
+  io.out_v.bits.reg_idxw := fpu.io.out.bits.ctrl.regIndex
+  io.out_x.bits.reg_idxw := fpu.io.out.bits.ctrl.regIndex
+  io.out_v.bits.warp_id := fpu.io.out.bits.ctrl.warpID
+  io.out_x.bits.warp_id := fpu.io.out.bits.ctrl.warpID
+  io.out_v.bits.wvd_mask := VecInit(fpu.io.out.bits.ctrl.vecMask.asBools)
+  io.out_v.bits.wvd := fpu.io.out.bits.ctrl.wvd
+  io.out_x.bits.wxd := fpu.io.out.bits.ctrl.wxd
+  io.out_v.valid := fpu.io.out.valid && fpu.io.out.bits.ctrl.wvd
+  io.out_x.valid := fpu.io.out.valid && fpu.io.out.bits.ctrl.wxd
+  fpu.io.out.ready := Mux(fpu.io.out.bits.ctrl.wvd, io.out_v.ready, io.out_x.ready)
 }
+
 class SFUexe extends Module{
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
@@ -263,9 +253,9 @@ class SFUexe extends Module{
   alu_out_arbiter.foreach(x=>x.out.ready:=alu_out_arbiter.map(x=>x.out.valid).reduce(_&_))// i_ctrl.wfd & result_v.io.enq.ready | i_ctrl.wxd & result_x.io.enq.ready | !(i_ctrl.wxd&i_ctrl.wfd)
   //result_x.io.enq.bits:=Cat(out_data(0),i_ctrl.wxd,i_ctrl.reg_idxw,i_ctrl.wid).asTypeOf(new WriteScalarCtrl)
   //result_v.io.enq.bits:=Cat(out_data.asUInt,data_buffer.bits.mask.asUInt,i_ctrl.wfd,i_ctrl.reg_idxw,i_ctrl.wid).asTypeOf(new WriteVecCtrl)
-  result_v.io.enq.bits.wfd_mask:=data_buffer.bits.mask
-  result_v.io.enq.bits.wfd:=i_ctrl.wfd
-  result_v.io.enq.bits.wb_wfd_rd:=out_data
+  result_v.io.enq.bits.wvd_mask:=data_buffer.bits.mask
+  result_v.io.enq.bits.wvd:=i_ctrl.wfd
+  result_v.io.enq.bits.wb_wvd_rd:=out_data
   result_v.io.enq.bits.reg_idxw:=i_ctrl.reg_idxw
   result_v.io.enq.bits.warp_id:=i_ctrl.wid
   result_x.io.enq.bits.wxd:=i_ctrl.wxd
