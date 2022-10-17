@@ -6,9 +6,9 @@ import parameters._
 import IDecode._
 
 class WriteVecCtrl extends Bundle{
-  val wb_wfd_rd=(Vec(num_thread,UInt(xLen.W)))
-  val wfd_mask=Vec(num_thread,Bool())
-  val wfd=Bool()
+  val wb_wvd_rd=(Vec(num_thread,UInt(xLen.W)))
+  val wvd_mask=Vec(num_thread,Bool())
+  val wvd=Bool()
   val reg_idxw=UInt(5.W)
   val warp_id=UInt(depth_warp.W)
 }
@@ -25,9 +25,12 @@ class crossbar2CU extends Bundle{
   val data = Vec(num_thread, UInt(xLen.W))
   val v0 = Vec(num_thread, UInt(xLen.W))
 }
-class CU2Arbiter extends Bundle{
+class readArbiterInnerIO extends Bundle{
   val rsAddr = UInt(depth_regBank.W)
   val bankID = UInt(log2Ceil(num_bank).W)
+}
+
+class CU2Arbiter extends readArbiterInnerIO {
   val rsType = UInt(2.W)
 }
 
@@ -36,6 +39,7 @@ class issueIO extends Bundle{
   val alu_src2 = Vec(num_thread, UInt(xLen.W))
   val alu_src3 = Vec(num_thread, UInt(xLen.W))
   val mask = Vec(num_thread, Bool())
+  val wid = UInt(depth_warp.W)
 }
 /**
  *One of the number of num_warp collector Units, instantiating this class in operand collector for num_warps.
@@ -47,27 +51,24 @@ class collectorUnit extends Module{
     //operand to be issued, alternatively vector and scalar
     val issue = Decoupled(new issueIO)
     val outArbiterIO = Vec(4, Decoupled(new CU2Arbiter))
-    val idle = Output(Bool())
-    val wid = Output(UInt(depth_warp.W))
 
   })
   val wid = Reg(UInt(depth_warp.W))
-  io.idle := !(valid.orR)
-  io.wid := wid
+  io.issue.bits.wid := wid
 
   // rsType == 0: PC or mask(for op4)
   // rsType == 1: scalar
   // rsType == 2: Vec
   // rsType == 3: Imm
-  val rsType = RegInit(Vec(4, UInt(2.W)))
-  val ready = RegInit(0.U(4.W))
-  val valid = RegInit(0.U(4.W))
-  val regIdx = RegInit(Vec(4, 0.U(5.W)))
-  val rsReg = RegInit(VecInit(Seq.fill(3)(Vec(num_thread, UInt(xLen.W))))) //op1, op2 and op3
-  val mask = Vec(num_thread, Bool())
+  val rsType = Reg(Vec(4, UInt(2.W)))
+  val ready = Reg(Vec(4, Bool()))
+  val valid = Reg(Vec(4, Bool()))
+  val regIdx = Reg(Vec(4, UInt(5.W)))
+  val rsReg = RegInit(VecInit(Seq.fill(3)(VecInit(Seq.fill(num_thread)(0.U(xLen.W)))))) //op1, op2 and op3
+  val mask = Reg(Vec(num_thread, Bool()))
 
   val rsTypeWire = Wire(Vec(4, UInt(2.W)))
-  val readyWire = Wire(UInt(4.W))
+  val readyWire = Wire(Vec(4, Bool()))
   val regIdxWire = Wire(Vec(4, UInt(5.W)))
 
   val imm = Module(new ImmGen)
@@ -81,7 +82,7 @@ class collectorUnit extends Module{
     io.outArbiterIO(i).valid := (state===s_idle && io.control.fire) ||
       (valid(i)===1.U && ready(i)===0.U)
   }
-  io.issue.valid := (valid.asUInt === ready.asUInt) && ready.andR
+  io.issue.valid := (valid.asUInt === ready.asUInt) && ready.asUInt.andR
   io.control.ready := (state===s_idle && !valid.asUInt.orR)
   //Lookup table for address transformation
   val bankIdLookup = (0 until num_warp+32).map { x =>
@@ -120,8 +121,8 @@ class collectorUnit extends Module{
         regIdx(1) := io.control.bits.reg_idx2
         regIdx(2) := io.control.bits.reg_idx3
         regIdx(3) := 0.U // mask of vector instructions
-        valid := "b1111".U
-        ready := "b0000".U
+        valid.foreach(_:= true.B)
+        ready.foreach(_:= false.B)
         //using an iterable variable to indicate sel_alu signals
         rsTypeWire(0) := io.control.bits.sel_alu1
         rsTypeWire(1) := io.control.bits.sel_alu2
@@ -135,22 +136,22 @@ class collectorUnit extends Module{
         imm.io.sel := io.control.bits.sel_imm
         //if the operand1 or operand2 is an immediate, elaborate it and enable the ready bit
         when(io.control.bits.sel_alu1 === A1_IMM) {
-          rsReg(0) := imm.out
+          rsReg(0).foreach(_:= imm.io.out)
           ready(0) := 1.U
         }.elsewhen(io.control.bits.sel_alu1===A1_PC){
-          rsReg(0) := io.control.bits.pc
+          rsReg(0).foreach(_:= io.control.bits.pc)
           ready(0) := 1.U
         }
         when(io.control.bits.sel_alu2===A2_IMM){
-          rsReg(1) := imm.out
+          rsReg(1).foreach(_:= imm.io.out)
           ready(1) := 1.U
         }.elsewhen(io.control.bits.sel_alu2===A2_SIZE){
-          rsReg(1) := 4.U
+          rsReg(1).foreach(_ := 4.U)
           ready(1) := 1.U
         }
         when(!io.control.bits.mask){
           (0 until num_thread).foreach(x=>{
-            rsReg(3)(x) := Mux(io.control.bits.isvec,true.B, !x.asUInt.orR)//this instruction is a Vector inst without mask or a Scalar inst.
+           mask(x) := Mux(io.control.bits.isvec,true.B, !x.asUInt.orR)//this instruction is a Vector inst without mask or a Scalar inst.
           })
           ready(3) := 1.U
         }
@@ -171,14 +172,27 @@ class collectorUnit extends Module{
     is(s_add){
       when(io.bankIn.fire){
         when(io.bankIn.bits.regOrder === 0.U){//operand1
-          rsReg(0) := MuxLookup(rsType(0), 0.U, Array(A1_RS1->Cat(0.U(((num_thread-1)*xLen).W), io.bankIn.bits.data(0)), A1_VRS1->io.bankIn.bits.data))
+          rsReg(0) := MuxLookup(rsType(0), VecInit.fill(num_thread)(0.U(xLen.W)),
+            Array(
+            A1_RS1->VecInit(Seq(io.bankIn.bits.data(0))++Seq.fill(num_thread-1)(0.U(xLen.W))),
+            A1_VRS1->io.bankIn.bits.data)
+          )
           ready(0) := 1.U
         }.elsewhen(io.bankIn.bits.regOrder===1.U){//operand2
-          rsReg(1) := MuxLookup(rsType(1), 0.U, Array(A2_RS2->Cat(0.U(((num_thread-1)*xLen).W), io.bankIn.bits.data(0)), A2_VRS2->io.bankIn.bits.data))
+          rsReg(1) := MuxLookup(rsType(1), VecInit.fill(num_thread)(0.U(xLen.W)),
+            Array(
+            A2_RS2 -> VecInit(Seq(io.bankIn.bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W))),
+            A2_VRS2 -> io.bankIn.bits.data)
+          )
           ready(1) := 1.U
         }.elsewhen(io.bankIn.bits.regOrder===2.U){//operand3
-          rsReg(2) := (rsType(2), 0.U, Array(A3_PC->Mux(io.control.bits.branch ===B_R,(imm.io.out+io.bankIn.bits.data(0)),(io.control.bits.pc+imm.io.out)),
-            A3_VRS3->io.bankIn.bits.data, A3_SD->Mux(io.control.bits.isvec,io.bankIn.bits.data, io.bankIn.bits.data(0)), A3_FRS3->io.bankIn.bits.data(0)))
+          rsReg(2) := MuxLookup(rsType(2), VecInit.fill(num_thread)(0.U(xLen.W)),
+            Array(A3_PC->Mux(io.control.bits.branch===B_R,VecInit.fill(num_thread)(imm.io.out+io.bankIn.bits.data(0)),VecInit.fill(num_thread)(io.control.bits.pc+imm.io.out)),
+                  A3_VRS3->io.bankIn.bits.data,
+                  A3_SD->Mux(io.control.bits.isvec,io.bankIn.bits.data, VecInit(Seq(io.bankIn.bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W)))),
+                  A3_FRS3->VecInit(Seq(io.bankIn.bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W)))
+            )
+          )
           ready(2) := 1.U
         }.elsewhen(io.bankIn.bits.regOrder===3.U){
           (0 until num_thread).foreach( x=>{
@@ -189,7 +203,7 @@ class collectorUnit extends Module{
       }
       // generate immediate
       (0 until 2).foreach(x=>{
-        when(rsType(x) === A1_IMM){rsReg(x) := imm.out}
+        when(rsType(x) === A1_IMM){rsReg(x).foreach(_ := imm.io.out)}
       })
     }
     is(s_out){
@@ -216,46 +230,44 @@ class operandArbiter extends Module{
 
   })
   val bankArbiterScalar = for(i<-0 until num_bank)yield{
-    val x = Module(new RRArbiter(UInt(depth_regBank.W), 4*num_collectorUnit))
+    val x = Module(new RRArbiter(new CU2Arbiter, 4*num_collectorUnit))
     x
   }
   val bankArbiterVector = for (i <- 0 until num_bank) yield {
-    val x = Module(new RRArbiter(UInt(depth_regBank.W), 4 * num_collectorUnit))
+    val x = Module(new RRArbiter(new CU2Arbiter, 4 * num_collectorUnit))
     x
   }
-  val vecRsIO = RegInit(VecInit(Seq.fill(4*num_collectorUnit)(UInt(depth_regBank.W))))
-  val vecBankIDIO = RegInit(VecInit(Seq.fill(4*num_collectorUnit)(UInt(log2Ceil(num_bank).W))))
-  val vecRsType = RegInit(VecInit(Seq.fill(4*num_collectorUnit)(UInt(2.W))))
 
-  //flatten readArbiterIO
-  for (i <-0 until num_collectorUnit) {
-    for (j<-0 until 4){
-      vecRsIO(i*4+j) := io.readArbiterIO(i)(j).bits.rsAddr
-      vecBankIDIO(i*4+j) := io.readArbiterIO(i)(j).bits.bankID
-      vecRsType(i*4+j) := io.readArbiterIO(i)(j).bits.rsType
+  for (i <- 0 until num_bank) {
+    //    mapping input signals from collector units to inputs of Arbiters
+    for (j <- 0 until num_collectorUnit){
+      for (k <- 0 until 4){
+        bankArbiterScalar(i).io.in(j*4+k).bits.rsAddr := io.readArbiterIO(j)(k).bits.rsAddr
+        bankArbiterScalar(i).io.in(j*4+k).bits.bankID := io.readArbiterIO(j)(k).bits.bankID
+        bankArbiterScalar(i).io.in(j*4+k).bits.rsType := io.readArbiterIO(j)(k).bits.rsType
+        bankArbiterVector(i).io.in(j*4+k).bits.rsAddr := io.readArbiterIO(j)(k).bits.rsAddr
+        bankArbiterVector(i).io.in(j*4+k).bits.bankID := io.readArbiterIO(j)(k).bits.bankID
+        bankArbiterVector(i).io.in(j*4+k).bits.rsType := io.readArbiterIO(j)(k).bits.rsType
+      }
     }
   }
 
-  for (i <- 0 until num_bank){
-    //    mapping input signals from collector units to inputs of Arbiters
-    bankArbiterScalar(i).io.in := VecInit(io.readArbiterIO.flatten.map(x => Flipped(Decoupled(new Bundle {
-      val rsAddr = Wire(x.bits.rsAddr)
-      val bankID = Wire(x.bits.bankID)
-    }))))
-    bankArbiterVector(i).io.in := bankArbiterScalar(i).io.in
-  }
   //elaborate valid port of readArbiters
   for (i <- 0 until num_bank){
     for(j <- 0 until num_collectorUnit)
       for(k <- 0 until 4){
         bankArbiterScalar(i).io.in(j*4+k).valid := io.readArbiterIO(j)(k).valid &&
-          (io.readArbiterIO(j)(k).bits.bankID === i.U) && (io.readArbiterIO(j)(k).bits.rsType === 1.U)
+          (io.readArbiterIO(j)(k).bits.bankID === i.U) //&& (io.readArbiterIO(j)(k).bits.rsType === 1.U)
         bankArbiterVector(i).io.in(j*4+k).valid := io.readArbiterIO(j)(k).valid &&
-          (io.readArbiterIO(j)(k).bits.bankID === i.U) && (io.readArbiterIO(j)(k).bits.rsType === 2.U)
+          (io.readArbiterIO(j)(k).bits.bankID === i.U) //&& (io.readArbiterIO(j)(k).bits.rsType === 2.U)
       }
   }
-  io.readArbiterOut := VecInit(bankArbiterScalar.map(x => x.io.out))
-  io.readchosen := VecInit(bankArbiterScalar.map(x => x.io.chosen))
+//  io.readArbiterOut := VecInit(bankArbiterScalar.map(x => x.io.out))
+  (0 until num_bank).foreach(x =>{
+    io.readArbiterOut(x) <> bankArbiterScalar(x).io.out
+    io.readchosen(x) <> bankArbiterScalar(x).io.chosen
+  })
+//  io.readchosen := VecInit(bankArbiterScalar.map(x => x.io.chosen))
 
   //Address of writeback transformation
 
@@ -276,11 +288,11 @@ class crossBar extends Module{
     CUId(i) := io.chosen(i) >> 2.U
     regOrder(i) := io.chosen(i) % 4.U
   })
-  (0 until num_collectorUnit).foreach(i=>{
+  (0 until num_bank).foreach(i=>{
     io.out(i).valid := (CUId(i)===i.U)
-    io.out(i).bits.data := io.dataIn.rs
-    io.out(i).bits.v0 := io.dataIn.v0
-    io.out(i).bits.regOrder := regOrder
+    io.out(i).bits.data := io.dataIn.rs(i)
+    io.out(i).bits.v0 := io.dataIn.v0(i)
+    io.out(i).bits.regOrder := regOrder(i)
   })
 
 }
@@ -292,7 +304,7 @@ class instDemux extends Module{
   val io = IO(new Bundle{
     val in = Flipped(Decoupled(new CtrlSigs))
     val out = Vec(num_collectorUnit, Decoupled(new CtrlSigs))
-    val widCmp = Vec(num_collectorUnit, Bool())
+    val widCmp = Input(Vec(num_collectorUnit, Bool()))
   })
   //If there isn't any warp id as same as input instruction, the instruction can be allocated a CU
   io.in.ready := !io.widCmp.reduce(_|_)
@@ -309,43 +321,48 @@ class instDemux extends Module{
 class operandCollector extends Module{
   val io=IO(new Bundle {
     val control=Flipped(Decoupled(new CtrlSigs()))
-    //val inst=Input(UInt(32.W))
     val out=Decoupled(new issueIO)
     val writeScalarCtrl=Flipped(DecoupledIO(new WriteScalarCtrl)) //should be used as decoupledIO
     val writeVecCtrl=Flipped(DecoupledIO(new WriteVecCtrl))
   })
   val collectorUnits = VecInit(Seq.fill(num_collectorUnit)(Module(new collectorUnit).io))
-  val Arbiter = new operandArbiter
+  val Arbiter = Module(new operandArbiter)
   val vectorBank = VecInit(Seq.fill(num_bank)(Module(new FloatRegFileBank).io))
   val scalarBank = VecInit(Seq.fill(num_bank)(Module(new RegFileBank).io))
-  val crossBar = new crossBar
-  val Demux = new instDemux
+  val crossBar = Module(new crossBar)
+  val Demux = Module(new instDemux)
   //connecting Arbiters and banks
   Arbiter.io.readArbiterIO <> VecInit(collectorUnits.map(_.outArbiterIO))
-  Arbiter.io.readArbiterOut <> vectorBank
-  Arbiter.io.readArbiterOut <> scalarBank
+  (0 until num_bank).foreach(i=>{
+    vectorBank(i).rsidx := Arbiter.io.readArbiterOut(i).bits.rsAddr
+    scalarBank(i).rsidx := Arbiter.io.readArbiterOut(i).bits.rsAddr
+  })
   //connecting crossbar and banks, as well as signal readchosen. Readchosen needs to delay one tik to match bank reading
   crossBar.io.chosen := RegNext(Arbiter.io.readchosen)
   for( i <- 0 until num_bank){
     when(Arbiter.io.readArbiterOut(i).bits.rsType===1.U){ //scalar
       crossBar.io.dataIn.rs(i)(0) := scalarBank(i).rs
-      crossBar.io.dataIn.v0(i) := Vec(num_bank, 0.U(xLen.W))
+      crossBar.io.dataIn.v0(i) := VecInit.fill(num_thread)(0.U(xLen.W))
     }.elsewhen((Arbiter.io.readArbiterOut(i).bits.rsType===2.U)){//vector
       crossBar.io.dataIn.rs(i) := vectorBank(i).rs
       crossBar.io.dataIn.v0(i) := vectorBank(i).v0
     }
   }
   //connecting crossbar and collector units
-  crossBar.io.out := VecInit(collectorUnits.map(_.bankIn))
+  crossBar.io.out <> VecInit(collectorUnits.map(_.bankIn))
+
   //CU allocation
   val widReg = RegInit(VecInit.fill(num_collectorUnit)(0.U(log2Ceil(num_collectorUnit).W)))
   val widCmp = Wire(Vec(num_collectorUnit, Bool()))
+  //Since arbitration has finished in scoreboard, each instruction in this stage should fetch operand unless there is no more collect unit.
   (0 until num_collectorUnit).foreach( i => {
-    widCmp(i) := io.control.bits.wid===collectorUnits(i).wid
+//    widCmp(i) := io.control.bits.wid===collectorUnits(i).wid
+    widCmp(i) := 0.U
   })
   Demux.io.widCmp := widCmp
   Demux.io.in <> io.control
   Demux.io.out <> VecInit(collectorUnits.map(_.control))
+
   //writeback control
   val bankIdLookup = (0 until num_warp + 32).map { x =>
     (x -> x % num_bank)
@@ -353,10 +370,10 @@ class operandCollector extends Module{
   val addrLookup = (0 until 32).map { x =>
     (x -> x % (num_bank))
   }.map { x => (x._1.U -> x._2.U) }
-  val wbVecBankId = UInt(2.W)
-  val wbScaBankId = UInt(2.W)
-  val wbVecBankAddr = UInt(depth_regBank.W)
-  val wbScaBankAddr = UInt(depth_regBank.W)
+  val wbVecBankId = Wire(UInt(2.W))
+  val wbScaBankId = Wire(UInt(2.W))
+  val wbVecBankAddr = Wire(UInt(depth_regBank.W))
+  val wbScaBankAddr = Wire(UInt(depth_regBank.W))
 
   wbVecBankId := MuxLookup(io.writeVecCtrl.bits.reg_idxw, 0.U, bankIdLookup)
   wbVecBankAddr := MuxLookup(io.writeVecCtrl.bits.reg_idxw, 0.U, addrLookup) + io.writeVecCtrl.bits.warp_id*(32/num_bank).U
@@ -365,25 +382,24 @@ class operandCollector extends Module{
 
   vectorBank.foreach(x=>{
     x.rdidx := wbVecBankAddr
-    x.rd := io.writeVecCtrl.bits.wb_wfd_rd
+    x.rd := io.writeVecCtrl.bits.wb_wvd_rd
     x.rdwen := false.B
-    x.rdwmask := io.writeVecCtrl.bits.wfd_mask
+    x.rdwmask := io.writeVecCtrl.bits.wvd_mask
   })
   scalarBank.foreach(x=>{
     x.rdidx := wbScaBankAddr
     x.rd := io.writeScalarCtrl.bits.wb_wxd_rd
     x.rdwen := false.B
   })
-  vectorBank(wbVecBankId).rdwen := io.writeVecCtrl.bits.wfd & io.writeVecCtrl.valid
+  vectorBank(wbVecBankId).rdwen := io.writeVecCtrl.bits.wvd & io.writeVecCtrl.valid
   scalarBank(wbScaBankId).rdwen := io.writeScalarCtrl.bits.wxd & io.writeScalarCtrl.valid
   io.writeScalarCtrl.ready := true.B
   io.writeVecCtrl.ready := true.B
 
   //when all operands of an instruction has prepared, issue it.
   val issueArbiter = Module(new Arbiter((new issueIO), num_collectorUnit))
-  issueArbiter.io.in := VecInit(collectorUnits.map(_.issue))
+  issueArbiter.io.in <> VecInit(collectorUnits.map(_.issue))
   io.out <> issueArbiter.io.out
-
 
   //  //old code
   //  val vectorRegFile=VecInit(Seq.fill(num_bank)(Module(new FloatRegFileBank).io))

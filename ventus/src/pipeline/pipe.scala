@@ -146,13 +146,23 @@ class pipe extends Module{
     scoreb(i).wb_v_fire:=false.B
     scoreb(i).wb_x_fire:=false.B
     scoreb(i).br_ctrl:=false.B
-    when(warp_sche.io.branch.fire()&(warp_sche.io.branch.bits.wid===i.asUInt())){scoreb(i).br_ctrl:=true.B}.
-      elsewhen(warp_sche.io.warp_control.fire()&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt())){scoreb(i).br_ctrl:=true.B}.
-      elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt())){scoreb(i).br_ctrl:=true.B}
+    scoreb(i).op_col_in_fire:=false.B
+    scoreb(i).op_col_out_fire:=false.B
+
+    when(warp_sche.io.branch.fire&(warp_sche.io.branch.bits.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
+      elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
+      elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
  }
-  scoreb(exe_acq_reg.io.enq.bits.wid).if_fire:=(exe_acq_reg.io.enq.fire())
-  scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire()
-  scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire()
+  val op_col_in_wid = Wire(Bool())
+  val op_col_out_wid = Wire(Bool())
+  op_col_in_wid := operand_collector.io.control.bits.wid
+  op_col_out_wid := operand_collector.io.out.bits.wid
+  scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
+  scoreb(op_col_out_wid).op_col_out_fire:=operand_collector.io.out.fire
+
+  scoreb(exe_acq_reg.io.enq.bits.wid).if_fire:=(exe_acq_reg.io.enq.fire)
+  scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
+  scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
 
   exe_acq_reg.io.enq<>ibuffer2issue.io.out
   operand_collector.io.control:=exe_acq_reg.io.deq.bits//ibuffer2issue.io.out.bits
@@ -161,21 +171,21 @@ class pipe extends Module{
 
   simt_stack.io.input_wid:=exe_acq_reg.io.deq.bits.wid//ibuffer2issue.io.out.bits.wid
 
-  when(io.icache_req.fire()&(io.icache_req.bits.warpid===2.U)){
+  when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
   }
-  when(io.icache_rsp.fire()&(io.icache_rsp.bits.warpid===2.U)){
+  when(io.icache_rsp.fire&(io.icache_rsp.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_rsp.bits.warpid},pc=0x${Hexadecimal(io.icache_rsp.bits.addr)},inst=0x${Hexadecimal(io.icache_rsp.bits.data)}\n")
   }
-  when(exe_data.io.deq.fire()&(exe_data.io.deq.bits.ctrl.wid===2.U)){
+  when(exe_data.io.deq.fire&(exe_data.io.deq.bits.ctrl.wid===2.U)){
     //printf(p"wid=${exe_data.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)}\n")
   }
-  when(io.dcache_req.fire()&io.dcache_req.bits.isWrite){
+  when(io.dcache_req.fire&io.dcache_req.bits.isWrite){
     //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
   }
   //输出所有write mem的操作
   val wid_to_check = 0.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
-  when( exe_data.io.deq.fire()&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
+  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
     printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
     exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
     printf(p"mask ${exe_data.io.deq.bits.mask} at${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
@@ -212,10 +222,10 @@ class pipe extends Module{
 
   {
     exe_data.io.enq.bits.ctrl := exe_acq_reg.io.deq.bits//ibuffer2issue.io.out.bits
-    exe_data.io.enq.bits.in1 := operand_collector.io.alu_src1
-    exe_data.io.enq.bits.in2 := operand_collector.io.alu_src2
-    exe_data.io.enq.bits.in3 := operand_collector.io.alu_src3
-    exe_data.io.enq.bits.mask := (operand_collector.io.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
+    exe_data.io.enq.bits.in1 := operand_collector.io.out.bits.alu_src1
+    exe_data.io.enq.bits.in2 := operand_collector.io.out.bits.alu_src2
+    exe_data.io.enq.bits.in3 := operand_collector.io.out.bits.alu_src3
+    exe_data.io.enq.bits.mask := (operand_collector.io.out.bits.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
     exe_data.io.enq.valid:=exe_acq_reg.io.deq.valid//ibuffer2issue.io.out.valid
   }
   exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
