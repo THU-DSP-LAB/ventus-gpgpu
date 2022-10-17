@@ -59,7 +59,7 @@ class unifiedBank extends Module  {
       }
     }
     is(2.U){//vector
-      io.rs := Mux(((io.rsidx===io.rdidx) & io.rdwen),io.rd,regs.read(io.rsidx).dropRight(1))
+      io.rs := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd, VecInit(regs.read(io.rsidx).dropRight(1)))
       io.v0 := regs.read(0.U)
       internalMask:=io.rdwmask
       when (io.rdwen) {
