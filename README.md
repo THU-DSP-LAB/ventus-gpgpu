@@ -25,6 +25,11 @@ The tutorial of Chisel development environment configuration comes from [chipsal
 0. Install dependencies and setup environments: 
 - Arch Linux `pacman -Syu --noconfirm make parallel wget cmake ninja mill dtc verilator git llvm clang lld protobuf antlr4 numactl`
 - Nix `nix-shell`
+- Ubuntu
+```shell
+apt-get install make parallel wget cmake verilator git llvm clang lld protobuf-compiler antlr4 numactl
+curl -L https://github.com/com-lihaoyi/mill/releases/download/0.10.8/0.10.8 > mill && chmod +x mill
+```
 1. Init and update dependences
 
 ```shell
