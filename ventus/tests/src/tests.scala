@@ -19,7 +19,7 @@ import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import chiseltest.simulator.WriteVcdAnnotation
 import pipeline.IDecode._
-import pipeline.vALUv2TestWrapper
+import testbox.{vALUv2TestInput, vALUv2TestWrapper}
 import top._
 
 // add new testcases here!
@@ -54,7 +54,7 @@ class vALUv2_test() extends AnyFreeSpec with ChiselScalatestTester{
     def reset = { count = 0 }
     def apply(a: Int, b: Int, c: Int, op: UInt) = {
       count = (count + 1) % 32
-      (new pipeline.vALUv2TestInput(softThread)).Lit(
+      (new vALUv2TestInput(softThread)).Lit(
         _.in1 -> Vec(softThread, UInt(32.W)).Lit((0 until softThread).map{ i => i -> (a+i).U }:_*),
         _.in2 -> Vec(softThread, UInt(32.W)).Lit((0 until softThread).map{ i => i -> b.U }:_*),
         _.in3 -> Vec(softThread, UInt(32.W)).Lit((0 until softThread).map{ i => i -> c.U }:_*),
