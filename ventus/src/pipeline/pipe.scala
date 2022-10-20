@@ -63,7 +63,7 @@ class pipe extends Module{
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new instbuffer)
   val ibuffer2issue=Module(new ibuffer2issue)
-  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
+//  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
   val exe_data=Module(new Queue(new vExeData,1,pipe=true))
   val simt_stack=Module(new SIMT_STACK(num_thread))
   val branch_back=Module(new Branch_back)
@@ -138,7 +138,7 @@ class pipe extends Module{
                   Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
     scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
-    scoreb(i).if_ctrl:= (exe_acq_reg.io.enq.bits)
+    scoreb(i).if_ctrl:= (ibuffer2issue.io.out.bits)
     scoreb(i).wb_v_ctrl:=wb.io.out_v.bits
     scoreb(i).wb_x_ctrl:=wb.io.out_x.bits
     scoreb(i).fence_end:=lsu.io.fence_end(i)
@@ -156,20 +156,20 @@ class pipe extends Module{
   val op_col_in_wid = Wire(Bool())
   val op_col_out_wid = Wire(Bool())
   op_col_in_wid := operand_collector.io.control.bits.wid
-  op_col_out_wid := operand_collector.io.out.bits.wid
+  op_col_out_wid := operand_collector.io.out.bits.control.wid
   scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
   scoreb(op_col_out_wid).op_col_out_fire:=operand_collector.io.out.fire
 
-  scoreb(exe_acq_reg.io.enq.bits.wid).if_fire:=(exe_acq_reg.io.enq.fire)
+  scoreb(ibuffer2issue.io.out.bits.wid).if_fire:=(ibuffer2issue.io.out.fire)
   scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
   scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
 
-  exe_acq_reg.io.enq<>ibuffer2issue.io.out
-  operand_collector.io.control:=exe_acq_reg.io.deq.bits//ibuffer2issue.io.out.bits
+
+  operand_collector.io.control<>ibuffer2issue.io.out//ibuffer2issue.io.out.bits
   operand_collector.io.writeVecCtrl<>wb.io.out_v
   operand_collector.io.writeScalarCtrl<>wb.io.out_x
 
-  simt_stack.io.input_wid:=exe_acq_reg.io.deq.bits.wid//ibuffer2issue.io.out.bits.wid
+  simt_stack.io.input_wid:=operand_collector.io.out.bits.control.wid//ibuffer2issue.io.out.bits.wid
 
   when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
@@ -221,14 +221,15 @@ class pipe extends Module{
   //}
 
   {
-    exe_data.io.enq.bits.ctrl := exe_acq_reg.io.deq.bits//ibuffer2issue.io.out.bits
+    exe_data.io.enq.bits.ctrl := operand_collector.io.out.bits.control
     exe_data.io.enq.bits.in1 := operand_collector.io.out.bits.alu_src1
     exe_data.io.enq.bits.in2 := operand_collector.io.out.bits.alu_src2
     exe_data.io.enq.bits.in3 := operand_collector.io.out.bits.alu_src3
     exe_data.io.enq.bits.mask := (operand_collector.io.out.bits.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
-    exe_data.io.enq.valid:=exe_acq_reg.io.deq.valid//ibuffer2issue.io.out.valid
+    exe_data.io.enq.valid:=operand_collector.io.out.valid
+    operand_collector.io.out.ready := exe_data.io.enq.ready
   }
-  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
+//  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
   issue.io.in<>exe_data.io.deq
 
   issue.io.out_vALU<>valu.io.in

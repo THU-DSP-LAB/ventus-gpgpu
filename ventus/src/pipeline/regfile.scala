@@ -43,7 +43,7 @@ class FloatRegFileBank extends Module  {
   io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,regs.read(io.rsidx))
   io.v0 := regs.read(0.U)
   internalMask:=io.rdwmask
-  when (io.rdwen ) {
+  when (io.rdwen) {
     regs.write(io.rdidx, io.rd, internalMask)
   }
 }
