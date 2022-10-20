@@ -22,7 +22,7 @@ import top._
 // add new testcases here!
 object TestCaseList{
   val L: Map[String, TestCase#Props] = Array[TestCase](
-    new TestCase("gaussian", "gaussian_.vmem", "gaussian8.data", 4, 8, 0, 3000),
+    new TestCase("gaussian", "gaussian_.vmem", "gaussian8.data", 4, 8, 0, 500),
     new TestCase("saxpy", "saxpy_.vmem", "saxpy.data", 8, 8, 0, 400),
     new TestCase("gemm", "gemm_.vmem", "gemm4x8x4.data", 2, 8, 0, 2400),
     //new TestCase("gemm", "gemm_.vmem", "gemm8x16x12.data", 2, 8, 0, 300),
@@ -35,7 +35,7 @@ object TestCaseList{
 class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
   "first_test" in {
     val caseName = "gaussian"
-    test(new GPGPU_ExtMemWrapper(TestCaseList(caseName))).withAnnotations(Seq(WriteVcdAnnotation)) { c =>
+    test(new GPGPU_ExtMemWrapper(TestCaseList(caseName)))/*.withAnnotations(Seq(WriteVcdAnnotation))*/ { c =>
       c.clock.setTimeout(0)
       c.clock.step(TestCaseList(caseName).cycles)
     }
