@@ -52,7 +52,7 @@ class pipe extends Module{
   val operand_collector=Module(new operandCollector)
   val issue=Module(new Issue)
   val alu=Module(new ALUexe)
-  val valu=Module(new vALUexe)
+  val valu=Module(new vALUv2)
   val fpu=Module(new FPUexe)
   val lsu=Module(new LSUexe)
   val sfu=Module(new SFUexe)

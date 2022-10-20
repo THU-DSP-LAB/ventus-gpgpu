@@ -443,7 +443,7 @@ class Control extends Module{
   io.control.mem_unsigned:=ctrlsignals(16)
   io.control.fence:=ctrlsignals(17)
   io.control.sfu:=ctrlsignals(18)
-  io.control.wfd:=ctrlsignals(19)
+  io.control.wvd:=ctrlsignals(19)
   io.control.readmask:=ctrlsignals(20) //read mode is mask - for mask bitwise opcode
   io.control.writemask:=ctrlsignals(21)//write mode is mask - for mask bitwise opcode
   io.control.wxd:=ctrlsignals(22)
