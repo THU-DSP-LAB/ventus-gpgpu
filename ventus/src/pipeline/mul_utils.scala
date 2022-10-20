@@ -17,21 +17,21 @@ object LookupTree {
   def apply[T <: Data](key: UInt, mapping: Iterable[(UInt, T)]): T =
     Mux1H(mapping.map(p => (p._1 === key, p._2)))
 }
-class MULin extends Bundle{
+class MULin(num_thread: Int = num_thread) extends Bundle{
   val mask                = Vec(num_thread,Bool())
   val a, b, c             = (UInt(xLen.W))
   val ctrl                = new CtrlSigs
 }
-class MULout extends Bundle{
+class MULout(num_thread: Int = num_thread) extends Bundle{
   val mask = Vec(num_thread,Bool())
   val result = UInt(xLen.W)
   val ctrl = new CtrlSigs
 }
 
-abstract class MulModule extends Module{
+abstract class MulModule(num_thread: Int = num_thread) extends Module{
   val io = IO(new Bundle{
-    val in = Flipped(DecoupledIO(new MULin))
-    val out = DecoupledIO(new MULout)
+    val in = Flipped(DecoupledIO(new MULin(num_thread)))
+    val out = DecoupledIO(new MULout(num_thread))
   })
 }
 

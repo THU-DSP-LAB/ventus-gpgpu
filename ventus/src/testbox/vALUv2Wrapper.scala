@@ -28,7 +28,7 @@ class vALUv2TestWrapper(softThread: Int, hardThread: Int) extends Module {
   fifo.io.enq.bits.ctrl := 0.U.asTypeOf(fifo.io.enq.bits.ctrl.cloneType)
   fifo.io.enq.bits.ctrl.alu_fn := io.in.bits.op
   fifo.io.enq.bits.ctrl.reg_idxw := io.in.bits.count
-  fifo.io.enq.bits.ctrl.wfd := true.B
+  fifo.io.enq.bits.ctrl.wvd := true.B
 
   fifo.io.enq.valid := io.in.valid
   io.in.ready := fifo.io.enq.ready
