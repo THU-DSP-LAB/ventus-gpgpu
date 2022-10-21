@@ -95,11 +95,6 @@ class collectorUnit extends Module{
       io.outArbiterIO(i).bits.rsAddr := MuxLookup(Mux(io.control.fire&&(state===s_idle), regIdxWire(i), regIdx(i)), 0.U, addrLookup) +
         Mux(io.control.fire&&(state===s_idle),io.control.bits.wid, controlReg.wid) * (32 / num_bank).U
       io.outArbiterIO(i).bits.rsType := Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))
-//    }.otherwise{
-//      io.outArbiterIO(i).bits.bankID := 0.U
-//      io.outArbiterIO(i).bits.rsAddr := 0.U
-//      io.outArbiterIO(i).bits.rsType := 0.U
-//    }
   }
   (0 until 4).foreach(i => {
     io.bankIn(i).ready := (state === s_add) && (ready(i)===0.U)
@@ -188,12 +183,12 @@ class collectorUnit extends Module{
            mask(x) := Mux(io.control.bits.isvec,true.B, !x.asUInt.orR)//this instruction is a Vector inst without mask or a Scalar inst.
           })
           ready(3) := 1.U
+          readyWire(3) := 1.U
         }
         readyWire(0) := (io.control.bits.sel_alu1===A1_IMM) || (io.control.bits.sel_alu1===A1_PC)
         readyWire(1) := (io.control.bits.sel_alu2===A2_IMM) || (io.control.bits.sel_alu2===A2_SIZE)
-        readyWire(2) := 0.U
-        readyWire(3) := 0.U
-        (0 until num_bank).foreach(i=>{io.outArbiterIO(i).valid := readyWire(i)===0.U})
+
+//        (0 until num_bank).foreach(i=>{io.outArbiterIO(i).valid := readyWire(i)===0.U})
       }
     }
     is(s_add) {
