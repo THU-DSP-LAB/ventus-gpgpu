@@ -24,7 +24,7 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def depth_regBank=log2Ceil(num_warp*32/num_bank)
   def num_warp=8
   def depth_warp=log2Ceil(num_warp)
-  def num_thread=8
+  def num_thread=4
   def depth_thread=log2Ceil(num_thread)
   def xLen = 32 // data length 32-bit
   def num_block=num_warp // not bigger than num_warp
