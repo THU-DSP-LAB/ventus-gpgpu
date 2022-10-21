@@ -183,11 +183,10 @@ class collectorUnit extends Module{
            mask(x) := Mux(io.control.bits.isvec,true.B, !x.asUInt.orR)//this instruction is a Vector inst without mask or a Scalar inst.
           })
           ready(3) := 1.U
-          readyWire(3) := 1.U
         }
         readyWire(0) := (io.control.bits.sel_alu1===A1_IMM) || (io.control.bits.sel_alu1===A1_PC)
         readyWire(1) := (io.control.bits.sel_alu2===A2_IMM) || (io.control.bits.sel_alu2===A2_SIZE)
-
+        readyWire(3) := !io.control.bits.mask
 //        (0 until num_bank).foreach(i=>{io.outArbiterIO(i).valid := readyWire(i)===0.U})
       }
     }
@@ -197,14 +196,16 @@ class collectorUnit extends Module{
           when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
             rsReg(0) := MuxLookup(rsType(0), VecInit.fill(num_thread)(0.U(xLen.W)),
               Array(
-                A1_RS1 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W))),
+//                A1_RS1 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W))),
+                A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
                 A1_VRS1 -> io.bankIn(i).bits.data)
             )
             ready(0) := 1.U
           }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
             rsReg(1) := MuxLookup(rsType(1), VecInit.fill(num_thread)(0.U(xLen.W)),
               Array(
-                A2_RS2 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W))),
+//                A2_RS2 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W))),
+                A2_RS2 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
                 A2_VRS2 -> io.bankIn(i).bits.data)
             )
             ready(1) := 1.U
@@ -212,8 +213,9 @@ class collectorUnit extends Module{
             rsReg(2) := MuxLookup(rsType(2), VecInit.fill(num_thread)(0.U(xLen.W)),
               Array(A3_PC -> Mux(controlReg.branch === B_R, VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)), VecInit.fill(num_thread)(controlReg.pc + imm.io.out)),
                 A3_VRS3 -> io.bankIn(i).bits.data,
-                A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W)))),
-                A3_FRS3 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W)))
+                A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))),
+//                A3_FRS3 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W)))
+                A3_FRS3 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))
               )
             )
             ready(2) := 1.U
@@ -374,10 +376,10 @@ class operandCollector extends Module{
   crossBar.io.chosen := RegNext(Arbiter.io.readchosen)
   crossBar.io.validArbiter := RegNext(VecInit(Arbiter.io.readArbiterOut.map(_.valid)))
   for( i <- 0 until num_bank){
-    when(Arbiter.io.readArbiterOut(i).bits.rsType===1.U){ //scalar
+    when(RegNext(Arbiter.io.readArbiterOut(i).bits.rsType===1.U)){ //scalar
       crossBar.io.dataIn.rs(i) := VecInit.fill(num_thread)(scalarBank(i).rs)
       crossBar.io.dataIn.v0(i) := VecInit.fill(num_thread)(0.U(xLen.W))
-    }.elsewhen((Arbiter.io.readArbiterOut(i).bits.rsType===2.U)){//vector
+    }.elsewhen(RegNext(Arbiter.io.readArbiterOut(i).bits.rsType===2.U)){//vector
       crossBar.io.dataIn.rs(i) := vectorBank(i).rs
       crossBar.io.dataIn.v0(i) := vectorBank(i).v0
     }.otherwise{
