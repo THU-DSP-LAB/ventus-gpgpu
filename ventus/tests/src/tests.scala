@@ -16,6 +16,7 @@ import chiseltest._
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
 import chiseltest.simulator.WriteVcdAnnotation
+//import chiseltest.simulator.
 import pipeline.pipe
 import top._
 
@@ -35,7 +36,8 @@ object TestCaseList{
 class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
   "first_test" in {
     val caseName = "gaussian"
-    test(new GPGPU_ExtMemWrapper(TestCaseList(caseName)))/*.withAnnotations(Seq(WriteVcdAnnotation))*/ { c =>
+//    test(new GPGPU_ExtMemWrapper(TestCaseList(caseName))).withAnnotations(Seq(WriteVcdAnnotation)) { c =>
+      test(new GPGPU_ExtMemWrapper(TestCaseList(caseName)))/*.withAnnotations(Seq(WriteVcdAnnotation))*/ { c =>
       c.clock.setTimeout(0)
       c.clock.step(TestCaseList(caseName).cycles)
     }

@@ -91,10 +91,11 @@ class collectorUnit extends Module{
    */
   for (i <- 0 until 4) {
 //    when(readyWire(i) === 0.U) {
-      io.outArbiterIO(i).bits.bankID := MuxLookup(Mux(io.control.fire&&(state===s_idle), regIdxWire(i), regIdx(i)), 0.U, bankIdLookup)
+      io.outArbiterIO(i).bits.bankID := MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid+regIdxWire(i), controlReg.wid+regIdx(i)), 0.U, bankIdLookup)
       io.outArbiterIO(i).bits.rsAddr := MuxLookup(Mux(io.control.fire&&(state===s_idle), regIdxWire(i), regIdx(i)), 0.U, addrLookup) +
         Mux(io.control.fire&&(state===s_idle),io.control.bits.wid, controlReg.wid) * (32 / num_bank).U
       io.outArbiterIO(i).bits.rsType := Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))
+
   }
   (0 until 4).foreach(i => {
     io.bankIn(i).ready := (state === s_add) && (ready(i)===0.U)
@@ -146,48 +147,72 @@ class collectorUnit extends Module{
         //using an iterable variable to indicate reg_idx signals
         regIdxWire(0) := io.control.bits.reg_idx1
         regIdxWire(1) := io.control.bits.reg_idx2
-        regIdxWire(2) := io.control.bits.reg_idx3
+        regIdxWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U,
+          Array(
+            A3_PC -> Mux(io.control.bits.branch===B_R, io.control.bits.reg_idx1, io.control.bits.reg_idx3),
+            A3_VRS3 -> io.control.bits.reg_idx3,
+            A3_SD -> Mux(io.control.bits.isvec, io.control.bits.reg_idx3, io.control.bits.reg_idx2),
+            A3_FRS3 -> io.control.bits.reg_idx3
+          ))
         regIdxWire(3) := 0.U // mask of vector instructions
-        regIdx(0) := io.control.bits.reg_idx1
-        regIdx(1) := io.control.bits.reg_idx2
-        regIdx(2) := io.control.bits.reg_idx3
+        regIdx(0) := regIdxWire(0)
+        regIdx(1) := regIdxWire(1)
+        regIdx(2) := regIdxWire(2)
         regIdx(3) := 0.U // mask of vector instructions
         valid.foreach(_:= true.B)
         ready.foreach(_:= false.B)
         //using an iterable variable to indicate sel_alu signals
         rsTypeWire(0) := io.control.bits.sel_alu1
         rsTypeWire(1) := io.control.bits.sel_alu2
-        rsTypeWire(2) := io.control.bits.sel_alu3
+        rsTypeWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U,
+          Array(
+            A3_PC -> Mux(io.control.bits.branch===B_R, 1.U, 3.U),
+            A3_VRS3 -> 2.U,
+            A3_SD -> Mux(io.control.bits.isvec, 2.U, 1.U),
+            A3_FRS3 -> 1.U
+          ))
         rsTypeWire(3) := 0.U(2.W) //mask
-        rsType(0) := io.control.bits.sel_alu1
-        rsType(1) := io.control.bits.sel_alu2
-        rsType(2) := io.control.bits.sel_alu3
-        rsType(3) := 0.U(2.W) //mask
+        rsType(0) := rsTypeWire(0)
+        rsType(1) := rsTypeWire(1)
+        rsType(2) := rsTypeWire(2)
+        rsType(3) := rsTypeWire(3)
         //if the operand1 or operand2 is an immediate, elaborate it and enable the ready bit
-        when(io.control.bits.sel_alu1 === A1_IMM) {
+        //op1 is immediate or don't care
+        when(io.control.bits.sel_alu1 === A1_IMM /*|| io.control.bits.sel_alu1 === A1_X*/) {
           rsReg(0).foreach(_:= imm.io.out)
           ready(0) := 1.U
+          readyWire(0) := 1.U
         }.elsewhen(io.control.bits.sel_alu1===A1_PC){
           rsReg(0).foreach(_:= io.control.bits.pc)
           ready(0) := 1.U
+          readyWire(0) := 1.U
         }
-        when(io.control.bits.sel_alu2===A2_IMM){
+        //op2 is immediate or don't care
+        when(io.control.bits.sel_alu2===A2_IMM /*|| io.control.bits.sel_alu2 === A2_X*/){
           rsReg(1).foreach(_:= imm.io.out)
           ready(1) := 1.U
+          readyWire(1) := 1.U
         }.elsewhen(io.control.bits.sel_alu2===A2_SIZE){
           rsReg(1).foreach(_ := 4.U)
           ready(1) := 1.U
+          readyWire(1) := 1.U
+        }
+        //When op3 is not cared. See DecodeUnit.scala
+        when((io.control.bits.sel_alu3===A3_PC /*|| io.control.bits.sel_alu3===A3_X*/) && io.control.bits.branch=/=B_R){
+          rsReg(2).foreach(_:= imm.io.out+io.control.bits.pc)
+          ready(2) := 1.U
+          readyWire(2) := 1.U
         }
         when(!io.control.bits.mask){
           (0 until num_thread).foreach(x=>{
            mask(x) := Mux(io.control.bits.isvec,true.B, !x.asUInt.orR)//this instruction is a Vector inst without mask or a Scalar inst.
           })
           ready(3) := 1.U
+          readyWire(3) := 1.U
         }
-        readyWire(0) := (io.control.bits.sel_alu1===A1_IMM) || (io.control.bits.sel_alu1===A1_PC)
-        readyWire(1) := (io.control.bits.sel_alu2===A2_IMM) || (io.control.bits.sel_alu2===A2_SIZE)
-        readyWire(3) := !io.control.bits.mask
-//        (0 until num_bank).foreach(i=>{io.outArbiterIO(i).valid := readyWire(i)===0.U})
+//        readyWire(0) := (io.control.bits.sel_alu1===A1_IMM) || (io.control.bits.sel_alu1===A1_PC)
+//        readyWire(1) := (io.control.bits.sel_alu2===A2_IMM) || (io.control.bits.sel_alu2===A2_SIZE)
+//        readyWire(3) := !io.control.bits.mask
       }
     }
     is(s_add) {
@@ -210,11 +235,10 @@ class collectorUnit extends Module{
             )
             ready(1) := 1.U
           }.elsewhen(io.bankIn(i).bits.regOrder === 2.U) { //operand3
-            rsReg(2) := MuxLookup(rsType(2), VecInit.fill(num_thread)(0.U(xLen.W)),
-              Array(A3_PC -> Mux(controlReg.branch === B_R, VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)), VecInit.fill(num_thread)(controlReg.pc + imm.io.out)),
+            rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)),
+              Array(A3_PC -> VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)),
                 A3_VRS3 -> io.bankIn(i).bits.data,
                 A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))),
-//                A3_FRS3 -> VecInit(Seq(io.bankIn(i).bits.data(0)) ++ Seq.fill(num_thread - 1)(0.U(xLen.W)))
                 A3_FRS3 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))
               )
             )
@@ -415,9 +439,9 @@ class operandCollector extends Module{
   val wbVecBankAddr = Wire(UInt(depth_regBank.W))
   val wbScaBankAddr = Wire(UInt(depth_regBank.W))
 
-  wbVecBankId := MuxLookup(io.writeVecCtrl.bits.reg_idxw, 0.U, bankIdLookup)
+  wbVecBankId := MuxLookup(io.writeVecCtrl.bits.reg_idxw+io.writeVecCtrl.bits.warp_id, 0.U, bankIdLookup)
   wbVecBankAddr := MuxLookup(io.writeVecCtrl.bits.reg_idxw, 0.U, addrLookup) + io.writeVecCtrl.bits.warp_id*(32/num_bank).U
-  wbScaBankId := MuxLookup(io.writeScalarCtrl.bits.reg_idxw, 0.U, bankIdLookup)
+  wbScaBankId := MuxLookup(io.writeScalarCtrl.bits.reg_idxw+io.writeScalarCtrl.bits.warp_id, 0.U, bankIdLookup)
   wbScaBankAddr := MuxLookup(io.writeScalarCtrl.bits.reg_idxw, 0.U, addrLookup) + io.writeScalarCtrl.bits.warp_id*(32/num_bank).U
 
   vectorBank.foreach(x=>{
@@ -476,7 +500,13 @@ class operandCollector extends Module{
   //  (0 until num_thread).foreach(x=>{
   //    io.alu_src1(x):=MuxLookup(io.control.sel_alu1,0.U,Array(A1_RS1->scalarRegFile(io.control.wid).rs1,A1_VRS1->(vectorRegFile(io.control.wid).rs1(x)),A1_IMM->imm.io.out,A1_PC->io.control.pc))//io.control.reg_idx1))
   //    io.alu_src2(x):=MuxLookup(io.control.sel_alu2,0.U,Array(A2_RS2->scalarRegFile(io.control.wid).rs2,A2_IMM->imm.io.out,A2_VRS2->vectorRegFile(io.control.wid).rs2(x),A2_SIZE->4.U))
-  //    io.alu_src3(x):=MuxLookup(io.control.sel_alu3,0.U,Array(A3_PC->Mux(io.control.branch===B_R,(imm.io.out+scalarRegFile(io.control.wid).rs1),(io.control.pc+imm.io.out)),A3_VRS3->vectorRegFile(io.control.wid).rs3(x),A3_SD->Mux(io.control.isvec,vectorRegFile(io.control.wid).rs3(x),scalarRegFile(io.control.wid).rs2),A3_FRS3->(scalarRegFile(io.control.wid).rs3)))
+//      io.alu_src3(x):=MuxLookup(io.control.sel_alu3,0.U,
+//        Array(
+//          A3_PC->Mux(io.control.branch===B_R,(imm.io.out+scalarRegFile(io.control.wid).rs1),(io.control.pc+imm.io.out)),
+//          A3_VRS3->vectorRegFile(io.control.wid).rs3(x),
+//          A3_SD->Mux(io.control.isvec,vectorRegFile(io.control.wid).rs3(x),scalarRegFile(io.control.wid).rs2),
+//          A3_FRS3->(scalarRegFile(io.control.wid).rs3)))
+  //
   //    io.mask(x):=Mux(io.control.mask,vectorRegFile(io.control.wid).v0(0).apply(x),Mux(io.control.isvec,true.B,!x.asUInt.orR))
   //
   //  })
