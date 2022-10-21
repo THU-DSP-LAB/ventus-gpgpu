@@ -184,7 +184,7 @@ class pipe extends Module{
     //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
   }
   //输出所有write mem的操作
-  val wid_to_check = 1.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
+  val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
   when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
     printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
     exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
