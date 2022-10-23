@@ -108,5 +108,5 @@ class Scoreboard extends Module{
   val readb=beqReg.read(0.U)
   val read_op_col=OpColReg.read(0.U)
   val readf=io.ibuffer_if_ctrl.mem & fenceReg.read(0.U)
-  io.delay:=read1|read2|read3|readm|readb|readf|read_op_col
+  io.delay:=read1|read2|read3|readm|readw|readb|readf|read_op_col
 }
