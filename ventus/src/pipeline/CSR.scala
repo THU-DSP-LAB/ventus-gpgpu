@@ -299,7 +299,7 @@ class CSRexe extends Module {
   result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
 
-
+  if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   io.frm:=vCSR(io.frm_wid).frm
 
 }

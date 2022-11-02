@@ -11,12 +11,14 @@ class WriteVecCtrl extends Bundle{
   val wvd=Bool()
   val reg_idxw=UInt(5.W)
   val warp_id=UInt(depth_warp.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 class WriteScalarCtrl extends Bundle{
   val wb_wxd_rd=(UInt(xLen.W))
   val wxd=Bool()
   val reg_idxw=UInt(5.W)
   val warp_id=UInt(depth_warp.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 
 class crossbar2CU extends Bundle{

@@ -12,6 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
+import pipeline.parameters.{SPIKE_OUTPUT, wid_to_check, xLen}
 class Branch_back extends Module{
   val io = IO(new Bundle{
     val out=DecoupledIO(new BranchCtrl)
@@ -24,8 +25,16 @@ class Branch_back extends Module{
   arbiter.io.in(0)<>fifo0
   arbiter.io.in(1)<>fifo1
   arbiter.io.out<>io.out
+  if (SPIKE_OUTPUT) {
+    when(io.out.fire && io.out.bits.wid === wid_to_check.U) {
+      printf(p"0x00000000${Hexadecimal(io.out.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out.bits.spike_info.get.inst)}")
+      printf(p" Jump?${io.out.bits.jump}  ${Hexadecimal(io.out.bits.new_pc)}\n")
+    }
+}}
+class InstWriteBack extends Bundle{
+  val pc=UInt(xLen.W)
+  val inst=UInt(32.W)
 }
-
 class Writeback(num_x:Int,num_v:Int) extends Module{
   val io = IO(new Bundle{
     val out_v=(DecoupledIO(new WriteVecCtrl))
@@ -49,7 +58,20 @@ class Writeback(num_x:Int,num_v:Int) extends Module{
   arbiter_x.io.out<>io.out_x
   arbiter_v.io.out<>io.out_v
   //send to operand collector
-  when(io.out_x.valid){
-    //printf(p"idw=0x${Hexadecimal(io.out.bits.reg_idxw)},wxdata=0x${Hexadecimal(io.out.bits.wb_wxd_rd)},wfdata7=0x${Hexadecimal(io.out.bits.wb_wfd_rd(7))},wxd=${Hexadecimal(io.out.bits.wxd)},wfd=${Hexadecimal(io.out.bits.wfd)}\n")
+  if(SPIKE_OUTPUT){
+    when(io.out_x.fire&&io.out_x.bits.warp_id===wid_to_check.U){
+      printf(p"0x00000000${Hexadecimal(io.out_x.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out_x.bits.spike_info.get.inst)}")
+      printf(p" ${io.out_x.bits.reg_idxw}  ${Hexadecimal(io.out_x.bits.wb_wxd_rd)}\n")
+    }
+    when(io.out_v.fire && io.out_v.bits.warp_id === wid_to_check.U) {
+      printf(p"0x00000000${Hexadecimal(io.out_v.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out_v.bits.spike_info.get.inst)}")
+      printf(p" ${io.out_v.bits.reg_idxw} ")
+      io.out_v.bits.wvd_mask.reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
+      printf(p" ")
+      io.out_v.bits.wb_wvd_rd.reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
+      printf(p"\n")
+    }
+
+
   }
 }
