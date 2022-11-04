@@ -26,7 +26,8 @@ class Branch_back extends Module{
   arbiter.io.in(1)<>fifo1
   arbiter.io.out<>io.out
   if (SPIKE_OUTPUT) {
-    when(io.out.fire && io.out.bits.wid === wid_to_check.U) {
+    when(io.out.fire/* && io.out.bits.wid === wid_to_check.U*/) {
+      printf(p"warp${io.out.bits.wid} ")
       printf(p"0x00000000${Hexadecimal(io.out.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out.bits.spike_info.get.inst)}")
       printf(p" Jump?${io.out.bits.jump}  ${Hexadecimal(io.out.bits.new_pc)}\n")
     }
@@ -59,11 +60,13 @@ class Writeback(num_x:Int,num_v:Int) extends Module{
   arbiter_v.io.out<>io.out_v
   //send to operand collector
   if(SPIKE_OUTPUT){
-    when(io.out_x.fire&&io.out_x.bits.warp_id===wid_to_check.U){
+    when(io.out_x.fire/*&&io.out_x.bits.warp_id===wid_to_check.U*/){
+      printf(p"warp${Decimal(io.out_x.bits.warp_id)} ")
       printf(p"0x00000000${Hexadecimal(io.out_x.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out_x.bits.spike_info.get.inst)}")
       printf(p" ${io.out_x.bits.reg_idxw}  ${Hexadecimal(io.out_x.bits.wb_wxd_rd)}\n")
     }
-    when(io.out_v.fire && io.out_v.bits.warp_id === wid_to_check.U) {
+    when(io.out_v.fire/* && io.out_v.bits.warp_id === wid_to_check.U*/) {
+      printf(p"warp${Decimal(io.out_x.bits.warp_id)} ")
       printf(p"0x00000000${Hexadecimal(io.out_v.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out_v.bits.spike_info.get.inst)}")
       printf(p" ${io.out_v.bits.reg_idxw} ")
       io.out_v.bits.wvd_mask.reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
