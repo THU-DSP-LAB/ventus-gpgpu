@@ -13,7 +13,7 @@ package pipeline
 import chisel3._
 import chisel3.util._
 import parameters._
-
+import java.io._
 
 class hash(val width:Int) extends Module{
   val io = IO(new Bundle() {
@@ -284,8 +284,8 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
   }
   if(SPIKE_OUTPUT){
     fetch_ctl.spike_info.get:=branch_ctl_buf.bits.spike_info.get
-    when(io.complete.valid&&io.complete.bits===wid_to_check.U&& !io.branch_ctl.fire){
-      printf(p"0x00000000${Hexadecimal(io.branch_ctl.bits.spike_info.get.pc)} 0x${Hexadecimal(io.branch_ctl.bits.spike_info.get.inst)}")
+    when(io.complete.valid/*&&io.complete.bits===wid_to_check.U*/&& !io.branch_ctl.fire){
+      printf(p"warp${Decimal(io.complete.bits)} 0x00000000${Hexadecimal(io.branch_ctl.bits.spike_info.get.pc)} 0x${Hexadecimal(io.branch_ctl.bits.spike_info.get.inst)}")
       if_mask.asTypeOf(Vec(num_thread,Bool())).reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
       printf(p"\n")
     }
