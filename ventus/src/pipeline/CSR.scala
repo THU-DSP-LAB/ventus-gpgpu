@@ -273,8 +273,8 @@ class CSRexe extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new csrExeData))
     val out = Decoupled(new WriteScalarCtrl())
-    val frm_wid = Input(UInt(depth_warp.W))
-    val frm = Output(UInt(3.W))
+    val rm_wid = Input(Vec(3,UInt(depth_warp.W)))
+    val rm = Output(Vec(3,UInt(3.W)))
     val CTA2csr = Flipped(ValidIO(new warpReqData))
     //val warpsetting = Input()
   })
@@ -299,7 +299,8 @@ class CSRexe extends Module {
   result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
 
-
-  io.frm:=vCSR(io.frm_wid).frm
+  (0 until 3).foreach(x=>{
+    io.rm(x):=vCSR(io.rm_wid(x)).frm
+  })
 
 }

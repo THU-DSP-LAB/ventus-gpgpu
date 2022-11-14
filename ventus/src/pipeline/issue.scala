@@ -49,6 +49,7 @@ class Issue extends Module{
     val out_warpscheduler=DecoupledIO(new warpSchedulerExeData())
     val out_CSR=DecoupledIO(new csrExeData())
     val out_MUL=DecoupledIO(new vExeData)
+    val out_TC=DecoupledIO(new vExeData)
   })
   val inputBuf=Queue.apply(io.in,0)//Module(new Queue(new vExeData,entries = 1,pipe=true))
   
@@ -62,6 +63,7 @@ class Issue extends Module{
   io.out_MUL.bits:=inputBuf.bits
   io.out_SFU.bits:=inputBuf.bits
   io.out_LSU.bits:=inputBuf.bits
+  io.out_TC.bits:=inputBuf.bits
   io.out_SIMT.bits.PC_branch:=inputBuf.bits.in3(0)
   io.out_SIMT.bits.wid:=inputBuf.bits.ctrl.wid
   io.out_SIMT.bits.opcode:=inputBuf.bits.ctrl.simt_stack_op
@@ -71,6 +73,7 @@ class Issue extends Module{
   io.out_CSR.bits.ctrl:=inputBuf.bits.ctrl
   io.out_CSR.bits.in1:=inputBuf.bits.in1(0)
 
+  io.out_TC.valid:=false.B
   io.out_sALU.valid:=false.B
   io.out_vALU.valid:=false.B
   io.out_SIMT.valid:=false.B
@@ -81,7 +84,10 @@ class Issue extends Module{
   io.out_CSR.valid:=false.B
   io.out_SFU.valid:=false.B
   inputBuf.ready:=false.B
-  when(inputBuf.bits.ctrl.sfu){
+  when(inputBuf.bits.ctrl.tc){
+    io.out_TC.valid:=inputBuf.valid
+    inputBuf.ready:=io.out_TC.ready
+  }.elsewhen(inputBuf.bits.ctrl.sfu){
     io.out_SFU.valid:=inputBuf.valid
     inputBuf.ready:=io.out_SFU.ready
   }.elsewhen(inputBuf.bits.ctrl.fp){
