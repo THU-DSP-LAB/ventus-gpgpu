@@ -56,6 +56,15 @@ object parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, no
   val l2cache_micro=InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm)
   val l2cache_params=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro,false)
 
+  def tc_dim: Seq[Int] = {
+    var x: Seq[Int] = Seq(2, 2, 2)
+    if(num_thread==8)
+      x = Seq(2, 4, 2)
+    else if(num_thread==32)
+      x = Seq(4, 8, 4)
+    x
+  }
+
   def sig_length = 33
 
   def num_cache_in_sm = 2

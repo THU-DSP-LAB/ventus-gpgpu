@@ -10,7 +10,8 @@
  * See the Mulan PSL v2 for more details. */
 package pipeline
 
-import FPUv2.utils.TestFPUCtrl
+import FPUv2.TensorCoreFP32
+import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
 import chisel3.util._
 import parameters._
@@ -91,6 +92,40 @@ class vMULexe extends Module{
   io.in.ready:=mul(0).in.ready//Mux(io.in.bits.ctrl.wfd,result_v.io.enq.ready,Mux(io.in.bits.ctrl.wxd,result_x.io.enq.ready,true.B))
   io.out_v<>result_v.io.deq
   io.out_x<>result_x.io.deq
+
+}
+class vTCexe extends Module{
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new vExeData()))
+    val rm = Input(UInt(3.W))
+    //val out_x = DecoupledIO(new WriteScalarCtrl())
+    val out_v = DecoupledIO(new WriteVecCtrl)
+  })
+  val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new FPUv2.TCCtrl(xLen, depth_warp)))
+
+  val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
+  tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
+  tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
+  tensor.io.in.valid:=io.in.valid
+  io.in.ready:=tensor.io.in.ready
+  (0 until num_thread).foreach(x=>{
+    tensor.io.in.bits.data(x).ctrl.foreach{ _ :=0.U.asTypeOf(EmptyFPUCtrl())}
+    tensor.io.in.bits.data(x).op:=0.U
+    tensor.io.in.bits.data(x).rm:=io.rm
+    tensor.io.in.bits.data(x).a:=io.in.bits.in1(x)
+    tensor.io.in.bits.data(x).b:=io.in.bits.in2(x)
+    tensor.io.in.bits.data(x).c:=io.in.bits.in3(x)
+    result_v.io.enq.bits.wb_wvd_rd(x):=tensor.io.out.bits.data(x).result
+  })
+
+  result_v.io.enq.bits.warp_id:=tensor.io.out.bits.ctrl.warpID
+  result_v.io.enq.bits.reg_idxw:=tensor.io.out.bits.ctrl.reg_idxw
+  result_v.io.enq.bits.wvd:=tensor.io.out.valid
+  result_v.io.enq.bits.wvd_mask.foreach(_:=true.B)
+  result_v.io.enq.valid:=tensor.io.out.valid
+  tensor.io.out.ready:=result_v.io.enq.ready
+
+  io.out_v<>result_v.io.deq
 
 }
 
@@ -331,9 +366,10 @@ class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     result_x.io.enq.bits.reg_idxw := resultReg.reg_idxw
     result_x.io.enq.valid := recvCS === maxIter.U && !resultReg.wvd
 
-    io.out_v <> result_v.io.deq
-    io.out_x <> result_x.io.deq
+
   }
+  io.out_v <> result_v.io.deq
+  io.out_x <> result_x.io.deq
 }
 class vALUexe extends Module{
   val io = IO(new Bundle {
