@@ -1,6 +1,6 @@
 # 配置环境
 配置verilator和systemc：https://zhuanlan.zhihu.com/p/473218029  
-配置chisel：https://blog.csdn.net/qq_39507748/article/details/118003696，进行到【二、】即可  
+配置chisel，进行到【二、】即可：https://blog.csdn.net/qq_39507748/article/details/118003696  
 我将环境都安装到个人文件夹，方便之后管理，当时的.bashrc中加了如下语句：  
 ```
 export SYSTEMC_HOME="/home/lan/utils/systemc-2.3.3"
