@@ -56,6 +56,5 @@ target/
 # 新增
 generated/
 obj_dir/
-output/
 project/
 
