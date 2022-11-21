@@ -15,7 +15,7 @@ export PATH="$PATH:/home/lan/utils/scala-2.12.12/bin"
 ```
 git clone https://github.com/maltanar/systemc-chisel-tools.git
 ```
-将chisel文件全放进工程目录，我直接放在了根目录。主要是对chisel尚不熟悉，试过放在单独文件夹中，但会报错：`No main class detected`  
+将chisel文件全放进工程目录，根据sbt的要求，放在src/main/scala文件夹中  
 这里放了与ALUexe有关的文件，我们将生成ALUexe的systemc代码。  
 我们在execution.scala文件中加入如下代码：  
 ```

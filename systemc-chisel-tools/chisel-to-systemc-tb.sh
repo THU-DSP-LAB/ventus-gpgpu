@@ -37,7 +37,7 @@ if [ "$3" = "-t" ]; then
   cd $TOOL_DIR
   cp -f testbench-template/Makefile $TARGET_DIR
   cp -f testbench-template/*.h $TARGET_DIR
-  ./build-sc-tb.py $WORK_DIR/obj_dir/V$MODULE_NAME.h > $TARGET_DIR/main.cpp
+  ./build-sc-tb.py $SRC_DIR/obj_dir/V$MODULE_NAME.h > $TARGET_DIR/main.cpp
 fi
 
 cd $SRC_DIR

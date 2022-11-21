@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 # A simple Python script for extracting input and output ports from a SystemC
 # module definition.
