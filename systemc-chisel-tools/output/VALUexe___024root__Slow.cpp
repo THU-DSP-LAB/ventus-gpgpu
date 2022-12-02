@@ -3,6 +3,7 @@
 // See VALUexe.h for the primary calling header
 
 #include "verilated.h"
+#include "verilated_dpi.h"
 
 #include "VALUexe__Syms.h"
 #include "VALUexe___024root.h"

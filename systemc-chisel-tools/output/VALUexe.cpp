@@ -3,6 +3,7 @@
 
 #include "VALUexe.h"
 #include "VALUexe__Syms.h"
+#include "verilated_dpi.h"
 
 //============================================================
 // Constructors

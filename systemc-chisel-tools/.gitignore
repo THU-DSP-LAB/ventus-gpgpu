@@ -54,7 +54,6 @@ docs/_build/
 target/
 
 # 新增
-generated/
 obj_dir/
 project/
-
+output/

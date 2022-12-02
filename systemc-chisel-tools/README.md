@@ -47,7 +47,7 @@ libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "0.5.3"
 还要修改一下chisel-to-systemc.sh文件，文件中的VERILATOR_DIR应该改成我们安装verilator的地方。有两处VERILATOR_DIR需要修改  
 
 最后，修改chisel-to-systemc.sh第29行，将verilator运行的位置修改一下。估计是改用了最新版sbt导致的，修改如下图：  
-![](开发文档/Snipaste_2022-11-20_20-54-27.png)  
+![](pictures/Snipaste_2022-11-20_20-54-27.png)  
 
 现在可以运行命令：
 ```
@@ -58,6 +58,12 @@ libraryDependencies += "edu.berkeley.cs" %% "chiseltest" % "0.5.3"
 最终，我们成功在output文件夹生成了ALUexe的systemc代码，模块定义在VALUexe.h，模块具体功能在VALUexe___024root__DepSet_h70c47e95__0.cpp中实现。  
 缺点是代码结构混乱，虽然功能完整，但是不易于阅读和修改。我想，这个可以作为生成不需要抽象硬件结构的模块时的辅助工具。
 
+## 补充：关于生成模块化systemc代码的注释
+尝试了如何使用verilator将RTL代码转为模块化的systemc代码。依然在本文件夹下运行命令，generated文件夹中包含生成的RTL，我们添加一个文件config.vlt，这是verilator的configuration file。hier_block声明要单独地生成哪些子模块（具体可参见这个文件）。运行
+```
+verilator --sc generated/ALUexe.v generated/config.vlt --hierarchical
+```
+即可在obj_dir目录下生成模块化的systemc代码。  
 
 ![]()  
 

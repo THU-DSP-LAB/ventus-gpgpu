@@ -18,6 +18,8 @@
 // INCLUDE MODULE CLASSES
 #include "VALUexe___024root.h"
 
+// DPI TYPES for DPI Export callbacks (Internal use)
+
 // SYMS CLASS (contains all model state)
 class VALUexe__Syms final : public VerilatedSyms {
   public:
@@ -27,6 +29,11 @@ class VALUexe__Syms final : public VerilatedSyms {
 
     // MODULE INSTANCE STATE
     VALUexe___024root              TOP;
+
+    // SCOPE NAMES
+    VerilatedScope __Vscope_ALUexe__alu;
+    VerilatedScope __Vscope_ALUexe__result;
+    VerilatedScope __Vscope_ALUexe__result_br;
 
     // CONSTRUCTORS
     VALUexe__Syms(VerilatedContext* contextp, const char* namep, VALUexe* modelp);

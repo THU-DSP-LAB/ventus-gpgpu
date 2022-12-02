@@ -11,6 +11,7 @@
 #include "systemc.h"
 #include "verilated_sc.h"
 #include "verilated.h"
+#include "svdpi.h"
 
 class VALUexe__Syms;
 class VALUexe___024root;

@@ -1,0 +1,6 @@
+`verilator_config
+
+hier_block -module "ScalarALU"
+// hier_block -module "ALUexe"
+hier_block -module "Queue"
+hier_block -module "Queue_1"
