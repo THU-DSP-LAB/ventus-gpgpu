@@ -52,13 +52,14 @@ class pipe extends Module{
   val operand_collector=Module(new operandCollector)
   val issue=Module(new Issue)
   val alu=Module(new ALUexe)
-  val valu=Module(new vALUexe)
+  val valu=Module(new vALUv2)
   val fpu=Module(new FPUexe)
   val lsu=Module(new LSUexe)
   val sfu=Module(new SFUexe)
-  val mul=Module(new vMULexe)
+  val mul=Module(new vMULv2)
+  val tensorcore=Module(new vTCexe)
   val lsu2wb=Module(new LSU2WB)
-  val wb=Module(new Writeback(6,5))
+  val wb=Module(new Writeback(6,6))
 
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new instbuffer)
@@ -234,11 +235,15 @@ class pipe extends Module{
   alu.io.out2br<>branch_back.io.in0
 
   issue.io.out_MUL<>mul.io.in
+  issue.io.out_TC<>tensorcore.io.in
 
   issue.io.out_vFPU<>fpu.io.in
-  fpu.io.rm:=csrfile.io.frm
-  sfu.io.rm:=csrfile.io.frm
-  csrfile.io.frm_wid:=fpu.io.in.bits.ctrl.wid
+  fpu.io.rm:=csrfile.io.rm(0)
+  csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
+  sfu.io.rm := csrfile.io.rm(1)
+  csrfile.io.rm_wid(1):=sfu.io.in.bits.ctrl.wid
+  tensorcore.io.rm := csrfile.io.rm(2)
+  csrfile.io.rm_wid(2):=tensorcore.io.in.bits.ctrl.wid
 
   lsu.io.dcache_rsp<>io.dcache_rsp
   lsu.io.dcache_req<>io.dcache_req
@@ -257,6 +262,7 @@ class pipe extends Module{
   wb.io.in_v(2)<>lsu2wb.io.out_v
   wb.io.in_v(3)<>sfu.io.out_v
   wb.io.in_v(4)<>mul.io.out_v
+  wb.io.in_v(5)<>tensorcore.io.out_v
 
   issue_stall:=(~issue.io.in.ready).asBool()//scoreb.io.delay | issue.io.in.ready
 }
