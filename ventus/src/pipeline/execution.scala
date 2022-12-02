@@ -10,7 +10,8 @@
  * See the Mulan PSL v2 for more details. */
 package pipeline
 
-import FPUv2.utils.TestFPUCtrl
+import FPUv2.TensorCoreFP32
+import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
 import chisel3.util._
 import parameters._
@@ -57,7 +58,7 @@ class vMULexe extends Module{
     val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
-  val mul=VecInit(Seq.fill(num_thread)(Module(new ArrayMultiplier(xLen)).io))
+  val mul=VecInit(Seq.fill(num_thread)(Module(new ArrayMultiplier(num_thread, xLen)).io))
   val result_x=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   (0 until num_thread).foreach(x=>{
@@ -78,7 +79,7 @@ class vMULexe extends Module{
 
   result_v.io.enq.bits.warp_id:=mul(0).out.bits.ctrl.wid
   result_v.io.enq.bits.reg_idxw:=mul(0).out.bits.ctrl.reg_idxw
-  result_v.io.enq.bits.wvd:=mul(0).out.bits.ctrl.wfd
+  result_v.io.enq.bits.wvd:=mul(0).out.bits.ctrl.wvd
   result_v.io.enq.bits.wvd_mask:=mul(0).out.bits.mask
 
   result_x.io.enq.bits.warp_id:=mul(0).out.bits.ctrl.wid
@@ -86,12 +87,289 @@ class vMULexe extends Module{
   result_x.io.enq.bits.wxd:=mul(0).out.bits.ctrl.wxd
   result_x.io.enq.bits.wb_wxd_rd:=mul(0).out.bits.result
 
-  result_v.io.enq.valid:=mul(0).out.valid&mul(0).out.bits.ctrl.wfd
+  result_v.io.enq.valid:=mul(0).out.valid&mul(0).out.bits.ctrl.wvd
   result_x.io.enq.valid:=mul(0).out.valid&mul(0).out.bits.ctrl.wxd
   io.in.ready:=mul(0).in.ready//Mux(io.in.bits.ctrl.wfd,result_v.io.enq.ready,Mux(io.in.bits.ctrl.wxd,result_x.io.enq.ready,true.B))
   io.out_v<>result_v.io.deq
   io.out_x<>result_x.io.deq
 
+}
+class vTCexe extends Module{
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new vExeData()))
+    val rm = Input(UInt(3.W))
+    //val out_x = DecoupledIO(new WriteScalarCtrl())
+    val out_v = DecoupledIO(new WriteVecCtrl)
+  })
+  val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new FPUv2.TCCtrl(xLen, depth_warp)))
+
+  val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
+  tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
+  tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
+  tensor.io.in.valid:=io.in.valid
+  io.in.ready:=tensor.io.in.ready
+  (0 until num_thread).foreach(x=>{
+    tensor.io.in.bits.data(x).ctrl.foreach{ _ :=0.U.asTypeOf(EmptyFPUCtrl())}
+    tensor.io.in.bits.data(x).op:=0.U
+    tensor.io.in.bits.data(x).rm:=io.rm
+    tensor.io.in.bits.data(x).a:=io.in.bits.in1(x)
+    tensor.io.in.bits.data(x).b:=io.in.bits.in2(x)
+    tensor.io.in.bits.data(x).c:=io.in.bits.in3(x)
+    result_v.io.enq.bits.wb_wvd_rd(x):=tensor.io.out.bits.data(x).result
+  })
+
+  result_v.io.enq.bits.warp_id:=tensor.io.out.bits.ctrl.warpID
+  result_v.io.enq.bits.reg_idxw:=tensor.io.out.bits.ctrl.reg_idxw
+  result_v.io.enq.bits.wvd:=tensor.io.out.valid
+  result_v.io.enq.bits.wvd_mask.foreach(_:=true.B)
+  result_v.io.enq.valid:=tensor.io.out.valid
+  tensor.io.out.ready:=result_v.io.enq.ready
+
+  io.out_v<>result_v.io.deq
+
+}
+
+class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
+  assert(softThread % hardThread == 0)
+  class vExeData2(num_thread: Int = softThread) extends vExeData {
+    override val in1 = Vec(num_thread, UInt(xLen.W))
+    override val in2 = Vec(num_thread, UInt(xLen.W))
+    override val in3 = Vec(num_thread, UInt(xLen.W))
+    override val mask = Vec(num_thread, Bool())
+  }
+  class WriteVecCtrl2(num_thread: Int = softThread) extends WriteVecCtrl {
+    override val wb_wvd_rd = Vec(num_thread, UInt(xLen.W))
+    override val wvd_mask = Vec(num_thread, Bool())
+  }
+//  class ArrayMultiplier2(num_thread: Int = softThread) extends ArrayMultiplier(xLen) {
+//    override val io = IO(new Bundle {
+//      val in = Flipped(DecoupledIO(new MULin(num_thread)))
+//      val out = DecoupledIO(new MULout(num_thread))
+//    })
+//  }
+
+  val io = IO(new Bundle{
+    val in = Flipped(DecoupledIO(new vExeData2))
+    val out_x = DecoupledIO(new WriteScalarCtrl)
+    val out_v = DecoupledIO(new WriteVecCtrl2)
+  })
+  val mul = VecInit(Seq.fill(hardThread)(Module(new ArrayMultiplier(softThread, xLen)).io))
+  val result_x = Module(new Queue(new WriteScalarCtrl, 1, pipe = true))
+  val result_v = Module(new Queue(new WriteVecCtrl2, 1, pipe = true))
+
+  if(softThread == hardThread){
+    (0 until num_thread).foreach(x => {
+      mul(x).in.bits.a := io.in.bits.in1(x)
+      mul(x).in.bits.b := io.in.bits.in2(x)
+      mul(x).in.bits.c := io.in.bits.in3(x)
+      mul(x).in.bits.ctrl := io.in.bits.ctrl
+      mul(x).in.bits.mask := io.in.bits.mask
+      mul(x).in.valid := io.in.valid
+      result_v.io.enq.bits.wb_wvd_rd(x) := mul(x).out.bits.result
+      mul(x).out.ready := Mux(mul(x).out.bits.ctrl.wxd, result_x.io.enq.ready, result_v.io.enq.ready)
+      when(io.in.bits.ctrl.reverse) {
+        mul(x).in.bits.a := io.in.bits.in2(x)
+        mul(x).in.bits.b := io.in.bits.in1(x)
+      }
+    })
+    result_v.io.enq.bits.warp_id := mul(0).out.bits.ctrl.wid
+    result_v.io.enq.bits.reg_idxw := mul(0).out.bits.ctrl.reg_idxw
+    result_v.io.enq.bits.wvd := mul(0).out.bits.ctrl.wvd
+    result_v.io.enq.bits.wvd_mask := mul(0).out.bits.mask
+
+    result_x.io.enq.bits.warp_id := mul(0).out.bits.ctrl.wid
+    result_x.io.enq.bits.reg_idxw := mul(0).out.bits.ctrl.reg_idxw
+    result_x.io.enq.bits.wxd := mul(0).out.bits.ctrl.wxd
+    result_x.io.enq.bits.wb_wxd_rd := mul(0).out.bits.result
+
+    result_v.io.enq.valid := mul(0).out.valid & mul(0).out.bits.ctrl.wvd
+    result_x.io.enq.valid := mul(0).out.valid & mul(0).out.bits.ctrl.wxd
+    io.in.ready := mul(0).in.ready
+  }
+  else{
+    val maxIter = softThread / hardThread
+
+    val inReg = Reg(new vExeData2)
+    val hardResult = VecInit.fill(softThread)(0.U(xLen.W))
+    val resultReg = Reg(new WriteVecCtrl2)
+    val outFIFOReady = Mux(resultReg.wvd, result_v.io.enq.ready, result_x.io.enq.ready)
+
+    val sendNS = WireInit(0.U(log2Ceil(maxIter+1).W))
+    val sendCS = RegNext(sendNS)
+    val send = Wire(Decoupled(UInt(0.W)))
+    send.bits := DontCare
+
+    io.in.ready := sendCS === 0.U || (sendCS === maxIter.U && send.ready)
+
+    switch(sendCS){
+      is(0.U){
+        when(io.in.fire){
+          when(io.in.bits.ctrl.wvd){
+            sendNS := 1.U
+          }.elsewhen(io.in.bits.ctrl.wxd){
+            sendNS := maxIter.U
+          }.otherwise{
+            sendNS := 0.U
+          }
+        }
+      }
+      is((1 until maxIter).map{_.U}){
+        when(send.fire){
+          sendNS := sendCS +% 1.U
+        }.otherwise{
+          sendNS := sendCS
+        }
+      }
+      is(maxIter.U){
+        when(send.fire){
+          when(io.in.fire){
+            when(io.in.bits.ctrl.wvd){
+              sendNS := 1.U
+            }.elsewhen(io.in.bits.ctrl.wxd) {
+              sendNS := maxIter.U
+            }.otherwise{
+              sendNS := 0.U
+            }
+          }.otherwise{
+            sendNS := 0.U
+          }
+        }.otherwise{
+          sendNS := sendCS
+        }
+      }
+    }
+
+    switch(sendNS){
+      is(0.U){
+        inReg := 0.U.asTypeOf(inReg)
+      }
+      is(1.U){
+        when(io.in.fire){
+          inReg := io.in.bits
+        }
+      }
+      is((2 to maxIter).map{_.U}){
+        when(send.fire){
+          (0 until softThread).foreach{ i =>
+            if(i + hardThread < softThread){
+              inReg.in1(i) := inReg.in1(i + hardThread)
+              inReg.in2(i) := inReg.in2(i + hardThread)
+              inReg.in3(i) := inReg.in3(i + hardThread)
+            }
+            else{
+              inReg.in1(i) := 0.U
+              inReg.in2(i) := 0.U
+              inReg.in3(i) := 0.U
+            }
+          }
+        }
+        when(io.in.fire){ // won't trigger if sendCS===maxIter-1 (since io.in.ready===false)
+          inReg := io.in.bits
+        }
+      }
+    }
+    send.valid := sendCS =/= 0.U
+    send.ready := mul(0).in.ready
+
+    (0 until hardThread).foreach{ x =>
+      mul(x).in.bits.a := inReg.in1(x)
+      mul(x).in.bits.b := inReg.in2(x)
+      mul(x).in.bits.c := inReg.in3(x)
+      mul(x).in.bits.ctrl := inReg.ctrl
+      mul(x).in.bits.mask := inReg.mask
+      mul(x).in.valid := send.valid
+      when(inReg.ctrl.reverse) {
+        mul(x).in.bits.a := inReg.in2(x)
+        mul(x).in.bits.b := inReg.in1(x)
+      }
+    }
+
+    val recvNS = WireInit(0.U(log2Ceil(maxIter+1).W))
+    val recvCS = RegNext(recvNS)
+    val recv = Wire(Decoupled(UInt(0.W)))
+    recv.bits := DontCare
+
+    switch(recvCS){
+      is(0.U){
+        when(recv.fire){
+          when(mul(0).out.bits.ctrl.wxd){
+            recvNS := maxIter.U
+          }.elsewhen(mul(0).out.bits.ctrl.wvd){
+            recvNS := 1.U
+          }.otherwise{
+            recvNS := 0.U
+          }
+        }.otherwise{
+          recvNS := 0.U
+        }
+      }
+      is((1 until maxIter).map{_.U}){
+        when(recv.fire){
+          recvNS := recvCS +% 1.U
+        }.otherwise{
+          recvNS := 0.U
+        }
+      }
+      is(maxIter.U){
+        when(outFIFOReady){
+          when(recv.fire){
+            when(mul(0).out.bits.ctrl.wxd){
+              recvNS := maxIter.U
+            }.elsewhen(mul(0).out.bits.ctrl.wvd){
+              recvNS := 1.U
+            }.otherwise {
+              recvNS := 0.U
+            }
+          }.otherwise{
+            recvNS := 0.U
+          }
+        }.otherwise{
+          recvNS := recvCS
+        }
+      }
+    }
+
+    switch(recvNS){
+      is(0.U){
+        resultReg := 0.U.asTypeOf(resultReg)
+      }
+      is((1 to maxIter).map{_.U}){
+        when(recv.fire){
+          (0 until softThread).foreach{ i =>
+            if(i + hardThread < softThread){
+              resultReg.wb_wvd_rd(i) := resultReg.wb_wvd_rd(i + hardThread)
+            }
+            else{
+              resultReg.wb_wvd_rd(i) := hardResult(i + hardThread - softThread)
+            }
+          }
+          when(recvNS===maxIter.U){
+            resultReg.wvd_mask := mul(0).out.bits.mask
+            resultReg.reg_idxw := mul(0).out.bits.ctrl.reg_idxw
+            resultReg.warp_id := mul(0).out.bits.ctrl.wid
+            resultReg.wvd := mul(0).out.bits.ctrl.wvd
+          }
+        }
+      }
+    }
+    recv.ready := recvCS =/= maxIter.U || (recvCS===maxIter.U && outFIFOReady)
+    recv.valid := mul(0).out.valid
+    (0 until hardThread).foreach{ x =>
+      mul(x).out.ready := recv.ready
+      hardResult(x) := mul(x).out.bits.result
+    }
+    result_v.io.enq.bits := resultReg
+    result_v.io.enq.valid := recvCS === maxIter.U && resultReg.wvd
+    result_x.io.enq.bits.wb_wxd_rd := resultReg.wb_wvd_rd(softThread-hardThread)
+    result_x.io.enq.bits.wxd := !resultReg.wvd
+    result_x.io.enq.bits.warp_id := resultReg.warp_id
+    result_x.io.enq.bits.reg_idxw := resultReg.reg_idxw
+    result_x.io.enq.valid := recvCS === maxIter.U && !resultReg.wvd
+
+
+  }
+  io.out_v <> result_v.io.deq
+  io.out_x <> result_x.io.deq
 }
 class vALUexe extends Module{
   val io = IO(new Bundle {
@@ -140,9 +418,9 @@ class vALUexe extends Module{
 
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  result.io.enq.bits.wvd:=io.in.bits.ctrl.wfd
+  result.io.enq.bits.wvd:=io.in.bits.ctrl.wvd
   result.io.enq.bits.wvd_mask:=io.in.bits.mask
-  result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wfd&(!io.in.bits.ctrl.simt_stack)
+  result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wvd&(!io.in.bits.ctrl.simt_stack)
 
   result2simt.io.enq.bits.wid:=io.in.bits.ctrl.wid
   result2simt.io.enq.bits.if_mask:= ~(VecInit(alu.map({x=>x.cmp_out})).asUInt)
@@ -152,6 +430,263 @@ class vALUexe extends Module{
   io.out<>result.io.deq
   io.out2simt_stack<>result2simt.io.deq
 }
+
+class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
+  assert(softThread % hardThread == 0)
+  //assert(softThread > 2 && hardThread > 1)
+
+  class vExeData2(num_thread: Int = softThread) extends vExeData{
+    override val in1 = Vec(num_thread, UInt(xLen.W))
+    override val in2 = Vec(num_thread, UInt(xLen.W))
+    override val in3 = Vec(num_thread, UInt(xLen.W))
+    override val mask = Vec(num_thread, Bool())
+  }
+
+  class WriteVecCtrl2(num_thread: Int = softThread) extends WriteVecCtrl{
+    override val wb_wvd_rd = Vec(num_thread, UInt(xLen.W))
+    override val wvd_mask = Vec(num_thread, Bool())
+  }
+
+  class vec_alu_bus2(num_thread: Int = softThread) extends vec_alu_bus {
+    override val if_mask = UInt(num_thread.W)
+  }
+
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new vExeData2()))
+    val out = DecoupledIO(new WriteVecCtrl2())
+    val out2simt_stack = DecoupledIO(new vec_alu_bus2())
+  })
+
+  val alu=VecInit(Seq.fill(hardThread)((Module(new ScalarALU())).io))
+
+  val result = Module(new Queue(new WriteVecCtrl2, 1, pipe = true))
+  val result2simt = Module(new Queue(new vec_alu_bus2, 1, pipe = true))
+  //==========================================
+  if(softThread == hardThread){
+    (0 until num_thread).foreach(x => {
+      alu(x).in1 := io.in.bits.in1(x)
+      alu(x).in2 := io.in.bits.in2(x)
+      alu(x).in3 := io.in.bits.in3(x)
+      alu(x).func := io.in.bits.ctrl.alu_fn(4, 0)
+      result.io.enq.bits.wb_wvd_rd(x) := alu(x).out
+      when(io.in.bits.ctrl.reverse) {
+        alu(x).in1 := io.in.bits.in2(x)
+        alu(x).in2 := io.in.bits.in1(x)
+      }
+      when((io.in.bits.ctrl.alu_fn === FN_VMANDNOT) | (io.in.bits.ctrl.alu_fn === FN_VMORNOT) | (io.in.bits.ctrl.alu_fn === FN_VMNAND) | (io.in.bits.ctrl.alu_fn === FN_VMNOR) | (io.in.bits.ctrl.alu_fn === FN_VMXNOR)) {
+        when((io.in.bits.ctrl.alu_fn === FN_VMANDNOT) | (io.in.bits.ctrl.alu_fn === FN_VMORNOT)) {
+          alu(x).in1 := (~io.in.bits.in1(x))
+          alu(x).func := Cat(3.U(4.W), io.in.bits.ctrl.alu_fn(0))
+        }.otherwise({
+          when(io.in.bits.ctrl.alu_fn === FN_VMXNOR) {
+            alu(x).func := FN_XOR(4, 0)
+          }
+            .otherwise(alu(x).func := Cat(3.U(4.W), io.in.bits.ctrl.alu_fn(0)))
+          result.io.enq.bits.wb_wvd_rd(x) := (~alu(x).out)
+        })
+      }
+      when(io.in.bits.ctrl.alu_fn === FN_VID) {
+        result.io.enq.bits.wb_wvd_rd(x) := x.asUInt()
+      }
+      when(io.in.bits.ctrl.alu_fn === FN_VMERGE) {
+        result.io.enq.bits.wb_wvd_rd(x) := Mux(io.in.bits.mask(x), io.in.bits.in1(x), io.in.bits.in2(x))
+        result.io.enq.bits.wvd_mask(x) := true.B
+      }
+    })
+    when(io.in.bits.ctrl.writemask) {
+      result.io.enq.bits.wb_wvd_rd(0) := Mux(io.in.bits.ctrl.readmask, alu(0).out, VecInit((0 until num_thread).map(x => {
+        Mux(io.in.bits.mask(x), alu(x).out(0), 0.U)
+      })).asUInt)
+      result.io.enq.bits.wvd_mask(0) := 1.U
+      when((io.in.bits.ctrl.alu_fn === FN_VMNAND) | (io.in.bits.ctrl.alu_fn === FN_VMNOR) | (io.in.bits.ctrl.alu_fn === FN_VMXNOR)) {
+        result.io.enq.bits.wb_wvd_rd(0) := VecInit((0 until num_thread).map(x => {
+          Mux(io.in.bits.mask(x), !alu(x).out(0), false.B)
+        })).asUInt
+      }
+    }
+
+    result.io.enq.bits.warp_id := io.in.bits.ctrl.wid
+    result.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
+    result.io.enq.bits.wvd := io.in.bits.ctrl.wvd
+    result.io.enq.bits.wvd_mask := io.in.bits.mask
+    result.io.enq.valid := io.in.valid & io.in.bits.ctrl.wvd & (!io.in.bits.ctrl.simt_stack)
+
+    result2simt.io.enq.bits.wid := io.in.bits.ctrl.wid
+    result2simt.io.enq.bits.if_mask := ~(VecInit(alu.map({ x => x.cmp_out })).asUInt)
+    result2simt.io.enq.valid := io.in.valid & io.in.bits.ctrl.simt_stack
+
+    io.in.ready := Mux(io.in.bits.ctrl.simt_stack, result2simt.io.enq.ready, result.io.enq.ready)
+    io.out <> result.io.deq
+    io.out2simt_stack <> result2simt.io.deq
+  }
+  //==========================================
+  else{
+    val maxIter = softThread / hardThread
+
+    val inReg = Reg(new vExeData2)
+    val hardResult = VecInit.fill(softThread)(0.U(xLen.W))
+    val resultReg = Reg(new WriteVecCtrl2)
+    val simtReg = Reg(new vec_alu_bus2)
+    val outFIFOReady = Mux(inReg.ctrl.simt_stack, result2simt.io.enq.ready, result.io.enq.ready)
+
+    val sendNS = WireInit(0.U(log2Ceil(maxIter+1).W))
+    val sendCS = RegNext(sendNS)
+    val send = Wire(Decoupled(UInt(0.W)))
+    send.bits := DontCare
+    val recv = Wire(Decoupled(UInt(0.W)))
+    recv.bits := DontCare
+
+    switch(sendCS){
+      is(0.U){
+        when(io.in.fire){
+          sendNS := sendCS +% 1.U
+        }.otherwise{ sendNS := 0.U }
+      }
+      is((1 until maxIter).map{_.U}){
+        when(send.fire){ sendNS := sendCS +% 1.U }.otherwise{ sendNS := sendCS }
+      }
+      is(maxIter.U){
+        when(send.fire){
+          when(io.in.fire){ // continuous flow
+            sendNS := 1.U
+          }.otherwise{
+            sendNS := 0.U
+          }
+        }.otherwise{
+          sendNS := sendCS
+        }
+      }
+    }
+
+    switch(sendNS){
+      is(0.U){
+        inReg := 0.U.asTypeOf(inReg)
+      }
+      is(1.U){
+        when(io.in.fire){
+          inReg := io.in.bits
+        }
+      }
+      is((2 to maxIter).map{_.U}){
+        when(sendCS =/= sendNS){
+          (0 until softThread).foreach { i =>
+            if (i + hardThread < softThread) {
+              inReg.in1(i) := inReg.in1(i + hardThread)
+              inReg.in2(i) := inReg.in2(i + hardThread)
+              inReg.in3(i) := inReg.in3(i + hardThread)
+            }
+            else {
+              inReg.in1(i) := 0.U
+              inReg.in2(i) := 0.U
+              inReg.in3(i) := 0.U
+            }
+          }
+        }
+      }
+    }
+    send.valid := sendCS =/= 0.U
+    send.ready := recv.ready
+
+    val recvNS = WireInit(0.U(log2Ceil(maxIter+1).W))
+    val recvCS = RegNext(recvNS)
+
+    val recv_wvd = Reg(Bool())
+    val recv_simt_stack = Reg(Bool())
+
+    switch(recvCS){
+      is((0 until maxIter).map{_.U}){
+        when(recv.fire){
+          recvNS := recvCS +% 1.U
+        }.otherwise{
+          recvNS := recvCS // may never happen
+        }
+      }
+      is(maxIter.U){
+        when(outFIFOReady){ // continuous flow
+          when(recv.fire){
+            recvNS := 1.U
+          }.otherwise{
+            recvNS := 0.U
+          }
+        }.otherwise{
+          recvNS := recvCS
+        }
+      }
+    }
+
+    switch(recvNS){
+      is(0.U){
+        resultReg := 0.U.asTypeOf(resultReg)
+        simtReg.if_mask := 0.U(softThread.W)
+      }
+      is((1 to maxIter).map{_.U}){
+        when(recv.fire){
+          (0 until softThread).foreach { i =>
+            if (i + hardThread < softThread) {
+              resultReg.wb_wvd_rd(i) := resultReg.wb_wvd_rd(i + hardThread)
+            }
+            else {
+              resultReg.wb_wvd_rd(i) := hardResult(i + hardThread - softThread)
+            }
+            simtReg.if_mask := Cat(~(VecInit(alu.map({ x => x.cmp_out })).asUInt), simtReg.if_mask(softThread-1, softThread-hardThread))
+          }
+          when(recvNS===maxIter.U){
+            //resultReg.wb_wvd_rd.foreach{ _ := 0.U }
+            resultReg.warp_id := inReg.ctrl.wid
+            resultReg.reg_idxw := inReg.ctrl.reg_idxw
+            resultReg.wvd := inReg.ctrl.wvd
+            resultReg.wvd_mask := inReg.mask
+
+            simtReg.wid := inReg.ctrl.wid
+            recv_wvd := inReg.ctrl.wvd
+            recv_simt_stack := inReg.ctrl.simt_stack
+          }
+        }
+      }
+    }
+    recv.ready := recvCS =/= maxIter.U || (recvCS===maxIter.U && outFIFOReady)
+    recv.valid := send.valid
+
+    (0 until hardThread).foreach{ x =>
+      alu(x).in1 := inReg.in1(x)
+      alu(x).in2 := inReg.in2(x)
+      alu(x).in3 := inReg.in3(x)
+      alu(x).func := inReg.ctrl.alu_fn(4, 0)
+      hardResult(x) := alu(x).out
+      when(io.in.bits.ctrl.reverse) {
+        alu(x).in1 := io.in.bits.in2(x)
+        alu(x).in2 := io.in.bits.in1(x)
+      }
+      when((inReg.ctrl.alu_fn === FN_VMANDNOT) | (inReg.ctrl.alu_fn === FN_VMORNOT) | (inReg.ctrl.alu_fn === FN_VMNAND) | (inReg.ctrl.alu_fn === FN_VMNOR) | (inReg.ctrl.alu_fn === FN_VMXNOR)) {
+        when((inReg.ctrl.alu_fn === FN_VMANDNOT) | (inReg.ctrl.alu_fn === FN_VMORNOT)) {
+          alu(x).in1 := (~inReg.in1(x))
+          alu(x).func := Cat(3.U(4.W), inReg.ctrl.alu_fn(0))
+        }.otherwise({
+          when(inReg.ctrl.alu_fn === FN_VMXNOR) {
+            alu(x).func := FN_XOR(4, 0)
+          }
+            .otherwise(alu(x).func := Cat(3.U(4.W), inReg.ctrl.alu_fn(0)))
+          hardResult(x) := (~alu(x).out)
+        })
+      }
+      when(inReg.ctrl.alu_fn === FN_VID) {
+        hardResult(x) := Mux(sendCS===0.U, 0.U, (sendCS-1.U)*hardThread.U + x.U)
+      }
+      when(inReg.ctrl.alu_fn === FN_VMERGE) {
+        hardResult(x) := Mux(inReg.mask(x), inReg.in1(x), inReg.in2(x))
+      }
+    }
+    result.io.enq.valid := recvCS===maxIter.U && recv_wvd && !recv_simt_stack
+    result2simt.io.enq.valid := recvCS===maxIter.U && recv_simt_stack
+    result.io.enq.bits := resultReg
+    result2simt.io.enq.bits := simtReg
+
+    io.in.ready := sendCS === 0.U || (sendCS===maxIter.U && outFIFOReady)
+    result.io.deq <> io.out
+    result2simt.io.deq <> io.out2simt_stack
+  }
+}
+
 class ctrl_fpu extends Bundle{
 val ctrl=new CtrlSigs
 val mask=Vec(num_thread,Bool())
@@ -182,7 +717,7 @@ class FPUexe extends Module{
       fpu.io.in.bits.data(x).c := io.in.bits.in2(x)
     }
   }
-  fpu.io.in.bits.ctrl.wvd := io.in.bits.ctrl.wfd
+  fpu.io.in.bits.ctrl.wvd := io.in.bits.ctrl.wvd
   fpu.io.in.bits.ctrl.wxd := io.in.bits.ctrl.wxd
   fpu.io.in.bits.ctrl.regIndex := io.in.bits.ctrl.reg_idxw
   fpu.io.in.bits.ctrl.warpID := io.in.bits.ctrl.wid
@@ -254,7 +789,7 @@ class SFUexe extends Module{
   //result_x.io.enq.bits:=Cat(out_data(0),i_ctrl.wxd,i_ctrl.reg_idxw,i_ctrl.wid).asTypeOf(new WriteScalarCtrl)
   //result_v.io.enq.bits:=Cat(out_data.asUInt,data_buffer.bits.mask.asUInt,i_ctrl.wfd,i_ctrl.reg_idxw,i_ctrl.wid).asTypeOf(new WriteVecCtrl)
   result_v.io.enq.bits.wvd_mask:=data_buffer.bits.mask
-  result_v.io.enq.bits.wvd:=i_ctrl.wfd
+  result_v.io.enq.bits.wvd:=i_ctrl.wvd
   result_v.io.enq.bits.wb_wvd_rd:=out_data
   result_v.io.enq.bits.reg_idxw:=i_ctrl.reg_idxw
   result_v.io.enq.bits.warp_id:=i_ctrl.wid
@@ -264,7 +799,7 @@ class SFUexe extends Module{
   result_x.io.enq.bits.wb_wxd_rd:=out_data(0)
 
   result_x.io.enq.valid:=state===s_finish&i_ctrl.wxd
-  result_v.io.enq.valid:=state===s_finish&i_ctrl.wfd
+  result_v.io.enq.valid:=state===s_finish&i_ctrl.wvd
   val o_ready= i_ctrl.isvec&result_v.io.enq.ready | !i_ctrl.isvec & result_x.io.enq.ready
   for(i <- 0 until num_sfu)
   {
