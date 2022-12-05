@@ -21,10 +21,10 @@ object parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, no
   def depth_warp=log2Ceil(num_warp)
   def num_thread=8
   def depth_thread=log2Ceil(num_thread)
-  def xLen = 64 // rv64 scalar data length 32-bit
+  def xLen = 64 // rv64 scalar data length 64-bit
   def vLen = 32 // default vector register length = vLen * num_thread
   def instLen = 32
-  def paddr = 32 //
+  def paddr = 36 //
   def vaddr = 39 // sv39
   def num_block=num_warp // not bigger than num_warp
   def num_warp_in_a_block=num_warp

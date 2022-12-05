@@ -15,6 +15,7 @@
   ***************************************************************************************/
 
 package pipeline
+import L2cache._
 import parameters._
 import chisel3._
 import chisel3.util._
@@ -25,6 +26,8 @@ trait HasVTParameter{
   val PAddrBits=paddr
   val VAddrBits=vaddr
   val asidLen=num_thread
+  val L2param =InclusiveCacheParameters_lite(CacheParameters(2,l2cache_NSets,l2cache_NWays,blockBytes=(l2cache_BlockWords<<2),beatBytes=(l2cache_BlockWords<<2)),InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm),false)
+
 }
 case class TLBParameters
 (
