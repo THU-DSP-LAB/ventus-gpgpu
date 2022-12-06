@@ -20,6 +20,9 @@ update-patches:
 bsp:
 	mill -i mill.bsp.BSP/install
 
+idea:
+	mill -i mill.scalalib.GenIdea/idea
+
 compile:
 	mill -i -j 0 __.compile
 
