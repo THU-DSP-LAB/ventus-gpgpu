@@ -691,7 +691,8 @@ class ctrl_fpu extends Bundle{
 val ctrl=new CtrlSigs
 val mask=Vec(num_thread,Bool())
 }
-class FPUexe extends Module{
+class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
+    assert(softThread % hardThread == 0)
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val rm = Input(UInt(3.W))
@@ -699,7 +700,7 @@ class FPUexe extends Module{
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
 
-  val fpu = Module(new FPUv2.VectorFPU(8, 24, num_thread, num_thread, new TestFPUCtrl(depth_warp, num_thread)))
+  val fpu = Module(new FPUv2.VectorFPU(8, 24, softThread, hardThread, new TestFPUCtrl(depth_warp, num_thread)))
   (0 until num_thread).foreach{ x =>
     fpu.io.in.bits.data(x).a := io.in.bits.in1(x)
     fpu.io.in.bits.data(x).b := io.in.bits.in2(x)
