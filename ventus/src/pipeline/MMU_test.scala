@@ -18,7 +18,7 @@ class MMU extends Module{
   val PTBR=Cat(0.U(32.W),io.host_req.bits.host_gds_baseaddr)
   val warp_id=io.host_req.bits.host_wg_id
 
-  io.host_rsp.bits.inflight_wg_buffer_host_wf_done_wg_id:=warp_id  //
+  io.host_rsp.bits.inflight_wg_buffer_host_wf_done_wg_id:=warp_id  //页表找到后返回一个完成信号
   when(true.B){
     //print 每次访存的结果
     //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
