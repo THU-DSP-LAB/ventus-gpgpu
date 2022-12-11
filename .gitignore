@@ -14,3 +14,5 @@ out/
 
 # MacOS
 *.DS_Store
+
+.metals/
