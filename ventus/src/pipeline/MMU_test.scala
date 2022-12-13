@@ -6,352 +6,158 @@ import chisel3.util._
 import top._
 import L2cache._
 
-class MMUIO extends MMUIOBaseBundle with HasPtwConst with HasTlbConst{
-  val host_req = Flipped(DecoupledIO(new host2CTA_data))
-  val host_rsp = DecoupledIO(new CTA2host_data)
-  val out_a =Decoupled(new TLBundleA_lite(L2param))
-  val out_d=Flipped(Decoupled(new TLBundleD_lite(L2param)))
+/*
+    |----++++----++++----++++----++++----++++----++++----++++----++++|
+    |6------5555----44-------33-3-----3222-----22-1-----111---------0|
+    |3------6543----87-------98-6-----0987-----10-8-----210---------0|
+    |<-[38]------------------><- VPN2-><--VPN1-><--VPN0-><--offset-->| VA
+    |xxxxxxxx<-------------------PPN2-><--PPN1-><--PPN0-><--offset-->| PA
+    |xxxxxxxxxx<-------------------PPN2-><--PPN1-><--PPN0->xxDAGUXWRV| PTE
+    valid value for PA:
+    0000 0000 0000 0000 <-> 0000 003f ffff ffff 256GiB
+    ffff ffc0 0000 0000 <-> ffff ffff ffff ffff 256GiB
+*/
+object SV39{
+  val xLen = 64
+  val ppnLen = 44
+  val offsetLen = 12
+  val idxLen = 9
+  val levels = 3
+  val vpnLen = idxLen * levels
+
+  def getVPN(va: UInt): UInt = va(38, 12)
+  def getVPNIdx(vpn: UInt, level: UInt): UInt = (vpn >> (level * idxLen.U))(idxLen-1, 0)
+  def PTE2PPN(pte: UInt): UInt = pte(53, 10)
+  def PPN2PA(ppn: UInt, idx: UInt = 0.U(idxLen.W)): UInt =
+    (ppn << offsetLen.U).asUInt + (idx << 3.U).asUInt & "h00ffffffffffffff".U
+  def PTBR2PPN(ptbr: UInt): UInt = ptbr(ppnLen-1, 0)
 }
-class MMU extends Module{
-  val io=IO(new MMUIO)
-  val addr=Cat(0.U(32.W),io.host_req.bits.host_start_pc)
-  val PTBR=Cat(0.U(32.W),io.host_req.bits.host_gds_baseaddr)
-  val warp_id=io.host_req.bits.host_wg_id
 
-  io.host_rsp.bits.inflight_wg_buffer_host_wf_done_wg_id:=warp_id  //
-  when(true.B){
-    //print 每次访存的结果
-    //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
-  }
-
+object MMUParameters {
+  val depth_ptw_source = 0
+  val depth_mem_source = 0
 }
 
-/** Page Table Walk is divided into two parts
-  * One,   PTW: page walk for pde, except for leaf entries, one by one
-  * Two, LLPTW: page walk for pte, only the leaf entries(4KB), in parallel
-  */
+import SV39._
+import MMUParameters._
 
+class PTW_Req extends Bundle{
+  val addr = UInt(xLen.W)
+  val PTBR = UInt(xLen.W)
+  val source = UInt(depth_ptw_source.W)
+}
 
-/** PTW : page table walker
-  * a finite state machine
-  * only take 1GB and 2MB page walks
-  * or in other words, except the last level(leaf)
-  **/
-class PTWIO() extends MMUIOBaseBundle with HasPtwConst {
-  val req = Flipped(DecoupledIO(new Bundle {
-    val req_info = new L2TlbInnerBundle()
-    val l1Hit = Bool()
+class PTW_Rsp extends Bundle{
+  val addr = UInt(xLen.W)
+  val source = UInt(depth_ptw_source.W)
+}
+
+class LL_Req extends PTW_Rsp{
+  val vpn = UInt(idxLen.W)
+}
+
+class MEM_Req extends Bundle{
+  val addr = UInt(xLen.W)
+  val source = UInt(depth_mem_source.W)
+}
+
+class MEM_Rsp extends Bundle{
+  val data = UInt(xLen.W)
+  val source = UInt(depth_mem_source.W)
+}
+
+class PTWIO() extends Bundle{
+  val ptw_req = Flipped(DecoupledIO(new PTW_Req))
+  val ptw_rsp = DecoupledIO(new PTW_Rsp)
+  val mem_req = DecoupledIO(new MEM_Req)
+  val mem_rsp = Flipped(DecoupledIO(new MEM_Rsp))
+}
+class FistLevelPTW(ways: Int = 1) extends Module{
+  val io = IO(new Bundle{
+    val ptw_req = Flipped(DecoupledIO(new PTW_Req))
+    //val ptw_rsp = DecoupledIO(new PTW_Rsp)
+    val mem_req = DecoupledIO(new MEM_Req)
+    val mem_rsp = Flipped(DecoupledIO(new MEM_Rsp))
+    val ll_req = DecoupledIO(new LL_Req)
+    //val ll_rsp = Flipped(DecoupledIO(new PTW_Rsp))
+  })
+
+  val s_idle :: s_memreq :: s_memwait :: s_llreq :: Nil = Enum(4)
+
+  class PTWEntry extends Bundle{
     val ppn = UInt(ppnLen.W)
-  }))
-  val resp = DecoupledIO(new Bundle {
-    val source = UInt(bSourceWidth.W)
-    val resp = new PtwResp
-  })
+    val vpn = UInt(vpnLen.W)
+    val cur_level = UInt(log2Up(levels).W)
+    val source = UInt(depth_ptw_source.W)
 
-  val llptw = DecoupledIO(new LLPTWInBundle())
-  // NOTE: llptw change from "connect to llptw" to "connect to page cache"
-  // to avoid corner case that caused duplicate entries
-
-  val mem = new Bundle {
-    val req = DecoupledIO(new L2TlbMemReqBundle())
-    val resp = Flipped(ValidIO(UInt(XLEN.W)))
-    val mask = Input(Bool())
-  }/*
-  val pmp = new Bundle {
-    val req = ValidIO(new PMPReqBundle())
-    val resp = Flipped(new PMPRespBundle())
-  }*/
-
-  val refill = Output(new Bundle {
-    val req_info = new L2TlbInnerBundle()
-    val level = UInt(log2Up(Level).W)
-  })
-}
-
-
-class PTW() extends Module with HasPtwConst {
-  val io = IO(new PTWIO)
-
-  //val sfence = io.sfence
-  val mem = io.mem
-  val satp = io.csr.satp
-  val flush = /*io.sfence.valid || */io.csr.satp.changed
-
-  val s_idle :: s_addr_check :: s_mem_req :: s_mem_resp :: s_check_pte :: Nil = Enum(5)
-  val state = RegInit(s_idle)
-  val level = RegInit(0.U(log2Up(Level).W))
-  val af_level = RegInit(0.U(log2Up(Level).W)) // access fault return this level
-  val ppn = Reg(UInt(ppnLen.W))
-  val vpn = Reg(UInt(vpnLen.W))
-  val levelNext = level + 1.U
-  val l1Hit = Reg(Bool())
-  val memPte = mem.resp.bits.asTypeOf(new PteBundle().cloneType)
-  io.req.ready := state === s_idle
-
-  val finish = WireInit(false.B)
-  //val sent_to_pmp = state === s_addr_check || (state === s_check_pte && !finish)
-  val accessFault = false.B//RegEnable(io.pmp.resp.ld || io.pmp.resp.mmio, sent_to_pmp)
-  val pageFault = memPte.isPf(level)
-  switch (state) {
-    is (s_idle) {
-      when (io.req.fire()) {
-        val req = io.req.bits
-        state := s_addr_check
-        level := Mux(req.l1Hit, 1.U, 0.U)
-        af_level := Mux(req.l1Hit, 1.U, 0.U)
-        ppn := Mux(req.l1Hit, io.req.bits.ppn, satp.ppn)
-        vpn := io.req.bits.req_info.vpn
-        l1Hit := req.l1Hit
-        //accessFault := false.B
-      }
+    def makePA: UInt = {
+      val vpnidx = getVPNIdx(vpn, cur_level)
+      PPN2PA(ppn, vpnidx)
     }
+  }
+  val entries = RegInit(VecInit(Seq.fill(ways)(0.U.asTypeOf(new PTWEntry))))
 
-    is (s_addr_check) {
-      state := s_mem_req
-    }
+  val state = RegInit(VecInit(Seq.fill(ways)(s_idle)))
+  val is_idle = state.map(_ === s_idle)
 
-    is (s_mem_req) {
-      when (mem.req.fire()) {
-        state := s_mem_resp
-      }
-      /*when (accessFault) {
-        state := s_check_pte
-      }*/
-    }
+  val full = !is_idle.reduce(_ || _)
+  val enq_ptr = PriorityEncoder(is_idle)
 
-    is (s_mem_resp) {
-      when(mem.resp.fire()) {
-        state := s_check_pte
-        af_level := af_level + 1.U
-      }
-    }
+  val is_memreq = state.map(_ === s_memreq)
+  val is_memwait = state.map(_ === s_memwait)
+  val is_llreq = state.map(_ === s_llreq)
 
-    is (s_check_pte) {
-      when (io.resp.valid) { // find pte already or accessFault (mentioned below)
-        when (io.resp.fire()) {
-          state := s_idle
-        }
-        finish := true.B
-      }.elsewhen(io.llptw.valid) { // the next level is pte, go to miss queue
-        when (io.llptw.fire()) {
-          state := s_idle
-        }
-        finish := true.B
-      } otherwise { // go to next level, access the memory, need pmp check first
-        //when (io.pmp.resp.ld) { // pmp check failed, raise access-fault
-          // do nothing, RegNext the pmp check result and do it later (mentioned above)
-        //}.otherwise { // go to next level.
-          assert(level === 0.U)
-          level := levelNext
-          state := s_mem_req
-        //}
+  io.ptw_req.ready := !full
+  when(io.ptw_req.fire){
+    state(enq_ptr) := s_memreq
+    entries(enq_ptr).cur_level := levels - 1.U
+    entries(enq_ptr).vpn := getVPN(io.ptw_req.bits.addr)
+    entries(enq_ptr).ppn := PTBR2PPN(io.ptw_req.bits.PTBR)
+    entries(enq_ptr).source := io.ptw_req.bits.source
+  }
+  val memreq_arb = Module(new RRArbiter(new PTWEntry, ways))
+  (0 until ways).foreach{ i =>
+    memreq_arb.io.in(i).bits := entries(i)
+    memreq_arb.io.in(i).valid := is_memreq(i)
+  }
+  io.mem_req.bits.addr := memreq_arb.io.out.bits.makePA
+  io.mem_req.bits.source := memreq_arb.io.out.bits.source
+  io.mem_req.valid := memreq_arb.io.out.valid
+  memreq_arb.io.out.ready := io.mem_req.ready
+
+  when(io.mem_req.fire){
+    state(memreq_arb.io.chosen) := s_memwait
+  }
+
+  io.mem_rsp.ready := is_memwait.reduce(_ || _)
+  when(io.mem_rsp.fire){
+    (0 until ways).foreach{ i =>
+      when(state(i) === s_memwait && entries(i).source === io.mem_rsp.bits.source){
+        state(i) := Mux(entries(i).cur_level > 1.U, s_memreq, s_llreq)
+        entries(i).cur_level := entries(i).cur_level - 1.U
+        entries(i).ppn := PTE2PPN(io.mem_rsp.bits.data)
       }
     }
   }
 
-  /*when (sfence.valid) {
-    state := s_idle
-    accessFault := false.B
-  }*/
-
-  // memPte is valid when at s_check_pte. when mem.resp.fire, it's not ready.
-  val is_pte = memPte.isLeaf() || memPte.isPf(level)
-  val find_pte = is_pte
-  val to_find_pte = level === 1.U && !is_pte
-  val source = RegEnable(io.req.bits.req_info.source, io.req.fire())
-  io.resp.valid := state === s_check_pte && (find_pte || accessFault)
-  io.resp.bits.source := source
-  io.resp.bits.resp.apply(pageFault && !accessFault, accessFault, Mux(accessFault, af_level, level), memPte, vpn, satp.asid)
-
-  io.llptw.valid := state === s_check_pte && to_find_pte && !accessFault
-  io.llptw.bits.req_info.source := source
-  io.llptw.bits.req_info.vpn := vpn
-  io.llptw.bits.ppn := memPte.ppn
-
-  assert(level =/= 2.U || level =/= 3.U)
-
-  val l1addr = MakeAddr(satp.ppn, getVpnn(vpn, 2))
-  val l2addr = MakeAddr(Mux(l1Hit, ppn, memPte.ppn), getVpnn(vpn, 1))
-  val mem_addr = Mux(af_level === 0.U, l1addr, l2addr)
-/*  io.pmp.req.valid := DontCare // samecycle, do not use valid
-  io.pmp.req.bits.addr := mem_addr
-  io.pmp.req.bits.size := 3.U // TODO: fix it
-  io.pmp.req.bits.cmd := TlbCmd.read*/
-
-  mem.req.valid := state === s_mem_req && !io.mem.mask && !accessFault
-  mem.req.bits.addr := mem_addr
-  mem.req.bits.id := FsmReqID.U(bMemID.W)
-
-  io.refill.req_info.vpn := vpn
-  io.refill.level := level
-  io.refill.req_info.source := source
+  val deq_ptr = PriorityEncoder(is_llreq)
+  when(io.ll_req.fire){
+    state(deq_ptr) := s_idle
+    entries(deq_ptr) := 0.U.asTypeOf(new PTWEntry)
+  }
+  val llreq_arb = Module(new RRArbiter(new PTWEntry, ways))
+  (0 until ways).foreach { i =>
+    llreq_arb.io.in(i).bits := entries(i)
+    llreq_arb.io.in(i).valid := is_llreq(i)
+  }
+  io.ll_req.valid := llreq_arb.io.out.valid
+  llreq_arb.io.out.ready := io.ll_req.ready
+  io.ll_req.bits.vpn := getVPNIdx(llreq_arb.io.out.bits.vpn, 0.U)
+  io.ll_req.bits.source := llreq_arb.io.out.bits.source
+  io.ll_req.bits.addr := llreq_arb.io.out.bits.makePA
 
 }
 
-/*========================= LLPTW ==============================*/
-
-/** LLPTW : Last Level Page Table Walker
-  * the page walker that only takes 4KB(last level) page walk.
-  **/
-
-class LLPTWInBundle extends Bundle with HasPtwConst {
-  val req_info = Output(new L2TlbInnerBundle())
-  val ppn = Output(UInt(PAddrBits.W))
-}
-
-class LLPTWIO extends MMUIOBaseBundle with HasPtwConst {
-  val in = Flipped(DecoupledIO(new LLPTWInBundle()))
-  val out = DecoupledIO(new Bundle {
-    val req_info = Output(new L2TlbInnerBundle())
-    val id = Output(UInt(bMemID.W))
-    val af = Output(Bool())
-  })
-  val mem = new Bundle {
-    val req = DecoupledIO(new L2TlbMemReqBundle())
-    val resp = Flipped(Valid(new Bundle {
-      val id = Output(UInt(log2Up(l2tlbParams.llptwsize).W))
-    }))
-    val enq_ptr = Output(UInt(log2Ceil(l2tlbParams.llptwsize).W))
-    val buffer_it = Output(Vec(l2tlbParams.llptwsize, Bool()))
-    val refill = Output(new L2TlbInnerBundle())
-    val req_mask = Input(Vec(l2tlbParams.llptwsize, Bool()))
-  }
-  val cache = DecoupledIO(new L2TlbInnerBundle())
-  /*val pmp = new Bundle {
-    val req = Valid(new PMPReqBundle())
-    val resp = Flipped(new PMPRespBundle())
-  }*/
-}
-
-class LLPTWEntry(implicit p: Parameters) extends Bundle with HasPtwConst {
-  val req_info = new L2TlbInnerBundle()
-  val ppn = UInt(ppnLen.W)
-  val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
-  val af = Bool()
-}
-
-
-class LLPTW(implicit p: Parameters) extends Module with HasPtwConst {
-  val io = IO(new LLPTWIO())
-
-  val flush = false.B//io.sfence.valid || io.csr.satp.changed
-  val entries = Reg(Vec(l2tlbParams.llptwsize, new LLPTWEntry()))
-  val state_idle :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_cache :: Nil = Enum(6)
-  val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
-
-  val is_emptys = state.map(_ === state_idle)
-  val is_mems = state.map(_ === state_mem_req)
-  val is_waiting = state.map(_ === state_mem_waiting)
-  val is_having = state.map(_ === state_mem_out)
-  val is_cache = state.map(_ === state_cache)
-
-  val full = !ParallelOR(is_emptys).asBool()
-  val enq_ptr = ParallelPriorityEncoder(is_emptys)
-
-  val mem_ptr = ParallelPriorityEncoder(is_having) // TODO: optimize timing, bad: entries -> ptr -> entry
-  val mem_arb = Module(new RRArbiter(new LLPTWEntry(), l2tlbParams.llptwsize))
-  for (i <- 0 until l2tlbParams.llptwsize) {
-    mem_arb.io.in(i).bits := entries(i)
-    mem_arb.io.in(i).valid := is_mems(i) && !io.mem.req_mask(i)
-  }
-
-  val cache_ptr = ParallelMux(is_cache, (0 until l2tlbParams.llptwsize).map(_.U(log2Up(l2tlbParams.llptwsize).W)))
-
-  // duplicate req
-  // to_wait: wait for the last to access mem, set to mem_resp
-  // to_cache: the last is back just right now, set to mem_cache
-  val dup_vec = state.indices.map(i =>
-    dup(io.in.bits.req_info.vpn, entries(i).req_info.vpn)
-  )
-  val dup_req_fire = mem_arb.io.out.fire() && dup(io.in.bits.req_info.vpn, mem_arb.io.out.bits.req_info.vpn) // dup with the req fire entry
-  val dup_vec_wait = dup_vec.zip(is_waiting).map{case (d, w) => d && w} // dup with "mem_waiting" entres, sending mem req already
-  val dup_vec_having = dup_vec.zipWithIndex.map{case (d, i) => d && is_having(i)} // dup with the "mem_out" entry recv the data just now
-  val wait_id = Mux(dup_req_fire, mem_arb.io.chosen, ParallelMux(dup_vec_wait zip entries.map(_.wait_id)))
-  val dup_wait_resp = io.mem.resp.fire() && VecInit(dup_vec_wait)(io.mem.resp.bits.id) // dup with the entry that data coming next cycle
-  val to_wait = Cat(dup_vec_wait).orR || dup_req_fire
-  val to_mem_out = dup_wait_resp
-  val to_cache = Cat(dup_vec_having).orR
-  val mem_resp_hit = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(false.B)))
-  val enq_state_normal = Mux(to_mem_out, state_mem_out, // same to the blew, but the mem resp now
-    Mux(to_wait, state_mem_waiting,
-      Mux(to_cache, state_cache, state_addr_check)))
-  val enq_state = Mux(from_pre(io.in.bits.req_info.source) && enq_state_normal =/= state_addr_check, state_idle, enq_state_normal)
-  when (io.in.fire()) {
-    // if prefetch req does not need mem access, just give it up.
-    // so there will be at most 1 + FilterSize entries that needs re-access page cache
-    // so 2 + FilterSize is enough to avoid dead-lock
-    state(enq_ptr) := enq_state
-    entries(enq_ptr).req_info := io.in.bits.req_info
-    entries(enq_ptr).ppn := io.in.bits.ppn
-    entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
-    entries(enq_ptr).af := false.B
-    mem_resp_hit(enq_ptr) := to_mem_out
-  }
-
-  val enq_ptr_reg = RegNext(enq_ptr)
-  val need_addr_check = RegNext(enq_state === state_addr_check && io.in.fire() && !flush)
-  val last_enq_vpn = RegEnable(io.in.bits.req_info.vpn, io.in.fire())
-
-  /*
-  io.pmp.req.valid := need_addr_check
-  io.pmp.req.bits.addr := RegEnable(MakeAddr(io.in.bits.ppn, getVpnn(io.in.bits.req_info.vpn, 0)), io.in.fire())
-  io.pmp.req.bits.cmd := TlbCmd.read
-  io.pmp.req.bits.size := 3.U // TODO: fix it
-  val pmp_resp_valid = io.pmp.req.valid // same cycle
-  when (pmp_resp_valid) {
-    // NOTE: when pmp resp but state is not addr check, then the entry is dup with other entry, the state was changed before
-    //       when dup with the req-ing entry, set to mem_waiting (above codes), and the ld must be false, so dontcare
-    val accessFault = io.pmp.resp.ld || io.pmp.resp.mmio
-    entries(enq_ptr_reg).af := accessFault
-    state(enq_ptr_reg) := Mux(accessFault, state_mem_out, state_mem_req)
-  }*/
-
-  when (mem_arb.io.out.fire()) {
-    for (i <- state.indices) {
-      when (state(i) =/= state_idle && dup(entries(i).req_info.vpn, mem_arb.io.out.bits.req_info.vpn)) {
-        // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
-        state(i) := state_mem_waiting
-        entries(i).wait_id := mem_arb.io.chosen
-      }
-    }
-  }
-  when (io.mem.resp.fire()) {
-    state.indices.map{i =>
-      when (state(i) === state_mem_waiting && io.mem.resp.bits.id === entries(i).wait_id) {
-        state(i) := state_mem_out
-        mem_resp_hit(i) := true.B
-      }
-    }
-  }
-  when (io.out.fire()) {
-    assert(state(mem_ptr) === state_mem_out)
-    state(mem_ptr) := state_idle
-  }
-  mem_resp_hit.map(a => when (a) { a := false.B } )
-
-  when (io.cache.fire) {
-    state(cache_ptr) := state_idle
-  }
-  when (flush) {
-    state.map(_ := state_idle)
-  }
-
-  io.in.ready := !full
-
-  io.out.valid := ParallelOR(is_having).asBool()
-  io.out.bits.req_info := entries(mem_ptr).req_info
-  io.out.bits.id := mem_ptr
-  io.out.bits.af := entries(mem_ptr).af
-
-  io.mem.req.valid := mem_arb.io.out.valid && !flush
-  io.mem.req.bits.addr := MakeAddr(mem_arb.io.out.bits.ppn, getVpnn(mem_arb.io.out.bits.req_info.vpn, 0))
-  io.mem.req.bits.id := mem_arb.io.chosen
-  mem_arb.io.out.ready := io.mem.req.ready
-  io.mem.refill := entries(RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))).req_info
-  io.mem.buffer_it := mem_resp_hit
-  io.mem.enq_ptr := enq_ptr
-
-  io.cache.valid := Cat(is_cache).orR
-  io.cache.bits := ParallelMux(is_cache, entries.map(_.req_info))
+class LastLevelPTW(ways: Int) extends Module{
 
 }
