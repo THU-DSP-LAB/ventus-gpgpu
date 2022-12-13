@@ -19,6 +19,7 @@ Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/d
 For ISA simulator and riscv-gnu-toolchain, see [ventus-gpgpu-isa-simulator](https://github.com/THU-DSP-LAB/ventus-gpgpu-isa-simulator) and [ventus-riscv-gnu-toolchain](https://github.com/THU-DSP-LAB/riscv-gnu-toolchain)
 
 ## Quick Start
+[从零开始的配置教程](https://zhuanlan.zhihu.com/p/586445036)（中文，从WSL和IDEA安装讲起）
 
 The tutorial of Chisel development environment configuration comes from [chipsalliance/playground: chipyard in mill :P](https://github.com/chipsalliance/playground)
 
