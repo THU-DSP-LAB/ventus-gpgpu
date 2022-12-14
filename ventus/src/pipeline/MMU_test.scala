@@ -1,4 +1,4 @@
-package pipeline
+package pipeline.mmu
 
 
 import chisel3._
@@ -52,9 +52,11 @@ class PTW_Rsp extends Bundle{
   val source = UInt(depth_ptw_source.W)
 }
 
-class LL_Req extends PTW_Rsp{
-  val vpn = UInt(idxLen.W)
-}
+class LL_Req extends PTW_Rsp
+
+class Cache_Req extends PTW_Rsp
+
+class Cache_Rsp extends PTW_Rsp
 
 class MEM_Req extends Bundle{
   val addr = UInt(xLen.W)
@@ -75,11 +77,9 @@ class PTWIO() extends Bundle{
 class FistLevelPTW(ways: Int = 1) extends Module{
   val io = IO(new Bundle{
     val ptw_req = Flipped(DecoupledIO(new PTW_Req))
-    //val ptw_rsp = DecoupledIO(new PTW_Rsp)
-    val mem_req = DecoupledIO(new MEM_Req)
-    val mem_rsp = Flipped(DecoupledIO(new MEM_Rsp))
+    val mem_req = DecoupledIO(new Cache_Req)
+    val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp))
     val ll_req = DecoupledIO(new LL_Req)
-    //val ll_rsp = Flipped(DecoupledIO(new PTW_Rsp))
   })
 
   val s_idle :: s_memreq :: s_memwait :: s_llreq :: Nil = Enum(4)
@@ -100,14 +100,14 @@ class FistLevelPTW(ways: Int = 1) extends Module{
   val state = RegInit(VecInit(Seq.fill(ways)(s_idle)))
   val is_idle = state.map(_ === s_idle)
 
-  val full = !is_idle.reduce(_ || _)
+  val avail = is_idle.reduce(_ || _)
   val enq_ptr = PriorityEncoder(is_idle)
 
   val is_memreq = state.map(_ === s_memreq)
   val is_memwait = state.map(_ === s_memwait)
   val is_llreq = state.map(_ === s_llreq)
 
-  io.ptw_req.ready := !full
+  io.ptw_req.ready := avail
   when(io.ptw_req.fire){
     state(enq_ptr) := s_memreq
     entries(enq_ptr).cur_level := levels - 1.U
@@ -132,10 +132,10 @@ class FistLevelPTW(ways: Int = 1) extends Module{
   io.mem_rsp.ready := is_memwait.reduce(_ || _)
   when(io.mem_rsp.fire){
     (0 until ways).foreach{ i =>
-      when(state(i) === s_memwait && entries(i).source === io.mem_rsp.bits.source){
+      when(is_memwait(i) && entries(i).source === io.mem_rsp.bits.source){
         state(i) := Mux(entries(i).cur_level > 1.U, s_memreq, s_llreq)
         entries(i).cur_level := entries(i).cur_level - 1.U
-        entries(i).ppn := PTE2PPN(io.mem_rsp.bits.data)
+        entries(i).ppn := PTE2PPN(io.mem_rsp.bits.addr)
       }
     }
   }
@@ -152,12 +152,72 @@ class FistLevelPTW(ways: Int = 1) extends Module{
   }
   io.ll_req.valid := llreq_arb.io.out.valid
   llreq_arb.io.out.ready := io.ll_req.ready
-  io.ll_req.bits.vpn := getVPNIdx(llreq_arb.io.out.bits.vpn, 0.U)
   io.ll_req.bits.source := llreq_arb.io.out.bits.source
   io.ll_req.bits.addr := llreq_arb.io.out.bits.makePA
 
 }
 
 class LastLevelPTW(ways: Int) extends Module{
+  val io = IO(new Bundle{
+    val ll_req = Flipped(DecoupledIO(new LL_Req))
+    val mem_req = DecoupledIO(new Cache_Req)
+    val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp))
+    val ptw_rsp = DecoupledIO(new PTW_Rsp)
+  })
+  val s_idle :: s_memreq :: s_memwait :: s_ptwrsp :: Nil = Enum(4)
 
+  class LLPTWEntry extends LL_Req
+
+  val entries = RegInit(VecInit.fill(ways)(0.U.asTypeOf(new LLPTWEntry)))
+
+  val state = RegInit(VecInit.fill(ways)(s_idle))
+  val is_idle = state.map(_ === s_idle)
+
+  val avail = is_idle.reduce(_ || _)
+  val enq_ptr = PriorityEncoder(is_idle)
+
+  val is_memreq = state.map(_ === s_memreq)
+  val is_memwait = state.map(_ === s_memwait)
+  val is_ptwrsp = state.map(_ === s_ptwrsp)
+
+  io.ll_req.ready := avail
+  when(io.ll_req.fire){
+    state(enq_ptr) := s_memreq
+    entries(enq_ptr) := io.ll_req.bits
+  }
+
+  val memreq_arb = Module(new RRArbiter(new LLPTWEntry, ways))
+  (0 until ways).foreach { i =>
+    memreq_arb.io.in(i).bits := entries(i)
+    memreq_arb.io.in(i).valid := is_memreq(i)
+  }
+  io.mem_req.bits := memreq_arb.io.out.bits
+  io.mem_req.valid := memreq_arb.io.out.valid
+  memreq_arb.io.out.ready := io.mem_req.ready
+
+  when(io.mem_req.fire){
+    state(memreq_arb.io.chosen) := s_memwait
+  }
+
+  io.mem_rsp.ready := is_memwait.reduce(_ || _)
+  when(io.mem_rsp.fire){
+    (0 until ways).foreach{ i =>
+      when(is_memwait(i) && entries(i).source === io.mem_rsp.bits.source){
+        state(i) := s_ptwrsp
+        entries(i).addr := io.mem_rsp.bits.addr // raw pte here
+      }
+    }
+  }
+
+  val deq_ptr = PriorityEncoder(is_ptwrsp)
+  when(io.ptw_rsp.fire){
+    state(deq_ptr) := s_idle
+    entries(deq_ptr) := 0.U.asTypeOf(new LLPTWEntry)
+  }
+  val ptwrsp_arb = Module(new RRArbiter(new LLPTWEntry, ways))
+  (0 until ways).foreach{ i =>
+    ptwrsp_arb.io.in(i).bits := entries(i)
+    ptwrsp_arb.io.in(i).valid := is_ptwrsp(i)
+  }
+  io.ptw_rsp <> ptwrsp_arb.io.out
 }
