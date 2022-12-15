@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import top._
 import L2cache._
-import parameters.l2cache_params
+import parameters._
 /*
     |----++++----++++----++++----++++----++++----++++----++++----++++|
     |6------5555----44-------33-3-----3222-----22-1-----111---------0|
@@ -347,11 +347,15 @@ class MMU extends Module{
 }
 
 class MMUtest extends Module{
+  val l2cache_cache=CacheParameters(2,l2cache_NWays,l2cache_NSets,8,8)
+  val l2cache_micro=InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,mem_source,2)
+  val l2cache_params=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro,false)
+  val l2cache_params_temp=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro,false)
   val io = IO(new Bundle{
     val host_req=Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp=DecoupledIO(new CTA2host_data)
-    val out_a =Decoupled(new TLBundleA_lite(l2cache_params))
-    val out_d=Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
+    val out_a =Decoupled(new TLBundleA_lite(l2cache_params_temp))
+    val out_d=Flipped(Decoupled(new TLBundleD_lite(l2cache_params_temp)))
   })
   val mmu=Module(new MMU)
   io.host_req.ready<>mmu.io.mmu_req.ready
@@ -369,13 +373,13 @@ class MMUtest extends Module{
   io.out_a.valid<>mmu.io.mem_req.valid
   io.out_a.ready<>mmu.io.mem_req.ready
   io.out_a.bits.source<>mmu.io.mem_req.bits.source
-  io.out_a.bits.mask:=0.U//TODO
-  io.out_a.bits.address:=mmu.io.mem_req.bits.addr
+  io.out_a.bits.mask:=1.U
+  io.out_a.bits.address:=mmu.io.mem_req.bits.addr(31,0)
   io.out_a.bits.data:=0.U
   io.out_a.bits.size:=0.U
   io.out_a.bits.opcode:=4.U
 
-  io.out_d.bits.data<>mmu.io.mem_rsp.bits.data // TODO
+  io.out_d.bits.data<>mmu.io.mem_rsp.bits.data
   io.out_d.bits.source<>mmu.io.mem_rsp.bits.source
   io.out_d.valid<>mmu.io.mem_rsp.valid
   io.out_d.ready<>mmu.io.mem_rsp.ready
