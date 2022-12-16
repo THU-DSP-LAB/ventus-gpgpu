@@ -1,24 +1,31 @@
 /*
- * Copyright (c) 2021-2022 International Innovation Center of Tsinghua University, Shanghai
- * Ventus is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *          http://license.coscl.org.cn/MulanPSL2
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details. */
+* Copyright (c) 2021-2022 International Innovation Center of Tsinghua University, Shanghai
+* Ventus is licensed under Mulan PSL v2.
+* You can use this software according to the terms and conditions of the Mulan PSL v2.
+* You may obtain a copy of Mulan PSL v2 at:
+* http://license.coscl.org.cn/MulanPSL2
+* THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+* EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+* MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+* See the Mulan PSL v2 for more details. */
 package top
-import pipeline.operandCollector
 import L1Cache.MyConfig
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
-import pipeline.parameters.num_warp
+import pipeline.parameters.{l2cache_BlockWords, l2cache_NSets, l2cache_NWays, l2cache_memCycles, l2cache_portFactor, l2cache_writeBytes, num_sm, num_warp}
+//import pipeline.vALUv2TestWrapper
 
 object GPGPU_gen extends App{
-  (new chisel3.stage.ChiselStage).emitVerilog(new operandCollector())
+  val L1param = (new MyConfig).toInstance
+  val L2param = InclusiveCacheParameters_lite(CacheParameters(2, l2cache_NSets, l2cache_NWays, blockBytes = (l2cache_BlockWords << 2), beatBytes = (l2cache_BlockWords << 2)), InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm), false)
+  (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_top()(L1param))
 }
 
+
 /*object GPGPU_gen2 extends App{
-  (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_ExtMemWrapper())
+(new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_ExtMemWrapper())
 }
 */
+
+//object vALUv2_gen extends App{
+// (new chisel3.stage.ChiselStage).emitVerilog(new vALUv2TestWrapper(12,4))
+//}
