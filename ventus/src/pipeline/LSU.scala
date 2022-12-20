@@ -170,7 +170,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   io.to_mshr.bits.tag.reg_idxw := reg_save.ctrl.reg_idxw
   io.to_mshr.bits.tag.warp_id := reg_save.ctrl.wid
   io.to_mshr.bits.tag.wxd:=reg_save.ctrl.wxd
-  io.to_mshr.bits.tag.wfd:=reg_save.ctrl.wfd
+  io.to_mshr.bits.tag.wfd:=reg_save.ctrl.wvd
   io.to_mshr.bits.tag.isvec := reg_save.ctrl.isvec
   io.to_mshr.bits.tag.unsigned := reg_save.ctrl.mem_unsigned
   io.to_mshr.bits.tag.wordOffset1H := wordOffset1H
@@ -288,9 +288,9 @@ class LSU2WB extends Module{
   io.out_x.bits.wb_wxd_rd:=io.lsu_rsp.bits.data(0)
   io.out_v.bits.warp_id:=io.lsu_rsp.bits.tag.warp_id
   io.out_v.bits.reg_idxw:=io.lsu_rsp.bits.tag.reg_idxw
-  io.out_v.bits.wfd:=io.lsu_rsp.bits.tag.wfd
-  io.out_v.bits.wfd_mask:=io.lsu_rsp.bits.tag.mask
-  io.out_v.bits.wb_wfd_rd:=io.lsu_rsp.bits.data
+  io.out_v.bits.wvd:=io.lsu_rsp.bits.tag.wfd
+  io.out_v.bits.wvd_mask:=io.lsu_rsp.bits.tag.mask
+  io.out_v.bits.wb_wvd_rd:=io.lsu_rsp.bits.data
   when(io.lsu_rsp.bits.tag.wxd){
     io.out_x.valid:=io.lsu_rsp.valid
     io.out_v.valid:=false.B

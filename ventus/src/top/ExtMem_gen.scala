@@ -14,7 +14,7 @@ import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCachePa
 import pipeline.parameters.num_warp
 
 object GPGPU_gen extends App{
-  (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_axi_top())
+  (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_axi_top(),Array("--emission-options=disableMemRandomization,disableRegisterRandomization"))
 }
 
 /*object GPGPU_gen2 extends App{

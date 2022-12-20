@@ -122,10 +122,10 @@ object IDecode //extends DecodeConstants
   def FN_FSGNJN   = 21.U(6.W) // 010 101
   def FN_FSGNJX   = 20.U(6.W) // 010 100
 
-  def FN_F2I      = 24.U(6.W) // 011 000
-  def FN_F2IU     = 25.U(6.W) // 011 001
-  def FN_I2F      = 32.U(6.W) // 100 000
-  def FN_IU2F     = 33.U(6.W) // 100 001
+  def FN_F2IU      = 24.U(6.W) // 011 000
+  def FN_F2I     = 25.U(6.W) // 011 001
+  def FN_IU2F      = 32.U(6.W) // 100 000
+  def FN_I2F     = 33.U(6.W) // 100 001
 
   // for SFU
   def FN_DIV      = 0.U(6.W)
@@ -134,6 +134,10 @@ object IDecode //extends DecodeConstants
   def FN_REMU     = 3.U(6.W)
   def FN_FDIV     = 0.U(6.W)
   def FN_FSQRT    = 1.U(6.W)
+
+  def FN_TTF = 1.U(6.W)
+  def FN_TTH = 2.U(6.W)
+  def FN_TTB = 3.U(6.W)
 
   val default = List(N,X,X,B_N,X,X,X,X,A3_X,A2_X,   A1_X,   IMM_X, MEM_X,  FN_X,     N,M_X,        X,X,X,X,X,X,X,X,X,X,X)
 
@@ -157,6 +161,10 @@ object IDecode //extends DecodeConstants
     JALR->   List(N,N,N,B_R,N,N,CSR.N,N,A3_PC,A2_SIZE,A1_PC,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     AUIPC->  List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_PC,IMM_U,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     //A2_SIZE=>for C extension 2, for others 4, used for PC+4 to reg. in Rocketchip it's rvc
+
+    VFTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
+    VHTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTH,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
+    VBTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTB,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
 
     CSRRW->  List(N,N,N,B_N,N,N,CSR.W,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     CSRRS->  List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
@@ -443,10 +451,11 @@ class Control extends Module{
   io.control.mem_unsigned:=ctrlsignals(16)
   io.control.fence:=ctrlsignals(17)
   io.control.sfu:=ctrlsignals(18)
-  io.control.wfd:=ctrlsignals(19)
+  io.control.wvd:=ctrlsignals(19)
   io.control.readmask:=ctrlsignals(20) //read mode is mask - for mask bitwise opcode
   io.control.writemask:=ctrlsignals(21)//write mode is mask - for mask bitwise opcode
   io.control.wxd:=ctrlsignals(22)
+  io.control.tc:=ctrlsignals(23)
   io.control.reg_idx1:=io.inst(19,15)
   io.control.reg_idx2:=io.inst(24,20)
   io.control.reg_idx3:=Mux(io.control.fp & !io.control.isvec,io.inst(31,27),io.inst(11,7))
