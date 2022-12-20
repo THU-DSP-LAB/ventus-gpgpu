@@ -146,8 +146,8 @@ class ArrayMulDataModule(len: Int) extends Module {
   io.result := sum + carry
 }
 
-class ArrayMultiplier(len: Int)
-  extends MulModule with HasPipelineReg {
+class ArrayMultiplier(num_thread: Int, len: Int)
+  extends MulModule(num_thread) with HasPipelineReg {
 
   override def latency = 2
 
