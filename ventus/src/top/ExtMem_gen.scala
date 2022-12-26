@@ -12,8 +12,12 @@ package top
 import L1Cache.MyConfig
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
 import pipeline.parameters.{l2cache_BlockWords, l2cache_NSets, l2cache_NWays, l2cache_memCycles, l2cache_portFactor, l2cache_writeBytes, num_sm, num_warp}
+import pipeline.parameters.{l2cache_BlockWords, l2cache_NSets, l2cache_NWays, l2cache_memCycles, l2cache_portFactor, l2cache_writeBytes, num_sm, num_warp}
 //import pipeline.vALUv2TestWrapper
 
+//object GPGPU_gen extends App{
+//  (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_axi_top())
+//}
 object GPGPU_gen extends App{
   val L1param = (new MyConfig).toInstance
   val L2param = InclusiveCacheParameters_lite(CacheParameters(2, l2cache_NSets, l2cache_NWays, blockBytes = (l2cache_BlockWords << 2), beatBytes = (l2cache_BlockWords << 2)), InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm), false)
