@@ -464,7 +464,12 @@ class operandCollector extends Module{
 
   //when all operands of an instruction has prepared, issue it.
   val issueArbiter = Module(new Arbiter((new issueIO), num_collectorUnit))
-  issueArbiter.io.in <> VecInit(collectorUnits.map(_.issue))
+//  issueArbiter.io.in <> VecInit(collectorUnits.map(_.issue))
+  (0 until num_collectorUnit).foreach { i =>
+    issueArbiter.io.in(i).bits := collectorUnits(i).issue.bits
+    issueArbiter.io.in(i).valid := collectorUnits(i).issue.valid
+    collectorUnits(i).issue.ready := issueArbiter.io.in(i).ready
+  }
   io.out <> issueArbiter.io.out
 
   //  //old code
