@@ -183,10 +183,11 @@ class pipe extends Module{
   when(io.dcache_req.fire&io.dcache_req.bits.isWrite){
     //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
   }
+
   //输出所有write mem的操作
   val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
   when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
-    printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
+    printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} ,writedata=")
     exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
     printf(p"mask ${exe_data.io.deq.bits.mask} at${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
     printf(p"\n")
@@ -200,24 +201,24 @@ class pipe extends Module{
   //}
 
   //输出特定指令的操作数
-  when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire() ){
-      printf(p"0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},${exe_data.io.deq.bits.ctrl.wid} operand is =")
-    exe_data.io.deq.bits.in2.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
-    exe_data.io.deq.bits.in1.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
-    exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
-    exe_data.io.deq.bits.mask.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
-    printf(p"\n")
-  }
+  //when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire() ){
+  //    printf(p"0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc+0x348.U-0xc.U) },${exe_data.io.deq.bits.ctrl.wid} operand is =")
+  //  exe_data.io.deq.bits.in2.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
+  //  exe_data.io.deq.bits.in1.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
+  //  exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
+  //  exe_data.io.deq.bits.mask.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
+  //  printf(p"\n")
+  //}
   //输出写入向量寄存器的
-  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
-    printf(p"write${wb.io.out_v.bits.reg_idxw})")
-    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p" ${Hexadecimal(x.asUInt)} "))
-    printf(p"with ${wb.io.out_v.bits.wvd_mask}\n")
-  }
-  //输出写入标量寄存器的
-  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
-    printf(p"write${wb.io.out_x.bits.reg_idxw} ${wb.io.out_x.bits.wb_wxd_rd}\n")
-  }
+  //when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
+  //  printf(p"write${wb.io.out_v.bits.reg_idxw})")
+  //  wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p" ${Hexadecimal(x.asUInt)} "))
+  //  printf(p"with ${wb.io.out_v.bits.wvd_mask}\n")
+  //}
+  ////输出写入标量寄存器的
+  //when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
+  //  printf(p"write${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
+  //}
 
   {
     exe_data.io.enq.bits.ctrl := operand_collector.io.out.bits.control

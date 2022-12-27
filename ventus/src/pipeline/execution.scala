@@ -20,6 +20,7 @@ class BranchCtrl extends Bundle{
   val wid=UInt(depth_warp.W)
   val jump=Bool()
   val new_pc=UInt(32.W)
+  val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 class ALUexe extends Module{
   val io = IO(new Bundle() {
@@ -41,7 +42,10 @@ class ALUexe extends Module{
   result.io.enq.bits.wb_wxd_rd:=alu.io.out
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
   result.io.enq.bits.wxd:=io.in.bits.ctrl.wxd
-
+  if(SPIKE_OUTPUT){
+    result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+    result_br.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+  }
   io.in.ready:=MuxLookup(io.in.bits.ctrl.branch,result_br.io.enq.ready&result.io.enq.ready,Seq(B_B->result_br.io.enq.ready,B_N->result.io.enq.ready))
 
   result_br.io.enq.bits.wid:=io.in.bits.ctrl.wid
@@ -80,7 +84,10 @@ class vMULexe extends Module{
   result_v.io.enq.bits.reg_idxw:=mul(0).out.bits.ctrl.reg_idxw
   result_v.io.enq.bits.wvd:=mul(0).out.bits.ctrl.wfd
   result_v.io.enq.bits.wvd_mask:=mul(0).out.bits.mask
-
+  if (SPIKE_OUTPUT) {
+    result_v.io.enq.bits.spike_info.get := mul(0).out.bits.ctrl.spike_info.get
+    result_x.io.enq.bits.spike_info.get := mul(0).out.bits.ctrl.spike_info.get
+  }
   result_x.io.enq.bits.warp_id:=mul(0).out.bits.ctrl.wid
   result_x.io.enq.bits.reg_idxw:=mul(0).out.bits.ctrl.reg_idxw
   result_x.io.enq.bits.wxd:=mul(0).out.bits.ctrl.wxd
@@ -143,7 +150,9 @@ class vALUexe extends Module{
   result.io.enq.bits.wvd:=io.in.bits.ctrl.wfd
   result.io.enq.bits.wvd_mask:=io.in.bits.mask
   result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wfd&(!io.in.bits.ctrl.simt_stack)
-
+  if (SPIKE_OUTPUT) {
+    result.io.enq.bits.spike_info.get := io.in.bits.ctrl.spike_info.get
+  }
   result2simt.io.enq.bits.wid:=io.in.bits.ctrl.wid
   result2simt.io.enq.bits.if_mask:= ~(VecInit(alu.map({x=>x.cmp_out})).asUInt)
   result2simt.io.enq.valid:=io.in.valid&io.in.bits.ctrl.simt_stack
@@ -164,7 +173,7 @@ class FPUexe extends Module{
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
 
-  val fpu = Module(new FPUv2.VectorFPU(8, 24, num_thread, num_thread, new TestFPUCtrl(depth_warp, num_thread)))
+  val fpu = Module(new FPUv2.VectorFPU(8, 24, num_thread, num_thread, new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)))
   (0 until num_thread).foreach{ x =>
     fpu.io.in.bits.data(x).a := io.in.bits.in1(x)
     fpu.io.in.bits.data(x).b := io.in.bits.in2(x)
@@ -187,12 +196,16 @@ class FPUexe extends Module{
   fpu.io.in.bits.ctrl.regIndex := io.in.bits.ctrl.reg_idxw
   fpu.io.in.bits.ctrl.warpID := io.in.bits.ctrl.wid
   fpu.io.in.bits.ctrl.vecMask := io.in.bits.mask.asUInt
-
   fpu.io.in.valid := io.in.valid
   io.in.ready := fpu.io.in.ready
 
   (0 until num_thread).foreach{ x =>
     io.out_v.bits.wb_wvd_rd(x) := fpu.io.out.bits.data(x).result(31,0)
+  }
+  if (SPIKE_OUTPUT) {
+    fpu.io.in.bits.ctrl.spike_info.get:=io.in.bits.ctrl.spike_info.get
+    io.out_v.bits.spike_info.get := fpu.io.out.bits.ctrl.spike_info.get
+    io.out_x.bits.spike_info.get := fpu.io.out.bits.ctrl.spike_info.get
   }
   io.out_x.bits.wb_wxd_rd := fpu.io.out.bits.data(0).result(31,0)
   io.out_v.bits.reg_idxw := fpu.io.out.bits.ctrl.regIndex
@@ -262,7 +275,10 @@ class SFUexe extends Module{
   result_x.io.enq.bits.warp_id:=i_ctrl.wid
   result_x.io.enq.bits.reg_idxw:=i_ctrl.reg_idxw
   result_x.io.enq.bits.wb_wxd_rd:=out_data(0)
-
+  if (SPIKE_OUTPUT) {
+    result_v.io.enq.bits.spike_info.get := i_ctrl.spike_info.get
+    result_x.io.enq.bits.spike_info.get := i_ctrl.spike_info.get
+  }
   result_x.io.enq.valid:=state===s_finish&i_ctrl.wxd
   result_v.io.enq.valid:=state===s_finish&i_ctrl.wfd
   val o_ready= i_ctrl.isvec&result_v.io.enq.ready | !i_ctrl.isvec & result_x.io.enq.ready
