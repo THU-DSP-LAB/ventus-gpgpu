@@ -50,6 +50,7 @@ class CtrlSigs extends Bundle {
   val writemask = Bool()
   val wxd = Bool()
   val pc=UInt(32.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
 }
 class scoreboardIO extends Bundle{

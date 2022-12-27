@@ -13,7 +13,7 @@ package pipeline
 import chisel3._
 import chisel3.util._
 import parameters._
-
+import java.io._
 
 class hash(val width:Int) extends Module{
   val io = IO(new Bundle() {
@@ -104,6 +104,7 @@ class simtExeData extends Bundle{
   val wid     = UInt(depth_warp.W)
   val PC_branch = UInt(32.W)
   val mask_init = UInt(num_thread.W)
+  val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 
 class vec_alu_bus() extends Bundle{
@@ -281,7 +282,14 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
       fetch_ctl.new_pc := branch_ctl_buf.bits.PC_branch
     }
   }
-
+  if(SPIKE_OUTPUT){
+    fetch_ctl.spike_info.get:=branch_ctl_buf.bits.spike_info.get
+    when(io.complete.valid/*&&io.complete.bits===wid_to_check.U*/&& !io.branch_ctl.fire){
+      printf(p"warp${Decimal(io.complete.bits)} 0x00000000${Hexadecimal(io.branch_ctl.bits.spike_info.get.pc)} 0x${Hexadecimal(io.branch_ctl.bits.spike_info.get.inst)}")
+      if_mask.asTypeOf(Vec(num_thread,Bool())).reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
+      printf(p"\n")
+    }
+  }
   fetch_ctl_buf.io.enq.bits := fetch_ctl
   fetch_ctl_buf.io.enq.valid := fetch_ctl_valid
   io.fetch_ctl <> fetch_ctl_buf.io.deq

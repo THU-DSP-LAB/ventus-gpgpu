@@ -11,12 +11,14 @@ class WriteVecCtrl extends Bundle{
   val wvd=Bool()
   val reg_idxw=UInt(5.W)
   val warp_id=UInt(depth_warp.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 class WriteScalarCtrl extends Bundle{
   val wb_wxd_rd=(UInt(xLen.W))
   val wxd=Bool()
   val reg_idxw=UInt(5.W)
   val warp_id=UInt(depth_warp.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 
 class crossbar2CU extends Bundle{
@@ -462,7 +464,12 @@ class operandCollector extends Module{
 
   //when all operands of an instruction has prepared, issue it.
   val issueArbiter = Module(new Arbiter((new issueIO), num_collectorUnit))
-  issueArbiter.io.in <> VecInit(collectorUnits.map(_.issue))
+//  issueArbiter.io.in <> VecInit(collectorUnits.map(_.issue))
+  (0 until num_collectorUnit).foreach { i =>
+    issueArbiter.io.in(i).bits := collectorUnits(i).issue.bits
+    issueArbiter.io.in(i).valid := collectorUnits(i).issue.valid
+    collectorUnits(i).issue.ready := issueArbiter.io.in(i).ready
+  }
   io.out <> issueArbiter.io.out
 
   //  //old code
