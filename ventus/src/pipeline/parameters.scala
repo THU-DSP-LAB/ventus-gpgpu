@@ -29,7 +29,7 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def xLen = 32 // data length 32-bit
   def num_block=num_warp // not bigger than num_warp
   def num_warp_in_a_block=num_warp
-
+  def num_lane=num_thread/2
   def num_icachebuf = 1 //blocking for each warp
   def depth_icachebuf = log2Ceil(num_icachebuf)
   def num_ibuffer=2
@@ -60,6 +60,15 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
     val l2cache_cache=CacheParameters(2,l2cache_NWays,l2cache_NSets,l2cache_BlockWords<<2,l2cache_BlockWords<<2)
     val l2cache_micro=InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm)
     val l2cache_params=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro,false)
+
+  def tc_dim: Seq[Int] = {
+    var x: Seq[Int] = Seq(2, 2, 2)
+    if(num_thread==8)
+      x = Seq(2, 4, 2)
+    else if(num_thread==32)
+      x = Seq(4, 8, 4)
+    x
+  }
 
   def sig_length = 33
 

@@ -12,6 +12,9 @@ package play
 
 import L1Cache.MyConfig
 import chisel3._
+import chisel3.util._
+import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
+import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
