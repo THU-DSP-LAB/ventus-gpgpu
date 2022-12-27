@@ -101,6 +101,10 @@ class vMULexe extends Module{
   io.out_x<>result_x.io.deq
 
 }
+
+class TCCtrlv2(xLen: Int, depth_warp: Int) extends FPUv2.TCCtrl(xLen, depth_warp){
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
+}
 class vTCexe extends Module{
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
@@ -108,9 +112,17 @@ class vTCexe extends Module{
     //val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
-  val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new FPUv2.TCCtrl(xLen, depth_warp)))
+  val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new TCCtrlv2(xLen, depth_warp)))
 
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
+
+  if(SPIKE_OUTPUT){
+    val tcctrl_i = Wire(new TCCtrlv2(xLen, depth_warp))
+    tcctrl_i.spike_info.get := io.in.bits.ctrl.spike_info.get
+    tcctrl_i.reg_idxw := io.in.bits.ctrl.reg_idxw
+    tcctrl_i.warpID := io.in.bits.ctrl.wid
+    tensor.io.in.bits.ctrl := tcctrl_i
+  }
   tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
   tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
   tensor.io.in.valid:=io.in.valid
@@ -131,6 +143,12 @@ class vTCexe extends Module{
   result_v.io.enq.bits.wvd_mask.foreach(_:=true.B)
   result_v.io.enq.valid:=tensor.io.out.valid
   tensor.io.out.ready:=result_v.io.enq.ready
+
+  if (SPIKE_OUTPUT) {
+    val tcctrl_o = Wire(new TCCtrlv2(xLen, depth_warp))
+    tcctrl_o := tensor.io.out.bits.ctrl
+    result_v.io.enq.bits.spike_info.get := tcctrl_o.spike_info.get
+  }
 
   io.out_v<>result_v.io.deq
 
@@ -188,6 +206,11 @@ class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     result_x.io.enq.bits.reg_idxw := mul(0).out.bits.ctrl.reg_idxw
     result_x.io.enq.bits.wxd := mul(0).out.bits.ctrl.wxd
     result_x.io.enq.bits.wb_wxd_rd := mul(0).out.bits.result
+
+    if (SPIKE_OUTPUT) {
+      result_v.io.enq.bits.spike_info.get := mul(0).out.bits.ctrl.spike_info.get
+      result_x.io.enq.bits.spike_info.get := mul(0).out.bits.ctrl.spike_info.get
+    }
 
     result_v.io.enq.valid := mul(0).out.valid & mul(0).out.bits.ctrl.wvd
     result_x.io.enq.valid := mul(0).out.valid & mul(0).out.bits.ctrl.wxd
@@ -373,7 +396,10 @@ class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     result_x.io.enq.bits.reg_idxw := resultReg.reg_idxw
     result_x.io.enq.valid := recvCS === maxIter.U && !resultReg.wvd
 
-
+    if (SPIKE_OUTPUT) {
+      result_v.io.enq.bits.spike_info.get := mul(0).out.bits.ctrl.spike_info.get
+      result_x.io.enq.bits.spike_info.get := mul(0).out.bits.ctrl.spike_info.get
+    }
   }
   io.out_v <> result_v.io.deq
   io.out_x <> result_x.io.deq
@@ -708,7 +734,10 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
-
+  class TestFPUCtrl(depth_warp: Int, num_thread: Int, SPIKE_OUTPUT: Boolean)
+    extends FPUv2.utils.TestFPUCtrl(depth_warp, num_thread){
+    val spike_info = if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
+  }
   val fpu = Module(new FPUv2.VectorFPU(8, 24, softThread, hardThread, new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)))
   (0 until num_thread).foreach{ x =>
     fpu.io.in.bits.data(x).a := io.in.bits.in1(x)
@@ -739,7 +768,8 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     io.out_v.bits.wb_wvd_rd(x) := fpu.io.out.bits.data(x).result(31,0)
   }
   if (SPIKE_OUTPUT) {
-    fpu.io.in.bits.ctrl.spike_info.get:=io.in.bits.ctrl.spike_info.get
+    fpu.io.in.bits.ctrl.asTypeOf(new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)).spike_info.get := io.in.bits.ctrl.spike_info.get
+    //fpu.io.in.bits.ctrl.spike_info.get := io.in.bits.ctrl.spike_info.get // <- IDEA报错但能正常运行
     io.out_v.bits.spike_info.get := fpu.io.out.bits.ctrl.spike_info.get
     io.out_x.bits.spike_info.get := fpu.io.out.bits.ctrl.spike_info.get
   }
