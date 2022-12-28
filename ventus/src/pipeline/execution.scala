@@ -768,8 +768,8 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     io.out_v.bits.wb_wvd_rd(x) := fpu.io.out.bits.data(x).result(31,0)
   }
   if (SPIKE_OUTPUT) {
-    fpu.io.in.bits.ctrl.asTypeOf(new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)).spike_info.get := io.in.bits.ctrl.spike_info.get
-    //fpu.io.in.bits.ctrl.spike_info.get := io.in.bits.ctrl.spike_info.get // <- IDEA报错但能正常运行
+//    fpu.io.in.bits.ctrl.asInstanceOf(new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)).spike_info.get := io.in.bits.ctrl.spike_info.get
+    fpu.io.in.bits.ctrl.spike_info.get := io.in.bits.ctrl.spike_info.get // <- IDEA报错但能正常运行
     io.out_v.bits.spike_info.get := fpu.io.out.bits.ctrl.spike_info.get
     io.out_x.bits.spike_info.get := fpu.io.out.bits.ctrl.spike_info.get
   }
