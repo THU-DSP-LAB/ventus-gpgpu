@@ -119,32 +119,40 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-
+val tobedone=RegInit(false.B)
 
   switch(stateReg){
     is(stage_1){
       busy:=false.B
-      when (io.req.fire()) {
+      when (io.req.fire() || tobedone){
         when(s1_valid_r && io.bs_radr.ready) {
           stateReg := stage_4
           busy := true.B
+          tobedone:=false.B
+
         }.elsewhen((s1_req.opcode === PutFullData|| s1_req.opcode===PutPartialData)){
             when(io.a.ready) {
               when(io.bs_wadr.ready ||  !s1_need_w) {
                 stateReg := stage_4
                 busy := true.B
+                tobedone:=false.B
               }.otherwise {
                 stateReg := stage_2
                 busy := true.B
+                tobedone:=false.B
               }
             }.otherwise {
               when(io.bs_wadr.ready||  !s1_need_w) {
                 stateReg := stage_3
                 busy := true.B
+                tobedone:=false.B
               }
             }
 
 
+        }.otherwise {
+          busy := true.B
+          tobedone := true.B
         }
       }
     }
