@@ -220,7 +220,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   
 
   bankedStore.io.sinkD_adr <> sinkD.io.bs_adr         
- 
+
   bankedStore.io.sinkD_dat :=sinkD.io.bs_dat
   bankedStore.io.sourceD_radr <> sourceD.io.bs_radr   
   bankedStore.io.sourceD_wadr <> sourceD.io.bs_wadr

@@ -83,6 +83,7 @@ class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag�
   val isvec = Bool()
   val wordOffset1H = Vec(num_thread, UInt(BytesOfWord.W))
   val isWrite = Bool()
+  val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 
 object ByteExtract{
@@ -176,6 +177,9 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   io.to_mshr.bits.tag.wordOffset1H := wordOffset1H
   io.to_mshr.valid := state===s_save & (reg_save.ctrl.mem_cmd.orR)
   io.to_mshr.bits.tag.isWrite := reg_save.ctrl.mem_cmd(1)
+  if(SPIKE_OUTPUT){
+    io.to_mshr.bits.tag.spike_info.get:=reg_save.ctrl.spike_info.get
+  }
   //val reg_toShared = Reg(new toShared)
   //val vld_toShared = Reg(Bool())
   val data_next=reg_save.in3
@@ -291,6 +295,10 @@ class LSU2WB extends Module{
   io.out_v.bits.wvd:=io.lsu_rsp.bits.tag.wfd
   io.out_v.bits.wvd_mask:=io.lsu_rsp.bits.tag.mask
   io.out_v.bits.wb_wvd_rd:=io.lsu_rsp.bits.data
+  if(SPIKE_OUTPUT){
+    io.out_x.bits.spike_info.get:=io.lsu_rsp.bits.tag.spike_info.get
+    io.out_v.bits.spike_info.get:=io.lsu_rsp.bits.tag.spike_info.get
+  }
   when(io.lsu_rsp.bits.tag.wxd){
     io.out_x.valid:=io.lsu_rsp.valid
     io.out_v.valid:=false.B

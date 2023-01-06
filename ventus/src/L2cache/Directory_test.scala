@@ -122,10 +122,12 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val set = RegEnable(io.read.bits.set, ren)
  // val writethrough =RegEnable(io.read.bits.opcode===PutFullData,ren)
   // Compute the victim way in case of an evicition
-  val replacer_array = Array.fill(2){
-    ReplacementPolicy.fromString("plru", n_ways = 2)
-  }
-  val victimWay = VecInit(replacer_array.map(_.way))(set)
+  val replacer_array = Reg(Vec(params.cache.sets, UInt(log2Ceil(params.cache.ways).W)))//ReplacementPolicy.fromString("plru", n_ways = params.cache.ways)
+for(i<- 0 until params.cache.sets){
+  replacer_array(i):=Mux(ren1&& i.asUInt===set ,1.U+replacer_array(i),replacer_array(i))
+
+}
+  val victimWay = replacer_array(set)
 
   val setQuash_1 = wen && io.write.bits.set === io.read.bits.set //表示write到上次读出来的set
   val setQuash=wen1 && io.write.bits.set === set
@@ -148,17 +150,18 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
 
   val hit = hits.orR()
-  val hitWay = Wire(UInt(2.W))
+  val hitWay = Wire(UInt(params.cache.ways.W))
   hitWay:= OHToUInt(hits)
   val writeSet1 = RegNext(io.write.bits.set)
 
-  for((repl, i) <- replacer_array.zipWithIndex){
-    when(wen1&&i.U===writeSet1){
-      repl.access(writeWay1)
-    }.elsewhen(ren1&&i.U===set&&hit){
-      repl.access(hitWay)
-    }
-  }  
+//  for((repl, i) <- replacer_array.zipWithIndex){
+////    when(wen1&&i.U===writeSet1){
+////      repl.access(writeWay1)
+////    }.else
+//    when(ren1&& i.U===set){//&&hit){
+//      repl.access(hitWay)
+//    }
+//  }
 
   cc_dir.io.w.req.valid :=  wen_new
   cc_dir.io.w.req.bits.apply(

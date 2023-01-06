@@ -29,10 +29,10 @@ class instbuffer extends Module{
     val x_single=Module(new Queue(new CtrlSigs,num_ibuffer,hasFlush=true))
       io.ibuffer_ready(i):=x_single.io.enq.ready
       x_single.io.enq.bits:=io.in.bits
-      x_single.io.enq.valid:=Mux((i.asUInt()===io.in.bits.wid),io.in.valid,false.B)
-      when(i.asUInt()===io.in.bits.wid){io.in.ready:=x_single.io.enq.ready}
+      x_single.io.enq.valid:=Mux((i.asUInt===io.in.bits.wid),io.in.valid,false.B)
+      when(i.asUInt===io.in.bits.wid){io.in.ready:=x_single.io.enq.ready}
       io.out(i)<>x_single.io.deq
-      x_single.flush:=io.flush.valid&(i.asUInt()===io.flush.bits)
+      x_single.flush:=io.flush.valid&(i.asUInt===io.flush.bits)
     x_single
   })
   //val arbiter=Module(new arbiter_m2o(3))

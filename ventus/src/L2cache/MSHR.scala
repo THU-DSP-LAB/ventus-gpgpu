@@ -60,7 +60,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.d.valid:= io.valid && sink_d_reg
   io.schedule.d.bits:=request 
   io.schedule.d.bits.hit:=false.B
-  io.schedule.d.bits.data :=Mux(sink_d_reg, io.sinkd.bits.data, request.data)
+  io.schedule.d.bits.data :=Mux(sink_d_reg, RegEnable(io.sinkd.bits.data,io.sinkd.valid), request.data)
 
 
   io.schedule.a.valid:=sche_a_valid

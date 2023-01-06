@@ -460,5 +460,8 @@ class Control extends Module{
   io.control.reg_idx2:=io.inst(24,20)
   io.control.reg_idx3:=Mux(io.control.fp & !io.control.isvec,io.inst(31,27),io.inst(11,7))
   io.control.reg_idxw:=io.inst(11,7)
-
+  if(SPIKE_OUTPUT){
+    io.control.spike_info.get.inst:=io.control.inst
+    io.control.spike_info.get.pc:=io.control.pc
+  }
 }

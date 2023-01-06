@@ -78,7 +78,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   val s1_req =Mux(io.req.fire(), io.req.bits, s1_req_reg)  //stall if busy
   val s1_need_w =(s1_req.opcode===PutFullData || s1_req.opcode===PutPartialData) && !s1_req.from_mem &&s1_req.hit
 
-  val s1_need_r =(s1_req.opcode===Get) 
+  val s1_need_r =(s1_req.opcode===Get) //&& s1_req.hit
 
 
   val s1_valid_r = s1_need_r
@@ -119,32 +119,45 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-
+val tobedone=RegInit(false.B)
 
   switch(stateReg){
     is(stage_1){
       busy:=false.B
-      when (io.req.fire()) {
+      when (io.req.fire() || tobedone){
+//        when(!s1_req.hit && s1_req.opcode===Get ){
+//          stateReg := stage_4
+//          busy := true.B
+//          tobedone:=false.B
+//        }.else
         when(s1_valid_r && io.bs_radr.ready) {
           stateReg := stage_4
           busy := true.B
+          tobedone:=false.B
+
         }.elsewhen((s1_req.opcode === PutFullData|| s1_req.opcode===PutPartialData)){
             when(io.a.ready) {
               when(io.bs_wadr.ready ||  !s1_need_w) {
                 stateReg := stage_4
                 busy := true.B
+                tobedone:=false.B
               }.otherwise {
                 stateReg := stage_2
                 busy := true.B
+                tobedone:=false.B
               }
             }.otherwise {
               when(io.bs_wadr.ready||  !s1_need_w) {
                 stateReg := stage_3
                 busy := true.B
+                tobedone:=false.B
               }
             }
 
 
+        }.otherwise {
+          busy := true.B
+          tobedone := true.B
         }
       }
     }
@@ -177,7 +190,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   io.d.bits.source  :=s_final_req.source
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,AccessAck)
   io.d.bits.size    := s_final_req.size
-  io.d.bits.data    :=Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况不需要
+  io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, io.bs_rdat.data,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况不需要
   io.d.bits.address      := params.expandAddress(s_final_req.tag, s_final_req.set,s_final_req.offset)
 ////将读出的数据返回给sourceA
 
