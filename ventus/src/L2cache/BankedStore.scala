@@ -139,7 +139,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
 
     val select = UIntToOH(a(bankBits-1, 0), numBanks/ports)
     val ready  = Cat(Seq.tabulate(numBanks/ports) { i => !(out.bankSum((i+1)*ports-1, i*ports) &m).orR } .reverse)
-    b.ready := ready(a(0))
+    b.ready := ready(a(bankBits-1,0))
 
     out.wen      := write
     out.index    := a //>> bankBits   //width=rowbits
