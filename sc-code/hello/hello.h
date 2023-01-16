@@ -2,7 +2,7 @@
 #define _HELLO_H
 
 #include "systemc.h"
-#include "../pipeline/parameters.h"
+#include "../parameters.h"
 
 SC_MODULE(worker1)
 {
@@ -13,15 +13,7 @@ SC_MODULE(worker1)
     SC_THREAD(worker_action);
   }
 
-  void worker_action()
-  {
-    wait(20, SC_NS);
-    cout << "waited for 20ns and notifying event1" << endl;
-    acase->notify();
-    wait(40, SC_NS);
-    cout << "waited for another 40ns and notifying event1" << endl;
-    acase->notify();
-  }
+  void worker_action();
 };
 
 SC_MODULE(worker2)
@@ -77,8 +69,8 @@ SC_MODULE(itype_test)
   void test_action()
   {
     // initialize
-    mem[0] = I_TYPE(1, 2, 3, 4);
-    mem[1] = I_TYPE(5, 6, 7, 8);
+    mem[0] = I_TYPE(add_, 2, 3, 4);
+    mem[1] = I_TYPE(lw_, 6, 7, 8);
     while (true)
     {
 

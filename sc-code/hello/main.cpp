@@ -1,4 +1,6 @@
 #include "hello.h"
+#include "tlm_utils/tlm_quantumkeeper.h"
+#include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
 
 int sc_main(int argc, char *argv[])
 {
@@ -35,17 +37,17 @@ int sc_main(int argc, char *argv[])
   // cout << "size of a is " << sizeof(a) << ". type of a is " << typeid(a).name() << endl;
   // cout << "size of a^b is " << sizeof(a ^ b) << ". type of a^b is " << typeid(a^b).name() << endl;
 
-  // // test for multiple events communication between modules
-  // event a1("myevent1");
-  // event a2("myevent2");
-  // worker1 W1("myworker1");
-  // worker2 W2("myworker2");
-  // receiver R("myreceiver");
-  // W1.acase(a1);
-  // W2.acase(a2);
-  // R.incase1(a1);
-  // R.incase2(a2);
-  // sc_start();
+  // test for multiple events communication between modules
+  event a1("myevent1");
+  event a2("myevent2");
+  worker1 W1("myworker1");
+  worker2 W2("myworker2");
+  receiver R("myreceiver");
+  W1.acase(a1);
+  W2.acase(a2);
+  R.incase1(a1);
+  R.incase2(a2);
+  sc_start();
 
   // // test for I_TYPE communication
   // sc_signal<sc_uint<8>> addr;
@@ -57,6 +59,7 @@ int sc_main(int argc, char *argv[])
   // ttt.addr(addr);
   // ttt.ins(ins);
   // sc_start();
-  
+
+
   return 0; // Terminate simulation
 }
