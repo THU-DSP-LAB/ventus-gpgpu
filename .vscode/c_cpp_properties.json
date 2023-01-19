@@ -4,8 +4,8 @@
             "name": "Linux",
             "includePath": [
                 "${workspaceFolder}/**",
-                "~/utils/systemc-2.3.3/include",
-                "~/utils/systemc-2.3.3/lib-linux64"
+                "~/utils/systemc-2.3.4/include",
+                "~/utils/systemc-2.3.4/lib-linux64"
             ],
             "defines": [],
             "compilerPath": "/usr/bin/gcc",
