@@ -46,6 +46,7 @@ class operandCollector extends Module{
   val imm=Module(new ImmGen())
   imm.io.inst:=io.control.inst
   imm.io.sel:=io.control.sel_imm
+  imm.io.imm_ext := io.control.imm_ext
 
   vectorRegFile.foreach(x=>{
     x.rs1idx:=io.control.reg_idx1
