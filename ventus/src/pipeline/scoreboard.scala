@@ -40,10 +40,10 @@ class CtrlSigs extends Bundle {
   val tc = Bool()
   val mem_cmd = UInt(2.W)
   val mop = UInt(2.W)
-  val reg_idx1 = UInt(5.W)
-  val reg_idx2 = UInt(5.W)
-  val reg_idx3 = UInt(5.W)
-  val reg_idxw = UInt(5.W)
+  val reg_idx1 = UInt((regidx_width + regext_width).W) // 8.W
+  val reg_idx2 = UInt((regidx_width + regext_width).W)
+  val reg_idx3 = UInt((regidx_width + regext_width).W)
+  val reg_idxw = UInt((regidx_width + regext_width).W)
   val wvd = Bool()
   val fence = Bool()
   val sfu = Bool()
@@ -51,6 +51,7 @@ class CtrlSigs extends Bundle {
   val writemask = Bool()
   val wxd = Bool()
   val pc=UInt(32.W)
+  val imm_ext = UInt(6.W) // new! immext
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
 }
 class scoreboardIO extends Bundle{

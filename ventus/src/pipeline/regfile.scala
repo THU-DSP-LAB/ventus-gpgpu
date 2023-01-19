@@ -73,6 +73,7 @@ class FloatRegFile extends Module  {
 class ImmGenIO extends Bundle {
   val inst = Input(UInt(32.W))
   val sel  = Input(UInt(3.W))
+  val imm_ext = Input(UInt(6.W))
   val out  = Output(UInt(32.W))
 }
 
@@ -86,7 +87,7 @@ class ImmGen extends Module {
   val Jimm = Cat(io.inst(31), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W)).asSInt // jal
   val Zimm = Cat(0.U(27.W),io.inst(19, 15)).asSInt // CSR I
   val Imm2 = io.inst(24,20).asSInt
-  val Vimm = io.inst(19,15).asSInt
+  val Vimm = Cat(io.imm_ext, io.inst(19,15)).asSInt
 
   val out = WireInit(0.S(32.W))
 

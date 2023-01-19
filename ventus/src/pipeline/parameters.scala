@@ -16,12 +16,16 @@ object parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, no
   def num_sm=2
 
   val SINGLE_INST:Boolean=false
-
+// TODO: better structure of parameters
+  def regidx_width = 5
+  def regext_width = 3
   def num_warp=4
   def depth_warp=log2Ceil(num_warp)
   def num_thread=8
   def depth_thread=log2Ceil(num_thread)
   def xLen = 32 // data length 32-bit
+  def instLen = 32
+  def addrLen = 32
   def num_block=num_warp // not bigger than num_warp
   def num_warp_in_a_block=num_warp
   def num_lane=num_thread/2

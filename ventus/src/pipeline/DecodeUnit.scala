@@ -11,9 +11,8 @@
 package pipeline
 
 import chisel3._
-import chisel3.util.BitPat
+import chisel3.util._
 import Instructions._
-import chisel3.util.ListLookup
 import parameters._
 
 object IDecode //extends DecodeConstants
@@ -461,4 +460,96 @@ class Control extends Module{
   io.control.reg_idx3:=Mux(io.control.fp & !io.control.isvec,io.inst(31,27),io.inst(11,7))
   io.control.reg_idxw:=io.inst(11,7)
 
+}
+
+trait DecodeParameters{}
+
+class InstrDecodeV2 extends VTModule with DecodeParameters {
+  val io = IO(new Bundle{
+    val inst = Input(Vec(num_fetch, UInt(instLen.W)))
+    val inst_mask = Input(Vec(num_fetch, Bool()))
+    val pc = Input(UInt(addrLen.W))
+    val wid = Input(UInt(depth_warp.W))
+    val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
+    val control = Output(Vec(num_fetch, new CtrlSigs))
+    val control_mask = Output(Vec(num_fetch, Bool()))
+  })
+  class regext extends Bundle{
+    val isExt = Bool() // regext
+    val isExtI = Bool() // regexti
+    val immHigh = UInt(6.W)
+    val regPrefix = Vec(4, UInt(3.W)) // 0 -> rd, 1 -> rs1, ...
+  }
+  val regextInfo_pre = Wire(Vec(num_fetch, new regext))
+  regextInfo_pre.zipWithIndex.foreach{ case(r, i) =>
+    when(!io.inst_mask(i)){
+      r := 0.U.asTypeOf(r)
+    }.otherwise{
+      r.isExt := io.inst(i) === REGEXT
+      r.isExtI := io.inst(i) === REGEXTI
+      r.immHigh := Mux(r.isExtI, io.inst(i)(31,26), 0.U)
+      when(r.isExt){
+        r.regPrefix := VecInit(io.inst(i)(22,20), io.inst(i)(25,23), io.inst(i)(28,26), io.inst(i)(31,29))
+      }.elsewhen(r.isExtI){
+        r.regPrefix := VecInit(io.inst(i)(22,20), 0.U(3.W), io.inst(i)(25,23), 0.U(3.W))
+      }.otherwise{
+        r.regPrefix := 0.U.asTypeOf(r.regPrefix)
+      }
+    }
+  }
+  val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
+  when(io.flush_wid.valid){
+    scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
+    when(io.flush_wid.bits =/= io.wid){
+      scratchPads(io.wid) := regextInfo_pre.last
+    }
+  }.otherwise{ scratchPads(io.wid) := regextInfo_pre.last }
+  // regextInfo: 0<>Scratchpad, 1<>decode_0, 2<>decode_1, 3<>decode_2
+  val regextInfo = VecInit(Seq(scratchPads(io.wid)) ++ regextInfo_pre.take(num_fetch-1))
+
+  val maskAfterExt = Wire(Vec(num_fetch, Bool()))
+  (0 until num_fetch).foreach{ i =>
+    maskAfterExt(i) := io.inst_mask(i) && !(regextInfo(i).isExtI || regextInfo(i).isExt)
+  }
+
+  val ctrlSignals = (0 until num_fetch).map(i => ListLookup(io.inst(i), IDecode.default, IDecode.table))
+  (ctrlSignals zip io.control).zipWithIndex.foreach{ case((s, c), i) =>
+    c.inst := io.inst(i)
+    c.wid := io.wid
+    c.pc := io.pc
+    c.mop := io.inst(i)(27, 26)
+    c.fp := s(1) //fp=1->vFPU
+    c.barrier := s(2) //barrier or endprg->to warp_scheduler
+    c.branch := s(3)
+    c.simt_stack := s(4)
+    c.simt_stack_op := s(5)
+    c.csr := s(6)
+    c.reverse := s(7) //for some vector inst,change in1 and in2, e.g. subr
+    c.isvec := s(0) //isvec=1->vALU/vFPU
+    c.sel_alu3 := s(8)
+    c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.branch.orR //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
+    c.sel_alu2 := s(9)
+    c.sel_alu1 := s(10)
+    c.sel_imm := s(11)
+    c.mem_whb := s(12)
+    c.alu_fn := s(13)
+    c.mul := s(14)
+    c.mem := c.mem_cmd.orR
+    c.mem_cmd := s(15)
+    c.mem_unsigned := s(16)
+    c.fence := s(17)
+    c.sfu := s(18)
+    c.wvd := s(19)
+    c.readmask := s(20) //read mode is mask - for mask bitwise opcode
+    c.writemask := s(21) //write mode is mask - for mask bitwise opcode
+    c.wxd := s(22)
+    c.tc := s(23)
+    c.reg_idx1 := Cat(regextInfo(i).regPrefix(1), io.inst(i)(19, 15))
+    c.reg_idx2 := Cat(regextInfo(i).regPrefix(2), io.inst(i)(24, 20))
+    // TODO: reg_idx3
+    c.reg_idx3 := Mux(c.fp & !c.isvec, Cat(0.U(3.W),io.inst(i)(31, 27)), Cat(regextInfo(i).regPrefix(0) ,io.inst(i)(11, 7)))
+    c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
+    c.imm_ext := regextInfo(i).immHigh
+  }
+  io.control_mask := maskAfterExt
 }
