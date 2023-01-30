@@ -135,3 +135,27 @@ class InstrBufferV2 extends VTModule with IBufferParameters{
     io.out(i) <> slowDownArray(i).io.out
   }
 }
+
+class IBuffer2OpC extends VTModule{
+  val io = IO(new Bundle {
+    val in = Vec(num_warp, Flipped(DecoupledIO(Output(new CtrlSigs))))
+    val out = Vec(num_fetch, DecoupledIO(Output(new CtrlSigs)))
+  })
+  val in_split = (0 until num_fetch).map { i => (num_warp + i) / num_fetch }.reverse
+  val arbiters = in_split.reverse.dropWhile(_ <= 1).reverse.map {
+    Module(new RRArbiter(new CtrlSigs, _))
+  }
+  (0 until num_fetch).foreach{ i =>
+    if(in_split(i) == 0){
+      io.out(i).valid := false.B
+      io.out(i).bits := 0.U.asTypeOf(new CtrlSigs)
+    }
+    else if(in_split(i) == 1){ io.out(i) <> io.in(i) }
+    else{
+      io.out(i) <> arbiters(i).io.out
+      arbiters(i).io.in.zipWithIndex.foreach{ case(in, j) =>
+        in <> io.in(j * num_fetch + i)
+      }
+    }
+  }
+}
