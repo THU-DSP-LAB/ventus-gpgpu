@@ -1,0 +1,1067 @@
+$date
+     Jan 30, 2023       23:00:59
+$end
+
+$version
+ SystemC 2.3.4-Accellera --- Jan 19 2023 19:11:16
+$end
+
+$timescale
+     1 ns
+$end
+
+$scope module SystemC $end
+$var wire    1  aaaaa  Clk       $end
+$var wire    1  aaaab  Rst_n       $end
+$var wire    1  aaaac  ibuf_full       $end
+$var wire    1  aaaad  jump       $end
+$var wire   10  aaaae  jump_addr [9:0]  $end
+$var wire    1  aaaaf  fetch_valid       $end
+$var wire   10  aaaag  pc [9:0]  $end
+$var wire    1  aaaam  dispatch       $end
+$var wire    1  aaaan  ibuf_empty       $end
+$var wire   32  aaaat  ififo_elem_num [31:0]  $end
+$var wire    1  aaaau  can_dispatch       $end
+$var wire    1  aaaav  opc_full       $end
+$var wire   32  aaabb  opcfifo_elem_num [31:0]  $end
+$var wire    1  aaabh  emit       $end
+$var wire    1  aaabi  emito_salu       $end
+$var wire    1  aaabj  emito_valu       $end
+$var wire    1  aaabk  emito_vfpu       $end
+$var wire    1  aaabl  emito_lsu       $end
+$var wire    1  aaabm  salu_ready       $end
+$var wire    5  aaabn  rss1_addr [4:0]  $end
+$var wire    5  aaabo  rss2_addr [4:0]  $end
+$var wire   32  aaabp  rss1_data [31:0]  $end
+$var wire   32  aaabq  rss2_data [31:0]  $end
+$var wire    1  aaabr  salufifo_empty       $end
+$var wire   32  aaaby  salufifo_elem_num [31:0]  $end
+$var wire    1  aaabz  valu_ready       $end
+$var wire    5  aaaca  rsv1_addr [4:0]  $end
+$var wire    5  aaacb  rsv2_addr [4:0]  $end
+$var wire    1  aaacs  valufifo_empty       $end
+$var wire   32  aaadg  valufifo_elem_num [31:0]  $end
+$var wire    1  aaadh  vfpu_ready       $end
+$var wire    5  aaadi  rsf1_addr [4:0]  $end
+$var wire    5  aaadj  rsf2_addr [4:0]  $end
+$var wire    1  aaaea  vfpufifo_empty       $end
+$var wire   32  aaaeo  vfpufifo_elem_num [31:0]  $end
+$var wire    1  aaaep  write_s       $end
+$var wire    1  aaaeq  write_v       $end
+$var wire    1  aaaer  write_f       $end
+$var wire    1  aaaes  wb_ena       $end
+$scope module fetch_ins $end
+$var wire   32  aaaah  op [31:0]  $end
+$var wire   32  aaaai  s1 [31:0]  $end
+$var wire   32  aaaaj  s2 [31:0]  $end
+$var wire   32  aaaak  d [31:0]  $end
+$var wire   10  aaaal  jump_addr [9:0]  $end
+$upscope $end
+$scope module ibuftop_ins $end
+$var wire   32  aaaao  op [31:0]  $end
+$var wire   32  aaaap  s1 [31:0]  $end
+$var wire   32  aaaaq  s2 [31:0]  $end
+$var wire   32  aaaar  d [31:0]  $end
+$var wire   10  aaaas  jump_addr [9:0]  $end
+$upscope $end
+$scope module issue_ins $end
+$var wire   32  aaaaw  op [31:0]  $end
+$var wire   32  aaaax  s1 [31:0]  $end
+$var wire   32  aaaay  s2 [31:0]  $end
+$var wire   32  aaaaz  d [31:0]  $end
+$var wire   10  aaaba  jump_addr [9:0]  $end
+$upscope $end
+$scope module opctop_ins $end
+$var wire   32  aaabc  op [31:0]  $end
+$var wire   32  aaabd  s1 [31:0]  $end
+$var wire   32  aaabe  s2 [31:0]  $end
+$var wire   32  aaabf  d [31:0]  $end
+$var wire   10  aaabg  jump_addr [9:0]  $end
+$upscope $end
+$scope module rsf1_data $end
+$var real    1  aaadk  data(0)       $end
+$var real    1  aaadl  data(1)       $end
+$var real    1  aaadm  data(2)       $end
+$var real    1  aaadn  data(3)       $end
+$var real    1  aaado  data(4)       $end
+$var real    1  aaadp  data(5)       $end
+$var real    1  aaadq  data(6)       $end
+$var real    1  aaadr  data(7)       $end
+$upscope $end
+$scope module rsf2_data $end
+$var real    1  aaads  data(0)       $end
+$var real    1  aaadt  data(1)       $end
+$var real    1  aaadu  data(2)       $end
+$var real    1  aaadv  data(3)       $end
+$var real    1  aaadw  data(4)       $end
+$var real    1  aaadx  data(5)       $end
+$var real    1  aaady  data(6)       $end
+$var real    1  aaadz  data(7)       $end
+$upscope $end
+$scope module rsv1_data $end
+$var wire   32  aaacc  data(0) [31:0]  $end
+$var wire   32  aaacd  data(1) [31:0]  $end
+$var wire   32  aaace  data(2) [31:0]  $end
+$var wire   32  aaacf  data(3) [31:0]  $end
+$var wire   32  aaacg  data(4) [31:0]  $end
+$var wire   32  aaach  data(5) [31:0]  $end
+$var wire   32  aaaci  data(6) [31:0]  $end
+$var wire   32  aaacj  data(7) [31:0]  $end
+$upscope $end
+$scope module rsv2_data $end
+$var wire   32  aaack  data(0) [31:0]  $end
+$var wire   32  aaacl  data(1) [31:0]  $end
+$var wire   32  aaacm  data(2) [31:0]  $end
+$var wire   32  aaacn  data(3) [31:0]  $end
+$var wire   32  aaaco  data(4) [31:0]  $end
+$var wire   32  aaacp  data(5) [31:0]  $end
+$var wire   32  aaacq  data(6) [31:0]  $end
+$var wire   32  aaacr  data(7) [31:0]  $end
+$upscope $end
+$scope module salutop_dat $end
+$var wire   32  aaabx  data [31:0]  $end
+$scope module ins $end
+$var wire   32  aaabs  op [31:0]  $end
+$var wire   32  aaabt  s1 [31:0]  $end
+$var wire   32  aaabu  s2 [31:0]  $end
+$var wire   32  aaabv  d [31:0]  $end
+$var wire   10  aaabw  jump_addr [9:0]  $end
+$upscope $end
+$upscope $end
+$scope module valutop_dat $end
+$var wire   32  aaacy  rdv1_data(0) [31:0]  $end
+$var wire   32  aaacz  rdv1_data(1) [31:0]  $end
+$var wire   32  aaada  rdv1_data(2) [31:0]  $end
+$var wire   32  aaadb  rdv1_data(3) [31:0]  $end
+$var wire   32  aaadc  rdv1_data(4) [31:0]  $end
+$var wire   32  aaadd  rdv1_data(5) [31:0]  $end
+$var wire   32  aaade  rdv1_data(6) [31:0]  $end
+$var wire   32  aaadf  rdv1_data(7) [31:0]  $end
+$scope module ins $end
+$var wire   32  aaact  op [31:0]  $end
+$var wire   32  aaacu  s1 [31:0]  $end
+$var wire   32  aaacv  s2 [31:0]  $end
+$var wire   32  aaacw  d [31:0]  $end
+$var wire   10  aaacx  jump_addr [9:0]  $end
+$upscope $end
+$upscope $end
+$scope module vfputop_dat $end
+$var real    1  aaaeg  rdf1_data(0)       $end
+$var real    1  aaaeh  rdf1_data(1)       $end
+$var real    1  aaaei  rdf1_data(2)       $end
+$var real    1  aaaej  rdf1_data(3)       $end
+$var real    1  aaaek  rdf1_data(4)       $end
+$var real    1  aaael  rdf1_data(5)       $end
+$var real    1  aaaem  rdf1_data(6)       $end
+$var real    1  aaaen  rdf1_data(7)       $end
+$scope module ins $end
+$var wire   32  aaaeb  op [31:0]  $end
+$var wire   32  aaaec  s1 [31:0]  $end
+$var wire   32  aaaed  s2 [31:0]  $end
+$var wire   32  aaaee  d [31:0]  $end
+$var wire   10  aaaef  jump_addr [9:0]  $end
+$upscope $end
+$upscope $end
+$scope module wb_ins $end
+$var wire   32  aaaet  op [31:0]  $end
+$var wire   32  aaaeu  s1 [31:0]  $end
+$var wire   32  aaaev  s2 [31:0]  $end
+$var wire   32  aaaew  d [31:0]  $end
+$var wire   10  aaaex  jump_addr [9:0]  $end
+$upscope $end
+$upscope $end
+$enddefinitions  $end
+
+$comment
+All initial values are dumped below at time 0 sec = 0 timescale units.
+$end
+
+$dumpvars
+0aaaaa
+0aaaab
+0aaaac
+0aaaad
+b0 aaaae
+0aaaaf
+b1111111111 aaaag
+b0 aaaah
+b0 aaaai
+b0 aaaaj
+b0 aaaak
+b1111111111 aaaal
+0aaaam
+0aaaan
+b0 aaaao
+b0 aaaap
+b0 aaaaq
+b0 aaaar
+b1111111111 aaaas
+b0 aaaat
+0aaaau
+0aaaav
+b0 aaaaw
+b0 aaaax
+b0 aaaay
+b0 aaaaz
+b1111111111 aaaba
+b0 aaabb
+b0 aaabc
+b11111111111111111111111111111111 aaabd
+b11111111111111111111111111111111 aaabe
+b11111111111111111111111111111111 aaabf
+b1111111111 aaabg
+0aaabh
+0aaabi
+0aaabj
+0aaabk
+0aaabl
+1aaabm
+b0 aaabn
+b0 aaabo
+b0 aaabp
+b0 aaabq
+1aaabr
+b0 aaabs
+b11111111111111111111111111111111 aaabt
+b11111111111111111111111111111111 aaabu
+b11111111111111111111111111111111 aaabv
+b1111111111 aaabw
+b0 aaabx
+b0 aaaby
+1aaabz
+b0 aaaca
+b0 aaacb
+b0 aaacc
+b0 aaacd
+b0 aaace
+b0 aaacf
+b0 aaacg
+b0 aaach
+b0 aaaci
+b0 aaacj
+b0 aaack
+b0 aaacl
+b0 aaacm
+b0 aaacn
+b0 aaaco
+b0 aaacp
+b0 aaacq
+b0 aaacr
+1aaacs
+b0 aaact
+b11111111111111111111111111111111 aaacu
+b11111111111111111111111111111111 aaacv
+b11111111111111111111111111111111 aaacw
+b1111111111 aaacx
+b0 aaacy
+b0 aaacz
+b0 aaada
+b0 aaadb
+b0 aaadc
+b0 aaadd
+b0 aaade
+b0 aaadf
+b0 aaadg
+1aaadh
+b0 aaadi
+b0 aaadj
+r0 aaadk
+r0 aaadl
+r0 aaadm
+r0 aaadn
+r0 aaado
+r0 aaadp
+r0 aaadq
+r0 aaadr
+r0 aaads
+r0 aaadt
+r0 aaadu
+r0 aaadv
+r0 aaadw
+r0 aaadx
+r0 aaady
+r0 aaadz
+1aaaea
+b0 aaaeb
+b11111111111111111111111111111111 aaaec
+b11111111111111111111111111111111 aaaed
+b11111111111111111111111111111111 aaaee
+b1111111111 aaaef
+r0 aaaeg
+r0 aaaeh
+r0 aaaei
+r0 aaaej
+r0 aaaek
+r0 aaael
+r0 aaaem
+r0 aaaen
+b0 aaaeo
+0aaaep
+0aaaeq
+0aaaer
+0aaaes
+b0 aaaet
+b11111111111111111111111111111111 aaaeu
+b11111111111111111111111111111111 aaaev
+b11111111111111111111111111111111 aaaew
+b1111111111 aaaex
+$end
+
+#5
+1aaaaa
+1aaaan
+b10110 aaabp
+b10110 aaabq
+b1 aaacc
+b1 aaacd
+b1 aaace
+b1 aaacf
+b1 aaacg
+b1 aaach
+b1 aaaci
+b1 aaacj
+b1 aaack
+b1 aaacl
+b1 aaacm
+b1 aaacn
+b1 aaaco
+b1 aaacp
+b1 aaacq
+b1 aaacr
+r1 aaadk
+r1 aaadl
+r1 aaadm
+r1 aaadn
+r1 aaado
+r1 aaadp
+r1 aaadq
+r1 aaadr
+r1 aaads
+r1 aaadt
+r1 aaadu
+r1 aaadv
+r1 aaadw
+r1 aaadx
+r1 aaady
+r1 aaadz
+
+#10
+0aaaaa
+1aaaab
+
+#15
+1aaaaa
+1aaaaf
+b0 aaaag
+b100 aaaah
+b1 aaaaj
+b10 aaaak
+
+#20
+0aaaaa
+
+#25
+1aaaaa
+b1 aaaag
+b10 aaaah
+b1 aaaai
+b11 aaaaj
+b11 aaaak
+1aaaam
+0aaaan
+b100 aaaao
+b1 aaaaq
+b10 aaaar
+b1 aaaat
+1aaaau
+b100 aaaaw
+b1 aaaay
+b10 aaaaz
+
+#30
+0aaaaa
+
+#35
+1aaaaa
+b10 aaaag
+b1 aaaah
+b0 aaaai
+b1001 aaaak
+b10 aaaao
+b1 aaaap
+b11 aaaaq
+b11 aaaar
+b10 aaaaw
+b1 aaaax
+b11 aaaay
+b11 aaaaz
+b1 aaabb
+b100 aaabc
+b0 aaabd
+b1 aaabe
+b10 aaabf
+1aaabh
+1aaabj
+b1 aaacb
+b11 aaack
+b11 aaacl
+b11 aaacm
+b11 aaacn
+b11 aaaco
+b11 aaacp
+b11 aaacq
+b11 aaacr
+
+#40
+0aaaaa
+
+#45
+1aaaaa
+b11 aaaag
+b11 aaaah
+b11 aaaai
+b1001 aaaaj
+b100 aaaak
+b1 aaaao
+b0 aaaap
+b1001 aaaar
+b1 aaaaw
+b0 aaaax
+b1001 aaaaz
+b10 aaabc
+b1 aaabd
+b11 aaabe
+b11 aaabf
+1aaabi
+0aaabj
+b1 aaabn
+b11 aaabo
+b11111111111111111111111111110110 aaabp
+b1011 aaabq
+0aaabz
+
+#50
+0aaaaa
+
+#55
+1aaaaa
+b100 aaaag
+b101 aaaah
+b0 aaaai
+b100 aaaaj
+b101 aaaak
+b11 aaaao
+b11 aaaap
+b1001 aaaaq
+b100 aaaar
+b11 aaaaw
+b11 aaaax
+b1001 aaaay
+b100 aaaaz
+b1 aaabc
+b0 aaabd
+b1001 aaabf
+0aaabi
+1aaabl
+0aaabm
+b0 aaabn
+b10110 aaabp
+1aaabz
+
+#60
+0aaaaa
+
+#65
+1aaaaa
+b101 aaaag
+b1 aaaaj
+b100 aaaak
+b101 aaaao
+b0 aaaap
+b100 aaaaq
+b101 aaaar
+b101 aaaaw
+b0 aaaax
+b100 aaaay
+b101 aaaaz
+b11 aaabc
+b11 aaabd
+b1001 aaabe
+b100 aaabf
+0aaabh
+0aaabl
+1aaabm
+
+#70
+0aaaaa
+
+#75
+1aaaaa
+b110 aaaag
+b110 aaaah
+b11 aaaai
+b100 aaaaj
+b10 aaaak
+0aaaam
+b1 aaaaq
+b100 aaaar
+0aaaau
+b10 aaabb
+
+#80
+0aaaaa
+
+#85
+1aaaaa
+b111 aaaag
+b111 aaaah
+b0 aaaai
+b111 aaaaj
+b11111111111111111111111111111100 aaaak
+b100 aaaal
+b10 aaaat
+b1 aaabq
+b10 aaabs
+b1 aaabt
+b11 aaabu
+b11 aaabv
+b1 aaabx
+1aaaep
+1aaaes
+b10 aaaet
+b1 aaaeu
+b11 aaaev
+b11 aaaew
+
+#90
+0aaaaa
+
+#95
+1aaaaa
+b1000 aaaag
+b0 aaaah
+b11111111111111111111111111111111 aaaai
+b11111111111111111111111111111111 aaaaj
+b11111111111111111111111111111111 aaaak
+b1111111111 aaaal
+b11 aaaat
+1aaabh
+1aaabl
+b11 aaabn
+b1 aaabp
+b100 aaact
+b0 aaacu
+b1 aaacv
+b10 aaacw
+b100 aaacy
+b100 aaacz
+b100 aaada
+b100 aaadb
+b100 aaadc
+b100 aaadd
+b100 aaade
+b100 aaadf
+0aaaep
+1aaaeq
+b100 aaaet
+b0 aaaeu
+b1 aaaev
+b10 aaaew
+
+#100
+0aaaaa
+
+#105
+1aaaaa
+b1001 aaaag
+b100 aaaat
+b1 aaabb
+b101 aaabc
+b0 aaabd
+b100 aaabe
+b101 aaabf
+1aaabj
+0aaabl
+b100 aaabo
+b1010 aaabq
+0aaaeq
+0aaaes
+
+#110
+0aaaaa
+
+#115
+1aaaaa
+b1010 aaaag
+b101 aaaat
+b0 aaabb
+0aaabh
+0aaabj
+0aaabz
+
+#120
+0aaaaa
+
+#125
+1aaaaa
+b1011 aaaag
+b110 aaaat
+1aaabh
+1aaabj
+1aaabz
+
+#130
+0aaaaa
+
+#135
+1aaaaa
+b1100 aaaag
+b111 aaaat
+0aaabh
+0aaabj
+0aaabz
+
+#140
+0aaaaa
+
+#145
+1aaaaa
+b1101 aaaag
+b1000 aaaat
+1aaabh
+1aaabj
+1aaabz
+
+#150
+0aaaaa
+
+#155
+1aaaaa
+b1110 aaaag
+b1001 aaaat
+0aaabh
+0aaabj
+0aaabz
+
+#160
+0aaaaa
+
+#165
+1aaaaa
+1aaaac
+b1111 aaaag
+b1010 aaaat
+1aaabh
+1aaabj
+1aaabz
+b101 aaact
+b100 aaacv
+b101 aaacw
+b1011 aaacy
+b1011 aaacz
+b1011 aaada
+b1011 aaadb
+b1011 aaadc
+b1011 aaadd
+b1011 aaade
+b1011 aaadf
+1aaaeq
+1aaaes
+b101 aaaet
+b100 aaaev
+b101 aaaew
+
+#170
+0aaaaa
+
+#175
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+1aaaep
+0aaaeq
+b1 aaaet
+b11 aaaev
+b1001 aaaew
+
+#180
+0aaaaa
+
+#185
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+0aaaep
+1aaaeq
+b101 aaaet
+b100 aaaev
+b101 aaaew
+
+#190
+0aaaaa
+
+#195
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+1aaaep
+0aaaeq
+b1 aaaet
+b11 aaaev
+b1001 aaaew
+
+#200
+0aaaaa
+
+#205
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+0aaaep
+1aaaeq
+b101 aaaet
+b100 aaaev
+b101 aaaew
+
+#210
+0aaaaa
+
+#215
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+1aaaep
+0aaaeq
+b1 aaaet
+b11 aaaev
+b1001 aaaew
+
+#220
+0aaaaa
+
+#225
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+0aaaep
+1aaaeq
+b101 aaaet
+b100 aaaev
+b101 aaaew
+
+#230
+0aaaaa
+
+#235
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+1aaaep
+0aaaeq
+b1 aaaet
+b11 aaaev
+b1001 aaaew
+
+#240
+0aaaaa
+
+#245
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+0aaaep
+1aaaeq
+b101 aaaet
+b100 aaaev
+b101 aaaew
+
+#250
+0aaaaa
+
+#255
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+1aaaep
+0aaaeq
+b1 aaaet
+b11 aaaev
+b1001 aaaew
+
+#260
+0aaaaa
+
+#265
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+0aaaep
+1aaaeq
+b101 aaaet
+b100 aaaev
+b101 aaaew
+
+#270
+0aaaaa
+
+#275
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#280
+0aaaaa
+
+#285
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#290
+0aaaaa
+
+#295
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#300
+0aaaaa
+
+#305
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#310
+0aaaaa
+
+#315
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#320
+0aaaaa
+
+#325
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#330
+0aaaaa
+
+#335
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#340
+0aaaaa
+
+#345
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#350
+0aaaaa
+
+#355
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#360
+0aaaaa
+
+#365
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#370
+0aaaaa
+
+#375
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#380
+0aaaaa
+
+#385
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#390
+0aaaaa
+
+#395
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#400
+0aaaaa
+
+#405
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#410
+0aaaaa
+
+#415
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#420
+0aaaaa
+
+#425
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#430
+0aaaaa
+
+#435
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#440
+0aaaaa
+
+#445
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#450
+0aaaaa
+
+#455
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#460
+0aaaaa
+
+#465
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#470
+0aaaaa
+
+#475
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#480
+0aaaaa
+
+#485
+1aaaaa
+1aaabh
+1aaabj
+1aaabz
+1aaaeq
+1aaaes
+
+#490
+0aaaaa
+
+#495
+1aaaaa
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+0aaaes
+
+#500

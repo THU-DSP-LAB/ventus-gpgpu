@@ -6,6 +6,8 @@ void ibuffer::IBUF_ACTION()
 
     while (true)
     {
+        ibuf_full = ififo.nb_can_put();
+        top_ins = ififo.peek();
         wait(rst_n.negedge_event() |
              fetch_out->obtain_event() |
              dispatch->obtain_event());

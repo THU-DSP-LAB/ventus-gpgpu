@@ -3,13 +3,6 @@
 
 #include "../parameters.h"
 
-struct datapack
-{
-    I_TYPE ins;
-    reg_t rss1_data;
-    reg_t rss2_data;
-};
-
 // template <typename T>
 class sALU : public sc_module
 {

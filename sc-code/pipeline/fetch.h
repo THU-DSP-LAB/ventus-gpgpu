@@ -1,4 +1,3 @@
-
 #ifndef FETCH_H_
 #define FETCH_H_
 
@@ -15,8 +14,9 @@ SC_MODULE(fetch)
     sc_out<I_TYPE> fetch_ins{"fetch_ins"};
     sc_port<event_if> fetch_out{"fetch_out"};
 
-    sc_signal<sc_uint<ireg_bitsize>> pc;
+    sc_signal<sc_int<ireg_bitsize + 1>> pc;
     I_TYPE ireg[ireg_size];
+    // I_TYPE aaaaa = I_TYPE(vfadd_, 0, 1, 2);
 
     void PROGRAM_COUNTER();
     void INSTRUCTION_REG();

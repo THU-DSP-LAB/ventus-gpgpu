@@ -1,0 +1,170 @@
+$date
+     Jan 26, 2023       01:35:27
+$end
+
+$version
+ SystemC 2.3.4-Accellera --- Jan 19 2023 19:11:16
+$end
+
+$timescale
+     1 ns
+$end
+
+$scope module SystemC $end
+$var wire    1  aaaaa  Boolnum       $end
+$var wire   32  aaaab  Intnum [31:0]  $end
+$var wire    1  aaaac  CLOCK       $end
+$scope module INS $end
+$var wire   32  aaaad  op [31:0]  $end
+$var wire   32  aaaae  s1 [31:0]  $end
+$var wire   32  aaaaf  s2 [31:0]  $end
+$var wire   32  aaaag  d [31:0]  $end
+$upscope $end
+$upscope $end
+$enddefinitions  $end
+
+$comment
+All initial values are dumped below at time 0 sec = 0 timescale units.
+$end
+
+$dumpvars
+0aaaaa
+b0 aaaab
+1aaaac
+b111111101100101 aaaad
+b0 aaaae
+b0 aaaaf
+b0 aaaag
+$end
+
+#5
+b1010 aaaab
+0aaaac
+b10 aaaad
+b1 aaaae
+b10 aaaaf
+b11 aaaag
+
+#10
+1aaaac
+
+#15
+0aaaac
+
+#20
+1aaaac
+
+#25
+0aaaac
+
+#30
+1aaaac
+
+#35
+1aaaaa
+b11110 aaaab
+0aaaac
+b100 aaaad
+b100 aaaae
+b101 aaaaf
+b110 aaaag
+
+#40
+0aaaaa
+b1100100 aaaab
+1aaaac
+
+#45
+0aaaac
+
+#50
+1aaaac
+
+#55
+0aaaac
+
+#60
+1aaaac
+
+#65
+0aaaac
+
+#70
+1aaaac
+
+#75
+0aaaac
+
+#80
+1aaaac
+
+#85
+0aaaac
+
+#90
+1aaaac
+
+#95
+0aaaac
+
+#100
+1aaaac
+
+#105
+0aaaac
+
+#110
+1aaaac
+
+#115
+0aaaac
+
+#120
+1aaaac
+
+#125
+0aaaac
+
+#130
+1aaaac
+
+#135
+0aaaac
+
+#140
+1aaaac
+
+#145
+0aaaac
+
+#150
+1aaaac
+
+#155
+0aaaac
+
+#160
+1aaaac
+
+#165
+0aaaac
+
+#170
+1aaaac
+
+#175
+0aaaac
+
+#180
+1aaaac
+
+#185
+0aaaac
+
+#190
+1aaaac
+
+#195
+0aaaac
+
+#200

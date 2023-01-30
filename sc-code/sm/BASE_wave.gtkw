@@ -1,0 +1,106 @@
+[*]
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Sun Jan 29 16:19:11 2023
+[*]
+[dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave.vcd"
+[dumpfile_mtime] "Sun Jan 29 16:18:07 2023"
+[dumpfile_size] 5125
+[savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave.gtkw"
+[timestart] 0
+[size] 1908 999
+[pos] -1 -1
+*-4.872661 25 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] SystemC.
+[sst_width] 214
+[signals_width] 307
+[sst_expanded] 1
+[sst_vpaned_height] 281
+@420
+SystemC.Clk
+SystemC.Rst_n
+[color] 1
+SystemC.pc[9:0]
+[color] 1
+SystemC.jump
+[color] 1
+SystemC.jump_addr[9:0]
+[color] 1
+SystemC.fetch_ins.op[31:0]
+[color] 1
+SystemC.fetch_ins.s1[31:0]
+[color] 1
+SystemC.fetch_ins.s2[31:0]
+[color] 1
+SystemC.fetch_ins.d[31:0]
+@421
+[color] 1
+SystemC.fetch_ins.jump_addr[31:0]
+@420
+[color] 1
+SystemC.fetch_valid
+[color] 3
+SystemC.ififo_elem_num[31:0]
+[color] 3
+SystemC.ibuf_full
+@28
+[color] 3
+SystemC.ibuf_empty
+@420
+[color] 2
+SystemC.ibuftop_ins.op[31:0]
+[color] 2
+SystemC.ibuftop_ins.s1[31:0]
+[color] 2
+SystemC.ibuftop_ins.s2[31:0]
+[color] 2
+SystemC.ibuftop_ins.d[31:0]
+[color] 2
+SystemC.ibuftop_ins.jump_addr[31:0]
+@28
+[color] 3
+SystemC.can_dispatch
+[color] 3
+SystemC.dispatch
+@420
+[color] 3
+SystemC.issue_ins.op[31:0]
+[color] 3
+SystemC.issue_ins.s1[31:0]
+[color] 3
+SystemC.issue_ins.s2[31:0]
+[color] 3
+SystemC.issue_ins.d[31:0]
+@28
+[color] 6
+SystemC.opc_full
+@420
+[color] 6
+SystemC.opcfifo_elem_num[31:0]
+[color] 6
+SystemC.opctop_ins.op[31:0]
+[color] 6
+SystemC.opctop_ins.s1[31:0]
+[color] 6
+SystemC.opctop_ins.s2[31:0]
+[color] 6
+SystemC.opctop_ins.d[31:0]
+@28
+[color] 1
+SystemC.emit
+[color] 1
+SystemC.emito_salu
+@420
+[color] 1
+SystemC.salu_ready
+SystemC.rss1_addr[4:0]
+SystemC.rss1_data[31:0]
+SystemC.rss2_addr[4:0]
+SystemC.rss2_data[31:0]
+@28
+SystemC.salufifo_empty
+SystemC.wb_ena
+SystemC.jump
+@420
+SystemC.jump_addr[9:0]
+[pattern_trace] 1
+[pattern_trace] 0

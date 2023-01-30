@@ -1,0 +1,181 @@
+$date
+     Jan 26, 2023       15:19:20
+$end
+
+$version
+ SystemC 2.3.4-Accellera --- Jan 19 2023 19:11:16
+$end
+
+$timescale
+     1 ns
+$end
+
+$scope module SystemC $end
+$var wire    1  aaaaa  Clk       $end
+$var wire    1  aaaab  Rst_n       $end
+$var wire    1  aaaac  ibuf_full       $end
+$var wire    1  aaaad  jump       $end
+$var wire   10  aaaae  jump_addr [9:0]  $end
+$var wire    1  aaaaj  fetch_out_event       $end
+$var wire   10  aaaak  pc [9:0]  $end
+$scope module fetch_ins $end
+$var wire   32  aaaaf  op [31:0]  $end
+$var wire   32  aaaag  s1 [31:0]  $end
+$var wire   32  aaaah  s2 [31:0]  $end
+$var wire   32  aaaai  d [31:0]  $end
+$upscope $end
+$scope module ireg(0) $end
+$var wire   32  aaaal  op [31:0]  $end
+$var wire   32  aaaam  s1 [31:0]  $end
+$var wire   32  aaaan  s2 [31:0]  $end
+$var wire   32  aaaao  d [31:0]  $end
+$upscope $end
+$scope module ireg(1) $end
+$var wire   32  aaaap  op [31:0]  $end
+$var wire   32  aaaaq  s1 [31:0]  $end
+$var wire   32  aaaar  s2 [31:0]  $end
+$var wire   32  aaaas  d [31:0]  $end
+$upscope $end
+$upscope $end
+$enddefinitions  $end
+
+$comment
+All initial values are dumped below at time 0 sec = 0 timescale units.
+$end
+
+$dumpvars
+1aaaaa
+0aaaab
+0aaaac
+0aaaad
+b0 aaaae
+b0 aaaaf
+b0 aaaag
+b0 aaaah
+b0 aaaai
+0aaaaj
+b1111111111 aaaak
+b1 aaaal
+b0 aaaam
+b1 aaaan
+b10 aaaao
+b10 aaaap
+b0 aaaaq
+b1 aaaar
+b10 aaaas
+$end
+
+#5
+0aaaaa
+1aaaab
+
+#10
+1aaaaa
+b1 aaaaf
+b1 aaaah
+b10 aaaai
+b0 aaaak
+
+#15
+0aaaaa
+
+#20
+1aaaaa
+b10 aaaaf
+1aaaaj
+b1 aaaak
+
+#21
+0aaaaj
+
+#25
+0aaaaa
+
+#30
+1aaaaa
+1aaaad
+b10 aaaae
+b11 aaaaf
+1aaaaj
+b10 aaaak
+
+#31
+0aaaaj
+
+#35
+0aaaaa
+
+#40
+1aaaaa
+0aaaad
+b101 aaaaf
+1aaaaj
+b100 aaaak
+
+#41
+0aaaaj
+
+#45
+0aaaaa
+
+#50
+1aaaaa
+b110 aaaaf
+1aaaaj
+b101 aaaak
+
+#51
+0aaaaj
+
+#55
+0aaaaa
+
+#60
+1aaaaa
+b111 aaaaf
+1aaaaj
+b110 aaaak
+
+#61
+0aaaaj
+
+#65
+0aaaaa
+
+#70
+1aaaaa
+b0 aaaaf
+b0 aaaah
+b0 aaaai
+1aaaaj
+b111 aaaak
+
+#71
+0aaaaj
+
+#75
+0aaaaa
+
+#80
+1aaaaa
+1aaaaj
+b1000 aaaak
+
+#81
+0aaaaj
+
+#85
+0aaaaa
+
+#90
+1aaaaa
+1aaaaj
+b1001 aaaak
+
+#91
+0aaaaj
+
+#95
+0aaaaa
+
+#100

@@ -12,7 +12,8 @@ SC_MODULE(ibuffer)
     sc_port<event_if> fetch_out;
     sc_port<event_if> dispatch;         // from issue
 
-    sc_out<I_TYPE> ibuf_ins;
+    sc_out<I_TYPE> ibuf_ins;            // 取出的
+    sc_out<I_TYPE> top_ins;             // fifo头部的
     sc_out<bool> ibuf_full;             // to fetch
 
     void IBUF_ACTION();

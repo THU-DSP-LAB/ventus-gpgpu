@@ -1,0 +1,38 @@
+[*]
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Thu Jan 26 07:43:25 2023
+[*]
+[dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/pipeline/fetch_wave.vcd"
+[dumpfile_mtime] "Thu Jan 26 07:19:20 2023"
+[dumpfile_size] 1979
+[savefile] "/home/lan/work/ventus-gpgpu/sc-code/pipeline/fetch_wave.gtkw"
+[timestart] 0
+[size] 1908 999
+[pos] -1 -1
+*-4.944516 20 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] SystemC.
+[treeopen] SystemC.fetch_ins.
+[sst_width] 214
+[signals_width] 365
+[sst_expanded] 1
+[sst_vpaned_height] 291
+@28
+SystemC.Clk
+SystemC.Rst_n
+@420
+SystemC.pc[9:0]
+@23
+SystemC.fetch_ins.op[31:0]
+@22
+SystemC.fetch_ins.d[31:0]
+SystemC.fetch_ins.s1[31:0]
+SystemC.fetch_ins.s2[31:0]
+@28
+SystemC.ibuf_full
+SystemC.jump
+@22
+SystemC.jump_addr[9:0]
+@28
+SystemC.fetch_out_event
+[pattern_trace] 1
+[pattern_trace] 0
