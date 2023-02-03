@@ -17,7 +17,7 @@ object parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, no
 
   val SINGLE_INST:Boolean=false
 
-  def num_warp=4
+  def num_warp=8
   def depth_warp=log2Ceil(num_warp)
   def num_thread=8
   def depth_thread=log2Ceil(num_thread)
