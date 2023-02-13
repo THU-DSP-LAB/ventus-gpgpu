@@ -85,7 +85,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
   val outerBytes=params.beatBytes
   val rowBytes = params.micro.portFactor * max(innerBytes, outerBytes)
   require (rowBytes < params.cache.sizeBytes)
-  val rowEntries = params.cache.sizeBytes / rowBytes
+  val rowEntries = params.cache.sizeBytes / rowBytes *params.micro.portFactor
   val rowBits = log2Ceil(rowEntries)
   val numBanks = rowBytes / params.micro.writeBytes
   val codeBits = 8*params.micro.writeBytes
@@ -127,7 +127,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
 
   def req[T <: BankedStoreAddress](b: DecoupledIO[T], write: Bool, d: UInt): Request = {
     val beatBytes = if (b.bits.inner) innerBytes else outerBytes
-    val ports = beatBytes /params.micro.writeBytes  //2
+    val ports = beatBytes /params.micro.writeBytes  //4
     val bankBits = log2Ceil(numBanks / ports) //2 port factor==4
     val words = Seq.tabulate(ports) { i =>
       val data = d((i + 1) * 8 * params.micro.writeBytes - 1, i * 8 *params.micro.writeBytes)
@@ -139,11 +139,11 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
 
     val select = UIntToOH(a(bankBits-1, 0), numBanks/ports)
     val ready  = Cat(Seq.tabulate(numBanks/ports) { i => !(out.bankSum((i+1)*ports-1, i*ports) &m).orR } .reverse)
-    b.ready := true.B 
+    b.ready := ready(a(bankBits-1,0))
 
     out.wen      := write
-    out.index    := a >> bankBits   //width=rowbits
-    out.bankSel  := Mux(b.valid, FillInterleaved(ports, select)&Fill(numBanks/ports,m) , 0.U)
+    out.index    := a //>> bankBits   //width=rowbits
+    out.bankSel  := Mux(b.valid, FillInterleaved(ports, select)&Fill(numBanks/ports,m) , 0.U) //ports =write ports
     out.bankEn   :=  out.bankSel & FillInterleaved(ports, ready)
     out.data     := VecInit(Seq.fill(numBanks/ports) { words }.flatten) //需要将尺寸填成跟rowbytes数据一样
 
