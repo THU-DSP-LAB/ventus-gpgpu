@@ -688,9 +688,9 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
       alu(x).in3 := inReg.in3(x)
       alu(x).func := inReg.ctrl.alu_fn(4, 0)
       hardResult(x) := alu(x).out
-      when(io.in.bits.ctrl.reverse) {
-        alu(x).in1 := io.in.bits.in2(x)
-        alu(x).in2 := io.in.bits.in1(x)
+      when(inReg.ctrl.reverse) {
+        alu(x).in1 := inReg.in2(x)
+        alu(x).in2 := inReg.in1(x)
       }
       when((inReg.ctrl.alu_fn === FN_VMANDNOT) | (inReg.ctrl.alu_fn === FN_VMORNOT) | (inReg.ctrl.alu_fn === FN_VMNAND) | (inReg.ctrl.alu_fn === FN_VMNOR) | (inReg.ctrl.alu_fn === FN_VMXNOR)) {
         when((inReg.ctrl.alu_fn === FN_VMANDNOT) | (inReg.ctrl.alu_fn === FN_VMORNOT)) {
