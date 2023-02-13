@@ -51,6 +51,7 @@ class CtrlSigs extends Bundle {
   val writemask = Bool()
   val wxd = Bool()
   val pc=UInt(32.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
 }
 class scoreboardIO extends Bundle{
@@ -64,18 +65,20 @@ class scoreboardIO extends Bundle{
   val wb_v_fire=Input(Bool())
   val wb_x_fire=Input(Bool())
   val delay=Output(Bool())
+  val op_col_in_fire=Input(Bool())
+  val op_col_out_fire=Input(Bool())
 }
 class ScoreboardUtil(n: Int,zero:Boolean=false)
 {
-  def set(en: Bool, addr: UInt): Unit = update(en, _next.asUInt() | mask(en, addr))
-  def clear(en: Bool, addr: UInt): Unit = update(en, _next.asUInt() & (~mask(en, addr)).asUInt())
+  def set(en: Bool, addr: UInt): Unit = update(en, _next.asUInt | mask(en, addr))
+  def clear(en: Bool, addr: UInt): Unit = update(en, _next.asUInt & (~mask(en, addr)).asUInt)
   def read(addr: UInt): Bool = r(addr)
   def readBypassed(addr: UInt): Bool = _next(addr)
   private val _r = RegInit(0.U(n.W))
   private val r = if(zero) (_r >> 1 << 1) else _r
   private var _next = r
   private var ens = false.B
-  private def mask(en: Bool, addr: UInt) = Mux(en, (1.U << addr).asUInt(), 0.U)
+  private def mask(en: Bool, addr: UInt) = Mux(en, (1.U << addr).asUInt, 0.U)
   private def update(en: Bool, update: UInt) = {
     _next = update
     ens = ens || en
@@ -87,6 +90,7 @@ class Scoreboard extends Module{
   val vectorReg=new ScoreboardUtil(32)
   val scalarReg=new ScoreboardUtil(32,true)
   val beqReg=new ScoreboardUtil(1)
+  val OpColReg=new ScoreboardUtil(1)
   val fenceReg=new ScoreboardUtil(1)
   vectorReg.set(io.if_fire & io.if_ctrl.wvd,io.if_ctrl.reg_idxw)
   vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wvd,io.wb_v_ctrl.reg_idxw)
@@ -94,6 +98,8 @@ class Scoreboard extends Module{
   scalarReg.clear(io.wb_x_fire & io.wb_x_ctrl.wxd,io.wb_x_ctrl.reg_idxw)
   beqReg.set(io.if_fire & ((io.if_ctrl.branch=/=0.U)|(io.if_ctrl.barrier)),0.U)
   beqReg.clear(io.br_ctrl,0.U)
+  OpColReg.set(io.op_col_in_fire, 0.U)
+  OpColReg.clear(io.op_col_out_fire, 0.U)
   fenceReg.set(io.if_fire & io.if_ctrl.fence,0.U)
   fenceReg.clear(io.fence_end,0.U)
   val read1=MuxLookup(io.ibuffer_if_ctrl.sel_alu1,false.B,Array(A1_RS1->scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),A1_VRS1->vectorReg.read(io.ibuffer_if_ctrl.reg_idx1)))
@@ -102,6 +108,7 @@ class Scoreboard extends Module{
   val readm=Mux(io.ibuffer_if_ctrl.mask,vectorReg.read(0.U),false.B)
   val readw=Mux(io.ibuffer_if_ctrl.wxd,scalarReg.read(io.ibuffer_if_ctrl.reg_idxw),false.B)|Mux(io.ibuffer_if_ctrl.wvd,vectorReg.read(io.ibuffer_if_ctrl.reg_idxw),false.B)
   val readb=beqReg.read(0.U)
+  val read_op_col=OpColReg.read(0.U)
   val readf=io.ibuffer_if_ctrl.mem & fenceReg.read(0.U)
-  io.delay:=read1|read2|read3|readm|readb|readf
+  io.delay:=read1|read2|read3|readm|readw|readb|readf|read_op_col
 }
