@@ -497,6 +497,13 @@ class InstrDecodeV2 extends VTModule with DecodeParameters {
       }
     }
   }
+  // eg1.               0    1    2    3                    |2.  0    1    2    3
+  // inst               0  EXT->  A    B    Scratch: N      |    A  EXT->  B  EXT    Scratch: EXT
+  // inst_mask          0    1    1    1                    |    1    1    1    1
+  // regextInfo_pre     N  EXT    N    N                    |    N  EXT    N  EXT
+  // regextInfo         N    N  EXT    N    N->Scratch      |  EXT    N  EXT    N    EXT->Scratch
+  // maskAfterExt       0    0    1    1                    |    1    0    1    0
+  // result             0    0   EA    B                    |   EA    0   EB    0
   val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
   when(io.flush_wid.valid){
     scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
@@ -509,7 +516,7 @@ class InstrDecodeV2 extends VTModule with DecodeParameters {
 
   val maskAfterExt = Wire(Vec(num_fetch, Bool()))
   (0 until num_fetch).foreach{ i =>
-    maskAfterExt(i) := io.inst_mask(i) && !(regextInfo(i).isExtI || regextInfo(i).isExt)
+    maskAfterExt(i) := io.inst_mask(i) && !(regextInfo_pre(i).isExtI || regextInfo_pre(i).isExt) // is Instr but not EXTs
   }
 
   val ctrlSignals = (0 until num_fetch).map(i => ListLookup(io.inst(i), IDecode.default, IDecode.table))
