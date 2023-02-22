@@ -136,6 +136,67 @@ SC_MODULE(itype_testbench)
   }
 };
 
+// SC_MODULE(delaytest)
+// {
+//   sc_in_clk clk;
+//   sc_event_queue eq;
+//   sc_int<32> value = 0;
+//   sc_signal<int> sigvalue;
+//   tlm::tlm_fifo<int> fifo, bibo;
+//   void eventnot()
+//   {
+//     while (true)
+//     {
+//       wait();
+//       eq.notify(sc_time(PERIOD, SC_NS));
+//       cout << "notified by clk.pos, will notify eq in 10ns, now is " << sc_time_stamp() << "\n";
+//     }
+//   }
+//   void updatevalue()
+//   {
+//     while (true)
+//     {
+//       wait(eq.default_event());
+//       cout << "notified by eq at time " << sc_time_stamp() << ", old value is " << value << ", old sigvalue is " << sigvalue << "\n";
+//       cout << "notified by eq, old fifo has " << fifo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+
+//       // value = 100;
+//       sigvalue = sigvalue + 1;
+//       // sigvalue = 100;
+//       fifo.put(value);
+//       cout << "notified by eq, after update, value is " << value << ", sigvalue is " << sigvalue << " at time " << sc_time_stamp() << "\n";
+//       cout << "notified by eq, after put, fifo has " << fifo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+//       wait(SC_ZERO_TIME);
+//       value = value + 1;
+//       cout << "notified by eq, after SC_ZERO_TIME, value is " << value << ", sigvalue is " << sigvalue << " at time " << sc_time_stamp() << "\n";
+//       cout << "notified by eq, after SC_ZERO_TIME, fifo has " << fifo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+//       cout << "notified by eq, after SC_ZERO_TIME, bibo has " << bibo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+//     }
+//   }
+//   void display()
+//   {
+//     while (true)
+//     {
+//       wait(clk.posedge_event());
+//       cout<<"ffffffffffffffffff\n";
+//       cout << "notified by clk.pos, value=" << value << ", sigvalue=" << sigvalue << ", fifo has " << fifo.used() << " elems in it, bibo has " << bibo.used() << " elems at time " << sc_time_stamp() << "\n";
+//       bibo.put(value);
+//       cout << "notified by clk.pos, after put, bibo has " << bibo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+//       wait(SC_ZERO_TIME);
+//       cout << "notified by clk.pos, after SC_ZERO_TIME, value=" << value << ", sigvalue=" << sigvalue << ", bibo has " << bibo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+//     }
+//   }
+
+//   delaytest(sc_module_name name_) : sc_module(name_), fifo(10), bibo(10)
+//   {
+//     SC_HAS_PROCESS(delaytest);
+//     SC_THREAD(eventnot);
+//     sensitive << clk.pos();
+//     SC_THREAD(updatevalue);
+//     SC_THREAD(display);
+//   }
+// };
+
 SC_MODULE(delaytest)
 {
   sc_in_clk clk;
@@ -157,20 +218,11 @@ SC_MODULE(delaytest)
     while (true)
     {
       wait(eq.default_event());
-      cout << "notified by eq at time " << sc_time_stamp() << ", old value is " << value << ", old sigvalue is " << sigvalue << "\n";
-      cout << "notified by eq, old fifo has " << fifo.used() << " elems in it at time " << sc_time_stamp() << "\n";
-
-      // value = 100;
+      cout << "notified by eq at time " << sc_time_stamp() << ", old sigvalue is " << sigvalue << "\n";
       sigvalue = sigvalue + 1;
-      // sigvalue = 100;
-      fifo.put(value);
-      cout << "notified by eq, after update, value is " << value << ", sigvalue is " << sigvalue << " at time " << sc_time_stamp() << "\n";
-      cout << "notified by eq, after put, fifo has " << fifo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+      cout << "notified by eq, after update, sigvalue is " << sigvalue << " at time " << sc_time_stamp() << "\n";
       wait(SC_ZERO_TIME);
-      value = value + 1;
-      cout << "notified by eq, after SC_ZERO_TIME, value is " << value << ", sigvalue is " << sigvalue << " at time " << sc_time_stamp() << "\n";
-      cout << "notified by eq, after SC_ZERO_TIME, fifo has " << fifo.used() << " elems in it at time " << sc_time_stamp() << "\n";
-      cout << "notified by eq, after SC_ZERO_TIME, bibo has " << bibo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+      cout << "notified by eq, after SC_ZERO_TIME, sigvalue is " << sigvalue << " at time " << sc_time_stamp() << "\n";
     }
   }
   void display()
@@ -178,12 +230,9 @@ SC_MODULE(delaytest)
     while (true)
     {
       wait(clk.posedge_event());
-      cout<<"ffffffffffffffffff\n";
-      cout << "notified by clk.pos, value=" << value << ", sigvalue=" << sigvalue << ", fifo has " << fifo.used() << " elems in it, bibo has " << bibo.used() << " elems at time " << sc_time_stamp() << "\n";
-      bibo.put(value);
-      cout << "notified by clk.pos, after put, bibo has " << bibo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+      cout << "notified by clk.pos, sigvalue=" << sigvalue << " at time " << sc_time_stamp() << "\n";
       wait(SC_ZERO_TIME);
-      cout << "notified by clk.pos, after SC_ZERO_TIME, value=" << value << ", sigvalue=" << sigvalue << ", bibo has " << bibo.used() << " elems in it at time " << sc_time_stamp() << "\n";
+      cout << "notified by clk.pos, after SC_ZERO_TIME, sigvalue=" << sigvalue << " at time " << sc_time_stamp() << "\n";
     }
   }
 

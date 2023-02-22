@@ -1,9 +1,9 @@
 $date
-     Jan 30, 2023       23:00:59
+     Feb 21, 2023       16:07:39
 $end
 
 $version
- SystemC 2.3.4-Accellera --- Jan 19 2023 19:11:16
+ SystemC 2.3.4-Accellera --- Jan 18 2023 20:21:33
 $end
 
 $timescale
@@ -46,10 +46,14 @@ $var wire    5  aaadi  rsf1_addr [4:0]  $end
 $var wire    5  aaadj  rsf2_addr [4:0]  $end
 $var wire    1  aaaea  vfpufifo_empty       $end
 $var wire   32  aaaeo  vfpufifo_elem_num [31:0]  $end
-$var wire    1  aaaep  write_s       $end
-$var wire    1  aaaeq  write_v       $end
-$var wire    1  aaaer  write_f       $end
-$var wire    1  aaaes  wb_ena       $end
+$var wire    1  aaaep  lsu_ready       $end
+$var wire    1  aaaeq  lsufifo_empty       $end
+$var wire   32  aaafn  lsufifo_elem_num [31:0]  $end
+$var wire    1  aaafo  write_s       $end
+$var wire    1  aaafp  write_v       $end
+$var wire    1  aaafq  write_f       $end
+$var wire    1  aaafr  write_lsu       $end
+$var wire    1  aaafs  wb_ena       $end
 $scope module fetch_ins $end
 $var wire   32  aaaah  op [31:0]  $end
 $var wire   32  aaaai  s1 [31:0]  $end
@@ -70,6 +74,32 @@ $var wire   32  aaaax  s1 [31:0]  $end
 $var wire   32  aaaay  s2 [31:0]  $end
 $var wire   32  aaaaz  d [31:0]  $end
 $var wire   10  aaaba  jump_addr [9:0]  $end
+$upscope $end
+$scope module lsutop_dat $end
+$var wire   32  aaaew  rds1_data [31:0]  $end
+$var wire   32  aaaex  rdv1_data(0) [31:0]  $end
+$var wire   32  aaaey  rdv1_data(1) [31:0]  $end
+$var wire   32  aaaez  rdv1_data(2) [31:0]  $end
+$var wire   32  aaafa  rdv1_data(3) [31:0]  $end
+$var wire   32  aaafb  rdv1_data(4) [31:0]  $end
+$var wire   32  aaafc  rdv1_data(5) [31:0]  $end
+$var wire   32  aaafd  rdv1_data(6) [31:0]  $end
+$var wire   32  aaafe  rdv1_data(7) [31:0]  $end
+$var real    1  aaaff  rdf1_data(0)       $end
+$var real    1  aaafg  rdf1_data(1)       $end
+$var real    1  aaafh  rdf1_data(2)       $end
+$var real    1  aaafi  rdf1_data(3)       $end
+$var real    1  aaafj  rdf1_data(4)       $end
+$var real    1  aaafk  rdf1_data(5)       $end
+$var real    1  aaafl  rdf1_data(6)       $end
+$var real    1  aaafm  rdf1_data(7)       $end
+$scope module ins $end
+$var wire   32  aaaer  op [31:0]  $end
+$var wire   32  aaaes  s1 [31:0]  $end
+$var wire   32  aaaet  s2 [31:0]  $end
+$var wire   32  aaaeu  d [31:0]  $end
+$var wire   10  aaaev  jump_addr [9:0]  $end
+$upscope $end
 $upscope $end
 $scope module opctop_ins $end
 $var wire   32  aaabc  op [31:0]  $end
@@ -163,11 +193,11 @@ $var wire   10  aaaef  jump_addr [9:0]  $end
 $upscope $end
 $upscope $end
 $scope module wb_ins $end
-$var wire   32  aaaet  op [31:0]  $end
-$var wire   32  aaaeu  s1 [31:0]  $end
-$var wire   32  aaaev  s2 [31:0]  $end
-$var wire   32  aaaew  d [31:0]  $end
-$var wire   10  aaaex  jump_addr [9:0]  $end
+$var wire   32  aaaft  op [31:0]  $end
+$var wire   32  aaafu  s1 [31:0]  $end
+$var wire   32  aaafv  s2 [31:0]  $end
+$var wire   32  aaafw  d [31:0]  $end
+$var wire   10  aaafx  jump_addr [9:0]  $end
 $upscope $end
 $upscope $end
 $enddefinitions  $end
@@ -296,22 +326,51 @@ r0 aaael
 r0 aaaem
 r0 aaaen
 b0 aaaeo
-0aaaep
-0aaaeq
-0aaaer
-0aaaes
-b0 aaaet
+1aaaep
+1aaaeq
+b0 aaaer
+b11111111111111111111111111111111 aaaes
+b11111111111111111111111111111111 aaaet
 b11111111111111111111111111111111 aaaeu
-b11111111111111111111111111111111 aaaev
-b11111111111111111111111111111111 aaaew
-b1111111111 aaaex
+b1111111111 aaaev
+b0 aaaew
+b0 aaaex
+b0 aaaey
+b0 aaaez
+b0 aaafa
+b0 aaafb
+b0 aaafc
+b0 aaafd
+b0 aaafe
+r0 aaaff
+r0 aaafg
+r0 aaafh
+r0 aaafi
+r0 aaafj
+r0 aaafk
+r0 aaafl
+r0 aaafm
+b0 aaafn
+0aaafo
+0aaafp
+0aaafq
+0aaafr
+0aaafs
+b0 aaaft
+b11111111111111111111111111111111 aaafu
+b11111111111111111111111111111111 aaafv
+b11111111111111111111111111111111 aaafw
+b1111111111 aaafx
 $end
 
 #5
 1aaaaa
 1aaaan
-b10110 aaabp
-b10110 aaabq
+b0 aaabd
+b0 aaabe
+b0 aaabf
+b101100 aaabp
+b101100 aaabq
 b1 aaacc
 b1 aaacd
 b1 aaace
@@ -366,7 +425,7 @@ b1 aaaag
 b10 aaaah
 b1 aaaai
 b11 aaaaj
-b11 aaaak
+b0 aaaak
 1aaaam
 0aaaan
 b100 aaaao
@@ -390,14 +449,13 @@ b1001 aaaak
 b10 aaaao
 b1 aaaap
 b11 aaaaq
-b11 aaaar
+b0 aaaar
 b10 aaaaw
 b1 aaaax
 b11 aaaay
-b11 aaaaz
+b0 aaaaz
 b1 aaabb
 b100 aaabc
-b0 aaabd
 b1 aaabe
 b10 aaabf
 1aaabh
@@ -422,22 +480,21 @@ b11 aaaah
 b11 aaaai
 b1001 aaaaj
 b100 aaaak
+0aaaam
 b1 aaaao
 b0 aaaap
 b1001 aaaar
-b1 aaaaw
-b0 aaaax
-b1001 aaaaz
+0aaaau
 b10 aaabc
 b1 aaabd
 b11 aaabe
-b11 aaabf
+b0 aaabf
 1aaabi
 0aaabj
 b1 aaabn
 b11 aaabo
 b11111111111111111111111111110110 aaabp
-b1011 aaabq
+b100000 aaabq
 0aaabz
 
 #50
@@ -447,25 +504,17 @@ b1011 aaabq
 1aaaaa
 b100 aaaag
 b101 aaaah
-b0 aaaai
+b111 aaaai
 b100 aaaaj
 b101 aaaak
-b11 aaaao
-b11 aaaap
-b1001 aaaaq
-b100 aaaar
-b11 aaaaw
-b11 aaaax
-b1001 aaaay
-b100 aaaaz
-b1 aaabc
+b10 aaaat
+b0 aaabb
+b0 aaabc
 b0 aaabd
-b1001 aaabf
+b0 aaabe
+0aaabh
 0aaabi
-1aaabl
 0aaabm
-b0 aaabn
-b10110 aaabp
 1aaabz
 
 #60
@@ -474,22 +523,10 @@ b10110 aaabp
 #65
 1aaaaa
 b101 aaaag
+b0 aaaai
 b1 aaaaj
 b100 aaaak
-b101 aaaao
-b0 aaaap
-b100 aaaaq
-b101 aaaar
-b101 aaaaw
-b0 aaaax
-b100 aaaay
-b101 aaaaz
-b11 aaabc
-b11 aaabd
-b1001 aaabe
-b100 aaabf
-0aaabh
-0aaabl
+b11 aaaat
 1aaabm
 
 #70
@@ -502,11 +539,7 @@ b110 aaaah
 b11 aaaai
 b100 aaaaj
 b10 aaaak
-0aaaam
-b1 aaaaq
-b100 aaaar
-0aaaau
-b10 aaabb
+b100 aaaat
 
 #80
 0aaaaa
@@ -517,21 +550,27 @@ b111 aaaag
 b111 aaaah
 b0 aaaai
 b111 aaaaj
-b11111111111111111111111111111100 aaaak
-b100 aaaal
-b10 aaaat
-b1 aaabq
+b11111111111111111111111111111011 aaaak
+b11 aaaal
+1aaaam
+b101 aaaat
+1aaaau
+b1 aaaaw
+b0 aaaax
+b1001 aaaaz
+0aaabr
 b10 aaabs
 b1 aaabt
 b11 aaabu
-b11 aaabv
-b1 aaabx
-1aaaep
-1aaaes
-b10 aaaet
-b1 aaaeu
-b11 aaaev
-b11 aaaew
+b0 aaabv
+b10110 aaabx
+b1 aaaby
+1aaafo
+1aaafs
+b10 aaaft
+b1 aaafu
+b11 aaafv
+b0 aaafw
 
 #90
 0aaaaa
@@ -539,16 +578,29 @@ b11 aaaew
 #95
 1aaaaa
 b1000 aaaag
-b0 aaaah
-b11111111111111111111111111111111 aaaai
-b11111111111111111111111111111111 aaaaj
-b11111111111111111111111111111111 aaaak
+b100 aaaah
+b1 aaaaj
+b10 aaaak
 b1111111111 aaaal
-b11 aaaat
+b11 aaaao
+b11 aaaap
+b1001 aaaaq
+b100 aaaar
+b11 aaaaw
+b11 aaaax
+b1001 aaaay
+b100 aaaaz
+b1 aaabb
+b1 aaabc
+b11 aaabe
+b1001 aaabf
 1aaabh
 1aaabl
-b11 aaabn
-b1 aaabp
+b0 aaabn
+b10110 aaabp
+1aaabr
+b0 aaaby
+0aaacs
 b100 aaact
 b0 aaacu
 b1 aaacv
@@ -561,12 +613,13 @@ b100 aaadc
 b100 aaadd
 b100 aaade
 b100 aaadf
-0aaaep
-1aaaeq
-b100 aaaet
-b0 aaaeu
-b1 aaaev
-b10 aaaew
+b1 aaadg
+0aaafo
+1aaafp
+b100 aaaft
+b0 aaafu
+b1 aaafv
+b10 aaafw
 
 #100
 0aaaaa
@@ -574,18 +627,29 @@ b10 aaaew
 #105
 1aaaaa
 b1001 aaaag
-b100 aaaat
-b1 aaabb
-b101 aaabc
-b0 aaabd
-b100 aaabe
-b101 aaabf
-1aaabj
+b10 aaaah
+b1 aaaai
+b11 aaaaj
+b11 aaaak
+b101 aaaao
+b111 aaaap
+b100 aaaaq
+b101 aaaar
+b101 aaaaw
+b111 aaaax
+b100 aaaay
+b101 aaaaz
+b11 aaabc
+b11 aaabd
+b1001 aaabe
+b100 aaabf
+0aaabh
 0aaabl
-b100 aaabo
-b1010 aaabq
-0aaaeq
-0aaaes
+1aaacs
+b0 aaadg
+0aaaep
+0aaafp
+0aaafs
 
 #110
 0aaaaa
@@ -593,11 +657,15 @@ b1010 aaabq
 #115
 1aaaaa
 b1010 aaaag
-b101 aaaat
-b0 aaabb
-0aaabh
-0aaabj
-0aaabz
+b1 aaaah
+b0 aaaai
+b1001 aaaak
+0aaaam
+b0 aaaap
+b1 aaaaq
+b100 aaaar
+0aaaau
+b10 aaabb
 
 #120
 0aaaaa
@@ -605,10 +673,11 @@ b0 aaabb
 #125
 1aaaaa
 b1011 aaaag
+b11 aaaah
+b11 aaaai
+b1001 aaaaj
+b100 aaaak
 b110 aaaat
-1aaabh
-1aaabj
-1aaabz
 
 #130
 0aaaaa
@@ -616,10 +685,16 @@ b110 aaaat
 #135
 1aaaaa
 b1100 aaaag
+b0 aaaah
+b11111111111111111111111111111111 aaaai
+b11111111111111111111111111111111 aaaaj
+b11111111111111111111111111111111 aaaak
 b111 aaaat
-0aaabh
-0aaabj
-0aaabz
+1aaabh
+1aaabl
+b11 aaabn
+b100000 aaabp
+1aaaep
 
 #140
 0aaaaa
@@ -628,9 +703,17 @@ b111 aaaat
 1aaaaa
 b1101 aaaag
 b1000 aaaat
-1aaabh
+b1 aaabb
+b101 aaabc
+b111 aaabd
+b100 aaabe
+b101 aaabf
 1aaabj
-1aaabz
+0aaabl
+b100 aaabo
+b1010 aaabq
+b111 aaaca
+0aaaep
 
 #150
 0aaaaa
@@ -639,6 +722,11 @@ b1000 aaaat
 1aaaaa
 b1110 aaaag
 b1001 aaaat
+b0 aaabb
+b0 aaabc
+b0 aaabd
+b0 aaabe
+b0 aaabf
 0aaabh
 0aaabj
 0aaabz
@@ -651,10 +739,35 @@ b1001 aaaat
 1aaaac
 b1111 aaaag
 b1010 aaaat
-1aaabh
-1aaabj
 1aaabz
+
+#170
+0aaaaa
+
+#175
+1aaaaa
+1aaaep
+
+#180
+0aaaaa
+
+#185
+1aaaaa
+
+#190
+0aaaaa
+
+#195
+1aaaaa
+
+#200
+0aaaaa
+
+#205
+1aaaaa
+0aaacs
 b101 aaact
+b111 aaacu
 b100 aaacv
 b101 aaacw
 b1011 aaacy
@@ -665,403 +778,318 @@ b1011 aaadc
 b1011 aaadd
 b1011 aaade
 b1011 aaadf
-1aaaeq
-1aaaes
-b101 aaaet
-b100 aaaev
-b101 aaaew
-
-#170
-0aaaaa
-
-#175
-1aaaaa
-0aaabh
-0aaabj
-0aaabz
-1aaaep
+b1 aaadg
 0aaaeq
-b1 aaaet
-b11 aaaev
-b1001 aaaew
-
-#180
-0aaaaa
-
-#185
-1aaaaa
-1aaabh
-1aaabj
-1aaabz
-0aaaep
-1aaaeq
-b101 aaaet
-b100 aaaev
-b101 aaaew
-
-#190
-0aaaaa
-
-#195
-1aaaaa
-0aaabh
-0aaabj
-0aaabz
-1aaaep
-0aaaeq
-b1 aaaet
-b11 aaaev
-b1001 aaaew
-
-#200
-0aaaaa
-
-#205
-1aaaaa
-1aaabh
-1aaabj
-1aaabz
-0aaaep
-1aaaeq
-b101 aaaet
-b100 aaaev
-b101 aaaew
+b1 aaaer
+b0 aaaes
+b11 aaaet
+b1001 aaaeu
+b100010 aaaew
+b1 aaafn
+1aaafp
+1aaafs
+b101 aaaft
+b111 aaafu
+b100 aaafv
+b101 aaafw
 
 #210
 0aaaaa
 
 #215
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-1aaaep
-0aaaeq
-b1 aaaet
-b11 aaaev
-b1001 aaaew
+1aaacs
+b0 aaadg
+1aaafo
+0aaafp
+1aaafr
+b1 aaaft
+b0 aaafu
+b11 aaafv
+b1001 aaafw
 
 #220
 0aaaaa
+1aaaeq
+b0 aaafn
 
 #225
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-0aaaep
-1aaaeq
-b101 aaaet
-b100 aaaev
-b101 aaaew
+0aaafo
+0aaafr
+0aaafs
 
 #230
 0aaaaa
 
 #235
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-1aaaep
-0aaaeq
-b1 aaaet
-b11 aaaev
-b1001 aaaew
 
 #240
 0aaaaa
 
 #245
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-0aaaep
-1aaaeq
-b101 aaaet
-b100 aaaev
-b101 aaaew
 
 #250
 0aaaaa
 
 #255
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-1aaaep
-0aaaeq
-b1 aaaet
-b11 aaaev
-b1001 aaaew
 
 #260
 0aaaaa
 
 #265
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-0aaaep
-1aaaeq
-b101 aaaet
-b100 aaaev
-b101 aaaew
 
 #270
 0aaaaa
 
 #275
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
 
 #280
 0aaaaa
 
 #285
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
 
 #290
 0aaaaa
 
 #295
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
+1aaaam
+1aaaau
+b0 aaaax
+b1 aaaay
+b100 aaaaz
 0aaaeq
-0aaaes
+b11 aaaer
+b11 aaaes
+b1001 aaaet
+b100 aaaeu
+b1 aaafn
+1aaafp
+1aaafr
+1aaafs
+b11 aaaft
+b11 aaafu
+b1001 aaafv
+b100 aaafw
 
 #300
 0aaaaa
 
 #305
 1aaaaa
+b10000 aaaag
+0aaaam
+0aaaau
+b1 aaabb
+b101 aaabc
+b1 aaabe
+b100 aaabf
 1aaabh
 1aaabj
-1aaabz
+b1 aaabo
+b11111111111111111111111111110110 aaabq
+b0 aaaca
 1aaaeq
-1aaaes
+b0 aaafn
+0aaafp
+0aaafr
+0aaafs
 
 #310
 0aaaaa
 
 #315
 1aaaaa
+b0 aaabb
+b0 aaabc
+b0 aaabe
+b0 aaabf
 0aaabh
 0aaabj
 0aaabz
-0aaaeq
-0aaaes
 
 #320
 0aaaaa
 
 #325
 1aaaaa
-1aaabh
-1aaabj
 1aaabz
-1aaaeq
-1aaaes
 
 #330
 0aaaaa
 
 #335
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
 
 #340
 0aaaaa
 
 #345
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
 
 #350
 0aaaaa
 
 #355
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
 
 #360
 0aaaaa
 
 #365
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
+1aaaam
+1aaaau
+0aaacs
+b0 aaacu
+b1 aaacv
+b100 aaacw
+b11111111111111111111111111110111 aaacy
+b11111111111111111111111111110111 aaacz
+b11111111111111111111111111110111 aaada
+b11111111111111111111111111110111 aaadb
+b11111111111111111111111111110111 aaadc
+b11111111111111111111111111110111 aaadd
+b11111111111111111111111111110111 aaade
+b11111111111111111111111111110111 aaadf
+b1 aaadg
+1aaafp
+1aaafs
+b101 aaaft
+b0 aaafu
+b1 aaafv
 
 #370
 0aaaaa
 
 #375
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
+b10001 aaaag
+0aaaam
+0aaaau
+b1 aaabb
+b101 aaabc
+b1 aaabe
+b100 aaabf
+1aaabh
+1aaabj
+1aaacs
+b0 aaadg
+0aaafp
+0aaafs
 
 #380
 0aaaaa
 
 #385
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
+b0 aaabb
+b0 aaabc
+b0 aaabe
+b0 aaabf
+0aaabh
+0aaabj
+0aaabz
 
 #390
 0aaaaa
 
 #395
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
+1aaabz
 
 #400
 0aaaaa
 
 #405
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
 
 #410
 0aaaaa
 
 #415
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
 
 #420
 0aaaaa
 
 #425
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
 
 #430
 0aaaaa
 
 #435
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
+1aaaam
+1aaaau
+0aaacs
+b1 aaadg
+1aaafp
+1aaafs
 
 #440
 0aaaaa
 
 #445
 1aaaaa
+b10010 aaaag
+0aaaam
+0aaaau
+b1 aaabb
+b101 aaabc
+b1 aaabe
+b100 aaabf
 1aaabh
 1aaabj
-1aaabz
-1aaaeq
-1aaaes
+1aaacs
+b0 aaadg
+0aaafp
+0aaafs
 
 #450
 0aaaaa
 
 #455
 1aaaaa
+b0 aaabb
+b0 aaabc
+b0 aaabe
+b0 aaabf
 0aaabh
 0aaabj
 0aaabz
-0aaaeq
-0aaaes
 
 #460
 0aaaaa
 
 #465
 1aaaaa
-1aaabh
-1aaabj
 1aaabz
-1aaaeq
-1aaaes
 
 #470
 0aaaaa
 
 #475
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
 
 #480
 0aaaaa
 
 #485
 1aaaaa
-1aaabh
-1aaabj
-1aaabz
-1aaaeq
-1aaaes
 
 #490
 0aaaaa
 
 #495
 1aaaaa
-0aaabh
-0aaabj
-0aaabz
-0aaaeq
-0aaaes
 
 #500

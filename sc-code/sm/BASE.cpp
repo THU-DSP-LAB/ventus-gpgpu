@@ -51,15 +51,6 @@ void BASE::INSTRUCTION_REG()
     // ireg[5] = I_TYPE(vfadd_, 3, 4, 2);
     // ireg[6] = I_TYPE(beq_, 0, 7, 5);
 
-    ireg[0] = I_TYPE(vaddvv_, 0, 1, 2);
-    ireg[1] = I_TYPE(add_, 1, 3, 3);
-    ireg[2] = I_TYPE(lw_, 0, 3, 9);
-    ireg[3] = I_TYPE(vload_, 3, 9, 4);
-    ireg[4] = I_TYPE(vaddvx_, 0, 4, 5);
-    ireg[5] = I_TYPE(vaddvx_, 0, 1, 4);
-    ireg[6] = I_TYPE(vfadd_, 3, 4, 2);
-    ireg[7] = I_TYPE(beq_, 0, 7, -4);
-
     while (true)
     {
         fetch_ins = (pc.read() >= 0) ? ireg[pc.read()] : I_TYPE(INVALID_, 0, 0, 0);
@@ -247,7 +238,7 @@ void BASE::UPDATE_SCORE()
             }
             score.insert(SCORE_TYPE(regtype_, tmpins.d));
             // cout << "scoreboard insert " << SCORE_TYPE(regtype_, tmpins.d)
-            //      << " because of dispatch at time " << sc_time_stamp() << " (using old ibuftop_ins)\n";
+            //      << " because of dispatch at time " << sc_time_stamp() << "\n";
         }
         wait(SC_ZERO_TIME);
         wait(SC_ZERO_TIME);
@@ -271,14 +262,14 @@ void BASE::UPDATE_SCORE()
                 break;
             }
             it = score.find(SCORE_TYPE(regtype_, tmpins.d));
-            cout << "scoreboard: finding SCORE " << SCORE_TYPE(regtype_, tmpins.d) << " at " << sc_time_stamp() << "\n";
+            // cout << "scoreboard: finding SCORE " << SCORE_TYPE(regtype_, tmpins.d) << " at " << sc_time_stamp() << "\n";
             if (it == score.end())
             {
                 cout << "wb_ena error: scoreboard can't find rd in score set, wb_ins=" << wb_ins << " at " << sc_time_stamp() << "\n";
                 break;
             }
             score.erase(it);
-            cout << "scoreboard: succesfully erased SCORE " << SCORE_TYPE(regtype_, tmpins.d) << ", wb_ins=" << wb_ins << " at " << sc_time_stamp() << "\n";
+            // cout << "scoreboard: succesfully erased SCORE " << SCORE_TYPE(regtype_, tmpins.d) << ", wb_ins=" << wb_ins << " at " << sc_time_stamp() << "\n";
         }
     }
 }
@@ -314,7 +305,7 @@ void BASE::OPC_FIFO()
         if (dispatch)
         {
             opcfifo.put(issue_ins);
-            // cout << "opcfifo has put issue_ins " << issue_ins << " at time " << sc_time_stamp() << "\n";
+            cout << "opcfifo has put issue_ins " << issue_ins << " at time " << sc_time_stamp() << "\n";
         }
         wait(SC_ZERO_TIME); // wait for opc_fifo to update
         if (jump)
@@ -331,6 +322,8 @@ void BASE::OPC_FIFO()
         {
             opc_full = !opcfifo.nb_can_put();
             opc_empty = !opcfifo.nb_peek(opctop_ins);
+            if (opc_empty)
+                opctop_ins = I_TYPE(INVALID_, 0, 0, 0);
             opcfifo_elem_num = opcfifo.used();
         }
     }
@@ -413,31 +406,6 @@ void BASE::OPC_EMIT()
         }
         emit = emito_salu | emito_valu | emito_vfpu | emito_lsu;
     }
-}
-
-void BASE::INIT_REG()
-{
-    s_regfile[0] = 22;
-    s_regfile[1] = -10;
-    s_regfile[2] = 666;
-    s_regfile[3] = 11;
-    s_regfile[4] = 10;
-    s_regfile[5] = 888;
-    s_regfile[6] = 6;
-    s_regfile[7] = 22;
-    v_regfile[0].fill(1);
-    v_regfile[1].fill(3);
-    v_regfile[2].fill(-10);
-    v_regfile[3].fill(7);
-    v_regfile[4].fill(-1);
-    v_regfile[5].fill(10);
-    v_regfile[6].fill(8);
-    v_regfile[7].fill(1);
-    f_regfile[0].fill(1);
-    f_regfile[1].fill(5.20);
-    f_regfile[2].fill(-0.3);
-    f_regfile[3].fill(3.14);
-    f_regfile[4].fill(18.99);
 }
 
 void BASE::READ_REG()
@@ -540,7 +508,7 @@ void BASE::SALU_OUT()
     bool succeed;
     while (true)
     {
-        wait(salu_eqa.default_event());
+        wait(salu_eqa.default_event() | clk.posedge_event());
         if (salu_eqa.default_event().triggered())
         {
             // cout << "SALU_OUT: eqa triggered at time " << sc_time_stamp() << "\n";
@@ -568,11 +536,34 @@ void BASE::SALU_OUT()
             wait(SC_ZERO_TIME);
             if (write_s)
             {
-                salufifo.get();
+                succeed = salufifo.nb_get(salutmp2);
+                if (!succeed)
+                {
+                    cout << "salu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
                 // cout << "salufifo has poped out at time " << sc_time_stamp() << "\n";
-                wait(SC_ZERO_TIME);
-                salufifo_empty = !salufifo.nb_peek(salutop_dat);
-                salufifo_elem_num = salufifo.used();
+                // wait(5, SC_NS);
+                // salufifo_empty = !salufifo.nb_peek(salutop_dat);
+                // salufifo_elem_num = salufifo.used();
+            }
+        }
+        else
+        {
+            salufifo_empty = !salufifo.nb_peek(salutop_dat);
+            salufifo_elem_num = salufifo.used();
+            wait(SC_ZERO_TIME);
+            wait(SC_ZERO_TIME);
+            if (write_s)
+            {
+                succeed = salufifo.nb_get(salutmp2);
+                if (!succeed)
+                {
+                    cout << "salu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
+                // cout << "salufifo has poped out at time " << sc_time_stamp() << "\n";
+                // wait(5, SC_NS);
+                // salufifo_empty = !salufifo.nb_peek(salutop_dat);
+                // salufifo_elem_num = salufifo.used();
             }
         }
     }
@@ -624,6 +615,7 @@ void BASE::VALU_IN()
                 valu_dq.push(new_data);
                 a_delay = 5;
                 b_delay = 2;
+                // cout << "valu: receive vaddvv_, will notify eq, at " << sc_time_stamp() << "\n";
                 valu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 valu_eqb.notify(sc_time((b_delay - 1) * PERIOD, SC_NS));
                 break;
@@ -637,6 +629,7 @@ void BASE::VALU_IN()
                 valu_dq.push(new_data);
                 a_delay = 5;
                 b_delay = 2;
+                // cout << "valu: receive vaddvx_, will notify eq, at " << sc_time_stamp() << "\n";
                 valu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 valu_eqb.notify(sc_time((b_delay - 1) * PERIOD, SC_NS));
                 break;
@@ -656,9 +649,10 @@ void BASE::VALU_OUT()
     bool succeed;
     while (true)
     {
-        wait(valu_eqa.default_event());
+        wait(valu_eqa.default_event() | clk.posedge_event());
         if (valu_eqa.default_event().triggered())
         {
+            // cout << "valu_eqa.default_event triggered at " << sc_time_stamp() << "\n";
             valutmp1 = valu_dq.front();
             valu_dq.pop();
             switch (valutmp1.ins.op)
@@ -689,10 +683,32 @@ void BASE::VALU_OUT()
             wait(SC_ZERO_TIME);
             if (write_v)
             {
-                valufifo.get();
-                wait(SC_ZERO_TIME);
-                valufifo_empty = !valufifo.nb_peek(valutop_dat);
-                valufifo_elem_num = valufifo.used();
+                succeed = valufifo.nb_get(valutmp2);
+                if (!succeed)
+                {
+                    cout << "valu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
+                // wait(5, SC_NS);
+                // valufifo_empty = !valufifo.nb_peek(valutop_dat);
+                // valufifo_elem_num = valufifo.used();
+            }
+        }
+        else
+        {
+            valufifo_empty = !valufifo.nb_peek(valutop_dat);
+            valufifo_elem_num = valufifo.used();
+            wait(SC_ZERO_TIME);
+            wait(SC_ZERO_TIME);
+            if (write_v)
+            {
+                succeed = valufifo.nb_get(valutmp2);
+                if (!succeed)
+                {
+                    cout << "valu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
+                // wait(5, SC_NS);
+                // valufifo_empty = !valufifo.nb_peek(valutop_dat);
+                // valufifo_elem_num = valufifo.used();
             }
         }
     }
@@ -761,7 +777,7 @@ void BASE::VFPU_OUT()
     bool succeed;
     while (true)
     {
-        wait(vfpu_eqa.default_event());
+        wait(vfpu_eqa.default_event() | clk.posedge_event());
         if (vfpu_eqa.default_event().triggered())
         {
             vfputmp1 = vfpu_dq.front();
@@ -786,10 +802,29 @@ void BASE::VFPU_OUT()
             wait(SC_ZERO_TIME);
             if (write_f)
             {
-                vfpufifo.get();
-                wait(SC_ZERO_TIME);
-                vfpufifo_empty = !vfpufifo.nb_peek(vfputop_dat);
-                vfpufifo_elem_num = vfpufifo.used();
+                succeed = vfpufifo.nb_get(vfputmp2);
+                if (!succeed)
+                {
+                    cout << "vfpu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
+                // wait(5, SC_NS);
+                // vfpufifo_empty = !vfpufifo.nb_peek(vfputop_dat);
+                // vfpufifo_elem_num = vfpufifo.used();
+            }
+        }
+        else
+        {
+            vfpufifo_empty = !vfpufifo.nb_peek(vfputop_dat);
+            vfpufifo_elem_num = vfpufifo.used();
+            wait(SC_ZERO_TIME);
+            wait(SC_ZERO_TIME);
+            if (write_f)
+            {
+                succeed = vfpufifo.nb_get(vfputmp2);
+                if (!succeed)
+                {
+                    cout << "vfpu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
             }
         }
     }
@@ -863,9 +898,10 @@ void BASE::LSU_OUT()
     bool succeed;
     while (true)
     {
-        wait(lsu_eqa.default_event());
+        wait(lsu_eqa.default_event() | clk.posedge_event());
         if (lsu_eqa.default_event().triggered())
         {
+            // cout << "lsu_eqa.default_event triggered at " << sc_time_stamp() << "\n";
             lsutmp1 = lsu_dq.front();
             lsu_dq.pop();
             switch (lsutmp1.ins.op)
@@ -893,8 +929,32 @@ void BASE::LSU_OUT()
             wait(SC_ZERO_TIME);
             if (write_lsu)
             {
-                lsufifo.get();
-                wait(SC_ZERO_TIME);
+                // cout << "lsu has detected write_lsu at " << sc_time_stamp() << "\n";
+                succeed = lsufifo.nb_get(lsutmp2);
+                if (!succeed)
+                {
+                    cout << "lsu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
+                // wait(5, SC_NS);
+                // lsufifo_empty = !lsufifo.nb_peek(lsutop_dat);
+                // lsufifo_elem_num = lsufifo.used();
+            }
+        }
+        else
+        { // triggered by clk: no eqa
+            lsufifo_empty = !lsufifo.nb_peek(lsutop_dat);
+            lsufifo_elem_num = lsufifo.used();
+            wait(SC_ZERO_TIME);
+            wait(SC_ZERO_TIME);
+            if (write_lsu)
+            {
+                // cout << "lsu has detected write_lsu at " << sc_time_stamp() << "\n";
+                succeed = lsufifo.nb_get(lsutmp2);
+                if (!succeed)
+                {
+                    cout << "lsu error: pop fail at " << sc_time_stamp() << "!\n";
+                }
+                wait(5, SC_NS);
                 lsufifo_empty = !lsufifo.nb_peek(lsutop_dat);
                 lsufifo_elem_num = lsufifo.used();
             }
@@ -929,7 +989,7 @@ void BASE::WRITE_BACK()
         if (salufifo_empty == false)
         {
             write_s = true;
-            write_v = write_f = false;
+            write_v = write_f = write_lsu = false;
             // cout << "do write_s=true at " << sc_time_stamp() << "\n";
             wb_ins = salutop_dat.ins;
             rds1_addr = salutop_dat.ins.d;
@@ -938,7 +998,7 @@ void BASE::WRITE_BACK()
         else if (valufifo_empty == false)
         {
             write_v = true;
-            write_s = write_f = false;
+            write_s = write_f = write_lsu = false;
             wb_ins = valutop_dat.ins;
             rdv1_addr = valutop_dat.ins.d;
             for (int i = 0; i < num_thread; i++)
@@ -949,7 +1009,7 @@ void BASE::WRITE_BACK()
         else if (vfpufifo_empty == false)
         {
             write_f = true;
-            write_s = write_v = false;
+            write_s = write_v = write_lsu = false;
             wb_ins = vfputop_dat.ins;
             rdf1_addr = vfputop_dat.ins.d;
             for (int i = 0; i < num_thread; i++)
@@ -986,7 +1046,7 @@ void BASE::WRITE_BACK()
         }
         else
         {
-            write_s = write_v = write_f = false;
+            write_s = write_v = write_f = write_lsu = false;
         }
         wb_ena = write_s | write_v | write_f;
     }

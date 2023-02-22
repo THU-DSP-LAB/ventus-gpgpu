@@ -1,20 +1,20 @@
 [*]
 [*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
-[*] Sun Jan 29 16:19:11 2023
+[*] Sat Feb 18 16:49:29 2023
 [*]
 [dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave.vcd"
-[dumpfile_mtime] "Sun Jan 29 16:18:07 2023"
-[dumpfile_size] 5125
+[dumpfile_mtime] "Sat Feb 18 16:46:29 2023"
+[dumpfile_size] 15248
 [savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave.gtkw"
 [timestart] 0
-[size] 1908 999
+[size] 2548 1359
 [pos] -1 -1
-*-4.872661 25 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-4.872661 175 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] SystemC.
 [sst_width] 214
-[signals_width] 307
+[signals_width] 369
 [sst_expanded] 1
-[sst_vpaned_height] 281
+[sst_vpaned_height] 403
 @420
 SystemC.Clk
 SystemC.Rst_n
@@ -32,10 +32,6 @@ SystemC.fetch_ins.s1[31:0]
 SystemC.fetch_ins.s2[31:0]
 [color] 1
 SystemC.fetch_ins.d[31:0]
-@421
-[color] 1
-SystemC.fetch_ins.jump_addr[31:0]
-@420
 [color] 1
 SystemC.fetch_valid
 [color] 3
@@ -54,8 +50,6 @@ SystemC.ibuftop_ins.s1[31:0]
 SystemC.ibuftop_ins.s2[31:0]
 [color] 2
 SystemC.ibuftop_ins.d[31:0]
-[color] 2
-SystemC.ibuftop_ins.jump_addr[31:0]
 @28
 [color] 3
 SystemC.can_dispatch
@@ -85,7 +79,7 @@ SystemC.opctop_ins.s2[31:0]
 [color] 6
 SystemC.opctop_ins.d[31:0]
 @28
-[color] 1
+[color] 6
 SystemC.emit
 [color] 1
 SystemC.emito_salu
@@ -95,12 +89,50 @@ SystemC.salu_ready
 SystemC.rss1_addr[4:0]
 SystemC.rss1_data[31:0]
 SystemC.rss2_addr[4:0]
+@24
 SystemC.rss2_data[31:0]
-@28
 SystemC.salufifo_empty
+[color] 1
+SystemC.emito_lsu
+[color] 1
+SystemC.lsu_ready
+SystemC.lsufifo_elem_num[31:0]
+@25
+SystemC.lsufifo_empty
+@24
+[color] 1
+SystemC.emito_valu
+[color] 1
+SystemC.valu_ready
+SystemC.rsv1_addr[4:0]
+SystemC.rsv2_addr[4:0]
+SystemC.valufifo_elem_num[31:0]
+@28
+SystemC.valufifo_empty
+[color] 1
+SystemC.emito_vfpu
+[color] 1
+SystemC.vfpu_ready
+[color] 2
+SystemC.write_s
+[color] 2
+SystemC.write_v
+[color] 2
+SystemC.write_f
+[color] 2
+SystemC.write_lsu
+[color] 3
 SystemC.wb_ena
-SystemC.jump
-@420
-SystemC.jump_addr[9:0]
+@24
+[color] 2
+SystemC.wb_ins.op[31:0]
+[color] 2
+SystemC.wb_ins.s1[31:0]
+[color] 2
+SystemC.wb_ins.s2[31:0]
+[color] 2
+SystemC.wb_ins.d[31:0]
+[color] 6
+SystemC.wb_ins.jump_addr[9:0]
 [pattern_trace] 1
 [pattern_trace] 0

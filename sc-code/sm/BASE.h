@@ -15,6 +15,7 @@ public:
     void debug_display();
 
     // fetch
+    void INIT_INS();
     void PROGRAM_COUNTER();
     void INSTRUCTION_REG();
     void DECODE();
@@ -67,6 +68,7 @@ public:
         SC_METHOD(memory_init);
 
         // fetch
+        SC_THREAD(INIT_INS);
         SC_THREAD(PROGRAM_COUNTER);
         sensitive << clk.pos() << rst_n.neg();
         SC_THREAD(INSTRUCTION_REG);
@@ -137,7 +139,8 @@ public:
     sc_signal<I_TYPE> issue_ins{"issue_ins"};
     // opc
     tlm::tlm_fifo<I_TYPE> opcfifo;
-    sc_signal<bool> opc_full{"opc_full"}, opc_empty{"opc_empty"};
+    sc_signal<bool> opc_full{"opc_full"};
+    bool opc_empty;
     I_TYPE opctop_ins;
     int opcfifo_elem_num;
     sc_signal<bool> salu_ready{"salu_ready"}, valu_ready{"valu_ready"}, vfpu_ready{"vfpu_ready"}, lsu_ready{"lsu_ready"};

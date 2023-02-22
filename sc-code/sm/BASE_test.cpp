@@ -91,12 +91,14 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf, BASE_impl.vfpufifo_empty, "vfpufifo_empty");
     sc_trace(tf, BASE_impl.vfputop_dat, "vfputop_dat");
     sc_trace(tf, BASE_impl.vfpufifo_elem_num, "vfpufifo_elem_num");
+    sc_trace(tf, BASE_impl.lsu_ready, "lsu_ready");
     sc_trace(tf, BASE_impl.lsufifo_empty, "lsufifo_empty");
     sc_trace(tf, BASE_impl.lsutop_dat, "lsutop_dat");
     sc_trace(tf, BASE_impl.lsufifo_elem_num, "lsufifo_elem_num");
     sc_trace(tf, BASE_impl.write_s, "write_s");
     sc_trace(tf, BASE_impl.write_v, "write_v");
     sc_trace(tf, BASE_impl.write_f, "write_f");
+    sc_trace(tf, BASE_impl.write_lsu, "write_lsu");
     sc_trace(tf, BASE_impl.wb_ena, "wb_ena");
     sc_trace(tf, BASE_impl.wb_ins, "wb_ins");
     // sc_trace(tf, BASE_impl., "");
