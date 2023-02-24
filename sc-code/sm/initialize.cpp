@@ -2,14 +2,14 @@
 
 void BASE::INIT_INS()
 {
-    ireg[0] = I_TYPE(vaddvv_, 0, 1, 2);
-    ireg[1] = I_TYPE(add_, 1, 3, 0);
-    ireg[2] = I_TYPE(lw_, 0, 3, 9);
+    ireg[0] = I_TYPE(vaddvv_, 3, 1, 2);
+    ireg[1] = I_TYPE(add_, 1, 3, 6);
+    ireg[2] = I_TYPE(lw_, 4, 1, 9);
     ireg[3] = I_TYPE(vload_, 3, 9, 4);
     ireg[4] = I_TYPE(vaddvx_, 7, 4, 5);
-    ireg[5] = I_TYPE(vaddvx_, 0, 1, 4);
+    ireg[5] = I_TYPE(vaddvx_, 2, 1, 4);
     ireg[6] = I_TYPE(vfadd_, 3, 4, 2);
-    ireg[7] = I_TYPE(beq_, 0, 7, -5);
+    ireg[7] = I_TYPE(beq_, 6, 7, -5);
 
     ireg[8] = I_TYPE(vaddvv_, 0, 1, 2);
     ireg[9] = I_TYPE(add_, 1, 3, 3);
@@ -23,7 +23,7 @@ void BASE::INIT_REG()
     s_regfile[1] = -10;
     s_regfile[2] = 666;
     s_regfile[3] = 32;
-    s_regfile[4] = 10;
+    s_regfile[4] = 4;
     s_regfile[5] = 888;
     s_regfile[6] = 6;
     s_regfile[7] = 22;

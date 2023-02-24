@@ -20,7 +20,7 @@ void BASE::PROGRAM_COUNTER()
     while (true)
     {
         wait();
-        wait(SC_ZERO_TIME); // wait for jump to update
+        wait(SC_ZERO_TIME); // wait for jump and ibuf to update
         if (rst_n.read() == 0)
         {
             pc = -1;
@@ -36,6 +36,10 @@ void BASE::PROGRAM_COUNTER()
             // later work: should ensure pc valid
             pc = pc.read() + 1;
             fetch_valid = true;
+        }
+        else
+        {
+            fetch_valid = false;
         }
     }
 }
@@ -91,6 +95,7 @@ void BASE::IBUF_ACTION()
     while (true)
     {
         wait();
+        // cout << "IBUF: entering ibuf at " << sc_time_stamp() << "\n";
         if (rst_n.read() == 0)
         {
             while (ififo.nb_get(_readdata3))
@@ -103,17 +108,26 @@ void BASE::IBUF_ACTION()
             {
                 // cout << "before dispatch, ififo has " << ififo.used() << " elems at time " << sc_time_stamp() << "\n";
                 dispatch_ins_ = ififo.get();
-                // cout << "after dispatch, ififo has " << ififo.used() << " elems at time " << sc_time_stamp() << "\n";
+                // cout << "IBUF: after dispatch, ififo has " << ififo.used() << " elems at time " << sc_time_stamp() << "\n";
+            }
+            else
+            {
+                // cout << "IBUF: dispatch == false at " << sc_time_stamp() << "\n";
             }
             if (fetch_valid)
             {
+                if (ibuf_full)
+                {
+                    cout << "IBUF ERROR: ibuf is full but is sent an ins from FETCH at " << sc_time_stamp() << "\n";
+                }
                 // cout << "before put, ififo has " << ififo.used() << " elems at time " << sc_time_stamp() << "\n";
                 ififo.put(fetch_ins);
                 // cout << "after put, ififo has " << ififo.used() << " elems at time " << sc_time_stamp() << "\n";
-                // cout << "ififo has put ins " << fetch_ins << ", whose jump_addr is " << fetch_ins.jump_addr << " at time " << sc_time_stamp() << "\n";
+                cout << "ififo has put ins " << fetch_ins << ", whose jump_addr is " << fetch_ins.jump_addr << " at time " << sc_time_stamp() << "\n";
             }
         }
-        wait(SC_ZERO_TIME);
+        ibuf_full = !ififo.nb_can_put();
+        // wait(SC_ZERO_TIME);
         if (jump)
         {
             while (ififo.nb_get(_readdata3))
@@ -122,10 +136,11 @@ void BASE::IBUF_ACTION()
             ibuf_full = false;
             ibuf_empty = true;
             ififo_elem_num = 0;
-            ibuftop_ins = I_TYPE(INVALID_, 0, 0, 0);
+            ibuftop_ins = I_TYPE(INVALID_, -1, 0, 0);
         }
         else
         {
+            wait(SC_ZERO_TIME);
             ibuf_full = !ififo.nb_can_put();
             // cout << "ififo.nb_can_put()=" << ififo.nb_can_put()
             //      << ", ibuf_full=" << ibuf_full << " at time " << sc_time_stamp() << "\n";
@@ -155,7 +170,6 @@ void BASE::JUDGE_DISPATCH()
                 can_dispatch = false;
             break;
         case add_:
-
             // cout << "JUDGE_DISPATCH switch to add_ case at time " << sc_time_stamp() << "\n";
             if (score.find(SCORE_TYPE(s, ibuftop_ins.s1)) == score.end() &&
                 score.find(SCORE_TYPE(s, ibuftop_ins.s2)) == score.end() &&
@@ -187,14 +201,19 @@ void BASE::JUDGE_DISPATCH()
                 can_dispatch = false;
             break;
         case vaddvx_:
+            // cout << "JUDGE_DISPATCH switch to vaddvx_ case at time " << sc_time_stamp() << "\n";
             if (score.find(SCORE_TYPE(v, ibuftop_ins.s1)) == score.end() &&
                 score.find(SCORE_TYPE(s, ibuftop_ins.s2)) == score.end() &&
                 score.find(SCORE_TYPE(v, ibuftop_ins.d)) == score.end())
                 can_dispatch = true;
             else
+            {
                 can_dispatch = false;
+                // cout << "JUDGE_DISPATCH don't dispatch vaddvx_, ins is " << ibuftop_ins << ", at " << sc_time_stamp() << "\n";
+            }
             break;
         case vfadd_:
+            // cout << "JUDGE_DISPATCH switch to vfadd_ case at time " << sc_time_stamp() << "\n";
             if (score.find(SCORE_TYPE(f, ibuftop_ins.s1)) == score.end() &&
                 score.find(SCORE_TYPE(f, ibuftop_ins.s2)) == score.end() &&
                 score.find(SCORE_TYPE(f, ibuftop_ins.d)) == score.end())
@@ -262,7 +281,7 @@ void BASE::UPDATE_SCORE()
                 break;
             }
             it = score.find(SCORE_TYPE(regtype_, tmpins.d));
-            // cout << "scoreboard: finding SCORE " << SCORE_TYPE(regtype_, tmpins.d) << " at " << sc_time_stamp() << "\n";
+            // cout << "scoreboard: 正在寻找 SCORE " << SCORE_TYPE(regtype_, tmpins.d) << " at " << sc_time_stamp() << "\n";
             if (it == score.end())
             {
                 cout << "wb_ena error: scoreboard can't find rd in score set, wb_ins=" << wb_ins << " at " << sc_time_stamp() << "\n";
@@ -302,10 +321,14 @@ void BASE::OPC_FIFO()
         {
             opcfifo.get(); // last cycle emit
         }
-        if (dispatch)
+        if (dispatch && jump == false)
         {
+            if (opc_full)
+            {
+                cout << "OPC ERROR: is full but receive ins from issue at " << sc_time_stamp() << "\n";
+            }
             opcfifo.put(issue_ins);
-            cout << "opcfifo has put issue_ins " << issue_ins << " at time " << sc_time_stamp() << "\n";
+            // cout << "opcfifo has put issue_ins " << issue_ins << " at time " << sc_time_stamp() << "\n";
         }
         wait(SC_ZERO_TIME); // wait for opc_fifo to update
         if (jump)
@@ -868,7 +891,7 @@ void BASE::LSU_IN()
                 new_data.ins = opctop_ins;
                 new_data.rss1_data = rss1_data;
                 lsu_dq.push(new_data);
-                a_delay = 10;
+                a_delay = 5;
                 b_delay = 4;
                 lsu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 lsu_eqb.notify(sc_time((b_delay - 1) * PERIOD, SC_NS));
@@ -877,7 +900,7 @@ void BASE::LSU_IN()
                 new_data.ins = opctop_ins;
                 new_data.rss1_data = rss1_data;
                 lsu_dq.push(new_data);
-                a_delay = 15;
+                a_delay = 6;
                 b_delay = 4;
                 lsu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 lsu_eqb.notify(sc_time((b_delay - 1) * PERIOD, SC_NS));
@@ -1033,7 +1056,7 @@ void BASE::WRITE_BACK()
                 write_v = true;
                 write_s = write_f = false;
                 wb_ins = lsutop_dat.ins;
-                rds1_addr = lsutop_dat.ins.d;
+                rdv1_addr = lsutop_dat.ins.d;
                 for (int i = 0; i < num_thread; i++)
                 {
                     rdv1_data[i] = lsutop_dat.rdv1_data[i];

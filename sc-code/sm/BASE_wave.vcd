@@ -1,5 +1,5 @@
 $date
-     Feb 21, 2023       16:07:39
+     Feb 23, 2023       17:53:11
 $end
 
 $version
@@ -54,6 +54,22 @@ $var wire    1  aaafp  write_v       $end
 $var wire    1  aaafq  write_f       $end
 $var wire    1  aaafr  write_lsu       $end
 $var wire    1  aaafs  wb_ena       $end
+$var wire   32  aaafy  s_regfile(0) [31:0]  $end
+$var wire   32  aaafz  s_regfile(1) [31:0]  $end
+$var wire   32  aaaga  s_regfile(2) [31:0]  $end
+$var wire   32  aaagb  s_regfile(3) [31:0]  $end
+$var wire   32  aaagc  s_regfile(4) [31:0]  $end
+$var wire   32  aaagd  s_regfile(5) [31:0]  $end
+$var wire   32  aaage  s_regfile(6) [31:0]  $end
+$var wire   32  aaagf  s_regfile(7) [31:0]  $end
+$var wire   32  aaagg  v_regfile(0)(0) [31:0]  $end
+$var wire   32  aaagh  v_regfile(1)(0) [31:0]  $end
+$var wire   32  aaagi  v_regfile(2)(0) [31:0]  $end
+$var wire   32  aaagj  v_regfile(3)(0) [31:0]  $end
+$var wire   32  aaagk  v_regfile(4)(0) [31:0]  $end
+$var wire   32  aaagl  v_regfile(5)(0) [31:0]  $end
+$var wire   32  aaagm  v_regfile(6)(0) [31:0]  $end
+$var wire   32  aaagn  v_regfile(7)(0) [31:0]  $end
 $scope module fetch_ins $end
 $var wire   32  aaaah  op [31:0]  $end
 $var wire   32  aaaai  s1 [31:0]  $end
@@ -361,6 +377,22 @@ b11111111111111111111111111111111 aaafu
 b11111111111111111111111111111111 aaafv
 b11111111111111111111111111111111 aaafw
 b1111111111 aaafx
+b101100 aaafy
+b11111111111111111111111111110110 aaafz
+b1010011010 aaaga
+b100000 aaagb
+b100 aaagc
+b1101111000 aaagd
+b110 aaage
+b10110 aaagf
+b1 aaagg
+b11 aaagh
+b11111111111111111111111111110110 aaagi
+b111 aaagj
+b11111111111111111111111111111111 aaagk
+b1010 aaagl
+b1000 aaagm
+b1 aaagn
 $end
 
 #5
@@ -413,6 +445,7 @@ r1 aaadz
 1aaaaf
 b0 aaaag
 b100 aaaah
+b11 aaaai
 b1 aaaaj
 b10 aaaak
 
@@ -425,15 +458,17 @@ b1 aaaag
 b10 aaaah
 b1 aaaai
 b11 aaaaj
-b0 aaaak
+b110 aaaak
 1aaaam
 0aaaan
 b100 aaaao
+b11 aaaap
 b1 aaaaq
 b10 aaaar
 b1 aaaat
 1aaaau
 b100 aaaaw
+b11 aaaax
 b1 aaaay
 b10 aaaaz
 
@@ -444,23 +479,34 @@ b10 aaaaz
 1aaaaa
 b10 aaaag
 b1 aaaah
-b0 aaaai
+b100 aaaai
+b1 aaaaj
 b1001 aaaak
 b10 aaaao
 b1 aaaap
 b11 aaaaq
-b0 aaaar
+b110 aaaar
 b10 aaaaw
 b1 aaaax
 b11 aaaay
-b0 aaaaz
+b110 aaaaz
 b1 aaabb
 b100 aaabc
+b11 aaabd
 b1 aaabe
 b10 aaabf
 1aaabh
 1aaabj
+b11 aaaca
 b1 aaacb
+b111 aaacc
+b111 aaacd
+b111 aaace
+b111 aaacf
+b111 aaacg
+b111 aaach
+b111 aaaci
+b111 aaacj
 b11 aaack
 b11 aaacl
 b11 aaacm
@@ -480,15 +526,18 @@ b11 aaaah
 b11 aaaai
 b1001 aaaaj
 b100 aaaak
-0aaaam
 b1 aaaao
-b0 aaaap
+b100 aaaap
+b1 aaaaq
 b1001 aaaar
-0aaaau
+b1 aaaaw
+b100 aaaax
+b1 aaaay
+b1001 aaaaz
 b10 aaabc
 b1 aaabd
 b11 aaabe
-b0 aaabf
+b110 aaabf
 1aaabi
 0aaabj
 b1 aaabn
@@ -507,81 +556,6 @@ b101 aaaah
 b111 aaaai
 b100 aaaaj
 b101 aaaak
-b10 aaaat
-b0 aaabb
-b0 aaabc
-b0 aaabd
-b0 aaabe
-0aaabh
-0aaabi
-0aaabm
-1aaabz
-
-#60
-0aaaaa
-
-#65
-1aaaaa
-b101 aaaag
-b0 aaaai
-b1 aaaaj
-b100 aaaak
-b11 aaaat
-1aaabm
-
-#70
-0aaaaa
-
-#75
-1aaaaa
-b110 aaaag
-b110 aaaah
-b11 aaaai
-b100 aaaaj
-b10 aaaak
-b100 aaaat
-
-#80
-0aaaaa
-
-#85
-1aaaaa
-b111 aaaag
-b111 aaaah
-b0 aaaai
-b111 aaaaj
-b11111111111111111111111111111011 aaaak
-b11 aaaal
-1aaaam
-b101 aaaat
-1aaaau
-b1 aaaaw
-b0 aaaax
-b1001 aaaaz
-0aaabr
-b10 aaabs
-b1 aaabt
-b11 aaabu
-b0 aaabv
-b10110 aaabx
-b1 aaaby
-1aaafo
-1aaafs
-b10 aaaft
-b1 aaafu
-b11 aaafv
-b0 aaafw
-
-#90
-0aaaaa
-
-#95
-1aaaaa
-b1000 aaaag
-b100 aaaah
-b1 aaaaj
-b10 aaaak
-b1111111111 aaaal
 b11 aaaao
 b11 aaaap
 b1001 aaaaq
@@ -590,47 +564,26 @@ b11 aaaaw
 b11 aaaax
 b1001 aaaay
 b100 aaaaz
-b1 aaabb
 b1 aaabc
-b11 aaabe
+b100 aaabd
+b1 aaabe
 b1001 aaabf
-1aaabh
+0aaabi
 1aaabl
-b0 aaabn
-b10110 aaabp
-1aaabr
-b0 aaaby
-0aaacs
-b100 aaact
-b0 aaacu
-b1 aaacv
-b10 aaacw
-b100 aaacy
-b100 aaacz
-b100 aaada
-b100 aaadb
-b100 aaadc
-b100 aaadd
-b100 aaade
-b100 aaadf
-b1 aaadg
-0aaafo
-1aaafp
-b100 aaaft
-b0 aaafu
-b1 aaafv
-b10 aaafw
+0aaabm
+b100 aaabn
+b100 aaabp
+1aaabz
 
-#100
+#60
 0aaaaa
 
-#105
+#65
 1aaaaa
-b1001 aaaag
-b10 aaaah
-b1 aaaai
-b11 aaaaj
-b11 aaaak
+b101 aaaag
+b10 aaaai
+b1 aaaaj
+b100 aaaak
 b101 aaaao
 b111 aaaap
 b100 aaaaq
@@ -645,6 +598,123 @@ b1001 aaabe
 b100 aaabf
 0aaabh
 0aaabl
+1aaabm
+0aaaep
+
+#70
+0aaaaa
+
+#75
+1aaaaa
+b110 aaaag
+b110 aaaah
+b11 aaaai
+b100 aaaaj
+b10 aaaak
+0aaaam
+b10 aaaap
+b1 aaaaq
+b100 aaaar
+0aaaau
+b10 aaabb
+
+#80
+0aaaaa
+
+#85
+1aaaaa
+b111 aaaag
+b111 aaaah
+b110 aaaai
+b111 aaaaj
+b11111111111111111111111111111011 aaaak
+b11 aaaal
+b10 aaaat
+0aaabr
+b10 aaabs
+b1 aaabt
+b11 aaabu
+b110 aaabv
+b10110 aaabx
+b1 aaaby
+1aaafo
+1aaafs
+b10 aaaft
+b1 aaafu
+b11 aaafv
+b110 aaafw
+b10110 aaage
+
+#90
+0aaaaa
+
+#95
+1aaaaa
+b1000 aaaag
+b100 aaaah
+b0 aaaai
+b1 aaaaj
+b10 aaaak
+b1111111111 aaaal
+b11 aaaat
+1aaabh
+1aaabl
+b11 aaabn
+b100000 aaabp
+1aaabr
+b0 aaaby
+0aaacs
+b100 aaact
+b11 aaacu
+b1 aaacv
+b10 aaacw
+b1010 aaacy
+b1010 aaacz
+b1010 aaada
+b1010 aaadb
+b1010 aaadc
+b1010 aaadd
+b1010 aaade
+b1010 aaadf
+b1 aaadg
+1aaaep
+0aaafo
+1aaafp
+b100 aaaft
+b11 aaafu
+b1 aaafv
+b10 aaafw
+b1010 aaagi
+
+#100
+0aaaaa
+
+#105
+1aaaaa
+b1001 aaaag
+b10 aaaah
+b1 aaaai
+b11 aaaaj
+b11 aaaak
+b100 aaaat
+b1 aaabb
+b101 aaabc
+b111 aaabd
+b100 aaabe
+b101 aaabf
+1aaabj
+0aaabl
+b100 aaabo
+b100 aaabq
+b111 aaaca
+b1 aaacc
+b1 aaacd
+b1 aaace
+b1 aaacf
+b1 aaacg
+b1 aaach
+b1 aaaci
+b1 aaacj
 1aaacs
 b0 aaadg
 0aaaep
@@ -660,12 +730,27 @@ b1010 aaaag
 b1 aaaah
 b0 aaaai
 b1001 aaaak
-0aaaam
-b0 aaaap
-b1 aaaaq
-b100 aaaar
-0aaaau
-b10 aaabb
+b101 aaaat
+b0 aaabb
+b0 aaabc
+b0 aaabd
+b0 aaabe
+b0 aaabf
+0aaabh
+0aaabj
+0aaabz
+0aaaeq
+b1 aaaer
+b100 aaaes
+b1 aaaet
+b1001 aaaeu
+b1 aaafn
+1aaafo
+1aaafr
+1aaafs
+b1 aaaft
+b100 aaafu
+b1001 aaafw
 
 #120
 0aaaaa
@@ -678,6 +763,12 @@ b11 aaaai
 b1001 aaaaj
 b100 aaaak
 b110 aaaat
+1aaabz
+1aaaeq
+b0 aaafn
+0aaafo
+0aaafr
+0aaafs
 
 #130
 0aaaaa
@@ -690,10 +781,6 @@ b11111111111111111111111111111111 aaaai
 b11111111111111111111111111111111 aaaaj
 b11111111111111111111111111111111 aaaak
 b111 aaaat
-1aaabh
-1aaabl
-b11 aaabn
-b100000 aaabp
 1aaaep
 
 #140
@@ -703,17 +790,6 @@ b100000 aaabp
 1aaaaa
 b1101 aaaag
 b1000 aaaat
-b1 aaabb
-b101 aaabc
-b111 aaabd
-b100 aaabe
-b101 aaabf
-1aaabj
-0aaabl
-b100 aaabo
-b1010 aaabq
-b111 aaaca
-0aaaep
 
 #150
 0aaaaa
@@ -722,6 +798,387 @@ b111 aaaca
 1aaaaa
 b1110 aaaag
 b1001 aaaat
+
+#160
+0aaaaa
+
+#165
+1aaaaa
+1aaaac
+0aaaaf
+b1010 aaaat
+0aaacs
+b101 aaact
+b111 aaacu
+b100 aaacv
+b101 aaacw
+b101 aaacy
+b101 aaacz
+b101 aaada
+b101 aaadb
+b101 aaadc
+b101 aaadd
+b101 aaade
+b101 aaadf
+b1 aaadg
+0aaaeq
+b11 aaaer
+b11 aaaes
+b1001 aaaet
+b100 aaaeu
+b1100001001 aaaex
+b1100001001 aaaey
+b1100001001 aaaez
+b1100001001 aaafa
+b1100001001 aaafb
+b1100001001 aaafc
+b1100001001 aaafd
+b1100001001 aaafe
+b1 aaafn
+1aaafp
+1aaafs
+b101 aaaft
+b111 aaafu
+b100 aaafv
+b101 aaafw
+b101 aaagl
+
+#170
+0aaaaa
+
+#175
+1aaaaa
+1aaaam
+1aaaau
+b10 aaaax
+b1 aaaay
+b100 aaaaz
+1aaacs
+b0 aaadg
+1aaafr
+b11 aaaft
+b11 aaafu
+b1001 aaafv
+b100 aaafw
+b1100001001 aaagk
+
+#180
+0aaaaa
+1aaaeq
+b0 aaafn
+
+#185
+1aaaaa
+0aaaac
+1aaaaf
+b1111 aaaag
+b110 aaaao
+b11 aaaap
+b100 aaaaq
+b10 aaaar
+b1001 aaaat
+b110 aaaaw
+b11 aaaax
+b100 aaaay
+b10 aaaaz
+b1 aaabb
+b101 aaabc
+b10 aaabd
+b1 aaabe
+b100 aaabf
+1aaabh
+1aaabj
+b1 aaabo
+b11111111111111111111111111110110 aaabq
+b10 aaaca
+b1010 aaacc
+b1010 aaacd
+b1010 aaace
+b1010 aaacf
+b1010 aaacg
+b1010 aaach
+b1010 aaaci
+b1010 aaacj
+0aaafp
+0aaafr
+0aaafs
+
+#190
+0aaaaa
+
+#195
+1aaaaa
+b10000 aaaag
+b111 aaaao
+b110 aaaap
+b111 aaaaq
+b11111111111111111111111111111011 aaaar
+b11 aaaas
+b111 aaaaw
+b110 aaaax
+b111 aaaay
+b11111111111111111111111111111011 aaaaz
+b11 aaaba
+b110 aaabc
+b11 aaabd
+b100 aaabe
+b10 aaabf
+0aaabj
+1aaabk
+0aaabz
+b11 aaadi
+b100 aaadj
+r3.140000104904175 aaadk
+r3.140000104904175 aaadl
+r3.140000104904175 aaadm
+r3.140000104904175 aaadn
+r3.140000104904175 aaado
+r3.140000104904175 aaadp
+r3.140000104904175 aaadq
+r3.140000104904175 aaadr
+r18.98999977111816 aaads
+r18.98999977111816 aaadt
+r18.98999977111816 aaadu
+r18.98999977111816 aaadv
+r18.98999977111816 aaadw
+r18.98999977111816 aaadx
+r18.98999977111816 aaady
+r18.98999977111816 aaadz
+
+#200
+0aaaaa
+
+#205
+1aaaaa
+b10001 aaaag
+b100 aaaao
+b0 aaaap
+b1 aaaaq
+b10 aaaar
+b1111111111 aaaas
+b100 aaaaw
+b0 aaaax
+b1 aaaay
+b10 aaaaz
+b1111111111 aaaba
+b111 aaabc
+b110 aaabd
+b111 aaabe
+b11111111111111111111111111111011 aaabf
+b11 aaabg
+1aaabi
+0aaabk
+b110 aaabn
+b111 aaabo
+b10110 aaabp
+b10110 aaabq
+1aaabz
+0aaadh
+
+#210
+0aaaaa
+
+#215
+1aaaaa
+1aaaad
+b11 aaaae
+b11 aaaag
+b11 aaaah
+b11 aaaai
+b1001 aaaaj
+b100 aaaak
+b10 aaaao
+b1 aaaap
+b11 aaaaq
+b11 aaaar
+b10 aaaaw
+b1 aaaax
+b11 aaaay
+b11 aaaaz
+b0 aaabb
+b0 aaabc
+b0 aaabd
+b0 aaabe
+b0 aaabf
+b1111111111 aaabg
+0aaabh
+0aaabi
+1aaadh
+
+#220
+0aaaaa
+
+#225
+1aaaaa
+0aaaad
+b100 aaaag
+b101 aaaah
+b111 aaaai
+b100 aaaaj
+b101 aaaak
+0aaaam
+1aaaan
+b0 aaaao
+b11111111111111111111111111111111 aaaap
+b0 aaaaq
+b0 aaaar
+b0 aaaat
+0aaaau
+
+#230
+0aaaaa
+
+#235
+1aaaaa
+b101 aaaag
+b10 aaaai
+b1 aaaaj
+b100 aaaak
+0aaaan
+b11 aaaao
+b11 aaaap
+b1001 aaaaq
+b100 aaaar
+b10 aaaat
+
+#240
+0aaaaa
+
+#245
+1aaaaa
+b110 aaaag
+b110 aaaah
+b11 aaaai
+b100 aaaaj
+b10 aaaak
+1aaaam
+b11 aaaat
+1aaaau
+b11 aaaaw
+b11 aaaax
+b1001 aaaay
+b100 aaaaz
+0aaacs
+b10 aaacu
+b1 aaacv
+b100 aaacw
+b0 aaacy
+b0 aaacz
+b0 aaada
+b0 aaadb
+b0 aaadc
+b0 aaadd
+b0 aaade
+b0 aaadf
+b1 aaadg
+1aaafp
+1aaafs
+b101 aaaft
+b10 aaafu
+b1 aaafv
+b0 aaagk
+
+#250
+0aaaaa
+
+#255
+1aaaaa
+b111 aaaag
+b111 aaaah
+b110 aaaai
+b111 aaaaj
+b11111111111111111111111111111011 aaaak
+b11 aaaal
+b101 aaaao
+b111 aaaap
+b100 aaaaq
+b101 aaaar
+b101 aaaaw
+b111 aaaax
+b100 aaaay
+b101 aaaaz
+b1 aaabb
+b11 aaabc
+b11 aaabd
+b1001 aaabe
+b100 aaabf
+1aaabh
+1aaabl
+b11 aaabn
+b100000 aaabp
+1aaacs
+b0 aaadg
+0aaaea
+b110 aaaeb
+b11 aaaec
+b100 aaaed
+b10 aaaee
+r22.1299991607666 aaaeg
+r22.1299991607666 aaaeh
+r22.1299991607666 aaaei
+r22.1299991607666 aaaej
+r22.1299991607666 aaaek
+r22.1299991607666 aaael
+r22.1299991607666 aaaem
+r22.1299991607666 aaaen
+b1 aaaeo
+0aaafp
+1aaafq
+b110 aaaft
+b11 aaafu
+b100 aaafv
+b10 aaafw
+
+#260
+0aaaaa
+
+#265
+1aaaaa
+b1000 aaaag
+b100 aaaah
+b0 aaaai
+b1 aaaaj
+b10 aaaak
+b1111111111 aaaal
+0aaaam
+b10 aaaap
+b1 aaaaq
+b100 aaaar
+0aaaau
+b101 aaabc
+b111 aaabd
+b100 aaabe
+b101 aaabf
+1aaabj
+0aaabl
+b100 aaabo
+b100 aaabq
+b111 aaaca
+b1 aaacc
+b1 aaacd
+b1 aaace
+b1 aaacf
+b1 aaacg
+b1 aaach
+b1 aaaci
+b1 aaacj
+1aaaea
+b0 aaaeo
+0aaaep
+0aaafq
+0aaafs
+
+#270
+0aaaaa
+
+#275
+1aaaaa
+b1001 aaaag
+b10 aaaah
+b1 aaaai
+b11 aaaaj
+b11 aaaak
+b100 aaaat
 b0 aaabb
 b0 aaabc
 b0 aaabd
@@ -731,208 +1188,106 @@ b0 aaabf
 0aaabj
 0aaabz
 
-#160
-0aaaaa
-
-#165
-1aaaaa
-1aaaac
-b1111 aaaag
-b1010 aaaat
-1aaabz
-
-#170
-0aaaaa
-
-#175
-1aaaaa
-1aaaep
-
-#180
-0aaaaa
-
-#185
-1aaaaa
-
-#190
-0aaaaa
-
-#195
-1aaaaa
-
-#200
-0aaaaa
-
-#205
-1aaaaa
-0aaacs
-b101 aaact
-b111 aaacu
-b100 aaacv
-b101 aaacw
-b1011 aaacy
-b1011 aaacz
-b1011 aaada
-b1011 aaadb
-b1011 aaadc
-b1011 aaadd
-b1011 aaade
-b1011 aaadf
-b1 aaadg
-0aaaeq
-b1 aaaer
-b0 aaaes
-b11 aaaet
-b1001 aaaeu
-b100010 aaaew
-b1 aaafn
-1aaafp
-1aaafs
-b101 aaaft
-b111 aaafu
-b100 aaafv
-b101 aaafw
-
-#210
-0aaaaa
-
-#215
-1aaaaa
-1aaacs
-b0 aaadg
-1aaafo
-0aaafp
-1aaafr
-b1 aaaft
-b0 aaafu
-b11 aaafv
-b1001 aaafw
-
-#220
-0aaaaa
-1aaaeq
-b0 aaafn
-
-#225
-1aaaaa
-0aaafo
-0aaafr
-0aaafs
-
-#230
-0aaaaa
-
-#235
-1aaaaa
-
-#240
-0aaaaa
-
-#245
-1aaaaa
-
-#250
-0aaaaa
-
-#255
-1aaaaa
-
-#260
-0aaaaa
-
-#265
-1aaaaa
-
-#270
-0aaaaa
-
-#275
-1aaaaa
-
 #280
 0aaaaa
 
 #285
 1aaaaa
+b1010 aaaag
+b1 aaaah
+b0 aaaai
+b1001 aaaak
+b101 aaaat
+1aaabz
 
 #290
 0aaaaa
 
 #295
 1aaaaa
-1aaaam
-1aaaau
-b0 aaaax
-b1 aaaay
-b100 aaaaz
-0aaaeq
-b11 aaaer
-b11 aaaes
-b1001 aaaet
-b100 aaaeu
-b1 aaafn
-1aaafp
-1aaafr
-1aaafs
-b11 aaaft
-b11 aaafu
-b1001 aaafv
-b100 aaafw
+b1011 aaaag
+b11 aaaah
+b11 aaaai
+b1001 aaaaj
+b100 aaaak
+b110 aaaat
+1aaaep
 
 #300
 0aaaaa
 
 #305
 1aaaaa
-b10000 aaaag
-0aaaam
-0aaaau
-b1 aaabb
-b101 aaabc
-b1 aaabe
-b100 aaabf
-1aaabh
-1aaabj
-b1 aaabo
-b11111111111111111111111111110110 aaabq
-b0 aaaca
-1aaaeq
-b0 aaafn
-0aaafp
-0aaafr
-0aaafs
+b1100 aaaag
+b0 aaaah
+b11111111111111111111111111111111 aaaai
+b11111111111111111111111111111111 aaaaj
+b11111111111111111111111111111111 aaaak
+b111 aaaat
 
 #310
 0aaaaa
 
 #315
 1aaaaa
-b0 aaabb
-b0 aaabc
-b0 aaabe
-b0 aaabf
-0aaabh
-0aaabj
-0aaabz
+b1101 aaaag
+b1000 aaaat
 
 #320
 0aaaaa
 
 #325
 1aaaaa
-1aaabz
+b1110 aaaag
+b1001 aaaat
+0aaacs
+b111 aaacu
+b100 aaacv
+b101 aaacw
+b101 aaacy
+b101 aaacz
+b101 aaada
+b101 aaadb
+b101 aaadc
+b101 aaadd
+b101 aaade
+b101 aaadf
+b1 aaadg
+0aaaeq
+b1 aaafn
+1aaafp
+1aaafs
+b101 aaaft
+b111 aaafu
+b101 aaafw
 
 #330
 0aaaaa
 
 #335
 1aaaaa
+1aaaac
+0aaaaf
+b1010 aaaat
+1aaacs
+b0 aaadg
+1aaafr
+b11 aaaft
+b11 aaafu
+b1001 aaafv
+b100 aaafw
+b1100001001 aaagk
 
 #340
 0aaaaa
+1aaaeq
+b0 aaafn
 
 #345
 1aaaaa
+0aaafp
+0aaafr
+0aaafs
 
 #350
 0aaaaa
@@ -945,65 +1300,24 @@ b0 aaabf
 
 #365
 1aaaaa
-1aaaam
-1aaaau
-0aaacs
-b0 aaacu
-b1 aaacv
-b100 aaacw
-b11111111111111111111111111110111 aaacy
-b11111111111111111111111111110111 aaacz
-b11111111111111111111111111110111 aaada
-b11111111111111111111111111110111 aaadb
-b11111111111111111111111111110111 aaadc
-b11111111111111111111111111110111 aaadd
-b11111111111111111111111111110111 aaade
-b11111111111111111111111111110111 aaadf
-b1 aaadg
-1aaafp
-1aaafs
-b101 aaaft
-b0 aaafu
-b1 aaafv
 
 #370
 0aaaaa
 
 #375
 1aaaaa
-b10001 aaaag
-0aaaam
-0aaaau
-b1 aaabb
-b101 aaabc
-b1 aaabe
-b100 aaabf
-1aaabh
-1aaabj
-1aaacs
-b0 aaadg
-0aaafp
-0aaafs
 
 #380
 0aaaaa
 
 #385
 1aaaaa
-b0 aaabb
-b0 aaabc
-b0 aaabe
-b0 aaabf
-0aaabh
-0aaabj
-0aaabz
 
 #390
 0aaaaa
 
 #395
 1aaaaa
-1aaabz
 
 #400
 0aaaaa
@@ -1028,51 +1342,24 @@ b0 aaabf
 
 #435
 1aaaaa
-1aaaam
-1aaaau
-0aaacs
-b1 aaadg
-1aaafp
-1aaafs
 
 #440
 0aaaaa
 
 #445
 1aaaaa
-b10010 aaaag
-0aaaam
-0aaaau
-b1 aaabb
-b101 aaabc
-b1 aaabe
-b100 aaabf
-1aaabh
-1aaabj
-1aaacs
-b0 aaadg
-0aaafp
-0aaafs
 
 #450
 0aaaaa
 
 #455
 1aaaaa
-b0 aaabb
-b0 aaabc
-b0 aaabe
-b0 aaabf
-0aaabh
-0aaabj
-0aaabz
 
 #460
 0aaaaa
 
 #465
 1aaaaa
-1aaabz
 
 #470
 0aaaaa

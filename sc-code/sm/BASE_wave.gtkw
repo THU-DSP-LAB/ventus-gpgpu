@@ -1,15 +1,15 @@
 [*]
 [*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
-[*] Sat Feb 18 16:49:29 2023
+[*] Thu Feb 23 16:44:07 2023
 [*]
 [dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave.vcd"
-[dumpfile_mtime] "Sat Feb 18 16:46:29 2023"
-[dumpfile_size] 15248
+[dumpfile_mtime] "Thu Feb 23 09:53:11 2023"
+[dumpfile_size] 19685
 [savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave.gtkw"
 [timestart] 0
 [size] 2548 1359
 [pos] -1 -1
-*-4.872661 175 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-4.872661 140 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] SystemC.
 [sst_width] 214
 [signals_width] 369
@@ -20,9 +20,9 @@ SystemC.Clk
 SystemC.Rst_n
 [color] 1
 SystemC.pc[9:0]
-[color] 1
+[color] 2
 SystemC.jump
-[color] 1
+[color] 2
 SystemC.jump_addr[9:0]
 [color] 1
 SystemC.fetch_ins.op[31:0]
@@ -97,9 +97,7 @@ SystemC.emito_lsu
 [color] 1
 SystemC.lsu_ready
 SystemC.lsufifo_elem_num[31:0]
-@25
 SystemC.lsufifo_empty
-@24
 [color] 1
 SystemC.emito_valu
 [color] 1
@@ -134,5 +132,40 @@ SystemC.wb_ins.s2[31:0]
 SystemC.wb_ins.d[31:0]
 [color] 6
 SystemC.wb_ins.jump_addr[9:0]
+@420
+[color] 4
+SystemC.s_regfile(0)[31:0]
+[color] 4
+SystemC.s_regfile(1)[31:0]
+[color] 4
+SystemC.s_regfile(2)[31:0]
+[color] 4
+SystemC.s_regfile(3)[31:0]
+[color] 4
+SystemC.s_regfile(4)[31:0]
+[color] 4
+SystemC.s_regfile(5)[31:0]
+[color] 4
+SystemC.s_regfile(6)[31:0]
+[color] 4
+SystemC.s_regfile(7)[31:0]
+[color] 5
+SystemC.v_regfile(0)(0)[31:0]
+[color] 5
+SystemC.v_regfile(1)(0)[31:0]
+[color] 5
+SystemC.v_regfile(2)(0)[31:0]
+[color] 5
+SystemC.v_regfile(3)(0)[31:0]
+[color] 5
+SystemC.v_regfile(4)(0)[31:0]
+@421
+[color] 5
+SystemC.v_regfile(5)(0)[31:0]
+@420
+[color] 5
+SystemC.v_regfile(6)(0)[31:0]
+[color] 5
+SystemC.v_regfile(7)(0)[31:0]
 [pattern_trace] 1
 [pattern_trace] 0

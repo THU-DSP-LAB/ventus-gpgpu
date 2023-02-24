@@ -101,6 +101,23 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf, BASE_impl.write_lsu, "write_lsu");
     sc_trace(tf, BASE_impl.wb_ena, "wb_ena");
     sc_trace(tf, BASE_impl.wb_ins, "wb_ins");
+    sc_trace(tf, BASE_impl.s_regfile[0], "s_regfile(0)");
+    sc_trace(tf, BASE_impl.s_regfile[1], "s_regfile(1)");
+    sc_trace(tf, BASE_impl.s_regfile[2], "s_regfile(2)");
+    sc_trace(tf, BASE_impl.s_regfile[3], "s_regfile(3)");
+    sc_trace(tf, BASE_impl.s_regfile[4], "s_regfile(4)");
+    sc_trace(tf, BASE_impl.s_regfile[5], "s_regfile(5)");
+    sc_trace(tf, BASE_impl.s_regfile[6], "s_regfile(6)");
+    sc_trace(tf, BASE_impl.s_regfile[7], "s_regfile(7)");
+    sc_trace(tf, BASE_impl.v_regfile[0][0], "v_regfile(0)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[1][0], "v_regfile(1)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[2][0], "v_regfile(2)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[3][0], "v_regfile(3)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[4][0], "v_regfile(4)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[5][0], "v_regfile(5)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[6][0], "v_regfile(6)(0)");
+    sc_trace(tf, BASE_impl.v_regfile[7][0], "v_regfile(7)(0)");
+
     // sc_trace(tf, BASE_impl., "");
 
     sc_start(500, SC_NS);

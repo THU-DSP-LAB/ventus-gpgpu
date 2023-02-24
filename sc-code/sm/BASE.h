@@ -203,6 +203,7 @@ public:
         s_memory[25] = 34;
         s_memory[41] = 67;
         v_memory[20].fill(666);
+        v_memory[41].fill(777);
     }
 };
 
