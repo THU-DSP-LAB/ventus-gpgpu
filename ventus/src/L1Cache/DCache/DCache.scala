@@ -139,8 +139,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      tag read      ******
   val missRspWriteEnable = Wire(Bool())
 
-  TagAccess.io.r.req.valid := io.coreReq.fire()// || (coreReqHolding && coreReq_ok_to_in)
-  TagAccess.io.r.req.bits.setIdx := io.coreReq.bits.setIdx
+  TagAccess.io.probe_read.valid := io.coreReq.fire()// || (coreReqHolding && coreReq_ok_to_in)
+  TagAccess.io.probe_read.bits.setIdx := io.coreReq.bits.setIdx
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag//Mux(coreReqHolding, coreReqTag_st2, coreReqCtrlAddr_st1.tag)
   TagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write      ******
