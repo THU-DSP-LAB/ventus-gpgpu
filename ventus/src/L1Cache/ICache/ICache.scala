@@ -100,13 +100,13 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
-  tagAccess.io.probe_read.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
-  tagAccess.io.probe_read.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
+  tagAccess.io.probeRead.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
+  tagAccess.io.probeRead.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
   tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
-  tagAccess.io.w.req.valid := memRsp_Q.io.deq.fire()
-  tagAccess.io.w.req.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
+  tagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.fire()
+  tagAccess.io.allocateWrite.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
 
   // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp

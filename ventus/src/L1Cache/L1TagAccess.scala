@@ -32,11 +32,11 @@ class getEntryStatus(nEntry: Int) extends Module{
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
 class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
   val io = IO(new Bundle {
-    val probe_read = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
+    val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
     val coreReqReady = Input(Bool())
 
-    val w = Flipped(new SRAMWriteBus(UInt(tagBits.W), set, way))//Allocate Channel
+    val allocateWrite = Flipped(Decoupled(new SRAMBundleAW(UInt(tagBits.W), set, way)))//Allocate Channel
 
     val waymaskReplacement = Output(UInt(way.W))//one hot, for SRAMTemplate
     val waymaskHit_st1 = Output(UInt(way.W))
@@ -54,7 +54,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
     singlePort = false,
     bypassWrite = false
   ))
-  tagBodyAccess.io.r.req <> io.probe_read
+  tagBodyAccess.io.r.req <> io.probeRead
 
   val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
   //val way_valid = Mem(set, UInt(way.W))
@@ -63,19 +63,19 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
-  iTagChecker.io.way_valid := way_valid(RegEnable(io.probe_read.bits.setIdx,io.coreReqReady))//st1
+  iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.coreReqReady))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
 
   // ******      Replacement    ******
   val Replacement = Module(new ReplacementUnit(way))
-  Replacement.io.validbits_of_set := Cat(way_valid(io.w.req.bits.setIdx))
+  Replacement.io.validbits_of_set := Cat(way_valid(io.allocateWrite.bits.setIdx))
   io.waymaskReplacement := Replacement.io.waymask
-  tagBodyAccess.io.w.req.valid := io.w.req.valid
-  io.w.req.ready := tagBodyAccess.io.w.req.ready
-  tagBodyAccess.io.w.req.bits.apply(data = io.w.req.bits.data, setIdx = io.w.req.bits.setIdx, waymask = Replacement.io.waymask)
-  when(io.w.req.valid && !Replacement.io.Set_is_full){
-    way_valid(io.w.req.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
+  tagBodyAccess.io.w.req.valid := io.allocateWrite.valid
+  io.allocateWrite.ready := tagBodyAccess.io.w.req.ready
+  tagBodyAccess.io.w.req.bits.apply(data = io.allocateWrite.bits.data, setIdx = io.allocateWrite.bits.setIdx, waymask = Replacement.io.waymask)
+  when(io.allocateWrite.valid && !Replacement.io.Set_is_full){
+    way_valid(io.allocateWrite.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
   }
 
 }

@@ -139,13 +139,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      tag read      ******
   val missRspWriteEnable = Wire(Bool())
 
-  TagAccess.io.probe_read.valid := io.coreReq.fire()// || (coreReqHolding && coreReq_ok_to_in)
-  TagAccess.io.probe_read.bits.setIdx := io.coreReq.bits.setIdx
+  TagAccess.io.probeRead.valid := io.coreReq.fire()// || (coreReqHolding && coreReq_ok_to_in)
+  TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag//Mux(coreReqHolding, coreReqTag_st2, coreReqCtrlAddr_st1.tag)
   TagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write      ******
-  TagAccess.io.w.req.valid := missRspWriteEnable//multiple for secondary miss
-  TagAccess.io.w.req.bits(
+  TagAccess.io.allocateWrite.valid := missRspWriteEnable//multiple for secondary miss
+  TagAccess.io.allocateWrite.bits(
     data=get_tag(memRsp_Q_st1.d_addr),
     setIdx=get_setIdx(memRsp_Q_st1.d_addr),
     waymask = 1.U)
