@@ -29,14 +29,14 @@ class getEntryStatus(nEntry: Int) extends Module{
   io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
 }
 
+//This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
 class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
-  //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
   val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(UInt(tagBits.W), set, way))
+    val probe_read = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
     val coreReqReady = Input(Bool())
 
-    val w = Flipped(new SRAMWriteBus(UInt(tagBits.W), set, way))
+    val w = Flipped(new SRAMWriteBus(UInt(tagBits.W), set, way))//Allocate Channel
 
     val waymaskReplacement = Output(UInt(way.W))//one hot, for SRAMTemplate
     val waymaskHit_st1 = Output(UInt(way.W))
@@ -44,7 +44,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
     val hit_st1 = Output(Bool())
   })
 
-  //There should be a way to zip tagBody & validBit module to one call in Scala
+//SRAM to store tag
   val tagBodyAccess = Module(new SRAMTemplate(
     UInt(tagBits.W),
     set=set,
@@ -54,16 +54,16 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
     singlePort = false,
     bypassWrite = false
   ))
-  tagBodyAccess.io.r <> io.r
+  tagBodyAccess.io.r.req <> io.probe_read
 
   val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
   //val way_valid = Mem(set, UInt(way.W))
 
-  // ******      TagChecker    ******
+  // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
-  iTagChecker.io.way_valid := way_valid(RegEnable(io.r.req.bits.setIdx,io.coreReqReady))//st1
+  iTagChecker.io.way_valid := way_valid(RegEnable(io.probe_read.bits.setIdx,io.coreReqReady))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
 

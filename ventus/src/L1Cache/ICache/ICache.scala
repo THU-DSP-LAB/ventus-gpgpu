@@ -100,8 +100,8 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
-  tagAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
-  tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
+  tagAccess.io.probe_read.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
+  tagAccess.io.probe_read.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
   tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
