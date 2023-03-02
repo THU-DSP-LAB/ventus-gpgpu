@@ -102,12 +102,22 @@ class ReplacementUnit(timeLength:Int, way: Int) extends Module{
     val waymask = Output(UInt(way.W))//one hot
     val Set_is_full = Output(Bool())
   })
-  val victim_1Hidx = if (way>1) Wire(UInt(way.W)) else Wire(UInt(1.W))
+  val wayIdxWidth = log2Ceil(way)
+  val victimIdx = if (way>1) Wire(UInt(wayIdxWidth.W)) else Wire(UInt(1.W))
   io.Set_is_full := io.validOfSet === Fill(way,1.U)
-  io.waymask := Mux(io.Set_is_full, victim_1Hidx, UIntToOH(VecInit(io.validOfSet.asBools).indexWhere(_===false.B)))
+
+  if (way>1) {
+    val timeOfSetAfterValid = Wire(Vec(way,UInt(timeLength.W)))
+    for (i <- 0 until way)
+      timeOfSetAfterValid(i) := Mux(io.validOfSet(i),io.timeOfSet(i),0.U)
+    val maxTimeChooser = Module(new maxIdxTree(width=timeLength,numInput=way))
+    maxTimeChooser.io.candidateIn := timeOfSetAfterValid
+    victimIdx := maxTimeChooser.io.idxOfMax
+  }else victimIdx := 0.U
+
+  io.waymask := Mux(io.Set_is_full, victimIdx, PriorityEncoder(~io.validOfSet))
   // First case, set not full
   //Second case, full set, replacement happens
-  if (way>1) victim_1Hidx := 0.U
 }
 class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   val io = IO(new Bundle {
@@ -126,7 +136,6 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   io.cache_hit := io.waymask.orR
 }
 
-
 class maxIdxTree(width: Int, numInput: Int) extends Module{
   val treeLevel = log2Ceil(numInput)
   val io = IO(new Bundle{
@@ -140,7 +149,7 @@ class maxIdxTree(width: Int, numInput: Int) extends Module{
   def maxWithIdx(a:candWithIdx, b:candWithIdx): candWithIdx = Mux(a.candidate > b.candidate,a,b)
 
   val candVec = Wire(Vec(numInput,new candWithIdx))
-  for(i <- 0 to numInput-1){
+  for(i <- 0 until numInput){
     candVec(i).candidate := io.candidateIn(i)
     candVec(i).index := i.asUInt
   }
