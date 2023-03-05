@@ -30,21 +30,26 @@ class getEntryStatus(nEntry: Int) extends Module{
 }
 
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
-class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
+class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Module{
   val io = IO(new Bundle {
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
-    val coreReqReady = Input(Bool())
+    val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
 
     val allocateWrite = Flipped(Decoupled(new SRAMBundleAW(UInt(tagBits.W), set, way)))//Allocate Channel
 
-    val waymaskReplacement = Output(UInt(way.W))//one hot, for SRAMTemplate
+    val waymaskReplacement_st1 = Output(UInt(way.W))//one hot, for SRAMTemplate
     val waymaskHit_st1 = Output(UInt(way.W))
 
     val hit_st1 = Output(Bool())
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
+  assert(!(io.probeRead.fire && io.allocateWrite.fire), s"tag probe and allocate in same cycle")
+
+  //access time counter
+  val accessFire = io.probeRead.fire || io.allocateWrite.fire
+  val (accessCount,accessCounterFull) = Counter(accessFire,1000)
 
   //SRAM to store tag
   val tagBodyAccess = Module(new SRAMTemplate(
@@ -69,10 +74,32 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
     singlePort = false,
     bypassWrite = false
   ))
-  timeAccess.io.r.req <> io.allocateWrite
+  timeAccess.io.r.req.valid := io.allocateWrite.fire
+  timeAccess.io.r.req.bits.setIdx := io.allocateWrite.bits.setIdx
+  io.allocateWrite.ready := true.B//TODO be conditional after add memReq_Q
+  //although use arb, src0 and src1 should not come in same cycle
+  val timeAccessWArb = Module(new Arbiter (new SRAMBundleAW(UInt(Length_Replace_time_SRAM.W),set,way),2))
+  assert(!(timeAccessWArb.io.in(0).valid && timeAccessWArb.io.in(1).valid), s"tag probe and allocate in same cycle")
+  //LRU replacement policy
+  //timeAccessWArb.io.in(0) for regular R/W hit update access time
+  timeAccessWArb.io.in(0).valid := io.hit_st1//hit already contain probe fire
+  timeAccessWArb.io.in(0).bits(
+    data = accessCount,
+    setIdx = RegNext(io.probeRead.bits.setIdx),
+    waymask = io.waymaskHit_st1
+  )
+  //timeAccessWArb.io.in(1) for memRsp allocate
+  timeAccessWArb.io.in(1).valid := RegNext(io.allocateWrite.fire)
+  timeAccessWArb.io.in(1).bits(
+    data = accessCount,
+    setIdx = RegNext(io.allocateWrite.bits.setIdx),
+    waymask = io.waymaskReplacement_st1
+  )
 
   val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
-  //val way_valid = Mem(set, UInt(way.W))
+  val way_dirty = if(!readOnly){
+    Some(RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W)))))))
+  } else None
 
   // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
@@ -82,24 +109,25 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
 
-  // ******      Replacement    ******
+  // ******      tag_array::allocate    ******
   val Replacement = Module(new ReplacementUnit(Length_Replace_time_SRAM,way))
   Replacement.io.validOfSet := Cat(way_valid(io.allocateWrite.bits.setIdx))
-  io.waymaskReplacement := Replacement.io.waymask
-  tagBodyAccess.io.w.req.valid := io.allocateWrite.valid
-  io.allocateWrite.ready := tagBodyAccess.io.w.req.ready
-  tagBodyAccess.io.w.req.bits.apply(data = io.allocateWrite.bits.data, setIdx = io.allocateWrite.bits.setIdx, waymask = Replacement.io.waymask)
-  when(io.allocateWrite.valid && !Replacement.io.Set_is_full){
-    way_valid(io.allocateWrite.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
+  Replacement.io.timeOfSet_st1 := timeAccess.io.r.resp.data//meta_entry_t::get_access_time
+  io.waymaskReplacement_st1 := Replacement.io.waymask_st1//tag_array::replace_choice
+  val allocateWrite_st1 = RegEnable(io.allocateWrite.bits,io.allocateWrite.fire)
+  tagBodyAccess.io.w.req.valid := RegNext(io.allocateWrite.fire)//meta_entry_t::allocate
+  tagBodyAccess.io.w.req.bits.apply(data = allocateWrite_st1.data, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
+  when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate
+    way_valid(io.allocateWrite.bits.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
   }
-
+  timeAccess.io.w.req <> timeAccessWArb.io.out//meta_entry_t::update_access_time
 }
 
-class ReplacementUnit(timeLength:Int, way: Int) extends Module{
+class ReplacementUnit(timeLength:Int, way: Int, debug:Boolean=false) extends Module{
   val io = IO(new Bundle {
     val validOfSet = Input(UInt(way.W))//MSB at left
-    val timeOfSet = Input(Vec(way,UInt(timeLength.W)))//MSB at right
-    val waymask = Output(UInt(way.W))
+    val timeOfSet_st1 = Input(Vec(way,UInt(timeLength.W)))//MSB at right
+    val waymask_st1 = Output(UInt(way.W))
     val Set_is_full = Output(Bool())
   })
   val wayIdxWidth = log2Ceil(way)
@@ -109,24 +137,26 @@ class ReplacementUnit(timeLength:Int, way: Int) extends Module{
   if (way>1) {
     val timeOfSetAfterValid = Wire(Vec(way,UInt(timeLength.W)))
     for (i <- 0 until way)
-      timeOfSetAfterValid(i) := Mux(io.validOfSet(i),io.timeOfSet(i),0.U)
+      timeOfSetAfterValid(i) := Mux(io.validOfSet(i),io.timeOfSet_st1(i),0.U)
     val maxTimeChooser = Module(new maxIdxTree(width=timeLength,numInput=way))
     maxTimeChooser.io.candidateIn := timeOfSetAfterValid
     victimIdx := maxTimeChooser.io.idxOfMax
   }else victimIdx := 0.U
 
-  io.waymask := Mux(io.Set_is_full, victimIdx, PriorityEncoder(~io.validOfSet))
+  io.waymask_st1 := Mux(io.Set_is_full, victimIdx, PriorityEncoder(~io.validOfSet))
   // First case, set not full
   //Second case, full set, replacement happens
 
   //debug use
-  when(io.validOfSet.asBools.reduce(_|_)===true.B){
-    for (i <- 0 until way)
-      printf("%d  ", io.validOfSet(i))
-    printf("\n")
-    for (i <- 0 until way)
-      printf("%d ", io.timeOfSet(i))
-    printf("\noutput: %d\n", io.waymask)
+  if(debug){
+    when(io.validOfSet.asBools.reduce(_ | _) === true.B) {
+      for (i <- 0 until way)
+        printf("%d  ", io.validOfSet(i))
+      printf("\n")
+      for (i <- 0 until way)
+        printf("%d ", io.timeOfSet_st1(way-1-i))
+      printf("\noutput: %d\n", io.waymask_st1)
+    }
   }
 }
 class tagChecker(way: Int, tagIdxBits: Int) extends Module{
@@ -146,7 +176,7 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   io.cache_hit := io.waymask.orR
 }
 
-class maxIdxTree(width: Int, numInput: Int) extends Module{
+class maxIdxTree(width: Int, numInput: Int) extends Module{//TODO turn this to be minIdxTree
   val treeLevel = log2Ceil(numInput)
   val io = IO(new Bundle{
     val candidateIn = Input(Vec(numInput, UInt(width.W)))

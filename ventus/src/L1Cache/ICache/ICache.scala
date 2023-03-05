@@ -58,7 +58,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val io = IO(new ICacheExtInf)
 
   // ****** submodules ******
-  val tagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits))
+  val tagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=true))
   val dataAccess = Module(new SRAMTemplate(
     gen=UInt(BlockBits.W),
     set=NSets,
@@ -87,7 +87,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   val wayidx_hit_st1 = Wire(UInt(WayIdxBits.W))
   wayidx_hit_st1 := OHToUInt(tagAccess.io.waymaskHit_st1)
-  val waymask_replace_st0 = tagAccess.io.waymaskReplacement
+  val waymask_replace_st0 = tagAccess.io.waymaskReplacement_st1
   val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.ready)
   val warpid_st2 = RegNext(warpid_st1)
   val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)

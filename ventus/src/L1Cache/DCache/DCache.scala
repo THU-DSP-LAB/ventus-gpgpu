@@ -97,7 +97,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val MshrAccess = Module(new MSHR(new DCacheMshrTargetInfo)(p))
   val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new DCacheMshrTargetInfo)
-  val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits))
+  val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
   val DataCorssBar = Module(new DataCrossbar)
   val WriteDataBuf = Module(new WDB)
 
@@ -159,7 +159,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
   val wayIdxAtHit_st2 = RegNext(wayIdxAtHit_st1)
   val wayIdxReplace_st0 = Wire(UInt(WayIdxBits.W))
-  wayIdxReplace_st0 := OHToUInt(TagAccess.io.waymaskReplacement)
+  wayIdxReplace_st0 := OHToUInt(TagAccess.io.waymaskReplacement_st1)
 
   val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR))  //mem Order
   val writeTouchBank_st1 =    Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.orR))   //mem Order
