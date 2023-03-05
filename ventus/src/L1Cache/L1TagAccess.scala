@@ -97,9 +97,9 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int)extends Module{
 
 class ReplacementUnit(timeLength:Int, way: Int) extends Module{
   val io = IO(new Bundle {
-    val validOfSet = Input(UInt(way.W))
-    val timeOfSet = Input(Vec(way,UInt(timeLength.W)))
-    val waymask = Output(UInt(way.W))//one hot
+    val validOfSet = Input(UInt(way.W))//MSB at left
+    val timeOfSet = Input(Vec(way,UInt(timeLength.W)))//MSB at right
+    val waymask = Output(UInt(way.W))
     val Set_is_full = Output(Bool())
   })
   val wayIdxWidth = log2Ceil(way)
@@ -118,6 +118,16 @@ class ReplacementUnit(timeLength:Int, way: Int) extends Module{
   io.waymask := Mux(io.Set_is_full, victimIdx, PriorityEncoder(~io.validOfSet))
   // First case, set not full
   //Second case, full set, replacement happens
+
+  //debug use
+  when(io.validOfSet.asBools.reduce(_|_)===true.B){
+    for (i <- 0 until way)
+      printf("%d  ", io.validOfSet(i))
+    printf("\n")
+    for (i <- 0 until way)
+      printf("%d ", io.timeOfSet(i))
+    printf("\noutput: %d\n", io.waymask)
+  }
 }
 class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   val io = IO(new Bundle {
@@ -150,7 +160,7 @@ class maxIdxTree(width: Int, numInput: Int) extends Module{
 
   val candVec = Wire(Vec(numInput,new candWithIdx))
   for(i <- 0 until numInput){
-    candVec(i).candidate := io.candidateIn(i)
+    candVec(i).candidate := io.candidateIn(numInput-1-i)
     candVec(i).index := i.asUInt
   }
 
