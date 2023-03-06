@@ -18,13 +18,6 @@ import chisel3.util._
 import config.config.Parameters
 import pipeline.parameters._
 
-class L1CacheMemReq extends DCacheMemReq{
-  override val a_source = UInt((log2Up(num_cache_in_sm)+depth_warp).W)
-}
-class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
-  override val d_source = UInt((log2Up(NCacheInSM)+WIdBits).W)
-}
-
 class L1Cache2L2ArbiterIO(implicit p: Parameters) extends DCacheBundle{
   val memReqVecIn = Flipped(Vec(NCacheInSM, Decoupled(new DCacheMemReq())))
   val memReqOut = Decoupled(new L1CacheMemReq)
