@@ -138,9 +138,9 @@ class ReplacementUnit(timeLength:Int, way: Int, debug:Boolean=false) extends Mod
     val timeOfSetAfterValid = Wire(Vec(way,UInt(timeLength.W)))
     for (i <- 0 until way)
       timeOfSetAfterValid(i) := Mux(io.validOfSet(i),io.timeOfSet_st1(i),0.U)
-    val maxTimeChooser = Module(new maxIdxTree(width=timeLength,numInput=way))
-    maxTimeChooser.io.candidateIn := timeOfSetAfterValid
-    victimIdx := maxTimeChooser.io.idxOfMax
+    val minTimeChooser = Module(new minIdxTree(width=timeLength,numInput=way))
+    minTimeChooser.io.candidateIn := timeOfSetAfterValid
+    victimIdx := minTimeChooser.io.idxOfMin
   }else victimIdx := 0.U
 
   io.waymask_st1 := Mux(io.Set_is_full, victimIdx, PriorityEncoder(~io.validOfSet))
@@ -176,17 +176,17 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   io.cache_hit := io.waymask.orR
 }
 
-class maxIdxTree(width: Int, numInput: Int) extends Module{//TODO turn this to be minIdxTree
+class minIdxTree(width: Int, numInput: Int) extends Module{//TODO turn this to be minIdxTree
   val treeLevel = log2Ceil(numInput)
   val io = IO(new Bundle{
     val candidateIn = Input(Vec(numInput, UInt(width.W)))
-    val idxOfMax = Output(UInt(treeLevel.W))
+    val idxOfMin = Output(UInt(treeLevel.W))
   })
   class candWithIdx extends Bundle{
     val candidate = UInt(width.W)
     var index = UInt(treeLevel.W)
   }
-  def maxWithIdx(a:candWithIdx, b:candWithIdx): candWithIdx = Mux(a.candidate > b.candidate,a,b)
+  def minWithIdx(a:candWithIdx, b:candWithIdx): candWithIdx = Mux(a.candidate < b.candidate,a,b)
 
   val candVec = Wire(Vec(numInput,new candWithIdx))
   for(i <- 0 until numInput){
@@ -194,5 +194,5 @@ class maxIdxTree(width: Int, numInput: Int) extends Module{//TODO turn this to b
     candVec(i).index := i.asUInt
   }
 
-  io.idxOfMax := candVec.reduceTree(maxWithIdx(_,_)).index
+  io.idxOfMin := candVec.reduceTree(minWithIdx(_,_)).index
 }
