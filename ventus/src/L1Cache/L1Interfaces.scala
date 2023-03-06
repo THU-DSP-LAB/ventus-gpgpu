@@ -2,6 +2,7 @@ package L1Cache
 
 import L1Cache.DCache.DCacheBundle
 import chisel3._
+import chisel3.util.log2Up
 import config.config.Parameters
 import pipeline.parameters._
 /*Version Note
@@ -15,8 +16,6 @@ import pipeline.parameters._
 *
 * this design havent take NBanks = BlockWords simplification in to account
 * this design consider only NBanks = BlockWords case at miss rsp to data bank transition
-*
-* TagAccess no need to acquire data from _st1 reg, as it can hold result with SRAMTemplate
 * */
 
 /*class DCacheMshrBlockAddr(implicit p: Parameters)extends DCacheBundle{
@@ -54,7 +53,7 @@ class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
   val d_data = Vec(BlockWords, UInt(WordLength.W))//UInt((WordLength * BlockWords).W)
 }
 
-class DCacheMemReq extends Bundle {
+class L1CacheMemReq extends Bundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)
   //val a_size
@@ -63,5 +62,13 @@ class DCacheMemReq extends Bundle {
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
-  val a_mask = Vec(dcache_BlockWords,Bool())
+  val a_mask = Vec(dcache_BlockWords, Bool())
+}
+
+class DCacheMemReq extends L1CacheMemReq{
+  override val a_source = UInt((log2Up(num_cache_in_sm)+depth_warp).W)
+}
+
+class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
+  override val d_source = UInt((log2Up(NCacheInSM)+WIdBits).W)
 }
