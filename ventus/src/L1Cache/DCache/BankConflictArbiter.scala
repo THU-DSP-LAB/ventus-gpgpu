@@ -10,6 +10,7 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache.DCache
 
+import L1Cache.DCachePerLaneAddr
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
