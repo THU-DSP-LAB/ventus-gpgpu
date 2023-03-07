@@ -79,7 +79,7 @@ class warp_scheduler extends Module{
   pcControl(next_warp).PC_src:=2.U
   io.pc_req.bits.addr:=pcControl(next_warp).PC_next
   io.pc_req.bits.warpid:=next_warp
-
+  // TODO: io.pc_req.bits.mask
   io.wg_id_lookup:=Mux(io.warp_control.bits.ctrl.barrier,warp_end_id,0.U)
 
   val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))

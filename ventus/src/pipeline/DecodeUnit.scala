@@ -464,6 +464,7 @@ class Control extends Module{
 
 trait DecodeParameters{}
 
+// NOW: num_fetch = 2, num_issue = 1
 class InstrDecodeV2 extends VTModule with DecodeParameters {
   val io = IO(new Bundle{
     val inst = Input(Vec(num_fetch, UInt(instLen.W)))
@@ -478,7 +479,7 @@ class InstrDecodeV2 extends VTModule with DecodeParameters {
     val isExt = Bool() // regext
     val isExtI = Bool() // regexti
     val immHigh = UInt(6.W)
-    val regPrefix = Vec(4, UInt(3.W)) // 0 -> rd, 1 -> rs1, ...
+    val regPrefix = Vec(4, UInt(3.W)) // 0 -> rd, 1 -> rs1, 2 -> rs2, 3 -> rs3
   }
   val regextInfo_pre = Wire(Vec(num_fetch, new regext))
   regextInfo_pre.zipWithIndex.foreach{ case(r, i) =>
@@ -523,7 +524,7 @@ class InstrDecodeV2 extends VTModule with DecodeParameters {
   (ctrlSignals zip io.control).zipWithIndex.foreach{ case((s, c), i) =>
     c.inst := io.inst(i)
     c.wid := io.wid
-    c.pc := io.pc
+    c.pc := io.pc + (i.U << 2.U) // for multi-fetching
     c.mop := io.inst(i)(27, 26)
     c.fp := s(1) //fp=1->vFPU
     c.barrier := s(2) //barrier or endprg->to warp_scheduler
