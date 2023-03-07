@@ -57,7 +57,7 @@ class L1CacheMemReq extends Bundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)
   //val a_size
-  val a_source = UInt(depth_warp.W)
+  val a_source = UInt(depth_warp.W)//TODO width not determined
   val a_addr = UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))

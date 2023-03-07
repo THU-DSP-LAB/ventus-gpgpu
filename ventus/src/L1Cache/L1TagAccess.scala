@@ -13,6 +13,7 @@ package L1Cache
 import SRAMTemplate._
 import chisel3._
 import chisel3.util._
+import pipeline.parameters._
 
 class getEntryStatus(nEntry: Int) extends Module{
   val io = IO(new Bundle{
@@ -32,16 +33,21 @@ class getEntryStatus(nEntry: Int) extends Module{
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
 class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Module{
   val io = IO(new Bundle {
+    //From coreReq_pipe0
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
     val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
-
-    val allocateWrite = Flipped(Decoupled(new SRAMBundleAW(UInt(tagBits.W), set, way)))//Allocate Channel
-
-    val waymaskReplacement_st1 = Output(UInt(way.W))//one hot, for SRAMTemplate
-    val waymaskHit_st1 = Output(UInt(way.W))
-
+    //To coreReq_pipe1
     val hit_st1 = Output(Bool())
+    val waymaskHit_st1 = Output(UInt(way.W))
+    //From memRsp_pipe0
+    val allocateWrite = Flipped(Decoupled(new SRAMBundleAW(UInt(tagBits.W), set, way)))//Allocate Channel
+    //To memRsp_pipe1
+    val waymaskReplacement_st1 = Output(UInt(way.W))//one hot, for SRAMTemplate
+    //To MemReq_Q(memRsp_pipe1)
+    val memReq = if(!readOnly) {
+      Some(DecoupledIO(new L1CacheMemReq))
+    } else None
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
@@ -61,7 +67,17 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     singlePort = false,
     bypassWrite = false
   ))
-  tagBodyAccess.io.r.req <> io.probeRead
+  if(readOnly){
+    tagBodyAccess.io.r.req <> io.probeRead
+  }else{
+    val tagAccessRArb = Module(new Arbiter (new SRAMBundleA(set),2))
+    tagBodyAccess.io.r.req <> tagAccessRArb.io.out
+    tagAccessRArb.io.in(1) <> io.probeRead
+    tagAccessRArb.io.in(0).valid <> io.allocateWrite.valid
+    tagAccessRArb.io.in(0).bits.setIdx <> io.allocateWrite.bits.setIdx
+    io.allocateWrite.ready <>  tagAccessRArb.io.in(0).ready
+  }
+
 
   //SRAM for replacement policy
   //store last_access_time for LRU, or last_fill_time for FIFO
@@ -109,16 +125,47 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
 
-  // ******      tag_array::allocate    ******
+  // allocateWrite_st1
   val Replacement = Module(new ReplacementUnit(Length_Replace_time_SRAM,way))
+
+  val allocateWrite_st1 = RegEnable(io.allocateWrite.bits, io.allocateWrite.fire)
+  val allocateWrite_st1_valid = Reg(Bool())
+  if(!readOnly){
+    when(io.allocateWrite.fire) {
+      allocateWrite_st1_valid := true.B
+    }.elsewhen(io.memReq.get.fire) {
+      allocateWrite_st1_valid := false.B
+    }
+  }else{
+    allocateWrite_st1_valid := RegNext(io.allocateWrite.fire)
+  }
+
+  val replaceIsDirty = if (!readOnly) {
+    Some(way_dirty.get(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool)
+  } else None
+  val replaceIsReady: Bool = if (!readOnly) {
+    !Replacement.io.Set_is_full || (replaceIsDirty.get && io.memReq.get.ready)
+  } else true.B
+  io.allocateWrite.ready := !allocateWrite_st1_valid || replaceIsReady
+  // ******      tag_array::allocate    ******
   Replacement.io.validOfSet := Cat(way_valid(io.allocateWrite.bits.setIdx))
   Replacement.io.timeOfSet_st1 := timeAccess.io.r.resp.data//meta_entry_t::get_access_time
   io.waymaskReplacement_st1 := Replacement.io.waymask_st1//tag_array::replace_choice
-  val allocateWrite_st1 = RegEnable(io.allocateWrite.bits,io.allocateWrite.fire)
+  if(!readOnly){//tag_array::issue_memReq_write
+    io.memReq.get.valid := replaceIsDirty.get && allocateWrite_st1_valid
+    io.memReq.get.bits.a_opcode := 0.U//PutFullData
+    io.memReq.get.bits.a_param := 0.U//regular write
+    io.memReq.get.bits.a_source := 0.U//TODO determine a source id scheme
+    io.memReq.get.bits.a_addr := Cat(Cat(tagBodyAccess.io.r.resp.data(Replacement.io.waymask_st1),//tag
+      allocateWrite_st1.setIdx),//setIdx
+      0.U((dcache_BlockOffsetBits+dcache_WordOffsetBits).W))//blockOffset+wordOffset
+    io.memReq.get.bits.a_mask := VecInit(Seq.fill(dcache_BlockWords)(true.B))
+    io.memReq.get.bits.a_data := DontCare//to be replaced by Data SRAM out
+  }
   tagBodyAccess.io.w.req.valid := RegNext(io.allocateWrite.fire)//meta_entry_t::allocate
   tagBodyAccess.io.w.req.bits.apply(data = allocateWrite_st1.data, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
-  when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate
-    way_valid(io.allocateWrite.bits.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
+  when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
+    way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
   }
   timeAccess.io.w.req <> timeAccessWArb.io.out//meta_entry_t::update_access_time
 }
