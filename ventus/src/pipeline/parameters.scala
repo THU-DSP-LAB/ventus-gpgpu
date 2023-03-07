@@ -12,17 +12,20 @@ package pipeline
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
 import chisel3._
 import chisel3.util._
+
+// TODO: MOVE parameters to `ventus/top'
 object parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
   def num_sm=2
 
   val SINGLE_INST:Boolean=false
-// TODO: better structure of parameters
   def regidx_width = 5
   def regext_width = 3
   def num_warp=4
   def depth_warp=log2Ceil(num_warp)
   def num_thread=8
   def depth_thread=log2Ceil(num_thread)
+  def num_fetch = 2
+  def num_issue = 1
   def xLen = 32 // data length 32-bit
   def instLen = 32
   def addrLen = 32

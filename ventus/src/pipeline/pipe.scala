@@ -17,11 +17,13 @@ import parameters._
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
 }
 class ICachePipeRsp_np extends Bundle{
   val addr = UInt(32.W)
   val data = UInt(32.W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
   val status = UInt(2.W)
 }
@@ -48,7 +50,7 @@ class pipe extends Module{
 
   val warp_sche=Module(new warp_scheduler)
   //val pcfifo=Module(new PCfifo)
-  val control=Module(new Control)
+  val control=Module(new InstrDecodeV2)
   val operand_collector=Module(new operandCollector)
   val issue=Module(new Issue)
   val alu=Module(new ALUexe)
@@ -62,7 +64,7 @@ class pipe extends Module{
   val wb=Module(new Writeback(6,6))
 
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
-  val ibuffer=Module(new instbuffer)
+  val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
   val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
   val exe_data=Module(new Queue(new vExeData,1,pipe=true))
@@ -103,18 +105,22 @@ class pipe extends Module{
 
   ibuffer.io.in.bits:=control.io.control
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
-  ibuffer.io.flush:=warp_sche.io.flush
+  ibuffer.io.flush_wid:=warp_sche.io.flush
 
-  when(control.io.control.alu_fn===63.U & ibuffer.io.in.valid) {
-    printf(p"undefined instructions at 0x${Hexadecimal(control.io.pc)} with 0x${Hexadecimal(control.io.inst)}\n")
+  (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
+    when(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask) {
+      printf(p"undefined instructions at 0x${Hexadecimal(ctrl.pc)} with 0x${Hexadecimal(ctrl.inst)}\n")
+    }
   }
 
+
   if(SINGLE_INST){
-    control.io.inst:=io.inst.get.bits
+    control.io.inst(0) := VecInit(io.inst.get.bits, 0.U(xLen.W))
+    control.io.inst_mask := VecInit(1.U(1.W), 0.U(1.W))
     control.io.wid:=0.U
     io.inst.map(_.ready:=ibuffer.io.in.ready)
     ibuffer.io.in.valid:=io.inst.get.valid
-    when(io.inst.get.fire) {printf(p"${Hexadecimal(control.io.inst)}\n")}
+    when(io.inst.get.fire) {printf(p"${Hexadecimal(control.io.inst(0))}\n")}
   }
 
   io.icache_rsp.ready:=ibuffer.io.in.ready

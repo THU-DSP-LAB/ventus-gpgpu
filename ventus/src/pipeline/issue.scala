@@ -52,7 +52,7 @@ class Issue extends Module{
     val out_TC=DecoupledIO(new vExeData)
   })
   val inputBuf=Queue.apply(io.in,0)//Module(new Queue(new vExeData,entries = 1,pipe=true))
-  
+
 
   io.out_sALU.bits.in1:=inputBuf.bits.in1(0)
   io.out_sALU.bits.in2:=inputBuf.bits.in2(0)
@@ -67,7 +67,7 @@ class Issue extends Module{
   io.out_SIMT.bits.PC_branch:=inputBuf.bits.in3(0)
   io.out_SIMT.bits.wid:=inputBuf.bits.ctrl.wid
   io.out_SIMT.bits.opcode:=inputBuf.bits.ctrl.simt_stack_op
-  io.out_SIMT.bits.mask_init:=inputBuf.bits.mask.asUInt()
+  io.out_SIMT.bits.mask_init:=inputBuf.bits.mask.asUInt
 
   io.out_warpscheduler.bits.ctrl:=inputBuf.bits.ctrl
   io.out_CSR.bits.ctrl:=inputBuf.bits.ctrl
@@ -156,7 +156,7 @@ class arbiter_o2m(numTarget:Int) extends Module {
 
 class IssueV2 extends VTModule {
   val io = IO(new Bundle {
-    val in = Flipped(Vec(num_fetch,Decoupled(Output(new vExeData))))
+    val in = Flipped(Vec(num_issue,Decoupled(Output(new vExeData))))
     val out_sALU = DecoupledIO(new sExeData)
     val out_vALU = DecoupledIO(new vExeData)
     val out_vFPU = DecoupledIO(new vExeData)
@@ -173,22 +173,23 @@ class IssueV2 extends VTModule {
     val vALU = new vExeData
     val SIMT = new simtExeData
   }
-  val arb_sALU = Module(new RRArbiter(new sExeData, num_fetch))
-  val arb_vALU = Module(new RRArbiter(new vALU_SIMT_Comb, num_fetch))
-  val arb_vFPU = Module(new RRArbiter(new vExeData, num_fetch))
-  val arb_LSU = Module(new RRArbiter(new vExeData, num_fetch))
-  val arb_SFU = Module(new RRArbiter(new vExeData, num_fetch))
-  val arb_warpscheduler = Module(new RRArbiter(new warpSchedulerExeData, num_fetch))
-  val arb_CSR = Module(new RRArbiter(new csrExeData, num_fetch))
-  val arb_MUL = Module(new RRArbiter(new vExeData, num_fetch))
-  val arb_TC = Module(new RRArbiter(new vExeData, num_fetch))
+  val arb_sALU = Module(new RRArbiter(new sExeData, num_issue))
+  val arb_vALU = Module(new RRArbiter(new vALU_SIMT_Comb, num_issue))
+  val arb_vFPU = Module(new RRArbiter(new vExeData, num_issue))
+  val arb_LSU = Module(new RRArbiter(new vExeData, num_issue))
+  val arb_SFU = Module(new RRArbiter(new vExeData, num_issue))
+  val arb_warpscheduler = Module(new RRArbiter(new warpSchedulerExeData, num_issue))
+  val arb_CSR = Module(new RRArbiter(new csrExeData, num_issue))
+  val arb_MUL = Module(new RRArbiter(new vExeData, num_issue))
+  val arb_TC = Module(new RRArbiter(new vExeData, num_issue))
 
   val inputBuf = io.in.map{Queue.apply(_, 0)}
-  (0 until num_fetch).foreach{ i =>
+  (0 until num_issue).foreach{ i =>
     arb_sALU.io.in(i).valid := false.B
     arb_vALU.io.in(i).valid := false.B
     arb_vFPU.io.in(i).valid := false.B
     arb_LSU.io.in(i).valid := false.B
+    arb_SFU.io.in(i).valid := false.B
     arb_warpscheduler.io.in(i).valid := false.B
     arb_CSR.io.in(i).valid := false.B
     arb_MUL.io.in(i).valid := false.B
