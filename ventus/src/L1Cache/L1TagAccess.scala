@@ -73,9 +73,9 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val tagAccessRArb = Module(new Arbiter (new SRAMBundleA(set),2))
     tagBodyAccess.io.r.req <> tagAccessRArb.io.out
     tagAccessRArb.io.in(1) <> io.probeRead
-    tagAccessRArb.io.in(0).valid <> io.allocateWrite.valid
-    tagAccessRArb.io.in(0).bits.setIdx <> io.allocateWrite.bits.setIdx
-    io.allocateWrite.ready <>  tagAccessRArb.io.in(0).ready
+    tagAccessRArb.io.in(0).valid := io.allocateWrite.valid
+    tagAccessRArb.io.in(0).bits.setIdx := io.allocateWrite.bits.setIdx
+    io.allocateWrite.ready := tagAccessRArb.io.in(0).ready
   }
 
 
@@ -162,7 +162,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     io.memReq.get.bits.a_mask := VecInit(Seq.fill(dcache_BlockWords)(true.B))
     io.memReq.get.bits.a_data := DontCare//to be replaced by Data SRAM out
   }
-  tagBodyAccess.io.w.req.valid := RegNext(io.allocateWrite.fire)//meta_entry_t::allocate
+  tagBodyAccess.io.w.req.valid := allocateWrite_st1_valid//meta_entry_t::allocate
   tagBodyAccess.io.w.req.bits.apply(data = allocateWrite_st1.data, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
