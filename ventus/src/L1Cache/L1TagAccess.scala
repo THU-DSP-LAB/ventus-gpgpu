@@ -36,6 +36,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //From coreReq_pipe0
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
+    val probeIsWrite_st1 = if(!readOnly){Some(Bool())} else None
     val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
     //To coreReq_pipe1
     val hit_st1 = Output(Bool())
@@ -111,11 +112,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     setIdx = RegNext(io.allocateWrite.bits.setIdx),
     waymask = io.waymaskReplacement_st1
   )
+  timeAccess.io.w.req <> timeAccessWArb.io.out//meta_entry_t::update_access_time
 
   val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
-  val way_dirty = if(!readOnly){
-    Some(RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W)))))))
-  } else None
+  //for Chisel coding convenience, dont set way_dirty to be optional
+  val way_dirty = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
+  //if(!readOnly){Some()} else None
 
   // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
@@ -124,6 +126,11 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.coreReqReady))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
+  if(!readOnly){//tag_array::write_hit_mark_dirty
+    when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){
+      way_dirty(RegNext(io.probeRead.bits.setIdx))(iTagChecker.io.waymask) := true.B
+    }//meta_entry_t::write_dirty
+  }
 
   // allocateWrite_st1
   val Replacement = Module(new ReplacementUnit(Length_Replace_time_SRAM,way))
@@ -141,7 +148,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   }
 
   val replaceIsDirty = if (!readOnly) {
-    Some(way_dirty.get(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool)
+    Some(way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool)
   } else None
   val replaceIsReady: Bool = if (!readOnly) {
     !Replacement.io.Set_is_full || (replaceIsDirty.get && io.memReq.get.ready)
@@ -167,7 +174,6 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
   }
-  timeAccess.io.w.req <> timeAccessWArb.io.out//meta_entry_t::update_access_time
 }
 
 class ReplacementUnit(timeLength:Int, way: Int, debug:Boolean=false) extends Module{
