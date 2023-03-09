@@ -14,7 +14,7 @@ import FPUv2.TensorCoreFP32
 import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 import IDecode._
 
 class BranchCtrl extends Bundle{

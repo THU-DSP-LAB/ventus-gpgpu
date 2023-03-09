@@ -13,7 +13,7 @@ package pipeline
 import L1Cache.ICache._
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)

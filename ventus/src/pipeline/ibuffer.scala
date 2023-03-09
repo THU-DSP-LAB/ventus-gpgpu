@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 
 
@@ -58,13 +58,9 @@ class ibuffer2issue extends Module{
 
 }
 
-trait IBufferParameters{
-  val size_ibuffer = 2
-}
-
 // "num_fetch -> 1" slow down
 //
-class InstrBufferV2 extends VTModule with IBufferParameters{
+class InstrBufferV2 extends Module{
   val io = IO(new Bundle{
     val in = Flipped(DecoupledIO(new Bundle{
       val control = Vec(num_fetch, new CtrlSigs)
@@ -136,14 +132,14 @@ class InstrBufferV2 extends VTModule with IBufferParameters{
   }
 }
 
-class IBuffer2OpC extends VTModule{
+class IBuffer2OpC extends Module{
   val io = IO(new Bundle {
     val in = Vec(num_warp, Flipped(DecoupledIO(Output(new CtrlSigs))))
     val out = Vec(num_fetch, DecoupledIO(Output(new CtrlSigs)))
   })
   val in_split = (0 until num_fetch).map { i => (num_warp + i) / num_fetch }.reverse
-  val arbiters = in_split.reverse.dropWhile(_ <= 1).reverse.map {
-    Module(new RRArbiter(new CtrlSigs, _))
+  val arbiters = in_split.reverse.dropWhile(_ <= 1).reverse.map { x =>
+    Module(new RRArbiter(new CtrlSigs, x))
   }
   (0 until num_fetch).foreach{ i =>
     if(in_split(i) == 0){

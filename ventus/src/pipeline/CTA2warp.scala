@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 
 class CTAreqData extends Bundle{
   val dispatch2cu_wg_wf_count        = (UInt(WF_COUNT_WIDTH.W)) // sum of wf in a wg

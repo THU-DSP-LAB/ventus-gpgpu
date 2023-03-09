@@ -13,7 +13,7 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
-import pipeline.parameters._
+import parameters._
 import L1Cache.ICache._
 import L1Cache._
 import L1Cache.DCache._

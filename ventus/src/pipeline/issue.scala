@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 class vExeData extends Bundle{
   val in1=Vec(num_thread,UInt(xLen.W))
@@ -154,7 +154,7 @@ class arbiter_o2m(numTarget:Int) extends Module {
 
 }
 
-class IssueV2 extends VTModule {
+class IssueV2 extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(num_issue,Decoupled(Output(new vExeData))))
     val out_sALU = DecoupledIO(new sExeData)

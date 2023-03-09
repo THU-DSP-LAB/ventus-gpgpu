@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util.{Decoupled, DecoupledIO, MuxLookup, Queue, UIntToOH}
-import parameters._
+import top.parameters._
 import IDecode._
 
 

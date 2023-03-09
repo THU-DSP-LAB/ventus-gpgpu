@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 class warp_scheduler extends Module{
   val io = IO(new Bundle{
@@ -77,9 +77,20 @@ class warp_scheduler extends Module{
   current_warp:=next_warp
   pcControl(next_warp).PC_replay:= (!io.pc_req.ready)|(!pc_ready(next_warp))
   pcControl(next_warp).PC_src:=2.U
-  io.pc_req.bits.addr:=pcControl(next_warp).PC_next
-  io.pc_req.bits.warpid:=next_warp
-  // TODO: io.pc_req.bits.mask
+  def align(pc: UInt) = {
+    val offset_mask = (icache_align - 1).U(32.W) // e.g. num_fetch = 4 (16B align) => offset_mask = "b1111".U(32.W)
+    val pc_aligned = pc & (~offset_mask).asUInt
+    val pc_mask = Vec(num_fetch, Bool())
+    (0 until num_fetch).foreach(i =>
+      pc_mask(i) := Mux(pc_aligned + (i * 4).U >= pc, true.B, false.B) // e.g. num_fetch = 4, pc = 28 => pc_aligned = 16, pc_mask = "b1000"
+    )
+    (pc_aligned, pc_mask.asUInt)
+  }
+  val pc_req_tmp = align(pcControl(next_warp).PC_next)
+  io.pc_req.bits.addr := pc_req_tmp._1
+  io.pc_req.bits.warpid := next_warp
+  io.pc_req.bits.mask := pc_req_tmp._2
+
   io.wg_id_lookup:=Mux(io.warp_control.bits.ctrl.barrier,warp_end_id,0.U)
 
   val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))

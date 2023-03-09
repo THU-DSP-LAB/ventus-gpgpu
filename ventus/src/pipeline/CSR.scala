@@ -12,7 +12,7 @@ package pipeline
 //source from https://github.com/lingscale/cc01/blob/master/src/main/scala/core/CSR.scala
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 
 object CSR{
   val N = 0.U(2.W)  // not CSR operation
