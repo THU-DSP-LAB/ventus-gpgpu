@@ -31,6 +31,7 @@ object IDecode //extends DecodeConstants
   def A3_X=0.U(2.W)
   val A3_VRS3=1.U(2.W)
   val A3_SD=3.U(2.W)
+  val A3_SD_VRS2=4.U(3.W)//TODO:update A3
   val A3_FRS3=2.U(2.W)//for float(not vector). jalr use b_r to distinguish
   val A3_PC=0.U(2.W)
   def A1_X=0.U(2.W)//BitPat("b??")
@@ -136,6 +137,7 @@ object IDecode //extends DecodeConstants
   def FN_REMU     = 3.U(6.W)
   def FN_FDIV     = 0.U(6.W)
   def FN_FSQRT    = 1.U(6.W)
+  def FN_EXP      = 4.U(6.W)
 
   def FN_TTF = 1.U(6.W)
   def FN_TTH = 2.U(6.W)
@@ -151,9 +153,27 @@ object IDecode //extends DecodeConstants
     VBGE->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGE,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     VBGEU->  List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGEU,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     JOIN->   List(Y,N,N,B_B,Y,Y,CSR.N,N,A3_PC,A2_X,A1_X,IMM_B,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    BARRIER->List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
+    BARRIER->List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
+    BARRIERSUB->List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
+    VADD12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
 
-
+    VLW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
+    VLH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
+    VLB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
+    VLHU_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
+    VLBU_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
+    VSW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_RS1,IMM_S11,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
+    VSH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_RS1,IMM_S11,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
+    VSB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_RS1,IMM_S11,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
+    VLW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
+    VLH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
+    VLB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
+    VLHU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
+    VLBU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
+    VSW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_VRS1,IMM_S,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
+    VSH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_VRS1,IMM_S,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
+    VSB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_VRS1,IMM_S,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
 
     ENDPRG-> List(N,N,Y,B_N,N,Y,CSR.N,N,A3_X,A2_X,A1_X,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     BNE->    List(N,N,N,B_B,N,N,CSR.N,N,A3_PC,A2_RS2,A1_RS1,IMM_B,MEM_X,FN_SNE,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
@@ -168,6 +188,7 @@ object IDecode //extends DecodeConstants
     //A2_SIZE=>for C extension 2, for others 4, used for PC+4 to reg. in Rocketchip it's rvc
 
     VFTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
+    VFEXP_V ->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_EXP,N,M_X,N,N,Y,Y,N,N,N,N,N,N,N),
     //VHTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTH,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
     //VBTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTB,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
 
@@ -433,7 +454,7 @@ class Control extends Module{
   io.control.inst:=io.inst
   io.control.wid:=io.wid
   io.control.pc:=io.pc
-  io.control.mop:=io.inst(27,26)
+  io.control.mop:=Mux(io.control.readmask,3.U(2.W),io.inst(27,26))
   io.control.fp:=ctrlsignals(1)//fp=1->vFPU
   io.control.barrier:=ctrlsignals(2)//barrier or endprg->to warp_scheduler
   io.control.branch:=ctrlsignals(3)
@@ -456,7 +477,7 @@ class Control extends Module{
   io.control.fence:=ctrlsignals(17)
   io.control.sfu:=ctrlsignals(18)
   io.control.wvd:=ctrlsignals(19)
-  io.control.readmask:=ctrlsignals(20) //read mode is mask - for mask bitwise opcode
+  io.control.readmask:=ctrlsignals(20) //read mode is mask - for mask bitwise opcode  // also means mop is unused.
   io.control.writemask:=ctrlsignals(21)//write mode is mask - for mask bitwise opcode
   io.control.wxd:=ctrlsignals(22)
   io.control.tc:=ctrlsignals(23)
@@ -530,7 +551,7 @@ class InstrDecodeV2 extends Module {
     c.inst := io.inst(i)
     c.wid := io.wid
     c.pc := io.pc + (i.U << 2.U) // for multi-fetching
-    c.mop := io.inst(i)(27, 26)
+    c.mop :=  Mux(c.readmask,3.U(2.W),io.inst(i)(27,26))
     c.fp := s(1) //fp=1->vFPU
     c.barrier := s(2) //barrier or endprg->to warp_scheduler
     c.branch := s(3)
