@@ -28,26 +28,29 @@ object IDecode //extends DecodeConstants
   val A1_VRS1 = 2.U(2.W)
   val A1_IMM =3.U(2.W)
   val A1_PC = 0.U(2.W)
-  def A3_X=1.U(2.W)
+  def A3_X=0.U(2.W)
   val A3_VRS3=1.U(2.W)
   val A3_SD=3.U(2.W)
   val A3_FRS3=2.U(2.W)//for float(not vector). jalr use b_r to distinguish
   val A3_PC=0.U(2.W)
-  def A1_X=1.U(2.W)//BitPat("b??")
-  def A2_X=1.U(2.W)//BitPat("b??")
+  def A1_X=0.U(2.W)//BitPat("b??")
+  def A2_X=0.U(2.W)//BitPat("b??")
   val A2_RS2 = 1.U(2.W)
   val A2_IMM =3.U(2.W)
   val A2_VRS2 = 2.U(2.W)
   val A2_SIZE = 0.U(2.W)
-  val IMM_I = 0.U(3.W)
-  val IMM_S = 1.U(3.W)
-  val IMM_B = 2.U(3.W)
-  val IMM_U = 3.U(3.W)
-  val IMM_2 = 4.U(3.W)//for rs2 as imm2
-  val IMM_J = 5.U(3.W)
-  val IMM_X = 0.U(3.W)//BitPat("b???")
-  val IMM_V = 6.U(3.W)
-  val IMM_Z = 7.U(3.W)
+  val IMM_I = 0.U(4.W)
+  val IMM_S = 1.U(4.W)
+  val IMM_B = 2.U(4.W)
+  val IMM_U = 3.U(4.W)
+  val IMM_2 = 4.U(4.W)//for rs2 as imm2
+  val IMM_J = 5.U(4.W)
+  val IMM_X = 0.U(4.W)//BitPat("b???")
+  val IMM_V = 6.U(4.W)
+  val IMM_Z = 7.U(4.W)
+  val IMM_S11 = 8.U(4.W)
+  val IMM_L11 = 9.U(4.W)
+
   val MEM_W = 3.U(2.W)
   val MEM_B = 2.U(2.W)
   val MEM_H = 1.U(2.W)//half word
@@ -149,6 +152,9 @@ object IDecode //extends DecodeConstants
     VBGEU->  List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGEU,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     JOIN->   List(Y,N,N,B_B,Y,Y,CSR.N,N,A3_PC,A2_X,A1_X,IMM_B,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     BARRIER->List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
+
+
+
     ENDPRG-> List(N,N,Y,B_N,N,Y,CSR.N,N,A3_X,A2_X,A1_X,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     BNE->    List(N,N,N,B_B,N,N,CSR.N,N,A3_PC,A2_RS2,A1_RS1,IMM_B,MEM_X,FN_SNE,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     BEQ->    List(N,N,N,B_B,N,N,CSR.N,N,A3_PC,A2_RS2,A1_RS1,IMM_B,MEM_X,FN_SEQ,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
