@@ -13,7 +13,7 @@ package axi
 
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 import top.host2CTA_data
 import top.CTA2host_data
 

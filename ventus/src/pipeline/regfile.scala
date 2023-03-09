@@ -13,7 +13,7 @@ package pipeline
 import chisel3._
 import chisel3.util.{Cat, MuxLookup}
 import IDecode._
-import parameters._
+import top.parameters._
 
 class RegFileIO extends Bundle  {
   val x1     = Output(UInt(xLen.W))//x1 CSR

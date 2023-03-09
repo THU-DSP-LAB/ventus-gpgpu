@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 
 class hash(val width:Int) extends Module{

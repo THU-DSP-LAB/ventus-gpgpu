@@ -64,7 +64,7 @@ object ALUOps {
 }
 
 import ALUOps._
-import parameters._
+import top.parameters._
 class ScalarALU() extends Module{
   val io = IO(new Bundle() {
     val func        = Input(UInt(5.W))

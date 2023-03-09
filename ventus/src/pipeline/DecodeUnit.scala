@@ -13,7 +13,7 @@ package pipeline
 import chisel3._
 import chisel3.util._
 import Instructions._
-import parameters._
+import top.parameters._
 
 object IDecode //extends DecodeConstants
 {
@@ -462,10 +462,10 @@ class Control extends Module{
 
 }
 
-trait DecodeParameters{}
+//trait DecodeParameters{}
 
 // NOW: num_fetch = 2, num_issue = 1
-class InstrDecodeV2 extends VTModule with DecodeParameters {
+class InstrDecodeV2 extends Module {
   val io = IO(new Bundle{
     val inst = Input(Vec(num_fetch, UInt(instLen.W)))
     val inst_mask = Input(Vec(num_fetch, Bool()))

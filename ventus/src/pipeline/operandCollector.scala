@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 import IDecode._
 
 class WriteVecCtrl extends Bundle{
