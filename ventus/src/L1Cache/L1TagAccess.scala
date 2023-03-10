@@ -15,21 +15,6 @@ import chisel3._
 import chisel3.util._
 import pipeline.parameters._
 
-class getEntryStatus(nEntry: Int) extends Module{
-  val io = IO(new Bundle{
-    val valid_list = Input(UInt(nEntry.W))
-    //val alm_full = Output(Bool())
-    val full = Output(Bool())
-    val next = Output(UInt(log2Up(nEntry).W))
-    val used = Output(UInt())
-  })
-
-  io.used := PopCount(io.valid_list)
-  //io.alm_full := io.used === (nEntry.U-1.U)
-  io.full := io.used === nEntry.U
-  io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
-}
-
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
 class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Module{
   val io = IO(new Bundle {

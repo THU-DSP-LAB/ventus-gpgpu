@@ -13,10 +13,13 @@ package L1Cache
 import L1Cache.{HasL1CacheParameters, L1CacheModule, getEntryStatus}
 import chisel3._
 import chisel3.util._
-import config.config.Parameters
+import pipeline.parameters._
 
 //abstract class MSHRBundle extends Bundle with L1CacheParameters
 
+class MSHRprobe(val bABits: Int) extends Bundle {
+  val blockAddr = UInt(bABits.W)
+}
 class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
   val blockAddr = UInt(bABits.W)
   val instrId = UInt(WIdBits.W)
@@ -33,10 +36,25 @@ class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: 
   //val last = Bool()
 }
 
-class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheModule{
-  //TODO parameterization method need improvement
-  val tIWidth = tIgen.getWidth
+class getEntryStatus(nEntry: Int) extends Module{
   val io = IO(new Bundle{
+    val valid_list = Input(UInt(nEntry.W))
+    //val alm_full = Output(Bool())
+    val full = Output(Bool())
+    val next = Output(UInt(log2Up(nEntry).W))
+    val used = Output(UInt())
+  })
+
+  io.used := PopCount(io.valid_list)
+  //io.alm_full := io.used === (nEntry.U-1.U)
+  io.full := io.used === nEntry.U
+  io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
+}
+
+
+class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:Int, val NMshrSubEntry:Int) extends Module{
+  val io = IO(new Bundle{
+    val probe = Flipped(ValidIO(new MSHRprobe(bABits)))
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(bABits)))
     val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
@@ -47,7 +65,8 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   val instrId_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(WIdBits.W))))
   val targetInfo_Accesss = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(tIWidth.W))))))
 
-  val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(1.W))))))
+  val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(false.B)))))
+  val entry_valid = Reverse(Cat(subentry_valid.map(Cat(_).orR)))
   /*Structure Diagram
   * bA  : blockAddr
   * tI  : targetInfo
@@ -69,18 +88,51 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   * this iI will be recorded as iI for this missing cache line fetch request to L2
   * */
 
+  // ******     enum vec_mshr_status     ******
+  val mshrStatus_st1 = RegInit(0.U(2.W))
+  /*PRIMARY_AVAIL   00
+  * PRIMARY_FULL    01
+  * SECONDARY_AVAIL 10
+  * SECONDARY_FULL  11
+  * see as always valid, validity relies on external procedures
+  * */
+  // ******      mshr::probe_vec    ******
+  val entryMatchProbe = Wire(UInt(NMshrEntry.W))
+  entryMatchProbe := Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid
+  assert(PopCount(entryMatchProbe) <= 1.U)
+  val secondaryMiss = entryMatchProbe.orR
+  val primaryMiss = !secondaryMiss
+  val mainEntryFull = entry_valid.orR
+  val entryIdxProbe = OHToUInt(entryMatchProbe)
+  val subValidProbe = subentry_valid(entryIdxProbe)
+  val subEntryFull = subValidProbe.reduceTree(_|_)
+  when(io.probe.valid){
+    when(primaryMiss){
+      when(mainEntryFull){
+        mshrStatus_st1 := 1.U//PRIMARY_FULL
+      }.otherwise{
+        mshrStatus_st1 := 0.U//PRIMARY_AVAIL
+      }
+    }.otherwise{
+      when(subEntryFull){
+        mshrStatus_st1 := 3.U//SECONDARY_FULL
+      }.otherwise{
+        mshrStatus_st1 := 2.U//SECONDARY_AVAIL
+      }
+    }
+  }
+
   //  ******     decide selected subentries are full or not     ******
   val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
-  val entryMatchMissReq = Wire(UInt(NMshrEntry.W))
+  val subentrySelected = subentry_valid(OHToUInt(entryMatchMissRsp))
 
-  val subentry_selected = subentry_valid(OHToUInt(entryMatchMissRsp))
   val subentryStatus = Module(new getEntryStatus(NMshrSubEntry))// Output: alm_full, full, next
-  subentryStatus.io.valid_list := Reverse(Cat(subentry_selected))
+  subentryStatus.io.valid_list := Reverse(Cat(subentrySelected))
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
-  subentry_next2cancel := subentry_selected.indexWhere(_===true.B)
+  subentry_next2cancel := subentrySelected.indexWhere(_===true.B)
 
   //  ******     decide MSHR is full or not     ******
-  val entry_valid = Reverse(Cat(subentry_valid.map(Cat(_).orR)))
+
   val entryStatus = Module(new getEntryStatus(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
 
@@ -90,21 +142,16 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   val muxedRspInBlockAddr = Mux(missRspBusy,firedRspInBlockAddr,io.missRspIn.bits.blockAddr)//存在多subentry时使用寄存的值
   entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_===muxedRspInBlockAddr))) & entry_valid
   assert(PopCount(entryMatchMissRsp) <= 1.U)
-  entryMatchMissReq := Reverse(Cat(blockAddr_Access.map(_===io.missReq.bits.blockAddr))) & entry_valid
-  assert(PopCount(entryMatchMissReq) <= 1.U)
-  //  ******     decide a primary miss or a secondary miss     ******
-  val secondary_miss = entryMatchMissReq.orR
-  val primary_miss = !secondary_miss
 
   //  ******     update MSHR when missReq     ******
-  io.missReq.ready := !(((entryStatus.io.full || missRspBusy || io.missRspIn.valid) && primary_miss) ||
-    (subentryStatus.io.full && secondary_miss))
+  io.missReq.ready := !(((entryStatus.io.full || missRspBusy || io.missRspIn.valid) && primaryMiss) ||
+    (subentryStatus.io.full && secondaryMiss))
   //missRsp + secondary miss holding at st1 should be accept
   //Priority: secondary missReq > missRspIn > primary missReq?
   //20220214 move missRspIn.valid into primary_miss
   val missReq_fire = io.missReq.fire()
-  val real_SRAMAddrUp = Mux(secondary_miss,OHToUInt(entryMatchMissReq),entryStatus.io.next)
-  val real_SRAMAddrDown = Mux(secondary_miss,subentryStatus.io.next,0.U)
+  val real_SRAMAddrUp = Mux(secondaryMiss,OHToUInt(entryMatchProbe),entryStatus.io.next)
+  val real_SRAMAddrDown = Mux(secondaryMiss,subentryStatus.io.next,0.U)
   when (missReq_fire){
     targetInfo_Accesss(real_SRAMAddrUp)(real_SRAMAddrDown) := io.missReq.bits.targetInfo
   }
@@ -133,23 +180,23 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   for (iofEn <- 0 until NMshrEntry){
     for (iofSubEn <- 0 until NMshrSubEntry){
       when(iofEn.asUInt===entryStatus.io.next &&
-        iofSubEn.asUInt===0.U && missReq_fire && primary_miss){
+        iofSubEn.asUInt===0.U && missReq_fire && primaryMiss){
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===OHToUInt(entryMatchMissRsp)){
         when(iofSubEn.asUInt===subentry_next2cancel &&
           io.missRspOut.fire()){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
-          missReq_fire && secondary_miss){
+          missReq_fire && secondaryMiss){
           subentry_valid(iofEn)(iofSubEn) := true.B
         }
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
     }
   }
   //original style can't modify 2 valid simultaneously
-  when(missReq_fire && secondary_miss){
-    instrId_Access(OHToUInt(entryMatchMissReq))(subentryStatus.io.next) := io.missReq.bits.instrId
-  }.elsewhen(missReq_fire && primary_miss){
+  when(missReq_fire && secondaryMiss){
+    instrId_Access(OHToUInt(entryMatchProbe))(subentryStatus.io.next) := io.missReq.bits.instrId
+  }.elsewhen(missReq_fire && primaryMiss){
     blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
     instrId_Access(entryStatus.io.next)(0.U) := io.missReq.bits.instrId
   }
