@@ -15,14 +15,6 @@ import chisel3._
 import chisel3.util._
 import config.config.Parameters
 
-trait MSHRParameters{
-  def bABits: Int// = tagIdxBits+SetIdxBits   // search in this module for abbreviation meaning
-  def tIBits: Int// = widBits+blockOffsetBits+wordOffsetBits
-}
-
-trait HasMshrParameters extends HasL1CacheParameters{
-
-}
 //abstract class MSHRBundle extends Bundle with L1CacheParameters
 
 class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
@@ -33,20 +25,13 @@ class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends B
 class MSHRmissRspIn(val bABits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
   val blockAddr = UInt(bABits.W)
 }
-class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
+class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {
   val targetInfo = UInt(tIWdith.W)
   val blockAddr = UInt(bABits.W)
   val instrId = UInt(WIdBits.W)
   //val burst = Bool()//This bit indicate the Rsp transaction comes from subentry
   //val last = Bool()
 }
-class MSHRmiss2mem(val bABits: Int, val WIdBits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
-  val blockAddr = UInt(bABits.W)
-  val instrId = UInt(WIdBits.W)
-}
-/*class MSHRmiss2Mem(val bAWidth: Int) extends Bundle{
-  val blockAddr = UInt(bAWidth.W)
-}*/
 
 class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheModule{
   //TODO parameterization method need improvement
@@ -55,34 +40,39 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(bABits)))
     val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
-    val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
+    //val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
-  val instrId_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(WIdBits.W))))))
+  val instrId_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(WIdBits.W))))
   val targetInfo_Accesss = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(tIWidth.W))))))
 
-  //def tI_setIdxBits = log2Up(NMshrEntry*NMshrSubEntry)
+  val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(1.W))))))
   /*Structure Diagram
   * bA  : blockAddr
   * tI  : targetInfo
+  * iI  : instrId
   * e_v : entry_valid, which is the first column of s_v
   * s_v : subentry_valid
-  * h_s : has_send2mem
+  * N : NMshrEntry
+  * n : NMshrSubEntry
   *
-  * reg   +reg   +reg        || syncSRAM + reg array
-  * h_s(0)+s_v(0)+bA#0       || tI#0 | s_v(1)+tI#1 | ... | s_v(n)+tI#NMshrSubEntry
-  * h_s(1)+s_v(1)+bA#1       || tI#0 | s_v(1)+tI#1 | ... | s_v(n)+tI#NMshrSubEntry
+  * reg     +reg +reg    || SRAM
+  * s_v(0,0)+bA#0+iI#0   || tI#0 | s_v(0,1)+tI#1 | ... | s_v(N,n)+tI#n
+  * s_v(1,0)+bA#1+iI#1   || tI#0 | s_v(1,1)+tI#1 | ... | s_v(N,n)+tI#n
   * .
   * .
   * .
-  * h_s(n)+s_v(n)+bA#NMshrEntry  || tI#0 | s_v(1)+tI#1 | ... | s_v(n)+tI#NMshrSubEntry
+  * s_v(N,0)+bA#N+iI#N   || tI#0 | s_v(N,1)+tI#1 | ... | s_v(N,n)+tI#n
+  *
+  * for dcache, every missRep tI include iI, but only useful when this request is primary miss
+  * this iI will be recorded as iI for this missing cache line fetch request to L2
   * */
 
   //  ******     decide selected subentries are full or not     ******
   val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
   val entryMatchMissReq = Wire(UInt(NMshrEntry.W))
-  val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(1.W))))))
+
   val subentry_selected = subentry_valid(OHToUInt(entryMatchMissRsp))
   val subentryStatus = Module(new getEntryStatus(NMshrSubEntry))// Output: alm_full, full, next
   subentryStatus.io.valid_list := Reverse(Cat(subentry_selected))
@@ -163,23 +153,4 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
     blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
     instrId_Access(entryStatus.io.next)(0.U) := io.missReq.bits.instrId
   }
-
-  //  ******      handle miss to lower mem    ******
-  val has_send2mem = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(1.W))))
-  val hasSendStatus = Module(new getEntryStatus(NMshrEntry))
-  hasSendStatus.io.valid_list := Reverse(Cat(has_send2mem))
-  io.miss2mem.valid := !has_send2mem(hasSendStatus.io.next) && entry_valid(hasSendStatus.io.next)
-  val miss2mem_fire = io.miss2mem.valid && io.miss2mem.ready
-
-  for (i <- 0 to NMshrEntry){
-    when(miss2mem_fire && i.U === hasSendStatus.io.next){
-      has_send2mem(i.U) := true.B
-    }.elsewhen(io.missRspOut.fire() && subentryStatus.io.used===1.U && i.U === OHToUInt(entryMatchMissRsp)){
-      has_send2mem(i.U) := false.B//missRsp, L2 to core
-    }
-  }
-  rInstrId := instrId_Access(Mux(missRspBusy || io.missRspIn.valid,
-    OHToUInt(entryMatchMissRsp),hasSendStatus.io.next))(Mux(missRspBusy || io.missRspIn.valid,subentry_next2cancel,0.U))
-  io.miss2mem.bits.blockAddr := blockAddr_Access(hasSendStatus.io.next)
-  io.miss2mem.bits.instrId := rInstrId
 }
