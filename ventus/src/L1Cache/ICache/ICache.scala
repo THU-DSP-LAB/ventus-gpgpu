@@ -19,6 +19,7 @@ import top.parameters._
 
 class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
 }
 class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
@@ -27,6 +28,7 @@ class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
 class ICachePipeRsp(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
   val data = UInt((num_fetch*WordLength).W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
   val status = UInt(2.W)//目前只有LSB投入使用，1表示MISS，0表示HIT
 }
@@ -90,7 +92,9 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   wayidx_hit_st1 := OHToUInt(tagAccess.io.waymaskHit_st1)
   val waymask_replace_st0 = tagAccess.io.waymaskReplacement
   val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.ready)
+  val mask_st1 = RegEnable(io.coreReq.bits.mask, io.coreReq.ready)
   val warpid_st2 = RegNext(warpid_st1)
+  val mask_st2 = RegNext(mask_st1)
   val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   val addr_st2 = RegNext(addr_st1)
 
@@ -151,6 +155,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   io.coreRsp.valid := coreReqFire_st2 && !OrderViolation_st2 //&& !ShouldFlushCoreRsp_st2// || missRsp_from_mshr
   io.coreRsp.bits.data := data_after_blockOffset_st2
   io.coreRsp.bits.warpid := warpid_st2
+  io.coreRsp.bits.mask := mask_st2
   /*Mux(missRsp_from_mshr,
     //miss Rsp
     mshrAccess.io.missRspOut.bits.targetInfo>>(BlockOffsetBits+WordOffsetBits),
