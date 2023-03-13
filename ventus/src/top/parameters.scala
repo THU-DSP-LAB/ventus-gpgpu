@@ -116,7 +116,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var NUMBER_SGPR_SLOTS = 1024
   var NUMBER_LDS_SLOTS = 131072 //TODO:check LDS max value. 128kB -> 2^17
   var NUMBER_WF_SLOTS = num_block // max num of wg in a CU
-  var WG_ID_WIDTH = 2 + log2Ceil(NUMBER_WF_SLOTS) + log2Ceil(NUMBER_CU) //Format: wg id + prefer scheduler (if multi-schedulers) + prefer cu
+  var WG_ID_WIDTH = 2 + log2Ceil(NUMBER_WF_SLOTS) + log2Ceil(NUMBER_CU) //Format: prefer scheduler (if multi-schedulers) + wg id + prefer cu
   var WG_NUM_MAX = NUMBER_WF_SLOTS * NUMBER_CU
   var WF_COUNT_MAX = num_warp // max num of wf in a cu
   var WF_COUNT_PER_WG_MAX = num_warp_in_a_block // max num of wf in a wg
