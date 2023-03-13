@@ -112,9 +112,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   var NUMBER_CU = num_sm
   var NUMBER_RES_TABLE = 1 // <NUMBER_CU
-  var NUMBER_VGPR_SLOTS = 4096
-  var NUMBER_SGPR_SLOTS = 4096
-  var NUMBER_LDS_SLOTS = 4096
+  var NUMBER_VGPR_SLOTS = 1024
+  var NUMBER_SGPR_SLOTS = 1024
+  var NUMBER_LDS_SLOTS = 131072 //TODO:check LDS max value. 128kB -> 2^17
   var NUMBER_WF_SLOTS = num_block // max num of wg in a CU
   var WG_ID_WIDTH = 2 + log2Ceil(NUMBER_WF_SLOTS) + log2Ceil(NUMBER_CU) //Format: wg id + prefer scheduler (if multi-schedulers) + prefer cu
   var WG_NUM_MAX = NUMBER_WF_SLOTS * NUMBER_CU
@@ -138,4 +138,11 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var TAG_WIDTH = WG_SLOT_ID_WIDTH + WF_COUNT_WIDTH_PER_WG
   var INIT_MAX_WG_COUNT = NUMBER_WF_SLOTS
   var NUM_SCHEDULER_WIDTH = log2Ceil(NUM_SCHEDULER)
+
+  val NUM_WG_X=1024 // max wg num in kernel
+  val NUM_WG_Y=1024
+  val NUM_WG_Z=1024
+  var WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X)
+  var WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y)
+  var WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
 }
