@@ -9,6 +9,8 @@ We are calling for contributors. If you are interested in Ventus GPGPU, please c
 
 8月23日线下活动的ppt已经上传到[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu-doc/tree/main/slides)。
 
+目前开发中的文档手册在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/承影GPGPU架构文档手册v1.8.pdf)，添加了对OpenCL支持所需的改动。2.0版本架构方案尚未确定，如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
+
 ## Architecture
 
 The micro-architecture overview of Ventus(承影) is shown below.

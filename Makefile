@@ -1,5 +1,5 @@
 init:
-	git submodule update --init
+	git submodule update --init --recursive
 
 patch:
 	find patches -type f | awk -F/ '{print("(echo "$$0" && cd dependencies/" $$2 " && git apply ../../" $$0 ")")}' | sh
