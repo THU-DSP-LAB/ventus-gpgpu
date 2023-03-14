@@ -527,20 +527,22 @@ class InstrDecodeV2 extends Module {
       }
     }
   }
-  // eg1.               0    1    2    3                    |2.  0    1    2    3
-  // inst               0  EXT->  A    B    Scratch: N      |    A  EXT->  B  EXT    Scratch: EXT
-  // inst_mask          0    1    1    1                    |    1    1    1    1
-  // regextInfo_pre     N  EXT    N    N                    |    N  EXT    N  EXT
-  // regextInfo         N    N  EXT    N    N->Scratch      |  EXT    N  EXT    N    EXT->Scratch
-  // maskAfterExt       0    0    1    1                    |    1    0    1    0
-  // result             0    0   EA    B                    |   EA    0   EB    0
+  // eg1.               0    1    2    3                    |2.  0    1    2    3                       |3. 0    1    2    3
+  // inst               0  EXT>   A    B  Scratch: N        |    A  EXT>  B   EXT> Scratch: EXT         |   0    A    B    EXT> Scratch: EXT
+  // inst_mask          0    1    1    1                    |    1    1    1    1                       |   0    1    1    0
+  // regextInfo_pre     N  EXT    N    N                    |   [N  EXT    N  EXT]                      |  [N    N    N    N]
+  // regextInfo         N    N  EXT    N  N->Scratch        |  EXT   [N  EXT    N  EXT]->Scratch        | EXT   [N    N    N   NC]->Scratch // NoChange
+  // maskAfterExt       0    0    1    1                    |    1    0    1    0                       |   0    1    1    0
+  // result             0    0   EA    B                    |   EA    0   EB    0                       |   0    A    B    0
   val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
   when(io.flush_wid.valid){
     scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
-    when(io.flush_wid.bits =/= io.wid){
+    when(io.flush_wid.bits =/= io.wid && io.inst_mask.last){
       scratchPads(io.wid) := regextInfo_pre.last
     }
-  }.otherwise{ scratchPads(io.wid) := regextInfo_pre.last }
+  }.otherwise{
+    when(io.inst_mask.last){ scratchPads(io.wid) := regextInfo_pre.last }
+  }
   // regextInfo: 0<>Scratchpad, 1<>decode_0, 2<>decode_1, 3<>decode_2
   val regextInfo = VecInit(Seq(scratchPads(io.wid)) ++ regextInfo_pre.take(num_fetch-1))
 
