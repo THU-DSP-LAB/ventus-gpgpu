@@ -68,6 +68,7 @@ class warp_scheduler extends Module{
       x.New_PC:=io.branch.bits.new_pc
       x.PC_replay:=true.B
       x.PC_src:=0.U
+      x.mask_i:=0.U
     }
   }
   val pc_ready=Wire(Vec(num_warp,Bool()))
@@ -77,19 +78,9 @@ class warp_scheduler extends Module{
   current_warp:=next_warp
   pcControl(next_warp).PC_replay:= (!io.pc_req.ready)|(!pc_ready(next_warp))
   pcControl(next_warp).PC_src:=2.U
-  def align(pc: UInt) = {
-    val offset_mask = (icache_align - 1).U(32.W) // e.g. num_fetch = 4 (16B align) => offset_mask = "b1111".U(32.W)
-    val pc_aligned = pc & (~offset_mask).asUInt
-    val pc_mask = Vec(num_fetch, Bool())
-    (0 until num_fetch).foreach(i =>
-      pc_mask(i) := Mux(pc_aligned + (i * 4).U >= pc, true.B, false.B) // e.g. num_fetch = 4, pc = 28 => pc_aligned = 16, pc_mask = "b1000"
-    )
-    (pc_aligned, pc_mask.asUInt)
-  }
-  val pc_req_tmp = align(pcControl(next_warp).PC_next)
-  io.pc_req.bits.addr := pc_req_tmp._1
+  io.pc_req.bits.addr := pcControl(next_warp).PC_next
   io.pc_req.bits.warpid := next_warp
-  io.pc_req.bits.mask := pc_req_tmp._2
+  io.pc_req.bits.mask := pcControl(next_warp).mask_o
 
   io.wg_id_lookup:=Mux(io.warp_control.bits.ctrl.barrier,warp_end_id,0.U)
 
@@ -149,8 +140,9 @@ class warp_scheduler extends Module{
 
   when(io.pc_rsp.valid&io.pc_rsp.bits.status(0)){//miss acknowledgement
     pcControl(io.pc_rsp.bits.warpid).PC_replay:=false.B
-    pcControl(io.pc_rsp.bits.warpid).PC_src:=1.U
+    pcControl(io.pc_rsp.bits.warpid).PC_src:=3.U
     pcControl(io.pc_rsp.bits.warpid).New_PC:=io.pc_rsp.bits.addr//pcReplay(io.pc_rsp.bits.warpid)
+    pcControl(io.pc_rsp.bits.warpid).mask_i:=io.pc_rsp.bits.mask
   }
 
   when(io.branch.fire()&io.branch.bits.jump){
