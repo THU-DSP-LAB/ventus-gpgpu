@@ -40,9 +40,9 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
         val dispatch2cu_wf_tag_dispatch = Output(UInt(TAG_WIDTH.W))
         val dispatch2cu_lds_base_dispatch = Output(UInt((LDS_ID_WIDTH + 1).W))
         val dispatch2cu_start_pc_dispatch = Output(UInt(MEM_ADDR_WIDTH.W)) // TODO:
-        val dispatch2cu_kernel_size_3d = Output(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
-        val dispatch2cu_pds_baseaddr = Output(UInt(MEM_ADDR_WIDTH.W))
-        val dispatch2cu_csr_knl = Output(UInt(MEM_ADDR_WIDTH.W))
+        val dispatch2cu_kernel_size_3d_dispatch = Output(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
+        val dispatch2cu_pds_baseaddr_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
+        val dispatch2cu_csr_knl_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
         val dispatch2cu_gds_base_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
         val cu2dispatch_wf_done = Input(UInt(NUMBER_CU.W))
         val cu2dispatch_wf_tag_done = Vec(NUMBER_CU, Input(UInt(TAG_WIDTH.W)))
@@ -206,9 +206,9 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
     io.dispatch2cu_wf_tag_dispatch := gpu_interface_i.io.dispatch2cu_wf_tag_dispatch
     io.dispatch2cu_lds_base_dispatch := gpu_interface_i.io.dispatch2cu_lds_base_dispatch
     io.dispatch2cu_start_pc_dispatch := gpu_interface_i.io.dispatch2cu_start_pc_dispatch
-    io.dispatch2cu_kernel_size_3d := gpu_interface_i.io.dispatch2cu_kernel_size_3d_dispatch
-    io.dispatch2cu_pds_baseaddr := gpu_interface_i.io.dispatch2cu_pds_baseaddr_dispatch
-    io.dispatch2cu_csr_knl := gpu_interface_i.io.dispatch2cu_csr_knl_dispatch
+    io.dispatch2cu_kernel_size_3d_dispatch := gpu_interface_i.io.dispatch2cu_kernel_size_3d_dispatch
+    io.dispatch2cu_pds_baseaddr_dispatch := gpu_interface_i.io.dispatch2cu_pds_baseaddr_dispatch
+    io.dispatch2cu_csr_knl_dispatch := gpu_interface_i.io.dispatch2cu_csr_knl_dispatch
     io.dispatch2cu_gds_base_dispatch := gpu_interface_i.io.dispatch2cu_gds_base_dispatch
     gpu_interface_i.io.cu2dispatch_wf_done := io.cu2dispatch_wf_done
     gpu_interface_i.io.cu2dispatch_wf_tag_done := io.cu2dispatch_wf_tag_done

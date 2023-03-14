@@ -23,6 +23,7 @@ class CTAreqData extends Bundle{
   val dispatch2cu_lds_base_dispatch  = (UInt((LDS_ID_WIDTH + 1).W))
   val dispatch2cu_start_pc_dispatch  = (UInt(MEM_ADDR_WIDTH.W))
   val dispatch2cu_pds_base_dispatch = UInt(MEM_ADDR_WIDTH.W)
+  val dispatch2cu_gds_base_dispatch = UInt(MEM_ADDR_WIDTH.W)
   val dispatch2cu_csr_knl_dispatch = UInt(MEM_ADDR_WIDTH.W)
   val dispatch2cu_wgid_x_dispatch = UInt(WG_SIZE_X_WIDTH.W)
   val dispatch2cu_wgid_y_dispatch = UInt(WG_SIZE_Y_WIDTH.W)
