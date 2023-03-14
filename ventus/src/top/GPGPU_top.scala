@@ -200,6 +200,7 @@ class SM_wrapper extends Module{
   icache.io.coreReq.valid:=pipe.io.icache_req.valid
   icache.io.coreReq.bits.addr:=pipe.io.icache_req.bits.addr
   icache.io.coreReq.bits.warpid:=pipe.io.icache_req.bits.warpid
+  icache.io.coreReq.bits.mask:=pipe.io.icache_req.bits.mask
   // ***********************
   // **** icache coreRsp ****
   pipe.io.icache_rsp.valid:=icache.io.coreRsp.valid
@@ -207,6 +208,7 @@ class SM_wrapper extends Module{
   pipe.io.icache_rsp.bits.data:=icache.io.coreRsp.bits.data
   pipe.io.icache_rsp.bits.addr:=icache.io.coreRsp.bits.addr
   pipe.io.icache_rsp.bits.status:=icache.io.coreRsp.bits.status
+  pipe.io.icache_rsp.bits.mask:=icache.io.coreRsp.bits.mask
   icache.io.coreRsp.ready:=pipe.io.icache_rsp.ready
   // ***********************
   icache.io.externalFlushPipe.bits.warpid :=pipe.io.externalFlushPipe.bits

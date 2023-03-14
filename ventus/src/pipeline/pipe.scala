@@ -22,7 +22,7 @@ class ICachePipeReq_np extends Bundle {
 }
 class ICachePipeRsp_np extends Bundle{
   val addr = UInt(32.W)
-  val data = UInt(32.W)
+  val data = UInt((num_fetch*32).W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
   val status = UInt(2.W)
@@ -92,6 +92,8 @@ class pipe extends Module{
   warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt()
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
+  operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
+  operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
 
@@ -102,6 +104,7 @@ class pipe extends Module{
   control.io.pc:=io.icache_rsp.bits.addr
   control.io.inst:=io.icache_rsp.bits.data
   control.io.wid:=io.icache_rsp.bits.warpid
+  control.io.inst_mask:=Mux(io.icache_rsp.valid& !io.icache_rsp.bits.status(0),io.icache_rsp.bits.mask.asTypeOf(control.io.inst_mask),0.U.asTypeOf(control.io.inst_mask))
 
   ibuffer.io.in.bits:=control.io.control
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
