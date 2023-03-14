@@ -29,7 +29,7 @@ class PCcontrol() extends Module{
   def align(pc: UInt) = {
     val offset_mask = (icache_align - 1).U(32.W) // e.g. num_fetch = 4 (16B align) => offset_mask = "b1111".U(32.W)
     val pc_aligned = pc & (~offset_mask).asUInt
-    val pc_mask = Vec(num_fetch, Bool())
+    val pc_mask = VecInit(Seq.fill(num_fetch)(false.B))
     (0 until num_fetch).foreach(i =>
       pc_mask(i) := Mux(pc_aligned + (i * 4).U >= pc, true.B, false.B) // e.g. num_fetch = 4, pc = 28 => pc_aligned = 16, pc_mask = "b1000"
     )
@@ -42,7 +42,7 @@ class PCcontrol() extends Module{
     mask:=mask
   }.elsewhen(io.PC_src===2.U){
     pout:=pout+ (num_fetch.U<<2)
-    mask:=Vec(num_fetch,1.U(1.W)).asUInt
+    mask:=VecInit(Seq.fill(num_fetch)(true.B)).asUInt
   }.elsewhen(io.PC_src===1.U){
     //pout:=Cat(io.New_PC(31,log2Ceil(num_fetch)+2),0.U((log2Ceil(num_fetch)+2).W))
     val pc_req_tmp = align(io.New_PC)

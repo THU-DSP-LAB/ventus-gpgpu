@@ -50,7 +50,7 @@ class inflight_wg_buffer(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val CU_I
   val PDS_BASEADDR_L = KNL_SZ_3D_H + 1
   val PDS_BASEADDR_H = PDS_BASEADDR_L + MEM_ADDR_WIDTH - 1;
   val CSR_KNL_L = PDS_BASEADDR_H + 1
-  val CSR_KNL_H = CSR_KNL_L + MEM_ADDR_WIDTH
+  val CSR_KNL_H = CSR_KNL_L + MEM_ADDR_WIDTH - 1
   val io = IO(new Bundle {
     //host inputs
     val host_wg_valid = Input(Bool())
@@ -165,7 +165,7 @@ class inflight_wg_buffer(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val CU_I
     host_wf_size_i := io.host_wf_size
     val host_start_pc_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     host_start_pc_i := io.host_start_pc
-    val host_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(UInt(top.parameters.WG_SIZE_X_WIDTH.W))))
+    val host_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))
     host_kernel_size_3d_i := io.host_kernel_size_3d
     val host_pds_baseaddr_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     host_pds_baseaddr_i := io.host_pds_baseaddr
@@ -316,7 +316,7 @@ class inflight_wg_buffer(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val CU_I
     io.inflight_wg_buffer_gpu_wf_size := inflight_wg_buffer_gpu_wf_size_i
     val inflight_wg_buffer_start_pc_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     io.inflight_wg_buffer_start_pc := inflight_wg_buffer_start_pc_i
-    val inflight_wg_buffer_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(UInt(top.parameters.WG_SIZE_X_WIDTH.W))))
+    val inflight_wg_buffer_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))
     io.inflight_wg_buffer_kernel_size_3d := inflight_wg_buffer_kernel_size_3d_i
     val inflight_wg_buffer_pds_baseaddr_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     io.inflight_wg_buffer_pds_baseaddr := inflight_wg_buffer_pds_baseaddr_i
