@@ -74,7 +74,11 @@ class InstrBufferV2 extends Module{
   val buffers_mask = VecInit(Seq.fill(num_warp)(Module(new Queue(Vec(num_fetch, Bool()), size_ibuffer, hasFlush = true)).io))
   (0 until num_warp).foreach{ i =>
     buffers(i).enq.valid := io.in.bits.control(0).wid === i.U && io.in.valid
+    buffers(i).enq.bits := io.in.bits.control
+    buffers(i).flush.foreach{ _ := io.flush_wid.valid && io.flush_wid.bits === i.U }
     buffers_mask(i).enq.valid := io.in.bits.control(0).wid === i.U && io.in.valid
+    buffers_mask(i).enq.bits := io.in.bits.control_mask
+    buffers_mask(i).flush.foreach{ _ := io.flush_wid.valid && io.flush_wid.bits === i.U }
     io.in.ready := buffers(io.in.bits.control(0).wid).enq.ready
     io.ibuffer_ready(i) := buffers(i).enq.ready
   }

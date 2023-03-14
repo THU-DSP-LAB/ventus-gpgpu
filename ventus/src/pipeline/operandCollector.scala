@@ -136,6 +136,10 @@ class collectorUnit extends Module{
     Array(s_idle->io.control.bits.inst,
           s_add->controlReg.inst
     ))
+  imm.io.imm_ext := MuxLookup(state, 0.U,
+    Array(s_idle -> io.control.bits.imm_ext,
+      s_add -> controlReg.imm_ext
+    ))
   imm.io.sel := MuxLookup(state, 0.U,
     Array(s_idle -> io.control.bits.sel_imm,
       s_add -> controlReg.sel_imm

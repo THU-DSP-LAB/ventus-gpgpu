@@ -93,6 +93,7 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(0)
     io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(1)
     io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(2)
+    io.CTA2warp(i).bits.dispatch2cu_wg_id :=0.U
     cta_sche.io.cu2dispatch_ready_for_dispatch(i):=io.CTA2warp(i).ready
 
     cta_sche.io.cu2dispatch_wf_tag_done(i):=io.warp2CTA(i).bits.cu2dispatch_wf_tag_done
