@@ -38,6 +38,7 @@ class CtrlSigs extends Bundle {
   val mem = Bool()
   val mul = Bool()
   val tc = Bool()
+  val disable_mask = Bool()
   val mem_cmd = UInt(2.W)
   val mop = UInt(2.W)
   val reg_idx1 = UInt((regidx_width + regext_width).W) // 8.W
@@ -92,7 +93,8 @@ class Scoreboard extends Module{
   val scalarReg=new ScoreboardUtil(32,true)
   val beqReg=new ScoreboardUtil(1)
   val OpColReg=new ScoreboardUtil(1)
-  val fenceReg=new ScoreboardUtil(1)
+  val fenceReg=new ScoreboardUtil(1) // after LSU rebuild, this could be cancelled.
+  // TODO: CSR operation may cause unexpected situation.
   vectorReg.set(io.if_fire & io.if_ctrl.wvd,io.if_ctrl.reg_idxw)
   vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wvd,io.wb_v_ctrl.reg_idxw)
   scalarReg.set(io.if_fire & io.if_ctrl.wxd,io.if_ctrl.reg_idxw)

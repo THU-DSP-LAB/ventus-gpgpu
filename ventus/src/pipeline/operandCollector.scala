@@ -9,14 +9,14 @@ class WriteVecCtrl extends Bundle{
   val wb_wvd_rd=(Vec(num_thread,UInt(xLen.W)))
   val wvd_mask=Vec(num_thread,Bool())
   val wvd=Bool()
-  val reg_idxw=UInt(5.W)
+  val reg_idxw=UInt((regidx_width + regext_width).W)
   val warp_id=UInt(depth_warp.W)
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
 class WriteScalarCtrl extends Bundle{
   val wb_wxd_rd=(UInt(xLen.W))
   val wxd=Bool()
-  val reg_idxw=UInt(5.W)
+  val reg_idxw=UInt((regidx_width + regext_width).W)
   val warp_id=UInt(depth_warp.W)
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
@@ -153,7 +153,7 @@ class collectorUnit extends Module{
           Array(
             A3_PC -> Mux(io.control.bits.branch===B_R, io.control.bits.reg_idx1, io.control.bits.reg_idx3),
             A3_VRS3 -> io.control.bits.reg_idx3,
-            A3_SD -> Mux(io.control.bits.isvec, io.control.bits.reg_idx3, io.control.bits.reg_idx2),
+            A3_SD -> Mux(io.control.bits.isvec & (!io.control.bits.readmask), io.control.bits.reg_idx3, io.control.bits.reg_idx2),
             A3_FRS3 -> io.control.bits.reg_idx3
           ))
         regIdxWire(3) := 0.U // mask of vector instructions
