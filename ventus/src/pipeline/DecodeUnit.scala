@@ -31,7 +31,6 @@ object IDecode //extends DecodeConstants
   def A3_X=0.U(2.W)
   val A3_VRS3=1.U(2.W)
   val A3_SD=3.U(2.W)
-  val A3_SD_VRS2=4.U(3.W)//TODO:update A3
   val A3_FRS3=2.U(2.W)//for float(not vector). jalr use b_r to distinguish
   val A3_PC=0.U(2.W)
   def A1_X=0.U(2.W)//BitPat("b??")
@@ -146,34 +145,34 @@ object IDecode //extends DecodeConstants
   val default = List(N,X,X,B_N,X,X,X,X,A3_X,A2_X,   A1_X,   IMM_X, MEM_X,  FN_X,     N,M_X,        X,X,X,X,X,X,X,X,X,X,X)
 
   val table=Array(//: Array[(BitPat, List[BitPat])] = Array(
-    VBNE->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SNE,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    VBEQ->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SEQ,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    VBLT->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SLT,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    VBLTU->  List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SLTU,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    VBGE->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGE,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    VBGEU->  List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGEU,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    JOIN->   List(Y,N,N,B_B,Y,Y,CSR.N,N,A3_PC,A2_X,A1_X,IMM_B,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
+    VBNE->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SNE,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
+    VBEQ->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SEQ,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
+    VBLT->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SLT,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
+    VBLTU->  List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SLTU,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
+    VBGE->   List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGE,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
+    VBGEU->  List(Y,N,N,B_B,Y,N,CSR.N,Y,A3_PC,A2_VRS2,A1_VRS1,IMM_B,MEM_X,FN_SGEU,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
+    JOIN->   List(Y,N,N,B_B,Y,Y,CSR.N,N,A3_PC,A2_X,A1_X,IMM_B,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,Y,N,N),
     BARRIER->List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     BARRIERSUB->List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
-    VADD12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
-    VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VADD12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
+    VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
 
-    VLW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
-    VLH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
-    VLB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
-    VLHU_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
-    VLBU_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
-    VSW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_RS1,IMM_S11,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
-    VSH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_RS1,IMM_S11,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
-    VSB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_RS1,IMM_S11,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
-    VLW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
-    VLH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
-    VLB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,N,N,N),
-    VLHU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
-    VLBU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,N,N,N),
-    VSW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_VRS1,IMM_S,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
-    VSH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_VRS1,IMM_S,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
-    VSB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD_VRS2,A2_IMM,A1_VRS1,IMM_S,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,N,N,N),
+    VLW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
+    VLH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
+    VLB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
+    VLHU_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,Y,N,N),
+    VLBU_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,Y,N,N),
+    VSW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_RS1,IMM_S11,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
+    VSH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_RS1,IMM_S11,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
+    VSB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_RS1,IMM_S11,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
+    VLW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
+    VLH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
+    VLB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
+    VLHU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,Y,N,N),
+    VLBU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,Y,N,N),
+    VSW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
+    VSH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
+    VSB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
 
     ENDPRG-> List(N,N,Y,B_N,N,Y,CSR.N,N,A3_X,A2_X,A1_X,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
     BNE->    List(N,N,N,B_B,N,N,CSR.N,N,A3_PC,A2_RS2,A1_RS1,IMM_B,MEM_X,FN_SNE,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
@@ -436,9 +435,9 @@ object IDecode //extends DecodeConstants
     VMV_V_I->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_IMM,IMM_V,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VMV_V_X->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VMV_X_S->   List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
-    VSETVLI->   List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
-    VSETIVLI->  List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
-    VSETVL->    List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
+    VSETVLI->   List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,Y,N,N),
+    VSETIVLI->  List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,Y,N,N),
+    VSETVL->    List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,Y,N,N),
 
   )
 }
@@ -464,7 +463,7 @@ class Control extends Module{
   io.control.reverse:=ctrlsignals(7)//for some vector inst,change in1 and in2, e.g. subr
   io.control.isvec:=ctrlsignals(0)//isvec=1->vALU/vFPU
   io.control.sel_alu3:=ctrlsignals(8)
-  io.control.mask:=((~io.inst(25)).asBool() | io.control.alu_fn===pipeline.IDecode.FN_VMERGE ) & io.control.isvec & !io.control.branch.orR() //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
+  io.control.mask:=((~io.inst(25)).asBool() | io.control.alu_fn===pipeline.IDecode.FN_VMERGE ) & io.control.isvec & !io.control.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
   io.control.sel_alu2:=ctrlsignals(9)
   io.control.sel_alu1:=ctrlsignals(10)
   io.control.sel_imm:=ctrlsignals(11)
@@ -481,6 +480,7 @@ class Control extends Module{
   io.control.writemask:=ctrlsignals(21)//write mode is mask - for mask bitwise opcode
   io.control.wxd:=ctrlsignals(22)
   io.control.tc:=ctrlsignals(23)
+  io.control.disable_mask:=ctrlsignals(24) //do not use mask for some vector inst.
   io.control.reg_idx1:=io.inst(19,15)
   io.control.reg_idx2:=io.inst(24,20)
   io.control.reg_idx3:=Mux(io.control.fp & !io.control.isvec,io.inst(31,27),io.inst(11,7))
@@ -564,7 +564,7 @@ class InstrDecodeV2 extends Module {
     c.reverse := s(7) //for some vector inst,change in1 and in2, e.g. subr
     c.isvec := s(0) //isvec=1->vALU/vFPU
     c.sel_alu3 := s(8)
-    c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.branch.orR //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
+    c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
     c.sel_alu2 := s(9)
     c.sel_alu1 := s(10)
     c.sel_imm := s(11)
@@ -577,13 +577,13 @@ class InstrDecodeV2 extends Module {
     c.fence := s(17)
     c.sfu := s(18)
     c.wvd := s(19)
-    c.readmask := s(20) //read mode is mask - for mask bitwise opcode
+    c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
     c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
     c.tc := s(23)
+    c.disable_mask := s(24)
     c.reg_idx1 := Cat(regextInfo(i).regPrefix(1), io.inst(i)(19, 15))
     c.reg_idx2 := Cat(regextInfo(i).regPrefix(2), io.inst(i)(24, 20))
-    // TODO: reg_idx3
     c.reg_idx3 := Mux(c.fp & !c.isvec, Cat(0.U(3.W),io.inst(i)(31, 27)), Cat(regextInfo(i).regPrefix(0) ,io.inst(i)(11, 7)))
     c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
     c.imm_ext := regextInfo(i).immHigh
