@@ -384,6 +384,8 @@ class operandCollector extends Module{
     val out=Decoupled(new issueIO)
     val writeScalarCtrl=Flipped(DecoupledIO(new WriteScalarCtrl)) //should be used as decoupledIO
     val writeVecCtrl=Flipped(DecoupledIO(new WriteVecCtrl))
+    val sgpr_base = Input(Vec(num_warp,UInt((SGPR_ID_WIDTH+1).W)))
+    val vgpr_base = Input(Vec(num_warp,UInt((VGPR_ID_WIDTH+1).W)))
   })
   val collectorUnits = VecInit(Seq.fill(num_collectorUnit)(Module(new collectorUnit).io))
   val Arbiter = Module(new operandArbiter)
