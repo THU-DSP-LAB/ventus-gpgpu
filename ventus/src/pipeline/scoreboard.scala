@@ -89,8 +89,8 @@ class ScoreboardUtil(n: Int,zero:Boolean=false)
 }
 class Scoreboard extends Module{
   val io=IO(new scoreboardIO())
-  val vectorReg=new ScoreboardUtil(32)
-  val scalarReg=new ScoreboardUtil(32,true)
+  val vectorReg=new ScoreboardUtil(1 << (regidx_width + regext_width))
+  val scalarReg=new ScoreboardUtil(1 << (regidx_width + regext_width),true)
   val beqReg=new ScoreboardUtil(1)
   val OpColReg=new ScoreboardUtil(1)
   val fenceReg=new ScoreboardUtil(1) // after LSU rebuild, this could be cancelled.

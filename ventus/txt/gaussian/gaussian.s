@@ -63,7 +63,7 @@ join        v0,v0, K1_A
 K1_A:
 join        v0,v0, K1_B
 K1_B: 
-barrier     x0, x0, x0               # syncthread
+barrier     x0, x0, 0               # syncthread
 
 Kernel2:
 addi        x20, x7, 1
@@ -117,7 +117,7 @@ join        v0, v0, K2_J2
 K2_J2:
 join        v0, v0, K2_B
 K2_B:
-barrier     x0, x0, x0
+barrier     x0, x0, 0
 addi        x7, x7, 1               # t+1
 blt         x7, x8, Kernel1
 endprg      x0, x0, x0

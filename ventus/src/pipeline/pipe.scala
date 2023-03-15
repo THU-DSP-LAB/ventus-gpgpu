@@ -107,7 +107,7 @@ class pipe extends Module{
   }
   control.io.wid:=io.icache_rsp.bits.warpid
   control.io.inst_mask:=Mux(io.icache_rsp.valid& !io.icache_rsp.bits.status(0),io.icache_rsp.bits.mask.asTypeOf(control.io.inst_mask),0.U.asTypeOf(control.io.inst_mask))
-
+  control.io.flush_wid := warp_sche.io.flush
   ibuffer.io.in.bits.control := control.io.control
   ibuffer.io.in.bits.control_mask := control.io.control_mask
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
@@ -223,15 +223,15 @@ class pipe extends Module{
   //  printf(p"\n")
   //}
   //输出写入向量寄存器的
-  //when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
-  //  printf(p"write${wb.io.out_v.bits.reg_idxw})")
-  //  wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p" ${Hexadecimal(x.asUInt)} "))
-  //  printf(p"with ${wb.io.out_v.bits.wvd_mask}\n")
-  //}
+  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
+    printf(p"write${wb.io.out_v.bits.reg_idxw})")
+    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p" ${Hexadecimal(x.asUInt)} "))
+    printf(p"with ${wb.io.out_v.bits.wvd_mask}\n")
+  }
   ////输出写入标量寄存器的
-  //when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
-  //  printf(p"write${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
-  //}
+  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
+    printf(p"write${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
+  }
 
   {
     exe_data.io.enq.bits.ctrl := operand_collector.io.out.bits.control
