@@ -339,13 +339,13 @@ class CPUtest(C: TestCase#Props) extends Module{
   io.host2cta.bits.host_vgpr_size_per_wf:=32.U
   io.host2cta.bits.host_sgpr_size_per_wf:=32.U
   io.host2cta.bits.host_gds_baseaddr := sharemem_size.U
-  io.host2cta.bits.host_pds_baseaddr := 20.U
+  io.host2cta.bits.host_pds_baseaddr := sharemem_size.U
   io.host2cta.bits.host_csr_knl:=10.U
   io.host2cta.bits.host_kernel_size_3d:=0.U.asTypeOf(io.host2cta.bits.host_kernel_size_3d)
 
   val cnt=Counter(16)
   io.host2cta.bits.host_wg_id:=Cat(cnt.value + 3.U,0.U(CU_ID_WIDTH.W))
-  io.host2cta.bits.host_pds_baseaddr:=cnt.value << 10
+  //io.host2cta.bits.host_pds_baseaddr:=cnt.value << 10
   io.host2cta.bits.host_csr_knl:=cnt.value
   io.host2cta.bits.host_kernel_size_3d:=VecInit(Seq(cnt.value,cnt.value+1.U,cnt.value+2.U))
   when(cnt.value < num_of_block){

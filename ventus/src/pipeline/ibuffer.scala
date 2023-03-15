@@ -115,11 +115,11 @@ class InstrBufferV2 extends Module{
         mask_reg := mask_next
       }
       when(io.in.fire){
-        mask_reg := io.in.bits.control_mask.asUInt // cover io.out.fire
-        control_reg := io.in.bits.control
+          mask_reg := io.in.bits.control_mask.asUInt // cover io.out.fire
+          control_reg := io.in.bits.control
       }
     }
-    io.in.ready := mask_next === 0.U
+    io.in.ready := mask_next === 0.U && io.out.ready
     io.out.valid := mask_reg =/= 0.U
     io.out.bits := control_reg(ptr)
   }

@@ -5,13 +5,13 @@ saxpy.o:     file format elf64-littleriscv
 Disassembly of section .text:
 
 0000000000000000 <L_END-0x4c>:
-   0:	807022f3          	csrrs	x5,0x807,x0
-   4:	80002373          	csrrs	x6,0x800,x0
+   0:	807022f3          	csrrs	x5,pds,x0
+   4:	80002373          	csrrs	x6,tid,x0
    8:	5208a3d7          	vid.v	v7
    c:	02734457          	vadd.vx	v8,v7,x6
   10:	0002a383          	lw	x7,0(x5)
   14:	5e03c4d7          	vmv.v.x	v9,x7
-  18:	0284da0b          	vbge	v8,v9,4c <L_END>
+  18:	0284da5b          	vbge	v8,v9,4c <L_END>
   1c:	0042aa03          	lw	x20,4(x5)
   20:	01f38393          	addi	x7,x7,31
   24:	0053d393          	srli	x7,x7,0x5
@@ -26,10 +26,10 @@ Disassembly of section .text:
   48:	0205e5a7          	vse32.v	v11,(x11)
 
 000000000000004c <L_END>:
-  4c:	0000320b          	join	v0,v0,50 <L_ENDPRG>
+  4c:	0000325b          	join	v0,v0,50 <L_ENDPRG>
 
 0000000000000050 <L_ENDPRG>:
-  50:	0200200b          	barrier	x0,x0,x0
-  54:	0000200b          	endprg	x0,x0,x0
-  58:	0000200b          	endprg	x0,x0,x0
-  5c:	0000200b          	endprg	x0,x0,x0
+  50:	0400400b          	barrier	x0,x0,0
+  54:	0000400b          	endprg	x0,x0,x0
+  58:	0000400b          	endprg	x0,x0,x0
+  5c:	0000400b          	endprg	x0,x0,x0
