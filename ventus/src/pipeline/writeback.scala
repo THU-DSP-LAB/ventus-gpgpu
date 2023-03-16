@@ -66,7 +66,7 @@ class Writeback(num_x:Int,num_v:Int) extends Module{
       printf(p" ${io.out_x.bits.reg_idxw}  ${Hexadecimal(io.out_x.bits.wb_wxd_rd)}\n")
     }
     when(io.out_v.fire/* && io.out_v.bits.warp_id === wid_to_check.U*/) {
-      printf(p"warp${Decimal(io.out_x.bits.warp_id)} ")
+      printf(p"warp${Decimal(io.out_v.bits.warp_id)} ")
       printf(p"0x00000000${Hexadecimal(io.out_v.bits.spike_info.get.pc)} 0x${Hexadecimal(io.out_v.bits.spike_info.get.inst)}")
       printf(p" ${io.out_v.bits.reg_idxw} ")
       io.out_v.bits.wvd_mask.reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
