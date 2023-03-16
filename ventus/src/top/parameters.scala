@@ -7,7 +7,7 @@ import chisel3.util.log2Ceil
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
   def num_sm = 2
   val SINGLE_INST: Boolean = false
-  val SPIKE_OUTPUT: Boolean = false
+  val SPIKE_OUTPUT: Boolean = true
   val wid_to_check = 2
   def num_bank = 4
   def num_collectorUnit = num_warp

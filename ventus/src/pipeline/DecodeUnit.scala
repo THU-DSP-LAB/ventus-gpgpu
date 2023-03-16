@@ -636,6 +636,10 @@ class InstrDecodeV2 extends Module {
     c.reg_idx3 := Mux(c.fp & !c.isvec, Cat(0.U(3.W),io.inst(i)(31, 27)), Cat(regextInfo(i).regPrefix(0) ,io.inst(i)(11, 7)))
     c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
     c.imm_ext := regextInfo(i).immHigh
+    if (SPIKE_OUTPUT) {
+      c.spike_info.get.inst := io.inst(i)
+      c.spike_info.get.pc := io.pc+ (i.U << 2.U)
+    }
   }
   io.control_mask := maskAfterExt
 }
