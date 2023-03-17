@@ -167,7 +167,7 @@ for(i<- 0 until params.cache.sets){
   cc_dir.io.w.req.bits.apply(
     setIdx=Mux(wipeDone, io.write.bits.set, wipeSet),
     data=Mux(wipeDone, io.write.bits.data.asUInt, 0.U),
-    waymask=UIntToOH(io.write.bits.way, 2) | Fill(2, !wipeDone))//就是写对应的way，如果reset全写
+    waymask=UIntToOH(io.write.bits.way, params.cache.ways) | Fill(params.cache.ways, !wipeDone))//就是写对应的way，如果reset全写
 
   io.read.ready:= (wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) //also fire when bypass
   io.result.valid := ren1
