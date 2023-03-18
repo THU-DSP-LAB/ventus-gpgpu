@@ -28,9 +28,16 @@ public:
     void ISSUE_ACTION();
     // opc
     void OPC_FIFO();
+    void OPC_FETCH();
     void OPC_EMIT();
+    bank_t bank_decode(int warp_id, int srcaddr);
     // regfile
     void INIT_REG();
+    std::pair<int, int> reg_arbiter(const std::array<std::array<bank_t, 4>, OPCFIFO_SIZE> &addr_arr, // opc_srcaddr
+                                    const std::array<std::array<bool, 4>, OPCFIFO_SIZE> &valid_arr,  // opc_valid
+                                    std::array<std::array<bool, 4>, OPCFIFO_SIZE> &ready_arr,        // opc_ready
+                                    int bank_id,
+                                    std::array<int, BANK_NUM> &REGcurrentIdx);
     void READ_REG();
     void WRITE_REG();
     // exec
@@ -58,7 +65,9 @@ public:
     }
 
     BASE(sc_core::sc_module_name name)
-        : sc_module(name), ififo(10), opcfifo(10), salufifo(3), valufifo(3), vfpufifo(3), lsufifo(3)
+        : sc_module(name), ififo(10),
+          salufifo(3), valufifo(3), vfpufifo(3), lsufifo(3)
+    // , opcfifo(10)
     {
         SC_HAS_PROCESS(BASE);
 
@@ -87,6 +96,8 @@ public:
         sensitive << clk.pos();
         // opc
         SC_THREAD(OPC_FIFO);
+        sensitive << clk.pos();
+        SC_THREAD(OPC_FETCH);
         sensitive << clk.pos();
         SC_THREAD(OPC_EMIT);
         sensitive << clk.pos();
@@ -120,8 +131,9 @@ public:
 
 public:
     // fetch
+    sc_event ev_dispatch;
     sc_signal<bool> ibuf_full{"ibuf_full"}, fetch_valid{"fetch_valid"};
-    sc_signal<bool> jump{"jump"};
+    sc_signal<bool> jump{"jump"}, branch_sig{"branch_sig"}; // 无论是否jump，只要发生了分支判断，将branch_sig置为1
     sc_signal<sc_int<ireg_bitsize + 1>> jump_addr{"jump_addr"}, pc{"pc"};
     I_TYPE fetch_ins;
     std::array<I_TYPE, ireg_size> ireg;
@@ -135,10 +147,20 @@ public:
     sc_signal<I_TYPE> wb_ins{"wb_ins"};
     I_TYPE _scoretmpins;
     std::set<SCORE_TYPE> score; // record regfile addr that's to be written
+    sc_signal<bool> wait_bran;  // dispatch了分支指令，则要暂停dispatch等待分支指令被执行
     // issue
     sc_signal<I_TYPE> issue_ins{"issue_ins"};
     // opc
-    tlm::tlm_fifo<I_TYPE> opcfifo;
+    StaticEntry<opcfifo_t, OPCFIFO_SIZE> opcfifo; // tlm::tlm_fifo<I_TYPE> opcfifo;
+    std::array<std::array<bool, 4>, OPCFIFO_SIZE> opc_valid;
+    std::array<std::array<bool, 4>, OPCFIFO_SIZE> opc_ready;
+    std::array<std::array<bank_t, 4>, OPCFIFO_SIZE> opc_srcaddr;
+    std::array<std::array<bool, 4>, OPCFIFO_SIZE> opc_banktype; // 0-s, 1-v
+    std::array<int, BANK_NUM> read_bank_addr;                   // regfile arbiter给出
+    std::array<int, BANK_NUM> REGcurrentIdx;                    // 轮询到哪了
+    std::array<std::array<reg_t, num_thread>, BANK_NUM> read_data;
+    std::array<std::pair<int, int>, BANK_NUM> REGselectIdx; // 轮询选出哪个了（索引，有这个数据，ready其实没有用了）
+    sc_signal<int> emit_idx{"emit_idx"};                    // 上一周期emit的ins在opc中的索引，最大是BANK_NUM
     sc_signal<bool> opc_full{"opc_full"};
     bool opc_empty;
     I_TYPE opctop_ins;
@@ -152,13 +174,13 @@ public:
     sc_signal<sc_uint<5>> rss1_addr{"rss1_addr"}, rss2_addr{"rss2_addr"},
         rsv1_addr{"rsv1_addr"}, rsv2_addr{"rsv2_addr"},
         rsf1_addr{"rsf1_addr"}, rsf2_addr{"rsf2_addr"};
+    bool findemit; // 轮询时，找到了全ready且执行单元也ready的entry
     bool emit, emito_salu, emito_valu, emito_vfpu, emito_lsu;
     // regfile
     std::array<reg_t, 32> s_regfile;
     using v_regfile_t = std::array<reg_t, num_thread>;
     std::array<v_regfile_t, 32> v_regfile;
     using f_regfile_t = std::array<float, num_thread>;
-    std::array<f_regfile_t, 32> f_regfile;
     sc_signal<sc_uint<5>> rds1_addr{"rds1_addr"}, rdv1_addr{"rdv1_addr"}, rdf1_addr{"rdf1_addr"};
     sc_signal<reg_t> rds1_data{"rds1_data"};
     sc_vector<sc_signal<reg_t>> rdv1_data{"rdv1_data", num_thread};
@@ -193,13 +215,15 @@ public:
     bool lsufifo_empty;
     int lsufifo_elem_num;
     // writeback
-    bool write_s, write_v, write_f, write_lsu;
+    bool write_s, write_v, write_f;
+    bool execpop_salu, execpop_valu, execpop_vfpu, execpop_lsu;
 
     // 外部存储，暂时在BASE中实现
     std::array<reg_t, 512> s_memory;
     std::array<v_regfile_t, 512> v_memory;
     std::array<f_regfile_t, 512> f_memory;
-    void memory_init(){
+    void memory_init()
+    {
         s_memory[25] = 34;
         s_memory[41] = 67;
         v_memory[20].fill(666);
