@@ -28,12 +28,16 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf, BASE_impl.ibuf_empty, "ibuf_empty");
     sc_trace(tf, BASE_impl.ibuftop_ins, "ibuftop_ins");
     sc_trace(tf, BASE_impl.ififo_elem_num, "ififo_elem_num");
+    sc_trace(tf, BASE_impl.wait_bran, "wait_bran");
     sc_trace(tf, BASE_impl.can_dispatch, "can_dispatch");
     sc_trace(tf, BASE_impl.opc_full, "opc_full");
     sc_trace(tf, BASE_impl.issue_ins, "issue_ins");
     sc_trace(tf, BASE_impl.opcfifo_elem_num, "opcfifo_elem_num");
     sc_trace(tf, BASE_impl.opctop_ins, "opctop_ins");
     sc_trace(tf, BASE_impl.emit, "emit");
+    sc_trace(tf, BASE_impl.findemit, "findemit");
+
+    sc_trace(tf, BASE_impl.emit_idx, "emit_idx");
     sc_trace(tf, BASE_impl.emito_salu, "emito_salu");
     sc_trace(tf, BASE_impl.emito_valu, "emito_valu");
     sc_trace(tf, BASE_impl.emito_vfpu, "emito_vfpu");
@@ -98,7 +102,10 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf, BASE_impl.write_s, "write_s");
     sc_trace(tf, BASE_impl.write_v, "write_v");
     sc_trace(tf, BASE_impl.write_f, "write_f");
-    sc_trace(tf, BASE_impl.write_lsu, "write_lsu");
+    sc_trace(tf, BASE_impl.execpop_salu, "execpop_salu");
+    sc_trace(tf, BASE_impl.execpop_valu, "execpop_valu");
+    sc_trace(tf, BASE_impl.execpop_vfpu, "execpop_vfpu");
+    sc_trace(tf, BASE_impl.execpop_lsu, "execpop_lsu");
     sc_trace(tf, BASE_impl.wb_ena, "wb_ena");
     sc_trace(tf, BASE_impl.wb_ins, "wb_ins");
     sc_trace(tf, BASE_impl.s_regfile[0], "s_regfile(0)");
@@ -120,7 +127,7 @@ int sc_main(int argc, char *argv[])
 
     // sc_trace(tf, BASE_impl., "");
 
-    sc_start(500, SC_NS);
+    sc_start(800, SC_NS);
     sc_close_vcd_trace_file(tf);
 
     return 0;

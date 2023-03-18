@@ -17,6 +17,8 @@ inline constexpr int ireg_bitsize = 9;
 inline constexpr int ireg_size = 1 << ireg_bitsize;
 inline constexpr int INS_LENGTH = 32; // the length of per instruction
 inline constexpr double PERIOD = 10;
+inline constexpr int OPCFIFO_SIZE = 4;
+inline constexpr int BANK_NUM = 4;
 
 using reg_t = sc_int<32>;
 
@@ -34,7 +36,7 @@ enum OP_TYPE
 class I_TYPE // type of per instruction
 {
 public:
-    int s1 = -1;                             // load指令为存储器addr
+    int s1 = -1;                             // load指令为寄存器addr
     int s2 = -1;                             // load指令为offset
     int d = -1;                              // beq指令为imm
     int op;                                  // trace不支持enum，只能定义op为int型
@@ -115,6 +117,186 @@ public:
     }
     SCORE_TYPE(REG_TYPE regtype_, int addr_) : regtype(regtype_), addr(addr_){};
 };
+struct bank_t
+{
+    int bank_id;
+    int addr;
+};
+struct opcfifo_t
+{
+    // 进入opcfifo时，若要取操作数，令valid=1，等待regfile返回ready=1
+    // 若是立即数，不用取操作数，令valid=0且直接令ready=1
+    // 只要ready=1，就可以发射
+    I_TYPE ins;
+    std::array<bool, 4> ready = {0};
+    std::array<bool, 4> valid = {0};
+    std::array<bank_t, 4> srcaddr;
+    std::array<bool, 4> banktype = {0};
+    // int mask;
+    std::array<std::array<reg_t, num_thread>, 4> data;
+    bool all_ready()
+    {
+        return ready[0] && ready[1] && ready[2] && ready[3];
+    }
+    opcfifo_t(){};
+    opcfifo_t(I_TYPE ins_) : ins(ins_){};
+    opcfifo_t(I_TYPE ins_, const std::array<bool, 4> &ready_arr,
+              const std::array<bool, 4> &valid_arr,
+              const std::array<bank_t, 4> &srcaddr_arr,
+              const std::array<bool, 4> &banktype_arr)
+        : ins(ins_), ready(ready_arr), valid(valid_arr),
+          srcaddr(srcaddr_arr), banktype(banktype_arr){};
+};
+
+template <typename T, size_t N>
+class StaticEntry
+{ // for OPC entry
+public:
+    StaticEntry() : size_(0)
+    {
+        tag_.fill(false);
+    }
+    void clear()
+    {
+        tag_.fill(false);
+    }
+    void push(const T &value)
+    {
+        if (size_ < N)
+        {
+            for (size_t i = 0; i < N; ++i)
+            {
+                if (tag_[i] == false)
+                {
+                    data_[i] = value;
+                    tag_[i] = true;
+                    ++size_;
+                    break;
+                }
+            }
+        }
+    }
+
+    void pop(size_t index)
+    {
+        if (index >= N || !tag_[index])
+        {
+            throw std::out_of_range("Invalid index");
+            return;
+        }
+
+        tag_[index] = false;
+        --size_;
+    }
+
+    T &operator[](size_t index)
+    {
+        return data_[index];
+    }
+
+    const T &operator[](size_t index) const
+    {
+        return data_[index];
+    }
+    bool tag_valid(size_t index) const
+    {
+        return tag_[index];
+    }
+    size_t get_size() const
+    {
+        return size_;
+    }
+
+    // 以下函数是为了使用范围-based for循环
+    T *begin() { return data_.begin(); }
+    T *end() { return data_.end(); }
+    const T *begin() const { return data_.begin(); }
+    const T *end() const { return data_.end(); }
+
+private:
+    std::array<T, N> data_;
+    std::array<bool, N> tag_; // 标志位置是否有效
+    size_t size_;
+};
+
+// template <typename T, std::size_t capacity>
+// class StaticQueue
+// { // used by OPC
+// private:
+//     std::array<T, capacity> data;
+//     std::size_t size;
+//     std::size_t front_index;
+
+// public:
+//     StaticQueue() : size(0), front_index(0) {}
+//     void push(const T &value)
+//     {
+//         if (size == capacity)
+//         {
+//             throw std::out_of_range("Queue is full");
+//         }
+//         data[(front_index + size) % capacity] = value;
+//         ++size;
+//     }
+//     void pop()
+//     {
+//         if (size == 0)
+//         {
+//             throw std::out_of_range("Queue is empty");
+//         }
+//         front_index = (front_index + 1) % capacity;
+//         --size;
+//     }
+//     // T &front()
+//     // {
+//     //     if (size == 0)
+//     //     {
+//     //         throw std::out_of_range("Queue is empty");
+//     //     }
+//     //     return data[front_index];
+//     // }
+//     const T &front() const
+//     {
+//         if (size == 0)
+//         {
+//             throw std::out_of_range("Queue is empty");
+//         }
+//         return data[front_index];
+//     }
+//     T &operator[](std::size_t index)
+//     { // front对应索引0
+//         return data[(front_index + index) % capacity];
+//     }
+//     T &at(size_t index) // 与[]不同，at()包含边界检查
+//     {
+//         if (index >= size)
+//         {
+//             throw std::out_of_range("Index out of range");
+//         }
+//         return data[(front_index + index) % capacity];
+//     }
+//     // const T &at(size_t index) const
+//     // {
+//     //     if (index >= size)
+//     //     {
+//     //         throw std::out_of_range("Index out of range");
+//     //     }
+//     //     return data[(front_index + index) % capacity];
+//     // }
+//     bool empty() const
+//     {
+//         return size == 0;
+//     }
+//     size_t get_size() const
+//     {
+//         return size;
+//     }
+//     size_t get_capacity() const
+//     {
+//         return capacity;
+//     }
+// };
+
 struct salu_in_t
 {
     I_TYPE ins;
@@ -238,7 +420,7 @@ struct vfpu_out_t
 struct lsu_in_t
 {
     I_TYPE ins;
-    reg_t rss1_data;    // 从regfile取出的数据作为momory地址
+    reg_t rss1_data; // 从regfile取出的数据作为momory地址
     // below 3 data is to store
     reg_t rds1_data;
     std::array<reg_t, num_thread> rdv1_data;

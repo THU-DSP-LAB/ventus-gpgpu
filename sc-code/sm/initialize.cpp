@@ -14,7 +14,14 @@ void BASE::INIT_INS()
     ireg[8] = I_TYPE(vaddvv_, 0, 1, 2);
     ireg[9] = I_TYPE(add_, 1, 3, 3);
     ireg[10] = I_TYPE(lw_, 0, 3, 9);
-    ireg[11] = I_TYPE(vload_, 3, 9, 4);
+    ireg[11] = I_TYPE(vload_, 3, 8, 4);
+    ireg[12] = I_TYPE(vload_, 3, 8, 5);
+    ireg[13] = I_TYPE(vload_, 3, 8, 6);
+    ireg[14] = I_TYPE(vload_, 3, 8, 7);
+    ireg[15] = I_TYPE(vload_, 3, 8, 8);
+    ireg[16] = I_TYPE(vload_, 3, 8, 9);
+    ireg[17] = I_TYPE(vload_, 3, 8, 10);
+    ireg[18] = I_TYPE(vload_, 3, 8, 11);
 }
 
 void BASE::INIT_REG()
@@ -35,11 +42,11 @@ void BASE::INIT_REG()
     v_regfile[5].fill(10);
     v_regfile[6].fill(8);
     v_regfile[7].fill(1);
-    f_regfile[0].fill(1);
-    f_regfile[1].fill(5.20);
-    f_regfile[2].fill(-0.3);
-    f_regfile[3].fill(3.14);
-    f_regfile[4].fill(18.99);
+    // f_regfile[0].fill(1);
+    // f_regfile[1].fill(5.20);
+    // f_regfile[2].fill(-0.3);
+    // f_regfile[3].fill(3.14);
+    // f_regfile[4].fill(18.99);
 }
 
 

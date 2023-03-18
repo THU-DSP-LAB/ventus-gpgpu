@@ -1,6 +1,7 @@
 #include "hello.h"
 #include "tlm_utils/tlm_quantumkeeper.h"
 #include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
+#include "pointer.h"
 
 int sc_main(int argc, char *argv[])
 {
@@ -63,13 +64,30 @@ int sc_main(int argc, char *argv[])
   // ttt.ins(ins);
   // sc_start();
 
-  // 测试event_queue和clk的时间关系，测试数值何时更新
-  if (sc_time(SC_ZERO_TIME) == sc_time(0, SC_NS))
-    cout << "sc_time(SC_ZERO_TIME) == sc_time(0, SC_NS)" << endl;
-  delaytest ddddd("DDDDD");
+  // // 测试event_queue和clk的时间关系，测试数值何时更新
+  // if (sc_time(SC_ZERO_TIME) == sc_time(0, SC_NS))
+  //   cout << "sc_time(SC_ZERO_TIME) == sc_time(0, SC_NS)" << endl;
+  // delaytest ddddd("DDDDD");
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // ddddd.clk(clk);
+  // sc_start(50, SC_NS);
+
+  // // Pointer test
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // POINTER pointertest("pointertest");
+  // pointertest.clk(clk);
+  // sc_start(50, SC_NS);
+
+  // timing update test
   sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
-  ddddd.clk(clk);
-  sc_start(20, SC_NS);
+  timing main_timing("timing");
+  main_timing.clk(clk);
+  sc_trace_file *tf = sc_create_vcd_trace_file("hello_wave");
+  tf->set_time_unit(1, SC_NS);
+  sc_trace(tf, clk, "Clk");
+
+  sc_start(100, SC_NS);
+  sc_close_vcd_trace_file(tf);
 
   return 0; // Terminate simulation
 }
