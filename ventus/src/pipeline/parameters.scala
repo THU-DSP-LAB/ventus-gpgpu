@@ -14,7 +14,7 @@ import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCachePa
 import chisel3._
 import chisel3.util._
 object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
-  def num_sm=2
+  def num_sm=8
 
   val SINGLE_INST:Boolean=false
   val SPIKE_OUTPUT:Boolean=true
@@ -23,6 +23,10 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def num_collectorUnit=num_warp
   def depth_regBank=log2Ceil(num_warp*32/num_bank)
   def num_warp=8
+
+  def num_cluster = 2
+
+  def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp=log2Ceil(num_warp)
   def num_thread=8
   def depth_thread=log2Ceil(num_thread)
@@ -31,6 +35,9 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def num_warp_in_a_block=num_warp
   def num_lane=num_thread/2
   def num_icachebuf = 1 //blocking for each warp
+
+
+
   def depth_icachebuf = log2Ceil(num_icachebuf)
   def num_ibuffer=2
   def depth_ibuffer=log2Ceil(num_ibuffer)
@@ -58,8 +65,10 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def l2cache_memCycles: Int = 4
   def l2cache_portFactor: Int = 2
     val l2cache_cache=CacheParameters(2,l2cache_NWays,l2cache_NSets,l2cache_BlockWords<<2,l2cache_BlockWords<<2)
-    val l2cache_micro=InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm)
+    val l2cache_micro=InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,num_cluster)
+    val l2cache_micro_l = InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,1)
     val l2cache_params=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro,false)
+    val l2cache_params_l=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro_l,false)
 
   def tc_dim: Seq[Int] = {
     var x: Seq[Int] = Seq(2, 2, 2)

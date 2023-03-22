@@ -15,7 +15,7 @@ import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
 import pipeline.parameters._
 import L1Cache.ICache._
-import L1Cache._
+import L1Cache.{RVGModule, _}
 import L1Cache.DCache._
 import L1Cache.ShareMem._
 import config.config._
@@ -94,7 +94,7 @@ class CTAinterface extends Module{
   //for (i <- 0 until NUMBER_CU){}
 }
 class GPGPU_axi_top extends Module{
-  val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_SM)+log2Up(l2cache_micro.num_warp)+1)
+  val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_sm)+log2Up(l2cache_micro.num_warp)+1)
   val l2_axi_params=InclusiveCacheParameters_lite_withAXI(l2cache_params,l2cache_axi_params)
 
   val io=IO(new Bundle{
@@ -114,7 +114,7 @@ class GPGPU_axi_top extends Module{
   gpgpu_top.io.host_rsp<>axi_lite_adapter.io.rsp
 }
 class GPGPU_axi_adapter_top extends Module{
-  val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_SM)+log2Up(l2cache_micro.num_warp)+1)
+  val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_sm)+log2Up(l2cache_micro.num_warp)+1)
   val l2_axi_params=InclusiveCacheParameters_lite_withAXI(l2cache_params,l2cache_axi_params)
   val io=IO(new Bundle{
     val s=Flipped(new AXI4Lite(32, 32))
@@ -135,19 +135,32 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
   val cta = Module(new CTAinterface)
   val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper).io))
   val l2cache=Module(new Scheduler(l2cache_params))
-  val sm2L2Arb = Module(new SM2L2Arbiter(l2cache_params))
+  val sm2clusterArb = VecInit(Seq.fill(NCluster)(Module(new SM2clusterArbiter(l2cache_params_l)).io))
+  val cluster2l2Arb = Module(new cluster2L2Arbiter(l2cache_params_l,l2cache_params)).io
+ // val sm2L2Arb = Module(new SM2L2Arbiter(l2cache_params))
 
-  for (i<- 0 until NSms) {
-    cta.io.CTA2warp(i)<>sm_wrapper(i).CTAreq
-    cta.io.warp2CTA(i)<>sm_wrapper(i).CTArsp
-    sm_wrapper(i).memRsp <> sm2L2Arb.io.memRspVecOut(i)
-    sm2L2Arb.io.memReqVecIn(i) <> sm_wrapper(i).memReq
+  for (i<- 0 until NCluster) {
+    for(j<- 0 until NSmInCluster) {
+      cta.io.CTA2warp(i * NSmInCluster + j) <> sm_wrapper(i * NSmInCluster + j).CTAreq
+      cta.io.warp2CTA(i * NSmInCluster + j) <> sm_wrapper(i * NSmInCluster + j).CTArsp
+      sm2clusterArb(i).memReqVecIn(j) <> sm_wrapper(i * NSmInCluster + j).memReq
+      sm_wrapper(i * NSmInCluster + j).memRsp <> sm2clusterArb(i).memRspVecOut(j)
+     // sm2clusterArb(i).memReqVecIn(j).bits := sm_wrapper(i * NSmInCluster + j).memReq.bits
+     // sm2clusterArb(i).memReqVecIn(j).valid := sm_wrapper(i * NSmInCluster + j).memReq.valid
+     // sm_wrapper(i * NSmInCluster + j).memReq.ready :=sm2clusterArb(i).memReqVecIn(j).ready
+
+
+    }
+    cluster2l2Arb.memReqVecIn(i) <> sm2clusterArb(i).memReqOut
+    sm2clusterArb(i).memRspIn <> cluster2l2Arb.memRspVecOut(i)
+  //  sm_wrapper(i).memRsp <> sm2L2Arb.io.memRspVecOut(i)
+  //  sm2L2Arb.io.memReqVecIn(i) <> sm_wrapper(i).memReq
   }
 
-  l2cache.io.in_a <> sm2L2Arb.io.memReqOut
+  l2cache.io.in_a <> cluster2l2Arb.memReqOut
   l2cache.io.out_a <> io.out_a
   l2cache.io.out_d <> io.out_d
-  sm2L2Arb.io.memRspIn <> l2cache.io.in_d
+  cluster2l2Arb.memRspIn <> l2cache.io.in_d
   io.host_rsp<>cta.io.CTA2host
   io.host_req<>cta.io.host2CTA
 }
@@ -292,6 +305,86 @@ class SM2L2Arbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Parameter
       io.memRspIn.bits.source(log2Up(NSms)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
   }
   io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSms)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))),
+    Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
+  // ****************
+}
+
+class SM2clusterArbiterIO(L2param: InclusiveCacheParameters_lite)(implicit p: Parameters) extends RVGBundle{
+  val memReqVecIn = (Vec(NSmInCluster, Flipped(DecoupledIO(new L1CacheMemReq()))))
+  val memReqOut = Decoupled(new TLBundleA_lite(L2param))
+  val memRspIn = Flipped(Decoupled(new TLBundleD_lite_plus(L2param)))
+  val memRspVecOut = Vec(NSmInCluster, DecoupledIO(new L1CacheMemRsp()))
+}
+
+class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Parameters) extends RVGModule {
+  val io = IO(new SM2clusterArbiterIO(L2param)(p))
+
+  // **** memReq ****
+  val memReqArb = Module(new Arbiter(new TLBundleA_lite(L2param),NSmInCluster))
+  val memReqBuf = Module(new Queue(new TLBundleA_lite(L2param),2))
+  //memReqArb.io.in <> io.memReqVecIn
+  for(i <- 0 until NSmInCluster) {
+    memReqArb.io.in(i).bits.opcode := io.memReqVecIn(i).bits.a_opcode
+    memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.a_source)
+    memReqArb.io.in(i).bits.address := io.memReqVecIn(i).bits.a_addr
+    memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.a_mask).asUInt
+    memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.a_data.asUInt
+    memReqArb.io.in(i).bits.size := 0.U//log2Up(BlockWords*BytesOfWord).U
+    memReqArb.io.in(i).valid := io.memReqVecIn(i).valid
+    io.memReqVecIn(i).ready:=memReqArb.io.in(i).ready
+  }
+  memReqBuf.io.enq <> memReqArb.io.out
+  io.memReqOut <> memReqBuf.io.deq
+  // ****************
+
+  // **** memRsp ****
+  for(i <- 0 until NSmInCluster) {
+    io.memRspVecOut(i).bits.d_data:=io.memRspIn.bits.data.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
+    io.memRspVecOut(i).bits.d_source:=io.memRspIn.bits.source
+    io.memRspVecOut(i).bits.d_addr:=io.memRspIn.bits.address
+    io.memRspVecOut(i).valid :=
+      io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
+  }
+  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))),
+    Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
+  // ****************
+}
+
+class cluster2L2ArbiterIO(L2paramIn: InclusiveCacheParameters_lite,L2paramOut: InclusiveCacheParameters_lite)(implicit p: Parameters) extends RVGBundle{
+  val memReqVecIn = Flipped(Vec(NCluster, Decoupled(new TLBundleA_lite(L2paramIn))))
+  val memReqOut = Decoupled(new TLBundleA_lite(L2paramOut))
+  val memRspIn = Flipped(Decoupled(new TLBundleD_lite_plus(L2paramOut)))
+  val memRspVecOut = Vec(NCluster, Decoupled(new TLBundleD_lite_plus(L2paramIn)))
+}
+
+class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: InclusiveCacheParameters_lite)(implicit p: Parameters) extends RVGModule {
+  val io = IO(new cluster2L2ArbiterIO(L2paramIn, L2paramOut)(p))
+
+  // **** memReq ****
+  val memReqArb = Module(new Arbiter(new TLBundleA_lite(L2paramOut),NCluster))
+  //memReqArb.io.in <> io.memReqVecIn
+  for(i <- 0 until NCluster) {
+    memReqArb.io.in(i).bits.opcode := io.memReqVecIn(i).bits.opcode
+    memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.source)
+    memReqArb.io.in(i).bits.address := io.memReqVecIn(i).bits.address
+    memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.mask).asUInt
+    memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.data.asUInt
+    memReqArb.io.in(i).bits.size := 0.U//log2Up(BlockWords*BytesOfWord).U
+    memReqArb.io.in(i).valid := io.memReqVecIn(i).valid
+    io.memReqVecIn(i).ready:=memReqArb.io.in(i).ready
+  }
+  io.memReqOut <> memReqArb.io.out
+  // ****************
+
+  // **** memRsp ****
+  for(i <- 0 until NCluster) {
+    io.memRspVecOut(i).bits.data :=io.memRspIn.bits.data//.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
+    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,0)
+    io.memRspVecOut(i).bits.address:= io.memRspIn.bits.address
+    io.memRspVecOut(i).valid :=
+      io.memRspIn.bits.source(log2Up(NCluster)+log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,log2Up(NSmInCluster)+WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
+  }
+  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))),
     Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
   // ****************
 }

@@ -23,6 +23,8 @@ case class RVGParameters
   NSms: Int = num_sm,
   NLanes: Int = num_thread,
   NWarps: Int = num_warp,
+  NSmInCluster: Int = num_sm_in_cluster,
+  NCluster: Int = num_cluster,
   WordLength: Int = xLen,
   BlockWords: Int = dcache_BlockWords,
   NCacheInSM: Int = num_cache_in_sm
@@ -41,6 +43,9 @@ trait HasRVGParameters {
   def BlockWords = RVGParams.BlockWords
 
   def NCacheInSM = RVGParams.NCacheInSM
+
+  def NSmInCluster = RVGParams.NSmInCluster
+  def NCluster = RVGParams.NCluster
 }
 
 abstract class RVGBundle(implicit val p: Parameters) extends Bundle with HasRVGParameters

@@ -112,7 +112,9 @@ case class InclusiveCacheMicroParameters(
   memCycles:  Int, //= 40, // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
   portFactor: Int, //= 4,  // numSubBanks = (widest TL port * portFactor) / writeBytes
   num_warp: Int,
-  num_SM:Int,
+  num_sm: Int,
+  num_sm_in_cluster:Int,
+  num_cluster:Int,
   dirReg:     Boolean = false,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.none, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full)   // or flowAE
@@ -144,7 +146,7 @@ case class InclusiveCacheParameters_lite(
 
   // If we are the first level cache, we do not need to support inner-BCE
   val op_bits = 3
-  val source_bits=log2Up(micro.num_warp)+log2Up(micro.num_SM)+1
+  val source_bits=log2Up(micro.num_warp)+log2Up(micro.num_sm_in_cluster)+log2Up(micro.num_cluster)+1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
