@@ -143,13 +143,14 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
     for(j<- 0 until NSmInCluster) {
       cta.io.CTA2warp(i * NSmInCluster + j) <> sm_wrapper(i * NSmInCluster + j).CTAreq
       cta.io.warp2CTA(i * NSmInCluster + j) <> sm_wrapper(i * NSmInCluster + j).CTArsp
-      sm2clusterArb(i).memReqVecIn(j) <> sm_wrapper(i * NSmInCluster + j).memReq
-      sm_wrapper(i * NSmInCluster + j).memRsp <> sm2clusterArb(i).memRspVecOut(j)
-     // sm2clusterArb(i).memReqVecIn(j).bits := sm_wrapper(i * NSmInCluster + j).memReq.bits
-     // sm2clusterArb(i).memReqVecIn(j).valid := sm_wrapper(i * NSmInCluster + j).memReq.valid
-     // sm_wrapper(i * NSmInCluster + j).memReq.ready :=sm2clusterArb(i).memReqVecIn(j).ready
-
-
+     //sm2clusterArb(i).memReqVecIn(j) <> sm_wrapper(i * NSmInCluster + j).memReq
+      //sm_wrapper(i * NSmInCluster + j).memRsp <> sm2clusterArb(i).memRspVecOut(j)
+      sm2clusterArb(i).memReqVecIn(j).bits := sm_wrapper(i * NSmInCluster + j).memReq.bits
+      sm2clusterArb(i).memReqVecIn(j).valid := sm_wrapper(i * NSmInCluster + j).memReq.valid
+      sm_wrapper(i * NSmInCluster + j).memReq.ready :=sm2clusterArb(i).memReqVecIn(j).ready
+      sm_wrapper(i * NSmInCluster + j).memRsp.bits := sm2clusterArb(i).memRspVecOut(j).bits
+      sm_wrapper(i * NSmInCluster + j).memRsp.valid := sm2clusterArb(i).memRspVecOut(j).valid
+       sm2clusterArb(i).memRspVecOut(j).ready := sm_wrapper(i * NSmInCluster + j).memRsp.ready
     }
     cluster2l2Arb.memReqVecIn(i) <> sm2clusterArb(i).memReqOut
     sm2clusterArb(i).memRspIn <> cluster2l2Arb.memRspVecOut(i)
@@ -378,6 +379,8 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
 
   // **** memRsp ****
   for(i <- 0 until NCluster) {
+    io.memRspVecOut(i).bits.size := io.memRspIn.bits.size
+    io.memRspVecOut(i).bits.opcode := io.memRspIn.bits.opcode
     io.memRspVecOut(i).bits.data :=io.memRspIn.bits.data//.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
     io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,0)
     io.memRspVecOut(i).bits.address:= io.memRspIn.bits.address
