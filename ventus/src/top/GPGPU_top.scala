@@ -326,7 +326,12 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
   //memReqArb.io.in <> io.memReqVecIn
   for(i <- 0 until NSmInCluster) {
     memReqArb.io.in(i).bits.opcode := io.memReqVecIn(i).bits.a_opcode
-    memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.a_source)
+    if (NSmInCluster == 1) {
+      memReqArb.io.in(i).bits.source := io.memReqVecIn(i).bits.a_source
+    }
+    else {
+      memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.a_source)
+    }
     memReqArb.io.in(i).bits.address := io.memReqVecIn(i).bits.a_addr
     memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.a_mask).asUInt
     memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.a_data.asUInt
@@ -343,11 +348,25 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
     io.memRspVecOut(i).bits.d_data:=io.memRspIn.bits.data.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
     io.memRspVecOut(i).bits.d_source:=io.memRspIn.bits.source
     io.memRspVecOut(i).bits.d_addr:=io.memRspIn.bits.address
-    io.memRspVecOut(i).valid :=
-      io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
+    if(NSmInCluster == 1){
+      io.memRspVecOut(i).valid := io.memRspIn.valid
+    } else if(NSmInCluster == 2){
+      io.memRspVecOut(i).valid := io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1)===i.asUInt && io.memRspIn.valid
+    }
+   // io.memRspVecOut(i).valid :=
+    else {
+      io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, WIdBits + log2Ceil(NCacheInSM)) === i.asUInt && io.memRspIn.valid
+    }
   }
-  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))),
-    Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
+  if(NSmInCluster == 1){
+    io.memRspIn.ready := io.memRspVecOut(0).ready
+  } else if(NSmInCluster == 2){
+    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1)),
+      Reverse(Cat(io.memRspVecOut.map(_.ready))))
+  } else {
+    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, WIdBits + log2Up(NCacheInSM))),
+      Reverse(Cat(io.memRspVecOut.map(_.ready)))) //TODO check order in test
+  }
   // ****************
 }
 
@@ -382,12 +401,12 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
     io.memRspVecOut(i).bits.size := io.memRspIn.bits.size
     io.memRspVecOut(i).bits.opcode := io.memRspIn.bits.opcode
     io.memRspVecOut(i).bits.data :=io.memRspIn.bits.data//.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
-    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,0)
+    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,0)
     io.memRspVecOut(i).bits.address:= io.memRspIn.bits.address
     io.memRspVecOut(i).valid :=
-      io.memRspIn.bits.source(log2Up(NCluster)+log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,log2Up(NSmInCluster)+WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
+      io.memRspIn.bits.source(log2Ceil(NCluster)+log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,log2Ceil(NSmInCluster)+WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
   }
-  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Up(NCacheInSM)+WIdBits-1,WIdBits+log2Up(NCacheInSM))),
+  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Ceil(NCluster)+log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,log2Ceil(NSmInCluster)+WIdBits+log2Up(NCacheInSM))),
     Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
   // ****************
 }

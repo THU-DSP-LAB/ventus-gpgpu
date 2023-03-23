@@ -146,7 +146,7 @@ case class InclusiveCacheParameters_lite(
 
   // If we are the first level cache, we do not need to support inner-BCE
   val op_bits = 3
-  val source_bits=log2Up(micro.num_warp)+log2Up(micro.num_sm_in_cluster)+log2Up(micro.num_cluster)+1
+  val source_bits=log2Up(micro.num_warp)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题

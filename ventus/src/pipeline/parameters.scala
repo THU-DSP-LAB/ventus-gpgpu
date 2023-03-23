@@ -14,7 +14,7 @@ import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCachePa
 import chisel3._
 import chisel3.util._
 object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
-  def num_sm=2
+  def num_sm=4
 
   val SINGLE_INST:Boolean=false
   val SPIKE_OUTPUT:Boolean=true
@@ -22,13 +22,13 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def num_bank=4 //number of register bank in operand collector
   def num_collectorUnit=num_warp
   def depth_regBank=log2Ceil(num_warp*32/num_bank)
-  def num_warp=8
+  def num_warp=4
 
-  def num_cluster = 1
+  def num_cluster = 2
 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp=log2Ceil(num_warp)
-  def num_thread=8
+  def num_thread=4
   def depth_thread=log2Ceil(num_thread)
   def xLen = 32 // data length 32-bit
   def num_block=num_warp // not bigger than num_warp
