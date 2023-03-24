@@ -78,16 +78,27 @@ int sc_main(int argc, char *argv[])
   // pointertest.clk(clk);
   // sc_start(50, SC_NS);
 
-  // timing update test
-  sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
-  timing main_timing("timing");
-  main_timing.clk(clk);
-  sc_trace_file *tf = sc_create_vcd_trace_file("hello_wave");
-  tf->set_time_unit(1, SC_NS);
-  sc_trace(tf, clk, "Clk");
+  // // timing update test
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // timing2 main_timing("timing");
+  // main_timing.clk(clk);
+  // sc_trace_file *tf = sc_create_vcd_trace_file("hello_wave");
+  // tf->set_time_unit(1, SC_NS);
+  // sc_trace(tf, clk, "Clk");
+  // sc_start(100, SC_NS);
+  // sc_close_vcd_trace_file(tf);
 
+  // // fifo full test
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // fifotest fifotester("fifotester");
+  // fifotester.clk(clk);
+  // sc_start(100, SC_NS);
+
+  // 测试event_queue的notify的延时
+  sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  eventqueue_test T("fifotester");
+  T.clk(clk);
   sc_start(100, SC_NS);
-  sc_close_vcd_trace_file(tf);
 
   return 0; // Terminate simulation
 }

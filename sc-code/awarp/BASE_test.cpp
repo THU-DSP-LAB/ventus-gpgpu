@@ -99,7 +99,6 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf, BASE_impl.lsufifo_empty, "lsufifo_empty");
     sc_trace(tf, BASE_impl.lsutop_dat, "lsutop_dat");
     sc_trace(tf, BASE_impl.lsufifo_elem_num, "lsufifo_elem_num");
-    sc_trace(tf, BASE_impl.lsufifo_push, "lsufifo_push");
     sc_trace(tf, BASE_impl.write_s, "write_s");
     sc_trace(tf, BASE_impl.write_v, "write_v");
     sc_trace(tf, BASE_impl.write_f, "write_f");

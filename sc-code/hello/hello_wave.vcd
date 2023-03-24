@@ -1,5 +1,5 @@
 $date
-     Mar 14, 2023       20:16:41
+     Mar 19, 2023       20:11:49
 $end
 
 $version
@@ -12,7 +12,6 @@ $end
 
 $scope module SystemC $end
 $var wire    1  aaaaa  Clk       $end
-$var wire   32  aaaab  a [31:0]  $end
 $upscope $end
 $enddefinitions  $end
 
@@ -22,74 +21,63 @@ $end
 
 $dumpvars
 0aaaaa
-b0 aaaab
 $end
 
 #5
 1aaaaa
-b1 aaaab
 
 #10
 0aaaaa
 
 #15
 1aaaaa
-b10 aaaab
 
 #20
 0aaaaa
 
 #25
 1aaaaa
-b11 aaaab
 
 #30
 0aaaaa
 
 #35
 1aaaaa
-b100 aaaab
 
 #40
 0aaaaa
 
 #45
 1aaaaa
-b101 aaaab
 
 #50
 0aaaaa
 
 #55
 1aaaaa
-b110 aaaab
 
 #60
 0aaaaa
 
 #65
 1aaaaa
-b111 aaaab
 
 #70
 0aaaaa
 
 #75
 1aaaaa
-b1000 aaaab
 
 #80
 0aaaaa
 
 #85
 1aaaaa
-b1001 aaaab
 
 #90
 0aaaaa
 
 #95
 1aaaaa
-b1010 aaaab
 
 #100

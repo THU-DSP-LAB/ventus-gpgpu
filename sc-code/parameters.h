@@ -17,6 +17,7 @@ inline constexpr int ireg_bitsize = 9;
 inline constexpr int ireg_size = 1 << ireg_bitsize;
 inline constexpr int INS_LENGTH = 32; // the length of per instruction
 inline constexpr double PERIOD = 10;
+inline constexpr int IFIFO_SIZE = 10;
 inline constexpr int OPCFIFO_SIZE = 4;
 inline constexpr int BANK_NUM = 4;
 
@@ -36,14 +37,15 @@ enum OP_TYPE
 class I_TYPE // type of per instruction
 {
 public:
-    int s1 = -1;                             // load指令为寄存器addr
-    int s2 = -1;                             // load指令为offset
-    int d = -1;                              // beq指令为imm
-    int op;                                  // trace不支持enum，只能定义op为int型
-    sc_int<ireg_bitsize + 1> jump_addr = -1; // 分支指令才有用
-    bool willwb;                             // 是否写回寄存器
+    int s1 = -1;        // load指令为寄存器addr
+    int s2 = -1;        // load指令为offset
+    int d = -1;         // beq指令为imm
+    int op;             // trace不支持enum，只能定义op为int型
+    int jump_addr = -1; // 分支指令才有用
+    bool willwb;        // 是否写回寄存器
     I_TYPE(){};
     I_TYPE(OP_TYPE _op, int _s1, int _s2, int _d) : op(_op), s1(_s1), s2(_s2), d(_d){};
+    I_TYPE(I_TYPE _ins, int _jump_addr) : op(_ins.op), s1(_ins.s1), s2(_ins.s2), d(_ins.d), jump_addr(_jump_addr){};
     bool operator==(const I_TYPE &rhs) const
     {
         return rhs.op == op && rhs.s1 == s1 && rhs.s2 == s2 && rhs.d == d;
@@ -219,83 +221,107 @@ private:
     size_t size_;
 };
 
-// template <typename T, std::size_t capacity>
-// class StaticQueue
-// { // used by OPC
-// private:
-//     std::array<T, capacity> data;
-//     std::size_t size;
-//     std::size_t front_index;
+template <typename T, std::size_t capacity>
+class StaticQueue
+{
+private:
+    std::array<T, capacity> data;
+    std::size_t size;
+    std::size_t front_index;
 
-// public:
-//     StaticQueue() : size(0), front_index(0) {}
-//     void push(const T &value)
-//     {
-//         if (size == capacity)
-//         {
-//             throw std::out_of_range("Queue is full");
-//         }
-//         data[(front_index + size) % capacity] = value;
-//         ++size;
-//     }
-//     void pop()
-//     {
-//         if (size == 0)
-//         {
-//             throw std::out_of_range("Queue is empty");
-//         }
-//         front_index = (front_index + 1) % capacity;
-//         --size;
-//     }
-//     // T &front()
-//     // {
-//     //     if (size == 0)
-//     //     {
-//     //         throw std::out_of_range("Queue is empty");
-//     //     }
-//     //     return data[front_index];
-//     // }
-//     const T &front() const
-//     {
-//         if (size == 0)
-//         {
-//             throw std::out_of_range("Queue is empty");
-//         }
-//         return data[front_index];
-//     }
-//     T &operator[](std::size_t index)
-//     { // front对应索引0
-//         return data[(front_index + index) % capacity];
-//     }
-//     T &at(size_t index) // 与[]不同，at()包含边界检查
-//     {
-//         if (index >= size)
-//         {
-//             throw std::out_of_range("Index out of range");
-//         }
-//         return data[(front_index + index) % capacity];
-//     }
-//     // const T &at(size_t index) const
-//     // {
-//     //     if (index >= size)
-//     //     {
-//     //         throw std::out_of_range("Index out of range");
-//     //     }
-//     //     return data[(front_index + index) % capacity];
-//     // }
-//     bool empty() const
-//     {
-//         return size == 0;
-//     }
-//     size_t get_size() const
-//     {
-//         return size;
-//     }
-//     size_t get_capacity() const
-//     {
-//         return capacity;
-//     }
-// };
+public:
+    StaticQueue() : size(0), front_index(0) {}
+    void push(const T &value)
+    {
+        if (size == capacity)
+        {
+            throw std::out_of_range("Queue is full");
+        }
+        data[(front_index + size) % capacity] = value;
+        ++size;
+    }
+    void pop()
+    {
+        if (size == 0)
+        {
+            throw std::out_of_range("Queue is empty");
+        }
+        front_index = (front_index + 1) % capacity;
+        --size;
+    }
+    void clear()
+    {
+        while (!isempty())
+            pop();
+    }
+    T get()
+    { // return front and pop
+        if (size == 0)
+        {
+            throw std::out_of_range("Queue is empty");
+        }
+        T re = data[front_index];
+        front_index = (front_index + 1) % capacity;
+        --size;
+        return re;
+    }
+    T &front()
+    {
+        if (size == 0)
+        {
+            throw std::out_of_range("Queue is empty");
+        }
+        return data[front_index];
+    }
+    const T &front() const
+    {
+        if (size == 0)
+        {
+            throw std::out_of_range("Queue is empty");
+        }
+        return data[front_index];
+    }
+    T &operator[](std::size_t index)
+    { // front对应索引0
+        return data[(front_index + index) % capacity];
+    }
+    const T &operator[](std::size_t index) const
+    {
+        return data[(front_index + index) % capacity];
+    }
+    T &at(size_t index) // 与[]不同，at()包含边界检查
+    {
+        if (index >= size)
+        {
+            throw std::out_of_range("Index out of range");
+        }
+        return data[(front_index + index) % capacity];
+    }
+    const T &at(size_t index) const
+    {
+        if (index >= size)
+        {
+            throw std::out_of_range("Index out of range");
+        }
+        return data[(front_index + index) % capacity];
+    }
+    bool isempty() const
+    {
+        return size == 0;
+    }
+    bool isfull() const
+    {
+        return size == capacity;
+    }
+    size_t used() const
+    {
+        return size;
+    }
+    size_t get_capacity() const
+    {
+        return capacity;
+    }
+};
 
 struct salu_in_t
 {
