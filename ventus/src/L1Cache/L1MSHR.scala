@@ -102,10 +102,10 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   assert(PopCount(entryMatchProbe) <= 1.U)
   val secondaryMiss = entryMatchProbe.orR
   val primaryMiss = !secondaryMiss
-  val mainEntryFull = entry_valid.orR
+  val mainEntryFull = entry_valid.andR
   val entryIdxProbe = OHToUInt(entryMatchProbe)
   val subValidProbe = subentry_valid(entryIdxProbe)
-  val subEntryFull = subValidProbe.reduceTree(_|_)
+  val subEntryFull = subValidProbe.reduceTree(_&_)
   when(io.probe.valid){
     when(primaryMiss){
       when(mainEntryFull){
@@ -121,6 +121,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       }
     }
   }
+  val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
 
   //  ******     decide selected subentries are full or not     ******
   val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
@@ -132,7 +133,6 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   subentry_next2cancel := subentrySelected.indexWhere(_===true.B)
 
   //  ******     decide MSHR is full or not     ******
-
   val entryStatus = Module(new getEntryStatus(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
 
@@ -143,19 +143,20 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_===muxedRspInBlockAddr))) & entry_valid
   assert(PopCount(entryMatchMissRsp) <= 1.U)
 
-  //  ******     update MSHR when missReq     ******
-  io.missReq.ready := !(((entryStatus.io.full || missRspBusy || io.missRspIn.valid) && primaryMiss) ||
-    (subentryStatus.io.full && secondaryMiss))
-  //missRsp + secondary miss holding at st1 should be accept
-  //Priority: secondary missReq > missRspIn > primary missReq?
-  //20220214 move missRspIn.valid into primary_miss
-  val missReq_fire = io.missReq.fire()
-  val real_SRAMAddrUp = Mux(secondaryMiss,OHToUInt(entryMatchProbe),entryStatus.io.next)
-  val real_SRAMAddrDown = Mux(secondaryMiss,subentryStatus.io.next,0.U)
-  when (missReq_fire){
+  //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
+  /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
+  io.missReq.ready := !(mshrStatus_st1 === 1.U || mshrStatus_st1 === 3.U)// || io.missRspIn.valid)
+  assert(!io.missReq.valid || (io.missReq.valid && !io.missRspIn.valid),"MSHR的Req和Rsp不同时valid，后者优先")
+  val real_SRAMAddrUp = Mux(mshrStatus_st1===2.U,OHToUInt(entryMatchProbe_st1),entryStatus.io.next)
+  val real_SRAMAddrDown = Mux(mshrStatus_st1===2.U,subentryStatus.io.next,0.U)
+  when (io.missReq.fire){
     targetInfo_Accesss(real_SRAMAddrUp)(real_SRAMAddrDown) := io.missReq.bits.targetInfo
   }
 
+  when(io.missReq.fire && mshrStatus_st1 === 0.U) {//PRIMARY_AVAIL
+    blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
+    instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
+  }
 
   //  ******      when missRsp    ******
   // priority: missRspIn > missReq
@@ -177,27 +178,21 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   io.missRspOut.valid := io.missRspIn.valid || missRspBusy
 
   //  ******     maintain subentries    ******
+  /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
   for (iofEn <- 0 until NMshrEntry){
     for (iofSubEn <- 0 until NMshrSubEntry){
       when(iofEn.asUInt===entryStatus.io.next &&
-        iofSubEn.asUInt===0.U && missReq_fire && primaryMiss){
+        iofSubEn.asUInt===0.U && io.missReq.fire && mshrStatus_st1 === 0.U){
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===OHToUInt(entryMatchMissRsp)){
         when(iofSubEn.asUInt===subentry_next2cancel &&
           io.missRspOut.fire()){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
-          missReq_fire && secondaryMiss){
+          io.missReq.fire && mshrStatus_st1 === 2.U){
           subentry_valid(iofEn)(iofSubEn) := true.B
         }
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
     }
-  }
-  //original style can't modify 2 valid simultaneously
-  when(missReq_fire && secondaryMiss){
-    instrId_Access(OHToUInt(entryMatchProbe))(subentryStatus.io.next) := io.missReq.bits.instrId
-  }.elsewhen(missReq_fire && primaryMiss){
-    blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
-    instrId_Access(entryStatus.io.next)(0.U) := io.missReq.bits.instrId
   }
 }
