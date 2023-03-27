@@ -26,7 +26,7 @@ class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends B
   val targetInfo = UInt(tIWdith.W)
 }
 class MSHRmissRspIn(val bABits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
-  val blockAddr = UInt(bABits.W)
+  val instrId = UInt(bABits.W)
 }
 class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {
   val targetInfo = UInt(tIWdith.W)
@@ -95,19 +95,9 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val subentryStatus = Module(new getEntryStatus(NMshrSubEntry)) // Output: alm_full, full, next
   subentryStatus.io.valid_list := Reverse(Cat(subentrySelected))
 
-  val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
-  subentry_next2cancel := subentrySelected.indexWhere(_ === true.B)
-
   //  ******     decide MSHR is full or not     ******
   val entryStatus = Module(new getEntryStatus(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
-
-  val missRspBusy = RegInit(false.B) //missRspIn_fire || (!io.missRsp.blockAddr.ready)
-
-  val firedRspInBlockAddr = RegEnable(io.missRspIn.bits.blockAddr, io.missRspIn.fire())
-  val muxedRspInBlockAddr = Mux(missRspBusy, firedRspInBlockAddr, io.missRspIn.bits.blockAddr) //存在多subentry时使用寄存的值
-  entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_ === muxedRspInBlockAddr))) & entry_valid
-  assert(PopCount(entryMatchMissRsp) <= 1.U)
 
   // ******     enum vec_mshr_status     ******
   val mshrStatus_st1 = RegInit(0.U(2.W))
@@ -144,7 +134,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
   io.missReq.ready := !(mshrStatus_st1 === 1.U || mshrStatus_st1 === 3.U)// || io.missRspIn.valid)
-  assert(!io.missReq.valid || (io.missReq.valid && !io.missRspIn.valid),"MSHR的Req和Rsp不同时valid，后者优先")
+  assert(!io.missReq.valid || (io.missReq.valid && !io.missRspIn.valid),"MSHR的Req和Rsp禁止同时valid，后者优先")
   val real_SRAMAddrUp = Mux(mshrStatus_st1===2.U,OHToUInt(entryMatchProbe_st1),entryStatus.io.next)
   val real_SRAMAddrDown = Mux(mshrStatus_st1===2.U,subentryStatus.io.next,0.U)
   when (io.missReq.fire){
@@ -156,24 +146,21 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
   }
 
-  //  ******      when missRsp    ******
+  //  ******      mshr::vec_arrange_core_rsp    ******
   // priority: missRspIn > missReq
-  //io.missRspOut.bits.busy := missRsp_busy
-  //io.missRspOut.bits.burst := subentryStatus.io.used >= 2.U
-  //io.missRspOut.bits.last := (missRsp_busy || missRspIn_fire) && subentryStatus.io.used === 1.U && io.missRspOut.ready
-  assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
-  when(io.missRspIn.fire && (subentryStatus.io.used =/= 1.U || !io.missRspOut.ready)){
-    missRspBusy := true.B
-  }.elsewhen(missRspBusy && subentryStatus.io.used === 1.U && io.missRspOut.ready){
-    missRspBusy := false.B
-  }
-  io.missRspIn.ready := !missRspBusy && io.missRspOut.ready// | (subentryStatus.io.used === 1.U && io.missRspOut.fire())
-  // cond after OR is a comb bypass for last cycle
+  //assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
+  //This version allow missRspIn fire when no subentry are left
+  io.missRspIn.ready := !(subentryStatus.io.used >= 2.U || (subentryStatus.io.used === 1.U && !io.missRspOut.ready))
+
+  entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
+  assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn时，禁止多个entry比对instrId成功")
+  val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
+  subentry_next2cancel := subentrySelected.indexWhere(_ === true.B)
+
   io.missRspOut.bits.targetInfo := targetInfo_Accesss(OHToUInt(entryMatchMissRsp))(subentry_next2cancel)
   io.missRspOut.bits.blockAddr := blockAddr_Access(OHToUInt(entryMatchMissRsp))
-  val rInstrId = Wire(UInt(WIdBits.W))
-  io.missRspOut.bits.instrId := rInstrId
-  io.missRspOut.valid := io.missRspIn.valid || missRspBusy
+  io.missRspOut.bits.instrId := instrId_Access(OHToUInt(entryMatchMissRsp))
+  io.missRspOut.valid := io.missRspIn.valid && subentryStatus.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
   //  ******     maintain subentries    ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
@@ -184,7 +171,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===OHToUInt(entryMatchMissRsp)){
         when(iofSubEn.asUInt===subentry_next2cancel &&
-          io.missRspOut.fire()){
+          io.missRspOut.fire){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
           io.missReq.fire && mshrStatus_st1 === 2.U){
@@ -193,6 +180,4 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
     }
   }
-
-  rInstrId := instrId_Access(OHToUInt(entryMatchMissRsp))
 }
