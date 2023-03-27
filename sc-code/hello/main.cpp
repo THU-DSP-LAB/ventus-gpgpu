@@ -94,9 +94,15 @@ int sc_main(int argc, char *argv[])
   // fifotester.clk(clk);
   // sc_start(100, SC_NS);
 
-  // 测试event_queue的notify的延时
+  // // 测试event_queue的notify的延时
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // eventqueue_test T("fifotester");
+  // T.clk(clk);
+  // sc_start(100, SC_NS);
+
+  // 测试event_queue和nothing在执行单元中的使用
   sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
-  eventqueue_test T("fifotester");
+  eq_nothing_test T("nothingtester");
   T.clk(clk);
   sc_start(100, SC_NS);
 

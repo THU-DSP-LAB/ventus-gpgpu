@@ -37,7 +37,7 @@ void BASE::debug_display3()
     }
 }
 
-void BASE::PROGRAM_COUNTER(int warp_id)
+void BASE::PROGRAM_COUNTER()
 {
     while (true)
     {
@@ -69,7 +69,7 @@ void BASE::PROGRAM_COUNTER(int warp_id)
     }
 }
 
-void BASE::INSTRUCTION_REG(int warp_id)
+void BASE::INSTRUCTION_REG()
 {
     // initialize
     // ireg[0] = I_TYPE(add_, 0, 1, 2);
@@ -92,7 +92,7 @@ void BASE::INSTRUCTION_REG(int warp_id)
     }
 }
 
-void BASE::DECODE(int warp_id)
+void BASE::DECODE()
 {
     while (true)
     {
@@ -110,7 +110,7 @@ void BASE::DECODE(int warp_id)
     }
 }
 
-void BASE::IBUF_ACTION(int warp_id)
+void BASE::IBUF_ACTION()
 {
     I_TYPE dispatch_ins_;
     I_TYPE _readdata3;
@@ -159,7 +159,7 @@ void BASE::IBUF_ACTION(int warp_id)
     }
 }
 
-void BASE::IBUF_PARAM(int warp_id)
+void BASE::IBUF_PARAM()
 {
     while (true)
     {
@@ -180,7 +180,7 @@ void BASE::IBUF_PARAM(int warp_id)
     }
 }
 
-void BASE::UPDATE_SCORE(int warp_id)
+void BASE::UPDATE_SCORE()
 {
     I_TYPE tmpins;
     std::set<SCORE_TYPE>::iterator it;
@@ -263,7 +263,7 @@ void BASE::UPDATE_SCORE(int warp_id)
     }
 }
 
-void BASE::JUDGE_DISPATCH(int warp_id)
+void BASE::JUDGE_DISPATCH()
 {
     I_TYPE _readibuf;
     while (true)

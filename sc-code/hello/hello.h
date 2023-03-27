@@ -443,4 +443,57 @@ SC_MODULE(eventqueue_test)
   }
 };
 
+SC_MODULE(eq_nothing_test)
+{
+  sc_in_clk clk;
+  sc_event_queue eq;
+  sc_event nothing, nothing2;
+  void gen()
+  {
+    while (true)
+    {
+      /* code */
+      wait();
+      int a = 10;
+      eq.notify(a, SC_NS);
+      cout << "gen notifying nothing at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << endl;
+      nothing.notify();
+    }
+  }
+  void gen2()
+  {
+    while (true)
+    {
+      /* code */
+      wait(nothing);
+      int a = 10;
+      eq.notify(a, SC_NS);
+      cout << "gen2 notifying nothing2 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << endl;
+      nothing2.notify();
+    }
+  }
+  void OUT()
+  {
+    while (true)
+    {
+      wait(eq.default_event() | nothing2);
+      if (eq.default_event().triggered())
+      {
+        wait(SC_ZERO_TIME);
+        cout << "triggered by eq at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << endl;
+      }
+      else if (nothing2.triggered())
+        cout << "triggered by nothing2 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << endl;
+    }
+  }
+  SC_CTOR(eq_nothing_test)
+  {
+    SC_THREAD(gen);
+    sensitive << clk.pos();
+    SC_THREAD(gen2);
+    sensitive << clk.pos();
+    SC_THREAD(OUT);
+  }
+};
+
 #endif

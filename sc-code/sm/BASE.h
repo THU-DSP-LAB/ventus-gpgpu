@@ -1,6 +1,7 @@
 #ifndef BASE_H_
 #define BASE_H_
 
+#define SC_INCLUDE_DYNAMIC_PROCESSES`
 #include "../parameters.h"
 #include "tlm.h"
 #include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
@@ -13,19 +14,22 @@ public:
 
     void debug_sti();
     void debug_display();
+    void debug_display1();
+    void debug_display2();
+    void debug_display3();
 
     // fetch
-    void INIT_INS();
-    void PROGRAM_COUNTER();
+    void INIT_INS(int warp_id);
+    void PROGRAM_COUNTER(int warp_id);
     // void FETCH_2();
-    void INSTRUCTION_REG();
-    void DECODE();
+    void INSTRUCTION_REG(int warp_id);
+    void DECODE(int warp_id);
     // ibuffer
-    void IBUF_ACTION();
-    void IBUF_PARAM();
+    void IBUF_ACTION(int warp_id);
+    void IBUF_PARAM(int warp_id);
     // scoreboard
-    void JUDGE_DISPATCH();
-    void UPDATE_SCORE();
+    void JUDGE_DISPATCH(int warp_id);
+    void UPDATE_SCORE(int warp_id);
     // issue
     void ISSUE_ACTION();
     // opc
@@ -48,12 +52,15 @@ public:
     void SALU_OUT();
     void SALU_CTRL();
     void VALU_IN();
+    void VALU_CALC();
     void VALU_OUT();
     void VALU_CTRL();
     void VFPU_IN();
+    void VFPU_CALC();
     void VFPU_OUT();
     void VFPU_CTRL();
     void LSU_IN();
+    void LSU_CALC();
     void LSU_OUT();
     void LSU_CTRL();
     // writeback
@@ -73,25 +80,40 @@ public:
         SC_HAS_PROCESS(BASE);
 
         SC_THREAD(debug_sti);
-        SC_METHOD(debug_display);
+        // SC_THREAD(debug_display);
+        // SC_THREAD(debug_display1);
+        // SC_THREAD(debug_display2);
+        // SC_THREAD(debug_display3);
         SC_METHOD(memory_init);
 
         // fetch
-        SC_THREAD(INIT_INS);
-        SC_THREAD(PROGRAM_COUNTER);
-        sensitive << clk.pos() << rst_n.neg();
-        SC_THREAD(INSTRUCTION_REG);
-        SC_THREAD(DECODE);
-        sensitive << clk.pos();
-        // ibuffer
-        SC_THREAD(IBUF_ACTION);
-        sensitive << clk.pos() << rst_n.neg();
-        SC_THREAD(IBUF_PARAM);
-        // scoreboard
-        SC_THREAD(JUDGE_DISPATCH);
-        sensitive << clk.pos();
-        SC_THREAD(UPDATE_SCORE);
-        sensitive << clk.pos();
+        for (int i = 0; i < num_warp; i++)
+        {
+            sc_spawn(sc_bind(&BASE::INIT_INS, this, i));
+            sc_spawn(sc_bind(&BASE::PROGRAM_COUNTER, this, i));
+            sc_spawn(sc_bind(&BASE::INSTRUCTION_REG, this, i));
+            sc_spawn(sc_bind(&BASE::DECODE, this, i));
+            sc_spawn(sc_bind(&BASE::IBUF_ACTION, this, i));
+            sc_spawn(sc_bind(&BASE::IBUF_PARAM, this, i));
+            sc_spawn(sc_bind(&BASE::JUDGE_DISPATCH, this, i));
+            sc_spawn(sc_bind(&BASE::UPDATE_SCORE, this, i));
+
+        }
+        // SC_THREAD(INIT_INS);
+        // SC_THREAD(PROGRAM_COUNTER);
+        // sensitive << clk.pos() << rst_n.neg();
+        // SC_THREAD(INSTRUCTION_REG);
+        // SC_THREAD(DECODE);
+        // sensitive << clk.pos();
+        // // ibuffer
+        // SC_THREAD(IBUF_ACTION);
+        // sensitive << clk.pos() << rst_n.neg();
+        // SC_THREAD(IBUF_PARAM);
+        // // scoreboard
+        // SC_THREAD(JUDGE_DISPATCH);
+        // sensitive << clk.pos();
+        // SC_THREAD(UPDATE_SCORE);
+        // sensitive << clk.pos();
         // issue
         SC_THREAD(ISSUE_ACTION);
         sensitive << clk.pos();
@@ -115,17 +137,26 @@ public:
         SC_THREAD(SALU_OUT);
         sensitive << clk.pos();
         SC_THREAD(SALU_CTRL);
+
         SC_THREAD(VALU_IN);
         sensitive << clk.pos();
+        SC_THREAD(VALU_CALC);
         SC_THREAD(VALU_OUT);
+        sensitive << clk.pos();
         SC_THREAD(VALU_CTRL);
+
         SC_THREAD(VFPU_IN);
         sensitive << clk.pos();
+        SC_THREAD(VFPU_CALC);
         SC_THREAD(VFPU_OUT);
+        sensitive << clk.pos();
         SC_THREAD(VFPU_CTRL);
+
         SC_THREAD(LSU_IN);
         sensitive << clk.pos();
+        SC_THREAD(LSU_CALC);
         SC_THREAD(LSU_OUT);
+        sensitive << clk.pos();
         SC_THREAD(LSU_CTRL);
         // writeback
         SC_THREAD(WRITE_BACK);
@@ -228,10 +259,10 @@ public:
     std::queue<lsu_in_t> lsu_dq;
     StaticQueue<lsu_out_t, 3> lsufifo;
     lsu_out_t lsutop_dat;
-    bool lsufifo_empty, lsufifo_push;
+    bool lsufifo_empty;
     int lsufifo_elem_num;
     // writeback
-    bool write_s, write_v, write_f;
+    sc_signal<bool> write_s, write_v, write_f;
     sc_signal<bool> execpop_salu, execpop_valu, execpop_vfpu, execpop_lsu;
 
     // 外部存储，暂时在BASE中实现
