@@ -90,10 +90,11 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
 
   //  ******     decide selected subentries are full or not     ******
   val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
-  val subentrySelected = subentry_valid(OHToUInt(entryMatchMissRsp))
-
+  val entryMatchProbe = Wire(UInt(NMshrEntry.W))
+  val subentrySelected = subentry_valid(Mux(io.missRspIn.valid,OHToUInt(entryMatchMissRsp),OHToUInt(entryMatchProbe)))
   val subentryStatus = Module(new getEntryStatus(NMshrSubEntry)) // Output: alm_full, full, next
   subentryStatus.io.valid_list := Reverse(Cat(subentrySelected))
+
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
   subentry_next2cancel := subentrySelected.indexWhere(_ === true.B)
 
@@ -117,15 +118,12 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   * see as always valid, validity relies on external procedures
   * */
   // ******      mshr::probe_vec    ******
-  val entryMatchProbe = Wire(UInt(NMshrEntry.W))
   entryMatchProbe := Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid
   assert(PopCount(entryMatchProbe) <= 1.U)
   val secondaryMiss = entryMatchProbe.orR
   val primaryMiss = !secondaryMiss
-  val mainEntryFull = entry_valid.andR
-  val entryIdxProbe = OHToUInt(entryMatchProbe)
-  val subValidProbe = subentry_valid(entryIdxProbe)
-  val subEntryFull = subValidProbe.reduceTree(_&_)
+  val mainEntryFull = entryStatus.io.full
+  val subEntryFull = subentryStatus.io.full
   when(io.probe.valid){
     when(primaryMiss){
       when(mainEntryFull){
