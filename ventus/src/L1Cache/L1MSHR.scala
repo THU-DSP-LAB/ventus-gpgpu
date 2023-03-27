@@ -47,7 +47,7 @@ class getEntryStatus(nEntry: Int) extends Module{
 
   io.used := PopCount(io.valid_list)
   //io.alm_full := io.used === (nEntry.U-1.U)
-  io.full := io.used === nEntry.U
+  io.full := io.valid_list.andR
   io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
 }
 
@@ -88,6 +88,26 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   * this iI will be recorded as iI for this missing cache line fetch request to L2
   * */
 
+  //  ******     decide selected subentries are full or not     ******
+  val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
+  val subentrySelected = subentry_valid(OHToUInt(entryMatchMissRsp))
+
+  val subentryStatus = Module(new getEntryStatus(NMshrSubEntry)) // Output: alm_full, full, next
+  subentryStatus.io.valid_list := Reverse(Cat(subentrySelected))
+  val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
+  subentry_next2cancel := subentrySelected.indexWhere(_ === true.B)
+
+  //  ******     decide MSHR is full or not     ******
+  val entryStatus = Module(new getEntryStatus(NMshrEntry))
+  entryStatus.io.valid_list := entry_valid
+
+  val missRspBusy = RegInit(false.B) //missRspIn_fire || (!io.missRsp.blockAddr.ready)
+
+  val firedRspInBlockAddr = RegEnable(io.missRspIn.bits.blockAddr, io.missRspIn.fire())
+  val muxedRspInBlockAddr = Mux(missRspBusy, firedRspInBlockAddr, io.missRspIn.bits.blockAddr) //存在多subentry时使用寄存的值
+  entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_ === muxedRspInBlockAddr))) & entry_valid
+  assert(PopCount(entryMatchMissRsp) <= 1.U)
+
   // ******     enum vec_mshr_status     ******
   val mshrStatus_st1 = RegInit(0.U(2.W))
   /*PRIMARY_AVAIL   00
@@ -122,26 +142,6 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     }
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
-
-  //  ******     decide selected subentries are full or not     ******
-  val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
-  val subentrySelected = subentry_valid(OHToUInt(entryMatchMissRsp))
-
-  val subentryStatus = Module(new getEntryStatus(NMshrSubEntry))// Output: alm_full, full, next
-  subentryStatus.io.valid_list := Reverse(Cat(subentrySelected))
-  val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
-  subentry_next2cancel := subentrySelected.indexWhere(_===true.B)
-
-  //  ******     decide MSHR is full or not     ******
-  val entryStatus = Module(new getEntryStatus(NMshrEntry))
-  entryStatus.io.valid_list := entry_valid
-
-  val missRspBusy = RegInit(false.B)//missRspIn_fire || (!io.missRsp.blockAddr.ready)
-
-  val firedRspInBlockAddr = RegEnable(io.missRspIn.bits.blockAddr,io.missRspIn.fire())
-  val muxedRspInBlockAddr = Mux(missRspBusy,firedRspInBlockAddr,io.missRspIn.bits.blockAddr)//存在多subentry时使用寄存的值
-  entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_===muxedRspInBlockAddr))) & entry_valid
-  assert(PopCount(entryMatchMissRsp) <= 1.U)
 
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
@@ -195,4 +195,6 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
     }
   }
+
+  rInstrId := instrId_Access(OHToUInt(entryMatchMissRsp))
 }
