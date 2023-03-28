@@ -53,6 +53,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   //val coreReqHolding = RegInit(false.B)
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire())
+  val coreReq_st1_ready = Wire(Bool())
   val coreReq_st2 = RegNext(coreReq_st1)
   val coreReqInstrId_st3 = RegNext(coreReq_st2.instrId)
   val writeMiss_st3 = Reg(Bool())
@@ -77,20 +78,18 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   arbReqMux_CoreOrMshr := Mux(missRspFromMshr_st1, arbReqMshr, arbReqCore)
   BankConfArb.io.coreReqArb := arbReqMux_CoreOrMshr
 
-  // ******      tag read      ******
+  // ******      tag probe      ******
   val missRspWriteEnable = Wire(Bool())
-
-  TagAccess.io.probeRead.valid := io.coreReq.fire()// || (coreReqHolding && coreReq_ok_to_in)
+  TagAccess.io.probeRead.valid := io.coreReq.fire
   TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
-  TagAccess.io.tagFromCore_st1 := coreReq_st1.tag//Mux(coreReqHolding, coreReqTag_st2, coreReqCtrlAddr_st1.tag)
-  TagAccess.io.coreReqReady := io.coreReq.ready
+  TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
+
   // ******      tag write      ******
   TagAccess.io.allocateWrite.valid := missRspWriteEnable//multiple for secondary miss
   TagAccess.io.allocateWrite.bits(
     data=get_tag(memRsp_Q_st1.d_addr),
     setIdx=get_setIdx(memRsp_Q_st1.d_addr),
     waymask = 1.U)
-  //???woc, why := dont work, but .apply does
 
   // ******     pipeline regs      ******
   cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire())
@@ -105,17 +104,17 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR))  //mem Order
   val writeTouchBank_st1 =    Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.orR))   //mem Order
   val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1               //mem Order
-  val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
+  //val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
 
   val readHit_st1 = cacheHit_st1 & !coreReq_st1.isWrite
   val readMiss_st1 = cacheMiss_st1 & !coreReq_st1.isWrite
   val writeHit_st1 = cacheHit_st1 & coreReq_st1.isWrite
   val writeMiss_st1 = cacheMiss_st1 & coreReq_st1.isWrite
-  val writeHitSubWord_st1 = writeHit_st1 & byteEn_st1
-  val writeMissSubWord_st1 = writeMiss_st1 & byteEn_st1
+  //val writeHitSubWord_st1 = writeHit_st1 & byteEn_st1
+  //val writeMissSubWord_st1 = writeMiss_st1 & byteEn_st1
 
   val writeMiss_st2 = RegNext(writeMiss_st1)
-  val writeMissSubWord_st2 = RegNext(writeMissSubWord_st1)
+  //val writeMissSubWord_st2 = RegNext(writeMissSubWord_st1)
   writeMiss_st3 := writeMiss_st2
 
   val cacheHit_st2 = RegInit(false.B)
@@ -146,15 +145,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memRspData_st2 := RegEnable(memRspData_st1,memRsp_Q.io.deq.fire() || (memRsp_Q.io.deq.valid && BankConfArb.io.bankConflict))
 
   // ******     mshrAccess      ******
-  MshrAccess.io.missReq.valid := cacheMiss_st1 &
-    (!coreReq_st1.isWrite | (coreReq_st1.isWrite & byteEn_st1))
+  MshrAccess.io.missReq.valid := readMiss_st1
 
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   mshrMissReqTI.isWrite := coreReq_st1.isWrite
   mshrMissReqTI.perLaneAddr := coreReq_st1.perLaneAddr
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
   MshrAccess.io.missReq.bits.blockAddr := Cat(coreReq_st1.tag,coreReq_st1.setIdx)
-  MshrAccess.io.missReq.bits.targetInfo := mshrMissReqTI.asUInt()
+  MshrAccess.io.missReq.bits.targetInfo := mshrMissReqTI.asUInt
 
   MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   MshrAccess.io.missRspIn.bits.blockAddr := get_blockAddr(memRsp_Q.io.deq.bits.d_addr)
@@ -286,7 +284,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******      core req ready
   //coreReq_ok_to_in := MshrAccess.io.missReq.ready && !missRspFromMshr_st2 && !io.memRsp.valid && coreRsp_Q.io.enq.ready && !Arbiter.io.bankConflict
-  io.coreReq.ready := !(BankConfArb.io.bankConflict && (cacheHit_st1 || cacheHit_st2)) &
+  io.coreReq.ready := coreReq_st1_ready
+  coreReq_st1_ready := !(BankConfArb.io.bankConflict && (cacheHit_st1 || cacheHit_st2)) &
     !missRspFromMshr_st1 & !(io.memRsp.valid && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)) &
     !(cacheHit_st1 & coreRsp_QAlmstFull) &
     !(coreReq_st1.isWrite & WriteDataBuf.io.wdbAlmostFull) &
