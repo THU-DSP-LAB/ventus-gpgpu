@@ -66,7 +66,7 @@ class L1CacheMemReq extends Bundle{
 }
 
 class DCacheMemReq extends L1CacheMemReq{
-  override val a_source = UInt((log2Up(num_cache_in_sm)+depth_warp).W)
+  override val a_source = UInt((5+depth_warp).W)
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{

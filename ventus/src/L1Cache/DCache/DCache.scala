@@ -17,7 +17,7 @@ import chisel3.util._
 import config.config.Parameters
 import pipeline.parameters._
 
-class DCacheMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
+class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
   //val instrId = UInt(WIdBits.W)
   val isWrite = Bool()
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
@@ -33,12 +33,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     important submodules     ******
   val BankConfArb = Module(new BankConflictArbiter)
   //val bankConflict_reg = Reg(Bool())
-  val MshrAccess = Module(new MSHR(new DCacheMshrTargetInfo)(p))
+  val MshrAccess = Module(new MSHR(new VecMshrTargetInfo)(p))
   val missRspFromMshr_st1 = Wire(Bool())
-  val missRspTI_st1 = Wire(new DCacheMshrTargetInfo)
+  val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
   val DataCorssBar = Module(new DataCrossbar)
-  val WriteDataBuf = Module(new WDB)
 
   // ******     queues     ******
   val coreRsp_Q_entries :Int = NLanes
@@ -48,6 +47,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val memRsp_Q = Module(new Queue(new DCacheMemRsp,entries = 2,flow=false,pipe=false))
   //flow will make predecessor read hit conflict with successor memRsp
   val memRsp_Q_st1 = memRsp_Q.io.deq.bits
+
+  val memReq_Q = Module(new Queue(new DCacheMemReq,entries = 8,flow=false,pipe=false))
+  val MemReqArb = Module(new Arbiter(new DCacheMemReq, 2))
 
   //val coreReqHolding = RegInit(false.B)
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire())
@@ -106,8 +108,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
 
   val readHit_st1 = cacheHit_st1 & !coreReq_st1.isWrite
+  val readMiss_st1 = cacheMiss_st1 & !coreReq_st1.isWrite
   val writeHit_st1 = cacheHit_st1 & coreReq_st1.isWrite
-  val writeMiss_st1 = cacheMiss_st1 & coreReq_st1.isWrite//TODO extend with bankConflict?
+  val writeMiss_st1 = cacheMiss_st1 & coreReq_st1.isWrite
   val writeHitSubWord_st1 = writeHit_st1 & byteEn_st1
   val writeMissSubWord_st1 = writeMiss_st1 & byteEn_st1
 
@@ -146,7 +149,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missReq.valid := cacheMiss_st1 &
     (!coreReq_st1.isWrite | (coreReq_st1.isWrite & byteEn_st1))
 
-  val mshrMissReqTI = Wire(new DCacheMshrTargetInfo)
+  val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   mshrMissReqTI.isWrite := coreReq_st1.isWrite
   mshrMissReqTI.perLaneAddr := coreReq_st1.perLaneAddr
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
@@ -157,18 +160,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missRspIn.bits.blockAddr := get_blockAddr(memRsp_Q.io.deq.bits.d_addr)
 
   missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
-  missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new DCacheMshrTargetInfo)
+  missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
   val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
   val missRspTILaneMask_st2 = RegNext(BankConfArb.io.activeLane)
   val memRspInstrId_st2 = RegNext(MshrAccess.io.missRspOut.bits.instrId)
   //val readMissRsp_st2 = missRspFromMshr_st2 & !missRspTI.isWrite
   val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())//TODO use Counter
-  MshrAccess.io.missRspOut.ready :=
-  //READ miss Rsp
-    (!missRspTI_st1.isWrite & !BankConfArb.io.bankConflict & !coreRsp_QAlmstFull
-      && (if(BankOffsetBits!=0) !missRspWriteEnable else true.B)) ||
-  //WRITE miss subword Rsp
-    (missRspTI_st1.isWrite & !WriteDataBuf.io.wdbAlmostFull)
+  MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready
 
   //val mshrMissRspStrobe = !RegNext(MshrAccess.io.missRspOut.valid) |
    // RegNext(RegNext(MshrAccess.io.missRspOut.ready) && MshrAccess.io.missRspOut.valid)
@@ -295,68 +293,29 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     !(readHit_st2 & coreReq_st1.isWrite) &
     (MshrAccess.io.missReq.ready || (!MshrAccess.io.missReq.ready && io.coreReq.bits.isWrite))
 
-  // ******      wdb input
-  WriteDataBuf.io.inputBus.valid := writeMiss_st2 | writeHit_st2 |
-    (writeMissRsp_st2 & missRspTI_st1.isWrite)//TODO 好像没写missRsp这块
-  val DataCrsbarToWdb_st2 = Wire(Vec(NLanes,Vec(BytesOfWord,UInt(8.W))))
-  DataCrsbarToWdb_st2 := DataCorssBar.io.DataOut.asTypeOf(DataCrsbarToWdb_st2)
-  val perWordByteMask = Wire(Vec(BlockWords,UInt(BytesOfWord.W)))
-  (0 until NBanks).foreach{ iofB =>
-    (0 until BankWords).foreach { iinB =>
-      perWordByteMask(iinB*NBanks+iofB) :=
-        Mux(arbArrayEn_st2(iofB),
-          Mux(arbAddrCrsbarOut_st2(iofB).bankOffset.getOrElse(0.U)===iinB.asUInt,//getElse的时候这里恒为真
-            arbAddrCrsbarOut_st2(iofB).wordOffset1H,
-            Fill(BytesOfWord,false.B)),
-          Fill(BytesOfWord,false.B))
-      WriteDataBuf.io.inputBus.bits.mask(iinB*NBanks+iofB) :=
-        Mux(arbArrayEn_st2(iofB),
-          Mux(arbAddrCrsbarOut_st2(iofB).bankOffset.getOrElse(0.U)===iinB.asUInt,
-            Mux(writeMissSubWord_st2,arbAddrCrsbarOut_st2(iofB).wordOffset1H,Fill(BytesOfWord,true.B)),
-            Fill(BytesOfWord,false.B)),
-          Fill(BytesOfWord,false.B))
-      (0 until BytesOfWord).foreach{ iofb =>
-        WriteDataBuf.io.inputBus.bits.data(iinB*NBanks+iofB)(iofb) :=
-          Mux(arbArrayEn_st2(iofB),
-            Mux(arbAddrCrsbarOut_st2(iofB).bankOffset.getOrElse(0.U)===iinB.asUInt,
-              Mux(perWordByteMask(iinB*NBanks+iofB)(iofb),
-                DataCrsbarToWdb_st2(iofB)(iofb),DataAccessesRRsp(iofB)(iofb)),
-              0.U),//TODO Dont care
-            0.U)//TODO Dont care
-      }
-    }
-  }
-  WriteDataBuf.io.inputBus.bits.instrId := coreReq_st2.instrId
-  WriteDataBuf.io.inputBus.bits.addr := Cat(coreReq_st2.tag,coreReq_st2.setIdx,0.U((WordLength-TagBits-SetIdxBits).W))
-  WriteDataBuf.io.inputBus.bits.bankConflict := bankConflict_st2
-  WriteDataBuf.io.inputBus.bits.subWordMissReq := writeMissSubWord_st2
-  WriteDataBuf.io.inputBus.bits.subWordMissRsp := writeMissRsp_st2 & missRspTI_st1.isWrite
+  // ******      m_memReq_Q.m_Q.push_back      ******
+  val missMemReq = Wire(new DCacheMemReq) //writeMiss_st1 || readMiss_st1
+  val writeMissReq = Wire(new DCacheMemReq)
+  val readMissReq = Wire(new DCacheMemReq)
+  writeMissReq.a_opcode := 1.U //PutPartialData:Get
+  writeMissReq.a_param := 0.U //regular write
+  writeMissReq.a_source := Cat("d3".U, coreReq_st1.instrId)
+  writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
+  writeMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
+  writeMissReq.a_data := coreReq_st1.data
 
-  // ******      mem req
-  val MemReqArb = Module(new Arbiter(new DCacheMemReq, 2))
+  readMissReq.a_opcode := 4.U //Get
+  readMissReq.a_param := 0.U //regular read
+  readMissReq.a_source := Cat("d2".U, MshrAccess.io.probeOut_st1)
+  readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
+  readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
+  readMissReq.a_data := DontCare
 
-  val MshrMiss2Mem = MshrAccess.io.miss2mem.bits
-  val MshrMemReq = Wire(new DCacheMemReq)
-  MshrMemReq.a_opcode := TLAOp_Get
-  MshrMemReq.a_addr := Cat(MshrMiss2Mem.blockAddr,0.U((WordLength-bABits).W))
-  MshrMemReq.a_data := VecInit(Seq.fill(BlockWords)(0.U))//TODO Dont care
-  MshrMemReq.a_source := MshrMiss2Mem.instrId
-  MshrMemReq.a_mask := VecInit(Seq.fill(BlockWords)(true.B))//useless port
-  MshrAccess.io.miss2mem.ready := MemReqArb.io.in(0).ready
+  missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
 
-  val wdbMemReq = Wire(new DCacheMemReq)
-  val wDataBufOut = WriteDataBuf.io.outputBus.bits
-  wdbMemReq.a_opcode := Mux(Cat(wDataBufOut.mask).andR,TLAOp_PutFull,TLAOp_PutPart)
-  wdbMemReq.a_addr := wDataBufOut.addr
-  wdbMemReq.a_data := wDataBufOut.data.asTypeOf(Vec(BlockWords,UInt(WordLength.W)))
-  wdbMemReq.a_source := wDataBufOut.instrId
-  wdbMemReq.a_mask := wDataBufOut.mask
-  WriteDataBuf.io.outputBus.ready := MemReqArb.io.in(1).ready
-
-
-  io.memReq <> MemReqArb.io.out
-  MemReqArb.io.in(0).valid := MshrAccess.io.miss2mem.valid
-  MemReqArb.io.in(0).bits := MshrMemReq
-  MemReqArb.io.in(1).valid := WriteDataBuf.io.outputBus.valid
-  MemReqArb.io.in(1).bits := wdbMemReq
+  memReq_Q.io.enq <> MemReqArb.io.out
+  MemReqArb.io.in(0) <> TagAccess.io.memReq.get
+  MemReqArb.io.in(1).valid := writeMiss_st1 || readMiss_st1
+  MemReqArb.io.in(1).bits := missMemReq
+  //TODO MemReqArb.io.in(1).ready need to be used
 }
