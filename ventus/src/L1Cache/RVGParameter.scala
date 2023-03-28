@@ -27,7 +27,8 @@ case class RVGParameters
   NCluster: Int = num_cluster,
   WordLength: Int = xLen,
   BlockWords: Int = dcache_BlockWords,
-  NCacheInSM: Int = num_cache_in_sm
+  NCacheInSM: Int = num_cache_in_sm,
+  NL2Cache: Int = num_l2cache
 )
 
 trait HasRVGParameters {
@@ -46,6 +47,7 @@ trait HasRVGParameters {
 
   def NSmInCluster = RVGParams.NSmInCluster
   def NCluster = RVGParams.NCluster
+  def NL2Cache = RVGParams.NL2Cache
 }
 
 abstract class RVGBundle(implicit val p: Parameters) extends Bundle with HasRVGParameters

@@ -73,7 +73,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   putbuffer.io.push.valid := a.valid && hasData && !req_block && !set_block
   when (a.valid && hasData && !req_block && !buf_block) { lists_set := freeOH }
 
-  val (tag, set, offset) = params.parseAddress(a.bits.address)
+  val (tag, l2cidx, set, offset) = params.parseAddress(a.bits.address)
   val put = freeIdx
 
   io.req.bits.opcode := a.bits.opcode
@@ -82,6 +82,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.req.bits.offset := offset
   io.req.bits.set    := set
   io.req.bits.tag    := tag
+  io.req.bits.l2cidx := l2cidx
   io.req.bits.put    := put
   io.req.bits.mask   := a.bits.mask
   io.req.bits.data   :=a.bits.data
