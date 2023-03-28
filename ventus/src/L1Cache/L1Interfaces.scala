@@ -30,7 +30,8 @@ class DCachePerLaneAddr(implicit p: Parameters) extends DCacheBundle{
 class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
   //val ctrlAddr = new Bundle{
   val instrId = UInt(WIdBits.W)//TODO length unsure
-  val isWrite = Bool()//Vec(NLanes, Bool())
+  val opcode = UInt(3.W)
+  val param = UInt(4.W)
   val tag = UInt(TagBits.W)
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
