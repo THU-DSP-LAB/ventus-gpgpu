@@ -147,7 +147,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     io.memReq.get.valid := replaceIsDirty.get && allocateWrite_st1_valid
     io.memReq.get.bits.a_opcode := 0.U//PutFullData
     io.memReq.get.bits.a_param := 0.U//regular write
-    io.memReq.get.bits.a_source := 0.U//TODO determine a source id scheme
+    io.memReq.get.bits.a_source := Cat("d2".U,allocateWrite_st1.setIdx)//refer to a_source确定机制 in onenote TODO
     io.memReq.get.bits.a_addr := Cat(Cat(tagBodyAccess.io.r.resp.data(Replacement.io.waymask_st1),//tag
       allocateWrite_st1.setIdx),//setIdx
       0.U((dcache_BlockOffsetBits+dcache_WordOffsetBits).W))//blockOffset+wordOffset
