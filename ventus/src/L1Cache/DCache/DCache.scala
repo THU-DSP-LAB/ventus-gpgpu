@@ -33,7 +33,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     important submodules     ******
   val BankConfArb = Module(new BankConflictArbiter)
   //val bankConflict_reg = Reg(Bool())
-  val MshrAccess = Module(new MSHR(new VecMshrTargetInfo)(p))
+  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry))
   val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
@@ -83,6 +83,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeRead.valid := io.coreReq.fire
   TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
+
+  // ******      mshr probe      ******
+  MshrAccess.io.probe.valid := io.coreReq.fire
+  MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
 
   // ******      tag write      ******
   TagAccess.io.allocateWrite.valid := missRspWriteEnable//multiple for secondary miss
@@ -305,7 +309,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   readMissReq.a_opcode := 4.U //Get
   readMissReq.a_param := 0.U //regular read
-  readMissReq.a_source := Cat("d2".U, MshrAccess.io.probeOut_st1)
+  readMissReq.a_source := Cat("d2".U, MshrAccess.io.probeOut_st1.a_source)
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
