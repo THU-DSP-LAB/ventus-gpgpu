@@ -213,7 +213,7 @@ case class InclusiveCacheParameters_lite(
     val set = offset >> offsetBits
     val l2c = set >> setBits
     val tag = l2c >> l2cBits
-    (tag(tagBits-1, 0), l2c(l2cBits,0),set(setBits-1, 0), offset(offsetBits-1, 0))
+    (tag(tagBits-1, 0), l2c(l2cBits-1,0),set(setBits-1, 0), offset(offsetBits-1, 0))
   }
 
   def widen(x: UInt, width: Int): UInt = {
