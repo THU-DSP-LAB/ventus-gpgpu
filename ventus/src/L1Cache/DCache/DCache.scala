@@ -318,4 +318,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MemReqArb.io.in(1).valid := writeMiss_st1 || readMiss_st1
   MemReqArb.io.in(1).bits := missMemReq
   //TODO MemReqArb.io.in(1).ready need to be used
+
+  io.memReq <> memReq_Q.io.deq
 }
