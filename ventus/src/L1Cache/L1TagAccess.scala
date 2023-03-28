@@ -22,7 +22,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
     val probeIsWrite_st1 = if(!readOnly){Some(Bool())} else None
-    val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
+    //val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
     //To coreReq_pipe1
     val hit_st1 = Output(Bool())
     val waymaskHit_st1 = Output(UInt(way.W))
@@ -108,7 +108,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
-  iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.coreReqReady))//st1
+  iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
   if(!readOnly){//tag_array::write_hit_mark_dirty
