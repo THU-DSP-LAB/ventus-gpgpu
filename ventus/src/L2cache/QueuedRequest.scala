@@ -38,6 +38,7 @@ class DirWriteRequest(params: InclusiveCacheParameters_lite)extends Bundle
 class FullRequest(params: InclusiveCacheParameters_lite) extends QueuedRequest(params)
 {
   val set = UInt(params.setBits.W)
+  val l2cidx = UInt(params.l2cBits.W)
   //override def cloneType: FullRequest.this.type = new FullRequest(params).asInstanceOf[this.type]
 }
 

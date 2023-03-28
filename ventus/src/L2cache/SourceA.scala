@@ -42,7 +42,7 @@ class SourceA(params: InclusiveCacheParameters_lite) extends Module
   io.a.bits.opcode  := io.req.bits.opcode
 
   io.a.bits.source  := io.req.bits.source
-  io.a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.set, io.req.bits.offset)
+  io.a.bits.address := params.expandAddress(io.req.bits.tag, io.req.bits.l2cidx,io.req.bits.set, io.req.bits.offset)
   io.a.bits.mask    :=io.req.bits.mask
   io.a.bits.data    := io.req.bits.data
   io.a.bits.size    :=io.req.bits.size

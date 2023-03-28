@@ -178,6 +178,7 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.offset :=RegNext(io.read.bits.offset)
   io.result.bits.size   :=RegNext(io.read.bits.size)
   io.result.bits.set    :=RegNext(io.read.bits.set)
+  io.result.bits.l2cidx := RegNext(io.read.bits.l2cidx)
   io.result.bits.source :=RegNext(io.read.bits.source)
   io.result.bits.tag    :=RegNext(io.read.bits.tag)
   io.result.bits.opcode :=RegNext(io.read.bits.opcode)

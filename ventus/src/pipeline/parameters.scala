@@ -64,7 +64,7 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def l2cache_writeBytes: Int = 4
   def l2cache_memCycles: Int = 4
   def l2cache_portFactor: Int = 2
-    val l2cache_cache=CacheParameters(2,l2cache_NWays,l2cache_NSets,l2cache_BlockWords<<2,l2cache_BlockWords<<2)
+    val l2cache_cache=CacheParameters(2,l2cache_NWays,l2cache_NSets,num_l2cache,l2cache_BlockWords<<2,l2cache_BlockWords<<2)
     val l2cache_micro=InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,num_cluster)
     val l2cache_micro_l = InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,1)
     val l2cache_params=InclusiveCacheParameters_lite(l2cache_cache,l2cache_micro,false)
@@ -82,6 +82,8 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def sig_length = 33
 
   def num_cache_in_sm = 2
+
+  def num_l2cache = 2
 
   var NUMBER_CU = num_sm
   var NUMBER_RES_TABLE = 1 // <NUMBER_CU
