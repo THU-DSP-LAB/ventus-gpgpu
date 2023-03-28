@@ -23,6 +23,37 @@ class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
 }
 
+class DCacheControl extends Bundle{
+  val isRead = Bool()
+  val isWrite = Bool()
+  val isLR = Bool()
+  val isSC = Bool()
+  val isAMO = Bool()
+  val isFlush = Bool()
+  val isInvalidate = Bool()
+}
+
+class genControl extends Module{
+  val io = IO(new Bundle{
+    val opcode = Input(UInt(3.W))
+    val param = Input(UInt(4.W))
+    val control = Output(new DCacheControl())
+  })
+  io.control.isRead := false.B
+  io.control.isWrite := false.B
+  io.control.isLR := false.B
+  io.control.isSC := false.B
+  io.control.isAMO := false.B
+  io.control.isFlush := false.B
+  io.control.isInvalidate := false.B
+
+  switch(io.opcode){
+    is(0.U){
+
+    }
+  }
+}
+
 class DataCache(implicit p: Parameters) extends DCacheModule{
   val io = IO(new Bundle{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
