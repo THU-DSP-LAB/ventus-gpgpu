@@ -31,7 +31,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     val memReq = DecoupledIO(new DCacheMemReq)})
 
   // ******     important submodules     ******
-  val BankConfArb = Module(new BankConflictArbiter)
+  //val BankConfArb = Module(new BankConflictArbiter)
   //val bankConflict_reg = Reg(Bool())
   val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry))
   val missRspFromMshr_st1 = Wire(Bool())
@@ -64,20 +64,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     ShiftRegister(BankConfArb.io.activeLane,2))
   val coreReqIsWrite_st3 = RegNext(coreReq_st2.isWrite)
 
-  // ******      Arbiter      ******
-  val arbReqMux_CoreOrMshr = Wire(new coreReqArb)
-  val arbReqMshr = Wire(new coreReqArb)
-  arbReqMshr.perLaneAddr := missRspTI_st1.perLaneAddr
-  arbReqMshr.isWrite := missRspTI_st1.isWrite
-  arbReqMshr.enable := missRspFromMshr_st1
-  val arbReqCore = Wire(new coreReqArb)
-  arbReqCore.perLaneAddr := coreReq_st1.perLaneAddr
-  arbReqCore.isWrite := coreReq_st1.isWrite
-  val cacheHit_st1 = Wire(Bool())
-  arbReqCore.enable := cacheHit_st1
-  arbReqMux_CoreOrMshr := Mux(missRspFromMshr_st1, arbReqMshr, arbReqCore)
-  BankConfArb.io.coreReqArb := arbReqMux_CoreOrMshr
-
   // ******      tag probe      ******
   val missRspWriteEnable = Wire(Bool())
   TagAccess.io.probeRead.valid := io.coreReq.fire
@@ -96,6 +82,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     waymask = 1.U)
 
   // ******     pipeline regs      ******
+  val cacheHit_st1 = Wire(Bool())
   cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire())
   val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.fire(),MshrAccess.io.missReq.ready)
   //RegEnable indicate whether the signal is consumed
@@ -128,13 +115,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val readHit_st3 = RegNext(readHit_st2)
   val writeHit_st2 = cacheHit_st2 && coreReq_st2.isWrite
   val writeHit_st3 = RegNext(writeHit_st2)
-
-  val bankConflict_st2 = RegNext(BankConfArb.io.bankConflict)
-  val arbDataCrsbarSel1H_st2 = RegNext(BankConfArb.io.dataCrsbarSel1H)//st2 both in cc path and mc path
-  val arbAddrCrsbarOut_st2 = RegNext(BankConfArb.io.addrCrsbarOut)
   val arbArrayEn_st2 = RegNext(BankConfArb.io.dataArrayEn)
-
-  val arbDataCrsbarSel1H_st3 = RegNext(arbDataCrsbarSel1H_st2)
 
   // ******     mem rsp      ******
   memRsp_Q.io.enq <> io.memRsp
@@ -150,7 +131,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     mshrAccess      ******
   MshrAccess.io.missReq.valid := readMiss_st1
-
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   mshrMissReqTI.isWrite := coreReq_st1.isWrite
   mshrMissReqTI.perLaneAddr := coreReq_st1.perLaneAddr
@@ -323,4 +303,23 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //TODO MemReqArb.io.in(1).ready need to be used
 
   io.memReq <> memReq_Q.io.deq
+}
+
+class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
+  val io = IO(new Bundle{
+    val perLaneBlockIdx = Input(Vec(NLane,UInt(log2Up(NBank).W)))
+    val perLaneValid = Input(Vec(NLane,Bool()))
+    val perBankValid = Output(Vec(NBank,Bool()))
+  })
+  val blockIdx1H = Wire(Vec(NLane, UInt(NBank.W)))
+  val blockIdxMasked = Wire(Vec(NLane, UInt(NBank.W)))
+  for(i <- 0 until NLane){
+    blockIdx1H(i) := UIntToOH(io.perLaneBlockIdx(i))
+    blockIdxMasked(i) := blockIdx1H(i) & Fill(NLane, io.perLaneValid(i))
+  }
+  val perBankReq_Bin = Wire(Vec(NBank, UInt(NLane.W)))//transpose of blockIdxMasked
+  for(i <- 0 until NBank){
+    perBankReq_Bin(i) := Reverse(Cat(blockIdxMasked.map(_(i))))
+  }
+  io.perBankValid := perBankReq_Bin.map(_.orR)
 }
