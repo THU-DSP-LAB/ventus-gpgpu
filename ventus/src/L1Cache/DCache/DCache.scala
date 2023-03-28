@@ -64,27 +64,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     ShiftRegister(BankConfArb.io.activeLane,2))
   val coreReqIsWrite_st3 = RegNext(coreReq_st2.isWrite)
 
-  // ******      tag probe      ******
-  val missRspWriteEnable = Wire(Bool())
-  TagAccess.io.probeRead.valid := io.coreReq.fire
-  TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
-  TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
-
-  // ******      mshr probe      ******
-  MshrAccess.io.probe.valid := io.coreReq.fire
-  MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
-
-  // ******      tag write      ******
-  TagAccess.io.allocateWrite.valid := missRspWriteEnable//multiple for secondary miss
-  TagAccess.io.allocateWrite.bits(
-    data=get_tag(memRsp_Q_st1.d_addr),
-    setIdx=get_setIdx(memRsp_Q_st1.d_addr),
-    waymask = 1.U)
-
   // ******     pipeline regs      ******
   val cacheHit_st1 = Wire(Bool())
   cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire())
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.fire(),MshrAccess.io.missReq.ready)
+  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.fire(), MshrAccess.io.missReq.ready)
   //RegEnable indicate whether the signal is consumed
   val wayIdxAtHit_st1 = Wire(UInt(WayIdxBits.W))
   wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
@@ -92,9 +75,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val wayIdxReplace_st0 = Wire(UInt(WayIdxBits.W))
   wayIdxReplace_st0 := OHToUInt(TagAccess.io.waymaskReplacement_st1)
 
-  val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR))  //mem Order
-  val writeTouchBank_st1 =    Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.orR))   //mem Order
-  val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1               //mem Order
+  val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR)) //mem Order
+  val writeTouchBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.orR)) //mem Order
+  val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1 //mem Order
   //val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
 
   val readHit_st1 = cacheHit_st1 & !coreReq_st1.isWrite
@@ -116,6 +99,24 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val writeHit_st2 = cacheHit_st2 && coreReq_st2.isWrite
   val writeHit_st3 = RegNext(writeHit_st2)
   val arbArrayEn_st2 = RegNext(BankConfArb.io.dataArrayEn)
+
+  // ******      l1_data_cache::coreReq_pipe1_cycle      ******
+  // ******      tag probe      ******
+  val missRspWriteEnable = Wire(Bool())
+  TagAccess.io.probeRead.valid := io.coreReq.fire
+  TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
+  TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
+
+  // ******      mshr probe      ******
+  MshrAccess.io.probe.valid := io.coreReq.fire
+  MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
+
+  // ******      tag write      ******
+  TagAccess.io.allocateWrite.valid := missRspWriteEnable//multiple for secondary miss
+  TagAccess.io.allocateWrite.bits(
+    data=get_tag(memRsp_Q_st1.d_addr),
+    setIdx=get_setIdx(memRsp_Q_st1.d_addr),
+    waymask = 1.U)
 
   // ******     mem rsp      ******
   memRsp_Q.io.enq <> io.memRsp
