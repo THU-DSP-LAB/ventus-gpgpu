@@ -49,7 +49,28 @@ class genControl extends Module{
 
   switch(io.opcode){
     is(0.U){
-
+      when(io.param === 0.U){
+        io.control.isRead := true.B
+      }.elsewhen(io.param === 1.U) {
+        io.control.isLR := true.B
+      }
+    }
+    is(1.U){
+      when(io.param === 0.U) {
+        io.control.isWrite := true.B
+      }.elsewhen(io.param === 1.U) {
+        io.control.isSC := true.B
+      }
+    }
+    is(2.U){
+      io.control.isAMO := true.B
+    }
+    is(3.U){
+      when(io.param === 0.U) {
+        io.control.isInvalidate := true.B
+      }.elsewhen(io.param === 1.U) {
+        io.control.isFlush := true.B
+      }
     }
   }
 }
@@ -83,9 +104,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val MemReqArb = Module(new Arbiter(new DCacheMemReq, 2))
 
   //val coreReqHolding = RegInit(false.B)
-  val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire())
-  val coreReq_st1_ready = Wire(Bool())
-  val coreReq_st2 = RegNext(coreReq_st1)
+  /*val coreReq_st2 = RegNext(coreReq_st1)
   val coreReqInstrId_st3 = RegNext(coreReq_st2.instrId)
   val writeMiss_st3 = Reg(Bool())
   val coreReqActvMask_st3 = Mux(writeMiss_st3,
@@ -93,9 +112,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     RegNext(VecInit(coreReq_st2.perLaneAddr.map(_.activeMask))),
     //READ/WRITE Hit case
     ShiftRegister(BankConfArb.io.activeLane,2))
-  val coreReqIsWrite_st3 = RegNext(coreReq_st2.isWrite)
+  val coreReqIsWrite_st3 = RegNext(coreReq_st2.isWrite)*/
 
   // ******     pipeline regs      ******
+  val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
+  val coreReq_st1_ready = Wire(Bool())
+  val coreReqControl_st0 = Wire(new DCacheControl)
+  val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
   cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire())
   val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.fire(), MshrAccess.io.missReq.ready)
@@ -111,10 +134,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1 //mem Order
   //val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
 
-  val readHit_st1 = cacheHit_st1 & !coreReq_st1.isWrite
-  val readMiss_st1 = cacheMiss_st1 & !coreReq_st1.isWrite
-  val writeHit_st1 = cacheHit_st1 & coreReq_st1.isWrite
-  val writeMiss_st1 = cacheMiss_st1 & coreReq_st1.isWrite
+  val readHit_st1 = cacheHit_st1 & coreReqControl_st1.isRead
+  val readMiss_st1 = cacheMiss_st1 & coreReqControl_st1.isRead
+  val writeHit_st1 = cacheHit_st1 & coreReqControl_st1.isWrite
+  val writeMiss_st1 = cacheMiss_st1 & coreReqControl_st1.isWrite
   //val writeHitSubWord_st1 = writeHit_st1 & byteEn_st1
   //val writeMissSubWord_st1 = writeMiss_st1 & byteEn_st1
 
@@ -149,13 +172,18 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     setIdx=get_setIdx(memRsp_Q_st1.d_addr),
     waymask = 1.U)
 
+  val genCtrl = Module(new genControl)
+  genCtrl.io.opcode := io.coreReq.bits.opcode
+  genCtrl.io.param := io.coreReq.bits.param
+  coreReqControl_st0 := genCtrl.io.control
+
   io.coreReq.ready := coreReq_st1_ready
 
   // ******      l1_data_cache::coreReq_pipe2_cycle      ******
   // ******      mshr missReq      ******
   MshrAccess.io.missReq.valid := readMiss_st1
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
-  mshrMissReqTI.isWrite := coreReq_st1.isWrite
+  mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.perLaneAddr := coreReq_st1.perLaneAddr
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
   MshrAccess.io.missReq.bits.blockAddr := Cat(coreReq_st1.tag, coreReq_st1.setIdx)
