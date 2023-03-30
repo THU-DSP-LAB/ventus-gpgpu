@@ -145,6 +145,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val writeMissSubWord_st2 = RegNext(writeMissSubWord_st1)
   writeMiss_st3 := writeMiss_st2*/
 
+  val coreRsp_st2 =Reg(new DCacheCoreRsp)
+  val coreRsp_st2_valid =Reg(Bool())
+
   /*val cacheHit_st2 = RegInit(false.B)
   cacheHit_st2 := cacheHit_st1 || (cacheHit_st2 && RegNext(BankConfArb.io.bankConflict))*/
   // bankConflict置高的周期比coreRsp需要输出的周期少一个，而其置高的第一个周期有cacheHit_st1做控制。所以这里使用RegNext(bankConflict)做控制
@@ -251,6 +254,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }
     }
+  }
+
+  when(cacheHit_st1){//TODO consider memRsp
+    coreRsp_st2.data := DontCare
+    coreRsp_st2.isWrite := coreReqControl_st1.isWrite
+    coreRsp_st2.instrId := coreReq_st1.instrId
+    coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
   }
 
   // ******     mem rsp      ******
