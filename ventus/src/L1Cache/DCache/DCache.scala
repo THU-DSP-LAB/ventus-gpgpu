@@ -209,22 +209,22 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
 
+  // ******      dataAccess bank enable     ******
+  val getBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = num_thread))
+  getBankEn.io.perLaneBlockIdx := coreReq_st1.perLaneAddr.map(_.blockOffset)
+  getBankEn.io.perLaneValid := coreReq_st1.perLaneAddr.map(_.activeMask)
+
   // ******      dataAccess write hit      ******
   val DataAccessWriteHitSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords,new SRAMBundleAW(UInt(xLen.W), NSets, NWays)))
   DataAccessWriteHitSRAMWReq.foreach(_.setIdx := coreReq_st1.setIdx)
   DataAccessWriteHitSRAMWReq.foreach(_.waymask.get := TagAccess.io.waymaskHit_st1)
   for (i <- 0 until BlockWords){
-    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(i)
+    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(getBankEn.io.perBankBlockIdx(i))
   }
 
   // ******      dataAccess read hit      ******
   val DataAccessReadHitSRAMWReq = Wire(Vec(BlockWords,new SRAMBundleA(NSets)))
   DataAccessReadHitSRAMWReq.foreach(_.setIdx := coreReq_st1.setIdx)
-  
-  // ******      dataAccess bank enable     ******
-  val getBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = num_thread))
-  getBankEn.io.perLaneBlockIdx := coreReq_st1.perLaneAddr.map(_.blockOffset)
-  getBankEn.io.perLaneValid := coreReq_st1.perLaneAddr.map(_.activeMask)
 
   /*!(BankConfArb.io.bankConflict && (cacheHit_st1 || cacheHit_st2)) &
     !missRspFromMshr_st1 & !(io.memRsp.valid && !ShiftRegister(io.coreReq.bits.isWrite && io.coreReq.fire(), 2)) &
@@ -411,6 +411,7 @@ class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
     val perLaneBlockIdx = Input(Vec(NLane,UInt(log2Up(NBank).W)))
     val perLaneValid = Input(Vec(NLane,Bool()))
     val perBankValid = Output(Vec(NBank,Bool()))
+    val perBankBlockIdx = Input(Vec(NBank,UInt(log2Up(NLane).W)))
   })
   val blockIdx1H = Wire(Vec(NLane, UInt(NBank.W)))
   val blockIdxMasked = Wire(Vec(NLane, UInt(NBank.W)))
@@ -418,9 +419,10 @@ class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
     blockIdx1H(i) := UIntToOH(io.perLaneBlockIdx(i))
     blockIdxMasked(i) := blockIdx1H(i) & Fill(NLane, io.perLaneValid(i))
   }
-  val perBankReq_Bin = Wire(Vec(NBank, UInt(NLane.W)))//transpose of blockIdxMasked
+  val perBankReq_Bin: Vec[UInt] = Wire(Vec(NBank, UInt(NLane.W)))//transpose of blockIdxMasked
   for(i <- 0 until NBank){
     perBankReq_Bin(i) := Reverse(Cat(blockIdxMasked.map(_(i))))
   }
   io.perBankValid := perBankReq_Bin.map(_.orR)
+  io.perBankBlockIdx := perBankReq_Bin.map(PriorityEncoder(_))
 }
