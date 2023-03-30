@@ -145,14 +145,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val writeMissSubWord_st2 = RegNext(writeMissSubWord_st1)
   writeMiss_st3 := writeMiss_st2*/
 
-  val cacheHit_st2 = RegInit(false.B)
-  cacheHit_st2 := cacheHit_st1 || (cacheHit_st2 && RegNext(BankConfArb.io.bankConflict))
+  /*val cacheHit_st2 = RegInit(false.B)
+  cacheHit_st2 := cacheHit_st1 || (cacheHit_st2 && RegNext(BankConfArb.io.bankConflict))*/
   // bankConflict置高的周期比coreRsp需要输出的周期少一个，而其置高的第一个周期有cacheHit_st1做控制。所以这里使用RegNext(bankConflict)做控制
-  val readHit_st2 = cacheHit_st2 && !coreReq_st2.isWrite//TODO add coreRsp_st2 handshake
+  val readHit_st2 = RegNext(readHit_st1)
   //val readHit_st3 = RegNext(readHit_st2)
-  val writeHit_st2 = cacheHit_st2 && coreReq_st2.isWrite
+  val writeHit_st2 = RegNext(writeHit_st1)//cacheHit_st2 && coreReq_st2.isWrite
   //val writeHit_st3 = RegNext(writeHit_st2)
-  val arbArrayEn_st2 = RegNext(BankConfArb.io.dataArrayEn)
+  //val arbArrayEn_st2 = RegNext(BankConfArb.io.dataArrayEn)
 
   // ******      l1_data_cache::coreReq_pipe1_cycle      ******
   // ******      tag probe      ******
@@ -215,6 +215,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     !(coreReq_st1.isWrite & WriteDataBuf.io.wdbAlmostFull) &
     !(readHit_st2 & coreReq_st1.isWrite) &
     (MshrAccess.io.missReq.ready || (!MshrAccess.io.missReq.ready && io.coreReq.bits.isWrite))*/
+
   coreReq_st1_ready := false.B
   when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
     when(cacheHit_st1){
