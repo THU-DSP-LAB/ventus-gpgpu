@@ -11,7 +11,7 @@
 package L1Cache.DCache
 
 import L1Cache._
-import SRAMTemplate.SRAMTemplate
+import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
@@ -209,13 +209,29 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
 
+  // ******      dataAccess write hit      ******
+  val DataAccessWriteHitSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords,new SRAMBundleAW(UInt(xLen.W), NSets, NWays)))
+  DataAccessWriteHitSRAMWReq.foreach(_.setIdx := coreReq_st1.setIdx)
+  DataAccessWriteHitSRAMWReq.foreach(_.waymask.get := TagAccess.io.waymaskHit_st1)
+  for (i <- 0 until BlockWords){
+    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(i)
+  }
+
+  // ******      dataAccess read hit      ******
+  val DataAccessReadHitSRAMWReq = Wire(Vec(BlockWords,new SRAMBundleA(NSets)))
+  DataAccessReadHitSRAMWReq.foreach(_.setIdx := coreReq_st1.setIdx)
+  
+  // ******      dataAccess bank enable     ******
+  val getBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = num_thread))
+  getBankEn.io.perLaneBlockIdx := coreReq_st1.perLaneAddr.map(_.blockOffset)
+  getBankEn.io.perLaneValid := coreReq_st1.perLaneAddr.map(_.activeMask)
+
   /*!(BankConfArb.io.bankConflict && (cacheHit_st1 || cacheHit_st2)) &
     !missRspFromMshr_st1 & !(io.memRsp.valid && !ShiftRegister(io.coreReq.bits.isWrite && io.coreReq.fire(), 2)) &
     !(cacheHit_st1 & coreRsp_QAlmstFull) &
     !(coreReq_st1.isWrite & WriteDataBuf.io.wdbAlmostFull) &
     !(readHit_st2 & coreReq_st1.isWrite) &
     (MshrAccess.io.missReq.ready || (!MshrAccess.io.missReq.ready && io.coreReq.bits.isWrite))*/
-
   coreReq_st1_ready := false.B
   when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
     when(cacheHit_st1){
@@ -388,6 +404,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   io.memReq <> memReq_Q.io.deq
 }
 
+/** coreReq hit场景中DataAccess以word为粒度的SRAM bank使能信号
+  */
 class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
   val io = IO(new Bundle{
     val perLaneBlockIdx = Input(Vec(NLane,UInt(log2Up(NBank).W)))
