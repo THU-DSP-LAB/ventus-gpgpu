@@ -21,6 +21,7 @@ class MSHRprobe(val bABits: Int) extends Bundle {
   val blockAddr = UInt(bABits.W)
 }
 class MSHRprobeOut(val NEntry:Int, val NSub:Int) extends Bundle {
+  val probeStatus = UInt(2.W)
   val a_source = UInt((log2Up(NEntry)+log2Up(NSub)).W)
 }
 class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
@@ -134,7 +135,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     }
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
-
+  io.probeOut_st1.probeStatus := mshrStatus_st1
+  def mshrProbeAvail: Bool = this.io.probeOut_st1.probeStatus === 0.U || this.io.probeOut_st1.probeStatus === 2.U
 
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/

@@ -120,18 +120,18 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
-  cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire())
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.fire(), MshrAccess.io.missReq.ready)
+  cacheHit_st1 := TagAccess.io.hit_st1 && RegEnable(io.coreReq.valid,io.coreReq.fire)
+  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.valid,io.coreReq.fire)
   //RegEnable indicate whether the signal is consumed
   val wayIdxAtHit_st1 = Wire(UInt(WayIdxBits.W))
   wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
-  val wayIdxAtHit_st2 = RegNext(wayIdxAtHit_st1)
+  //val wayIdxAtHit_st2 = RegNext(wayIdxAtHit_st1)
   val wayIdxReplace_st0 = Wire(UInt(WayIdxBits.W))
   wayIdxReplace_st0 := OHToUInt(TagAccess.io.waymaskReplacement_st1)
 
-  val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR)) //mem Order
+  /*val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR)) //mem Order
   val writeTouchBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.orR)) //mem Order
-  val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1 //mem Order
+  val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1 //mem Order*/
   //val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
 
   val readHit_st1 = cacheHit_st1 & coreReqControl_st1.isRead
@@ -141,17 +141,17 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val writeHitSubWord_st1 = writeHit_st1 & byteEn_st1
   //val writeMissSubWord_st1 = writeMiss_st1 & byteEn_st1
 
-  val writeMiss_st2 = RegNext(writeMiss_st1)
+  /*val writeMiss_st2 = RegNext(writeMiss_st1)
   //val writeMissSubWord_st2 = RegNext(writeMissSubWord_st1)
-  writeMiss_st3 := writeMiss_st2
+  writeMiss_st3 := writeMiss_st2*/
 
   val cacheHit_st2 = RegInit(false.B)
   cacheHit_st2 := cacheHit_st1 || (cacheHit_st2 && RegNext(BankConfArb.io.bankConflict))
   // bankConflict置高的周期比coreRsp需要输出的周期少一个，而其置高的第一个周期有cacheHit_st1做控制。所以这里使用RegNext(bankConflict)做控制
-  val readHit_st2 = cacheHit_st2 && !coreReq_st2.isWrite
-  val readHit_st3 = RegNext(readHit_st2)
+  val readHit_st2 = cacheHit_st2 && !coreReq_st2.isWrite//TODO add coreRsp_st2 handshake
+  //val readHit_st3 = RegNext(readHit_st2)
   val writeHit_st2 = cacheHit_st2 && coreReq_st2.isWrite
-  val writeHit_st3 = RegNext(writeHit_st2)
+  //val writeHit_st3 = RegNext(writeHit_st2)
   val arbArrayEn_st2 = RegNext(BankConfArb.io.dataArrayEn)
 
   // ******      l1_data_cache::coreReq_pipe1_cycle      ******
@@ -215,8 +215,26 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     !(coreReq_st1.isWrite & WriteDataBuf.io.wdbAlmostFull) &
     !(readHit_st2 & coreReq_st1.isWrite) &
     (MshrAccess.io.missReq.ready || (!MshrAccess.io.missReq.ready && io.coreReq.bits.isWrite))*/
-  when(coreReq_st1.)
-  coreReq_st1_ready :=
+  coreReq_st1_ready := false.B
+  when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
+    when(cacheHit_st1){
+      when(coreRsp_Q.io.enq.ready){
+        coreReq_st1_ready := true.B
+      }
+    }.otherwise{
+      assert(cacheMiss_st1,s"coreReq_st1有效时，hit和miss总有一个有效")
+      when(coreReqControl_st1.isRead){
+        //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
+        when(MshrAccess.mshrProbeAvail && memReq_Q.io.enq.ready){
+          coreReq_st1_ready := true.B
+        }
+      }.otherwise{//isWrite
+        when(coreRsp_Q.io.enq.ready && memReq_Q.io.enq.ready){
+          coreReq_st1_ready := true.B
+        }
+      }
+    }
+  }
 
   // ******     mem rsp      ******
   memRsp_Q.io.enq <> io.memRsp
