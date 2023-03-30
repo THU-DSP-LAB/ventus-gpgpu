@@ -11,6 +11,7 @@
 package play
 
 import L1Cache.MyConfig
+import L2cache.TLBundleD_lite
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
@@ -29,6 +30,7 @@ object TestCaseList{
   // `parameters.num_warp` should >= `warp` parameter in TestCase() below
   // the simulation may be slow if `parameters.num_warp` is large
   val L: Map[String, TestCase#Props] = Array[TestCase](
+    // TODO: Refresh file
     new TestCase("gaussian", "gaussian_.vmem", "gaussian8.data", 8, 8, 0, 5000),
     new TestCase("saxpy", "saxpy_.vmem", "saxpy.data", 8, 8, 0, 500),
     new TestCase("gemm", "gemm_.vmem", "gemm4x8x4.data", 1, 8, 0, 2400),
@@ -87,6 +89,87 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
 
       div.clock.step(500)
       //c.io.in2.poke(3.U)
+    }
+  }
+}
+
+class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
+  import top.helper._
+  "adv_test" in {
+    val caseName = "saxpy"
+    val metaFileDir = "saxpy.meta" // TODO: rename
+    val dataFileDir = "saxpy.data"
+    val mem = new MemBox(metaFileDir, dataFileDir)
+    val size3d = mem.metaData.kernel_size.map(_.toInt)
+    var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+    test(new GPGPU_SimWrapper).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
+      c.io.host_req.initSource()
+      c.io.host_req.setSourceClock(c.clock)
+      c.io.out_d.initSource()
+      c.io.out_d.setSourceClock(c.clock)
+      c.io.host_rsp.initSink()
+      c.io.host_rsp.setSinkClock(c.clock)
+      c.io.out_a.initSink()
+      c.io.out_a.setSinkClock(c.clock)
+      c.clock.setTimeout(TestCaseList(caseName).cycles)
+      c.clock.step(5)
+      fork{ // HOST <-> GPU
+        val enq = fork{
+          for (i <- 0 until size3d(0);
+               j <- 0 until size3d(1);
+               k <- 0 until size3d(2)
+               ) {
+            c.io.host_req.enq(mem.metaData.generateHostReq(i, j, k))
+          }
+        }
+        val deq = fork{
+          while(!wg_list.reduce(_ && _)){
+            c.io.host_rsp.ready.poke(true.B)
+            c.io.host_rsp.waitForValid()
+            val rsp = c.io.host_rsp.bits.peek().litValue.toInt
+            wg_list(rsp) = true
+            c.clock.step(1)
+          }
+        }
+        enq.join()
+        deq.join()
+        c.clock.step(20)
+      }.fork{ // GPU <-> MEM
+        val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
+        while(!wg_list.reduce(_ && _)){
+          fork{
+            timescope{
+              c.io.out_a.ready.poke(true.B)
+              c.io.out_a.waitForValid()
+              val addr = c.io.out_a.bits.address.peek().litValue
+              val opcode = c.io.out_a.bits.opcode.peek().litValue
+              val source = c.io.out_a.bits.source.peek().litValue
+              var data = new Array[Byte](data_byte_count)
+              if(c.io.out_a.bits.opcode.peek().litValue == 4){ // read
+                data = mem.readMem(addr, data_byte_count) // read operation
+              }
+              else if(c.io.out_a.bits.opcode.peek().litValue == 1){ // write
+                data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
+                val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).padTo(c.io.out_a.bits.mask.getWidth, '0').map {
+                  case '1' => true
+                  case _  => false
+                }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
+                mem.writeMem(addr, data_byte_count, data, mask) // write operation
+                data = Array.fill(data_byte_count)(0.toByte) // response = 0
+              }
+              else{
+                data = Array.fill(data_byte_count)(0.toByte)
+              }
+              c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
+                _.opcode -> opcode.U,
+                _.data -> ByteArray2BigInt(data).U,
+                _.source -> source.U,
+                _.size -> 0.U // TODO: Unused
+              ))
+            }
+          }.join
+        }
+      }.join
     }
   }
 }
