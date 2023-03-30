@@ -257,6 +257,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
 
   when(cacheHit_st1){//TODO consider memRsp
+    coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
     coreRsp_st2.instrId := coreReq_st1.instrId
@@ -309,7 +310,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     DataAccess      ******
   val DataFromCrsbarOrMemRspQ = Wire(Vec(NBanks, UInt(WordLength.W)))
-  val DataAccessesRRsp = (0 until NBanks).map {i =>
+  val DataAccessesRRsp: Seq[UInt] = (0 until NBanks).map { i =>
     val DataAccess = Module(new SRAMTemplate(
       gen=UInt(8.W),
       set=NSets*NWays*(BankWords),
@@ -383,10 +384,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     arbDataCrsbarSel1H_st3)
 
   // ******      core rsp
-  // only serve for READ hit flow and READ miss Rsp flow
   coreRsp_Q.io.deq <> io.coreRsp
-  coreRsp_Q.io.enq.valid := readHit_st3 || readMissRsp_st2 || writeMiss_st3 || writeHit_st3
-  coreRsp_Q.io.enq.bits.isWrite := Mux(writeMissRsp_st2,
+  coreRsp_Q.io.enq.valid := coreRsp_st2_valid
+  coreRsp_Q.io.enq.bits := coreRsp_st2
+  coreRsp_Q.io.enq.bits.data := Mux(writeMissRsp_st2,memReq_Q.io.deq.bits.a_data,VecInit(DataAccessesRRsp))
+  /*.isWrite := Mux(writeMissRsp_st2,
     //WRITE miss Rsp
     true.B,
     //WRITE hit
@@ -402,7 +404,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     missRspTILaneMask_st2,
     //Mux of READ/WRITE hit or WRITE miss case
     coreReqActvMask_st3)//refer to generation of this signal
-  coreRsp_QAlmstFull := coreRsp_Q.io.count === coreRsp_Q_entries.asUInt - 2.U
+  coreRsp_QAlmstFull := coreRsp_Q.io.count === coreRsp_Q_entries.asUInt - 2.U*/
 
   // ******      m_memReq_Q.m_Q.push_back      ******
   memReq_Q.io.enq <> MemReqArb.io.out
