@@ -46,7 +46,7 @@ class DCacheCoreRsp(implicit p: Parameters) extends DCacheBundle{
 }
 
 class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
-  //val d_opcode = UInt(3.W)// AccessAckData only
+  val d_opcode = UInt(3.W)// AccessAckData only
   //val d_param
   //val d_size
   val d_source = UInt(WIdBits.W)//cut off head log2Up(NSms) bits at outside
