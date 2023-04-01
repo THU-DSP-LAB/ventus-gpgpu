@@ -153,7 +153,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
   }
 
-  io.probeOut_st1 := Cat(real_SRAMAddrUp,real_SRAMAddrDown)
+  io.probeOut_st1.a_source := real_SRAMAddrUp
 
   //  ******      mshr::vec_arrange_core_rsp    ******
   // priority: missRspIn > missReq

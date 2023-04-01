@@ -191,14 +191,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val readMissReq = Wire(new DCacheMemReq)
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
-  writeMissReq.a_source := Cat("d3".U, coreReq_st1.instrId)
+  writeMissReq.a_source := Cat("d0".U, coreReq_st1.instrId)
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   writeMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   writeMissReq.a_data := coreReq_st1.data
 
   readMissReq.a_opcode := 4.U //Get
   readMissReq.a_param := 0.U //regular read
-  readMissReq.a_source := Cat("d2".U, MshrAccess.io.probeOut_st1.a_source)
+  readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//set
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
