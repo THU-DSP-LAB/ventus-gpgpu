@@ -89,7 +89,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
-  val DataCorssBar = Module(new DataCrossbar)
+  //val DataCrsCore2Mem = Module(new DataCrossbar(num_thread,BlockWords))
+  //val DataCrsMem2Core = Module(new DataCrossbar(BlockWords,num_thread))
 
   // ******     queues     ******
   val coreRsp_Q_entries :Int = NLanes
@@ -198,7 +199,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   readMissReq.a_opcode := 4.U //Get
   readMissReq.a_param := 0.U //regular read
-  readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//set
+  readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//setIdx for memRsp tag access in 1st stage
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
@@ -353,7 +354,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     } else{
       0.U(1.W)
     }
-    DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCorssBar.io.DataOut)
+    DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCrsCore2Mem.io.DataOut)
     DataAccess.io.w.req.bits.data := DataFromCrsbarOrMemRspQ(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
     //this setIdx = setIdx + wayIdx + bankOffset
     val DAWtSetIdxMissRspCase_st1 = if(BlockOffsetBits-BankIdxBits>0){
@@ -399,16 +400,16 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val dataAccess_data_st3 = RegEnable(VecInit(DataAccessesRRsp),readHit_st2)
 
   // ******      data crossbar     ******
-  DataCorssBar.io.DataIn := Mux(readMissRsp_st2,
+  /*  DataCrsCore2Mem.io.DataIn := Mux(readMissRsp_st2,
     VecInit((0 until NBanks).map{i => memRspData_st2(arbAddrCrsbarOut_st2(i).bankOffset.getOrElse(0.U))(i)}),//READ missRsp case
     Mux(coreReq_st2.isWrite,
       coreReq_st2.data,//WRITE case(all 3
       dataAccess_data_st3//READ hit case
     ))
   //Sel from st2 on each WRITE flow, and READ missRsp
-  DataCorssBar.io.Select1H := Mux(coreReq_st2.isWrite | readMissRsp_st2,
+  DataCrsCore2Mem.io.Select1H := Mux(coreReq_st2.isWrite | readMissRsp_st2,
     arbDataCrsbarSel1H_st2,
-    arbDataCrsbarSel1H_st3)
+    arbDataCrsbarSel1H_st3)*/
 
   // ******      core rsp
   when(cacheHit_st1) { //TODO consider memRsp
