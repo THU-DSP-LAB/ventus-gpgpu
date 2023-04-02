@@ -18,7 +18,7 @@ import config.config.Parameters
 import pipeline.parameters._
 
 class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
-  //val instrId = UInt(WIdBits.W)
+  val instrId = UInt(WIdBits.W)
   //val isWrite = Bool()
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
 }
@@ -181,6 +181,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missReq.valid := readMiss_st1
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
+  mshrMissReqTI.instrId := coreReq_st1.instrId
   mshrMissReqTI.perLaneAddr := coreReq_st1.perLaneAddr
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
   MshrAccess.io.missReq.bits.blockAddr := Cat(coreReq_st1.tag, coreReq_st1.setIdx)
@@ -291,25 +292,20 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
   val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
   //val missRspTILaneMask_st2 = RegNext(BankConfArb.io.activeLane)
-  val memRspInstrId_st1 = MshrAccess.io.missRspOut.bits.instrId
+  //val memRspInstrId_st1 = MshrAccess.io.missRspOut.bits.instrId
   //val readMissRsp_st2 = missRspFromMshr_st2 & !missRspTI.isWrite
   //val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())
   MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
   TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
 
-  // ******     l1_data_cache::memRsp_pipe3_cycle      ******
-  val missRspBA_st2 = RegNext(missRspBA_st1)
-  val memRspData_st2 = RegNext(memRsp_st1.d_data)
   // ******      dataAccess missRsp      ******
   val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(xLen.W), NSets, NWays)))
-  DataAccessMissRspSRAMWReq.foreach(_.setIdx := get_setIdx(missRspBA_st2))
+  DataAccessMissRspSRAMWReq.foreach(_.setIdx := get_setIdx(missRspBA_st1))
   DataAccessMissRspSRAMWReq.foreach(_.waymask.get := TagAccess.io.waymaskReplacement_st1)
   for (i <- 0 until BlockWords) {
-    DataAccessMissRspSRAMWReq(i).data := memRspData_st2(i)
+    DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i)
   }
-
-
 
   //val mshrMissRspStrobe = !RegNext(MshrAccess.io.missRspOut.valid) |
    // RegNext(RegNext(MshrAccess.io.missRspOut.ready) && MshrAccess.io.missRspOut.valid)
@@ -416,7 +412,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2_valid := true.B
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
-    coreRsp_st2.instrId := memRspInstrId_st1
+    coreRsp_st2.instrId := missRspTI_st1.instrId
     coreRsp_st2.activeMask := missRspTI_st1.perLaneAddr.map(_.activeMask)
   }
 
