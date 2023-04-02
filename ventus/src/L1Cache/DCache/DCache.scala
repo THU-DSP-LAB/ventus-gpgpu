@@ -10,12 +10,13 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache.DCache
 
+import L1Cache.DCache.DCacheParameters._
 import L1Cache._
 import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import pipeline.parameters._
+//import pipeline.parameters._
 
 class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
   val instrId = UInt(WIdBits.W)
@@ -208,21 +209,21 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
 
   // ******      dataAccess bank enable     ******
-  val getBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = num_thread))
+  val getBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = NLanes))
   getBankEn.io.perLaneBlockIdx := coreReq_st1.perLaneAddr.map(_.blockOffset)
   getBankEn.io.perLaneValid := coreReq_st1.perLaneAddr.map(_.activeMask)
 
   // ******      dataAccess write hit      ******
-  val DataAccessWriteHitSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords,new SRAMBundleAW(UInt(xLen.W), NSets, NWays)))
+  val DataAccessWriteHitSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords,new SRAMBundleAW(UInt(8.W), NSets*NWays, BytesOfWord)))
   //this setIdx = setIdx + wayIdx
   DataAccessWriteHitSRAMWReq.foreach(_.setIdx := Cat(coreReq_st1.setIdx,TagAccess.io.waymaskHit_st1))
   for (i <- 0 until BlockWords){
     DataAccessWriteHitSRAMWReq(i).waymask.get := coreReq_st1.perLaneAddr(getBankEn.io.perBankBlockIdx(i)).wordOffset1H
-    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(getBankEn.io.perBankBlockIdx(i))
+    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)).asTypeOf(Vec(BytesOfWord,UInt(8.W)))//TODO check order
   }
 
   // ******      dataAccess read hit      ******
-  val DataAccessReadHitSRAMRReq = Wire(Vec(BlockWords,new SRAMBundleA(NSets)))
+  val DataAccessReadHitSRAMRReq = Wire(Vec(BlockWords,new SRAMBundleA(NSets*NWays)))
   DataAccessReadHitSRAMRReq.foreach(_.setIdx := Cat(coreReq_st1.setIdx,TagAccess.io.waymaskHit_st1))
 
   /*!(BankConfArb.io.bankConflict && (cacheHit_st1 || cacheHit_st2)) &
@@ -301,11 +302,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
 
   // ******      dataAccess missRsp      ******
-  val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(xLen.W), NSets, NWays)))
+  val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets*NWays, BytesOfWord)))
   DataAccessMissRspSRAMWReq.foreach(_.setIdx := Cat(get_setIdx(missRspBA_st1),TagAccess.io.waymaskReplacement_st1))
   DataAccessMissRspSRAMWReq.foreach(_.waymask.get := Fill(BytesOfWord,true.B))
   for (i <- 0 until BlockWords) {
-    DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i)
+    DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
   }
 
   //val mshrMissRspStrobe = !RegNext(MshrAccess.io.missRspOut.valid) |
@@ -347,7 +348,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       0.U(1.W)
     }*/
     //DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCrsCore2Mem.io.DataOut)
-    DataAccess.io.w.req.bits := Mux(missRspFromMshr_st1,DataAccessMissRspSRAMWReq,DataAccessWriteHitSRAMWReq)//TODO 一次memRsp只允许一次握手
+    DataAccess.io.w.req.bits := Mux(missRspFromMshr_st1,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))//TODO 一次memRsp只允许一次握手
     /*DataAccess.io.w.req.bits.data := Mux(missRspFromMshr_st1,
       memRsp_st1.d_data(i),//READ miss resp
       coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)))
@@ -374,7 +375,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         wayIdxAtHit_st1,//wayIdx
         BankConfArb.io.addrCrsbarOut(i).bankOffset.getOrElse(false.B))//bankOffset
     } else{*/
-    DataAccess.io.r.req.bits.setIdx := DataAccessReadHitSRAMRReq
+    DataAccess.io.r.req.bits.setIdx := DataAccessReadHitSRAMRReq(i)
     Cat(DataAccess.io.r.resp.data.reverse)
   }
   val DataAccessReadHitSRAMRRsp: Vec[UInt] = Wire(VecInit(DataAccessesRRsp))
@@ -447,7 +448,7 @@ class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
     val perLaneBlockIdx = Input(Vec(NLane,UInt(log2Up(NBank).W)))
     val perLaneValid = Input(Vec(NLane,Bool()))
     val perBankValid = Output(Vec(NBank,Bool()))
-    val perBankBlockIdx = Input(Vec(NBank,UInt(log2Up(NLane).W)))
+    val perBankBlockIdx = Output(Vec(NBank,UInt(log2Up(NLane).W)))
   })
   val blockIdx1H = Wire(Vec(NLane, UInt(NBank.W)))
   val blockIdxMasked = Wire(Vec(NLane, UInt(NBank.W)))

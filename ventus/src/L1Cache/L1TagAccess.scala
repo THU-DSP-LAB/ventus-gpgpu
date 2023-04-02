@@ -21,7 +21,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //From coreReq_pipe0
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
-    val probeIsWrite_st1 = if(!readOnly){Some(Bool())} else None
+    val probeIsWrite_st1 = if(!readOnly){Some(Input(Bool()))} else None
     //val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
     //To coreReq_pipe1
     val hit_st1 = Output(Bool())
