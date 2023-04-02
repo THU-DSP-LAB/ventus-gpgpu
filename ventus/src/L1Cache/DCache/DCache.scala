@@ -97,7 +97,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRsp_Q_entries :Int = NLanes
   val coreRsp_Q = Module(new Queue(new DCacheCoreRsp,entries = coreRsp_Q_entries,flow=false,pipe=false))
   //this queue also work as a pipeline reg, so cannot flow
-  val coreRsp_QAlmstFull = Wire(Bool())
+  //val coreRsp_QAlmstFull = Wire(Bool())
   val memRsp_Q = Module(new Queue(new DCacheMemRsp,entries = 2,flow=false,pipe=false))
   //flow will make predecessor read hit conflict with successor memRsp
   val memRsp_Q_st0 = memRsp_Q.io.deq.bits
@@ -178,6 +178,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   io.coreReq.ready := coreReq_st1_ready
 
   // ******      l1_data_cache::coreReq_pipe2_cycle      ******
+  TagAccess.io.probeIsWrite_st1.get := writeHit_st1
+
   // ******      mshr missReq      ******
   MshrAccess.io.missReq.valid := readMiss_st1
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
@@ -309,6 +311,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
   }
 
+  memRsp_st1_ready := coreRsp_Q.io.enq.ready
+
   //val mshrMissRspStrobe = !RegNext(MshrAccess.io.missRspOut.valid) |
    // RegNext(RegNext(MshrAccess.io.missRspOut.ready) && MshrAccess.io.missRspOut.valid)
   //val readMissRsp_st1 = (MshrAccess.io.missRspOut.fire() || (MshrAccess.io.missRspOut.valid && BankConfArb.io.bankConflict)) & !missRspTI_st1.isWrite
@@ -375,10 +379,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         wayIdxAtHit_st1,//wayIdx
         BankConfArb.io.addrCrsbarOut(i).bankOffset.getOrElse(false.B))//bankOffset
     } else{*/
-    DataAccess.io.r.req.bits.setIdx := DataAccessReadHitSRAMRReq(i)
+    DataAccess.io.r.req.bits := DataAccessReadHitSRAMRReq(i)
     Cat(DataAccess.io.r.resp.data.reverse)
   }
-  val DataAccessReadHitSRAMRRsp: Vec[UInt] = Wire(VecInit(DataAccessesRRsp))
+  val DataAccessReadHitSRAMRRsp: Vec[UInt] = VecInit(DataAccessesRRsp)
 
   // ******      data crossbar     ******
   /*  DataCrsCore2Mem.io.DataIn := Mux(readMissRsp_st2,
