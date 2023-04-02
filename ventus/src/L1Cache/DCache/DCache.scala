@@ -263,7 +263,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val memRsp_st1_ready = Wire(Bool())
 
   memRsp_Q.io.enq <> io.memRsp
-  memRsp_Q.io.deq.ready := MshrAccess.io.missRspIn.ready && memRsp_st1_ready//TODO add memRsp_st1_ready
+  memRsp_Q.io.deq.ready := MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready//TODO add tag_array
   // && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   when(memReq_Q.io.deq.fire){
     memRsp_st1 := memRsp_Q_st0
@@ -281,6 +281,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source
 
+  // ******      tag write      ******
+  TagAccess.io.allocateWrite.valid := memReq_Q.io.deq.valid//TODO 一次memRsp只允许一次握手
+  TagAccess.io.allocateWrite.bits.setIdx := memReq_Q.io.deq.bits.a_source(SetIdxBits-1,0)
+  //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
+
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
   missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
   missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
@@ -291,18 +296,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())
   MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
-  // ******      tag write      ******
-  val tagAllocateValid = Reg(Bool())
-  when(TagAccess.io.allocateWrite.fire && !memRsp_st1_ready){
-    tagAllocateValid := false.B
-  }.elsewhen(memRsp_Q.io.deq.fire){
-    tagAllocateValid := true.B//TODO modify this
-  }
-  TagAccess.io.allocateWrite.valid := tagAllocateValid //multiple for secondary miss
-  TagAccess.io.allocateWrite.bits(
-    data = get_tag(missRspBA_st1),
-    setIdx = get_setIdx(missRspBA_st1),
-    waymask = 1.U)
+  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
 
   // ******     l1_data_cache::memRsp_pipe3_cycle      ******
   val missRspBA_st2 = RegNext(missRspBA_st1)
