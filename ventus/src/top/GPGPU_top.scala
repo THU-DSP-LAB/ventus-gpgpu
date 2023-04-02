@@ -228,7 +228,7 @@ class SM_wrapper extends Module{
   dcache.io.coreReq.bits.data:=pipe.io.dcache_req.bits.data
   dcache.io.coreReq.bits.instrId:=pipe.io.dcache_req.bits.instrId
   dcache.io.coreReq.bits.setIdx:=pipe.io.dcache_req.bits.setIdx
-  dcache.io.coreReq.bits.isWrite:=pipe.io.dcache_req.bits.isWrite
+  dcache.io.coreReq.bits.opcode:=pipe.io.dcache_req.bits.isWrite//TODO jcf new cache
   dcache.io.coreReq.bits.perLaneAddr:=pipe.io.dcache_req.bits.perLaneAddr
   dcache.io.coreReq.bits.tag:=pipe.io.dcache_req.bits.tag
   // **** dcache coreRsp ****

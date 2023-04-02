@@ -103,12 +103,13 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   tagAccess.io.probeRead.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
   tagAccess.io.probeRead.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
-  tagAccess.io.coreReqReady := io.coreReq.ready
+  //tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
-  tagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.fire()
-  tagAccess.io.allocateWrite.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
+  tagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.fire()//TODO new tagAccess adaption
+  tagAccess.io.allocateWrite.bits.setIdx := get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr)
+  tagAccess.io.allocateWriteData_st1 := get_tag(mshrAccess.io.missRspOut.bits.blockAddr)
 
-  // ******     missReq Queue enqueue     ******
+    // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp
   val memRsp_QData = Wire(UInt((WordLength*BlockWords).W))
   memRsp_QData := memRsp_Q.io.deq.bits.d_data.asUInt()
