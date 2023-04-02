@@ -160,7 +160,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******      l1_data_cache::coreReq_pipe1_cycle      ******
   // ******      tag probe      ******
-  val missRspWriteEnable = Wire(Bool())
+  //val missRspWriteEnable = Wire(Bool())
   TagAccess.io.probeRead.valid := io.coreReq.fire
   TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
@@ -409,7 +409,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreRsp_st2_valid
   coreRsp_Q.io.enq.bits := coreRsp_st2
-  when(readHit_st1){
+  when(readHit_st2){
     coreRsp_Q.io.enq.bits.data := DataAccessReadHitSRAMRRsp
   }
   /*.isWrite := Mux(writeMissRsp_st2,
