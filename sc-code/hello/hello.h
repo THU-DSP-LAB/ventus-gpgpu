@@ -3,6 +3,8 @@
 
 #include "systemc.h"
 #include "../parameters.h"
+#include "tlm.h"
+#include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
 
 SC_MODULE(worker1)
 {
@@ -493,6 +495,40 @@ SC_MODULE(eq_nothing_test)
     SC_THREAD(gen2);
     sensitive << clk.pos();
     SC_THREAD(OUT);
+  }
+};
+
+SC_MODULE(triggered_test)
+{
+  sc_in_clk clk;
+  sc_event_queue eq;
+  sc_event ev;
+
+  void genev()
+  {
+    while (true)
+    {
+      wait(clk.posedge_event());
+      eq.notify(10, SC_NS);
+      ev.notify();
+    }
+  }
+  void display()
+  {
+    while (true)
+    {
+      // wait(clk.posedge_event());
+      wait(eq.default_event() & ev);
+      if (eq.default_event().triggered())
+        cout << "eq at " << sc_time_stamp() << ", delta_cycle=" << sc_delta_count_at_current_time() << ".\n";
+      if (ev.triggered())
+        cout << "ev at " << sc_time_stamp() << ", delta_cycle=" << sc_delta_count_at_current_time() << ".\n";
+    }
+  }
+  SC_CTOR(triggered_test)
+  {
+    SC_THREAD(genev);
+    SC_THREAD(display);
   }
 };
 

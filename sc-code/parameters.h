@@ -2,8 +2,8 @@
 #define _PARAMETERS_H
 
 #include "systemc.h"
-#include "tlm.h"
-#include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
+// #include "tlm.h"
+// #include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
 #include <set>
 #include <queue>
 #include <math.h>
@@ -22,6 +22,7 @@ inline constexpr int OPCFIFO_SIZE = 4;
 inline constexpr int BANK_NUM = 4;
 
 using reg_t = sc_int<32>;
+using v_regfile_t = std::array<reg_t, num_thread>;
 
 enum OP_TYPE
 { // start at 1, so 0 is invalid op
@@ -124,12 +125,18 @@ struct bank_t
     int bank_id;
     int addr;
 };
+struct warpaddr_t
+{
+    int warp_id;
+    int addr;
+};
 struct opcfifo_t
 {
     // 进入opcfifo时，若要取操作数，令valid=1，等待regfile返回ready=1
     // 若是立即数，不用取操作数，令valid=0且直接令ready=1
     // 只要ready=1，就可以发射
     I_TYPE ins;
+    int warp_id;
     std::array<bool, 4> ready = {0};
     std::array<bool, 4> valid = {0};
     std::array<bank_t, 4> srcaddr;
@@ -142,11 +149,12 @@ struct opcfifo_t
     }
     opcfifo_t(){};
     opcfifo_t(I_TYPE ins_) : ins(ins_){};
-    opcfifo_t(I_TYPE ins_, const std::array<bool, 4> &ready_arr,
+    opcfifo_t(I_TYPE ins_, int warp_id_,
+              const std::array<bool, 4> &ready_arr,
               const std::array<bool, 4> &valid_arr,
               const std::array<bank_t, 4> &srcaddr_arr,
               const std::array<bool, 4> &banktype_arr)
-        : ins(ins_), ready(ready_arr), valid(valid_arr),
+        : ins(ins_), warp_id(warp_id_), ready(ready_arr), valid(valid_arr),
           srcaddr(srcaddr_arr), banktype(banktype_arr){};
 };
 
@@ -176,6 +184,10 @@ public:
                     break;
                 }
             }
+        }
+        else
+        {
+            throw std::out_of_range("StaticEntry full but push data");
         }
     }
 
@@ -244,7 +256,7 @@ public:
     {
         if (size == 0)
         {
-            throw std::out_of_range("Queue is empty");
+            throw std::out_of_range("StaticQueue is empty");
         }
         front_index = (front_index + 1) % capacity;
         --size;
@@ -258,7 +270,7 @@ public:
     { // return front and pop
         if (size == 0)
         {
-            throw std::out_of_range("Queue is empty");
+            throw std::out_of_range("StaticQueue is empty");
         }
         T re = data[front_index];
         front_index = (front_index + 1) % capacity;
@@ -269,7 +281,7 @@ public:
     {
         if (size == 0)
         {
-            throw std::out_of_range("Queue is empty");
+            throw std::out_of_range("StaticQueue is empty");
         }
         return data[front_index];
     }
@@ -277,7 +289,7 @@ public:
     {
         if (size == 0)
         {
-            throw std::out_of_range("Queue is empty");
+            throw std::out_of_range("StaticQueue is empty");
         }
         return data[front_index];
     }
@@ -326,12 +338,14 @@ public:
 struct salu_in_t
 {
     I_TYPE ins;
+    int warp_id;
     reg_t rss1_data;
     reg_t rss2_data;
 };
 struct salu_out_t
 {
     I_TYPE ins;
+    int warp_id;
     reg_t data;
     bool operator==(const salu_out_t &rhs) const
     {
@@ -341,6 +355,7 @@ struct salu_out_t
     {
         ins = rhs.ins;
         data = rhs.data;
+        warp_id = rhs.warp_id;
         return *this;
     }
     friend ostream &operator<<(ostream &os, salu_out_t const &v)
@@ -351,18 +366,21 @@ struct salu_out_t
     friend void sc_trace(sc_trace_file *tf, const salu_out_t &v, const std::string &NAME)
     {
         sc_trace(tf, v.ins, NAME + ".ins");
+        sc_trace(tf, v.warp_id, NAME + ".warp_id");
         sc_trace(tf, v.data, NAME + ".data");
     }
 };
 struct valu_in_t
 {
     I_TYPE ins;
+    int warp_id;
     std::array<reg_t, num_thread> rsv1_data, rsv2_data;
     reg_t rss2_data;
 };
 struct valu_out_t
 {
     I_TYPE ins;
+    int warp_id;
     std::array<reg_t, num_thread> rdv1_data;
     bool operator==(const valu_out_t &rhs) const
     {
@@ -372,6 +390,7 @@ struct valu_out_t
     {
         ins = rhs.ins;
         rdv1_data = rhs.rdv1_data;
+        warp_id = rhs.warp_id;
         return *this;
     }
     friend ostream &operator<<(ostream &os, valu_out_t const &v)
@@ -397,16 +416,19 @@ struct valu_out_t
         sc_trace(tf, v.rdv1_data[5], NAME + ".rdv1_data(5)");
         sc_trace(tf, v.rdv1_data[6], NAME + ".rdv1_data(6)");
         sc_trace(tf, v.rdv1_data[7], NAME + ".rdv1_data(7)");
+        sc_trace(tf, v.warp_id, NAME + ".warp_id");
     }
 };
 struct vfpu_in_t
 {
     I_TYPE ins;
+    int warp_id;
     std::array<float, num_thread> rsf1_data, rsf2_data;
 };
 struct vfpu_out_t
 {
     I_TYPE ins;
+    int warp_id;
     std::array<float, num_thread> rdf1_data;
     bool operator==(const vfpu_out_t &rhs) const
     {
@@ -416,6 +438,7 @@ struct vfpu_out_t
     {
         ins = rhs.ins;
         rdf1_data = rhs.rdf1_data;
+        warp_id = rhs.warp_id;
         return *this;
     }
     friend ostream &operator<<(ostream &os, vfpu_out_t const &v)
@@ -441,11 +464,13 @@ struct vfpu_out_t
         sc_trace(tf, v.rdf1_data[5], NAME + ".rdf1_data(5)");
         sc_trace(tf, v.rdf1_data[6], NAME + ".rdf1_data(6)");
         sc_trace(tf, v.rdf1_data[7], NAME + ".rdf1_data(7)");
+        sc_trace(tf, v.warp_id, NAME + ".warp_id");
     }
 };
 struct lsu_in_t
 {
     I_TYPE ins;
+    int warp_id;
     reg_t rss1_data; // 从regfile取出的数据作为momory地址
     // below 3 data is to store
     reg_t rds1_data;
@@ -455,6 +480,7 @@ struct lsu_in_t
 struct lsu_out_t
 {
     I_TYPE ins;
+    int warp_id;
     reg_t rds1_data;
     std::array<reg_t, num_thread> rdv1_data;
     std::array<float, num_thread> rdf1_data;
@@ -469,6 +495,7 @@ struct lsu_out_t
         rds1_data = rhs.rds1_data;
         rdv1_data = rhs.rdv1_data;
         rdf1_data = rhs.rdf1_data;
+        warp_id = rhs.warp_id;
         return *this;
     }
     friend ostream &operator<<(ostream &os, lsu_out_t const &v)
@@ -510,7 +537,40 @@ struct lsu_out_t
         sc_trace(tf, v.rdf1_data[5], NAME + ".rdf1_data(5)");
         sc_trace(tf, v.rdf1_data[6], NAME + ".rdf1_data(6)");
         sc_trace(tf, v.rdf1_data[7], NAME + ".rdf1_data(7)");
+        sc_trace(tf, v.warp_id, NAME + ".warp_id");
     }
+};
+
+class WARP_BONE
+{
+public:
+    // fetch
+    sc_event ev_fetchpc, ev_decode;
+    sc_signal<bool> ibuf_swallow; // 表示是否接收上一cycle fetch_valid，相当于ready
+    sc_signal<bool> fetch_valid{"fetch_valid"};
+    sc_signal<bool> jump{"jump"}, branch_sig{"branch_sig"}; // 无论是否jump，只要发生了分支判断，将branch_sig置为1
+    sc_signal<int> jump_addr{"jump_addr"}, pc{"pc"};
+    I_TYPE fetch_ins;
+    sc_signal<I_TYPE> decode_ins{"decode_ins"};
+    std::array<I_TYPE, ireg_size> ireg;
+    // ibuffer
+    sc_event ev_ibuf_inout, ev_ibuf_updated;
+    sc_signal<bool> ibuf_empty{"ibuf_empty"}, ibuf_full{"ibuf_full"};
+    sc_signal<I_TYPE> ibuftop_ins{"ibuftop_ins"};
+    StaticQueue<I_TYPE, IFIFO_SIZE> ififo;
+    sc_signal<int> ififo_elem_num;
+    // scoreboard
+    sc_event ev_judge_dispatch;
+    bool can_dispatch;
+    sc_signal<bool> dispatch_warp_valid{"dispatch_warp_valid"};
+    I_TYPE _scoretmpins;
+    std::set<SCORE_TYPE> score; // record regfile addr that's to be written
+    bool wait_bran;             // 应该使用C++类型；dispatch了分支指令，则要暂停dispatch等待分支指令被执行
+    // issue
+    sc_event ev_issue;
+    // regfile
+    std::array<reg_t, 32> s_regfile;
+    std::array<v_regfile_t, 32> v_regfile;
 };
 
 #endif

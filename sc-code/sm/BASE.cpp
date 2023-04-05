@@ -2,69 +2,74 @@
 
 void BASE::debug_sti()
 {
+    while (true)
+    {
+        wait(clk.posedge_event());
+        wait(SC_ZERO_TIME);
+        dispatch_ready = !opc_full | doemit;
+    }
 }
 
 void BASE::debug_display()
 {
     while (true)
     {
-        wait(ev_salufifo_updated);
-        cout << "ev_salufifo_updated triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        wait(ev_salufifo_pushed);
+        cout << "ev_salufifo_pushed triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
     }
 }
 void BASE::debug_display1()
 {
     while (true)
     {
-        wait(ev_valufifo_updated);
-        cout << "ev_valufifo_updated triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        wait(ev_valufifo_pushed);
+        cout << "ev_valufifo_pushed triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
     }
 }
 void BASE::debug_display2()
 {
     while (true)
     {
-        wait(ev_vfpufifo_updated);
-        cout << "ev_vfpufifo_updated triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        wait(ev_vfpufifo_pushed);
+        cout << "ev_vfpufifo_pushed triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
     }
 }
 void BASE::debug_display3()
 {
     while (true)
     {
-        wait(ev_lsufifo_updated);
-        cout << "ev_lsufifo_updated triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        wait(ev_lsufifo_pushed);
+        cout << "ev_lsufifo_pushed triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
     }
 }
 
 void BASE::PROGRAM_COUNTER(int warp_id)
 {
+    WARPS[warp_id].pc = 0;
     while (true)
     {
-        // wait();
+        wait(clk.posedge_event());
         // cout << "PC start by clk at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-        wait(ev_ibuf_inout);
+        // wait(WARPS[warp_id].ev_ibuf_inout); // ibuf判断swallow后，fetch新指令
         // cout << "PC start, ibuf_swallow=" << ibuf_swallow << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         if (rst_n == 0)
         {
-            pc = -1;
-            fetch_valid = false;
+            WARPS[warp_id].pc = -1;
+            WARPS[warp_id].fetch_valid = false;
         }
-        else if (jump == 1)
+        else if (WARPS[warp_id].jump == 1)
         {
-            pc = jump_addr;
-            fetch_valid = true;
+            WARPS[warp_id].pc = WARPS[warp_id].jump_addr;
+            WARPS[warp_id].fetch_valid = true;
             // cout << "pc jumps to addr " << jump_addr.read() << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
         }
-        else if (ibuf_empty | ibuf_swallow)
+        else if (WARPS[warp_id].ibuf_empty |
+                 (!WARPS[warp_id].ibuf_full |
+                  (WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))))
         {
             // cout << "pc will +1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-            pc = pc.read() + 1;
-            fetch_valid = true;
-        }
-        else
-        {
-            fetch_valid = false;
+            WARPS[warp_id].pc = WARPS[warp_id].pc.read() + 1;
+            WARPS[warp_id].fetch_valid = true;
         }
     }
 }
@@ -82,12 +87,15 @@ void BASE::INSTRUCTION_REG(int warp_id)
 
     while (true)
     {
-        fetch_ins = (pc.read() >= 0) ? ireg[pc.read()] : I_TYPE(INVALID_, 0, 0, 0);
+        WARPS[warp_id].fetch_ins =
+            (WARPS[warp_id].pc.read() >= 0)
+                ? WARPS[warp_id].ireg[WARPS[warp_id].pc.read()]
+                : I_TYPE(INVALID_, 0, 0, 0);
         // cout << "pc=" << pc << ", fetch_ins is " << fetch_ins << " at " << sc_time_stamp()
         //      << ", it will be " << ireg[pc.read()] << " at the next timestamp"
         //      << "\n";
-        ev_decode.notify();
-        wait(pc.value_changed_event());
+        WARPS[warp_id].ev_decode.notify();
+        wait(WARPS[warp_id].pc.value_changed_event());
         // cout << "pc.value_changed_event() triggered\n";
     }
 }
@@ -96,15 +104,17 @@ void BASE::DECODE(int warp_id)
 {
     while (true)
     {
-        wait(ev_decode);
-        switch (fetch_ins.op)
+        wait(WARPS[warp_id].ev_decode);
+        switch (WARPS[warp_id].fetch_ins.op)
         {
         case beq_:
-            decode_ins = I_TYPE(fetch_ins, pc.read() + 1 + fetch_ins.d);
+            WARPS[warp_id].decode_ins =
+                I_TYPE(WARPS[warp_id].fetch_ins,
+                       WARPS[warp_id].pc.read() + 1 + WARPS[warp_id].fetch_ins.d);
             // cout << "decoding beq ins at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             break;
         default:
-            decode_ins = I_TYPE(fetch_ins, -1);
+            WARPS[warp_id].decode_ins = I_TYPE(WARPS[warp_id].fetch_ins, -1);
             break;
         }
     }
@@ -116,46 +126,46 @@ void BASE::IBUF_ACTION(int warp_id)
     I_TYPE _readdata3;
     while (true)
     {
-        wait();
-        ibuf_swallow = false;
-        // cout << "IBUF: entering ibuf at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
+        wait(clk.posedge_event());
+        WARPS[warp_id].ibuf_swallow = false;
+        // cout << "IBUF: entering ibuf at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         if (rst_n.read() == 0)
-            ififo.clear();
+            WARPS[warp_id].ififo.clear();
         else
         {
-            if (dispatch)
+            if (WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
             {
                 // cout << "before dispatch, ififo has " << ififo.used() << " elems at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                dispatch_ins_ = ififo.get();
+                dispatch_ins_ = WARPS[warp_id].ififo.get();
                 // cout << "IBUF: after dispatch, ififo has " << ififo.used() << " elems at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             }
             else
             {
                 // cout << "IBUF: dispatch == false at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             }
-            if (fetch_valid && jump == false)
+            if (WARPS[warp_id].fetch_valid && WARPS[warp_id].jump == false)
             {
-                if (ififo.isfull())
+                if (WARPS[warp_id].ififo.isfull())
                 {
                     // cout << "IBUF ERROR: ibuf is full but is sent an ins from FETCH at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 }
                 else
                 {
-                    ififo.push(decode_ins.read());
-                    ibuf_swallow = true;
+                    WARPS[warp_id].ififo.push(WARPS[warp_id].decode_ins.read());
+                    WARPS[warp_id].ibuf_swallow = true;
                 }
                 // cout << "before put, ififo has " << ififo.used() << " elems at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
 
                 // cout << "after put, ififo has " << ififo.used() << " elems at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 // cout << "ififo has put ins " << fetch_ins << ", whose jump_addr is " << fetch_ins.jump_addr << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             }
-            else if (jump)
+            else if (WARPS[warp_id].jump)
             {
                 // cout << "ibuf detected jump at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                ififo.clear();
+                WARPS[warp_id].ififo.clear();
             }
         }
-        ev_ibuf_inout.notify();
+        WARPS[warp_id].ev_ibuf_inout.notify();
     }
 }
 
@@ -163,20 +173,21 @@ void BASE::IBUF_PARAM(int warp_id)
 {
     while (true)
     {
-        wait(ev_ibuf_inout);
-        ibuf_empty = ififo.isempty();
-        if (ififo.isempty())
+        wait(WARPS[warp_id].ev_ibuf_inout);
+        WARPS[warp_id].ibuf_empty = WARPS[warp_id].ififo.isempty();
+        WARPS[warp_id].ibuf_full = WARPS[warp_id].ififo.isfull();
+        if (WARPS[warp_id].ififo.isempty())
         {
-            ififo_elem_num = 0;
-            ibuftop_ins = I_TYPE(INVALID_, -1, 0, 0);
+            WARPS[warp_id].ififo_elem_num = 0;
+            WARPS[warp_id].ibuftop_ins = I_TYPE(INVALID_, -1, 0, 0);
         }
         else
         {
-            ibuftop_ins.write(ififo.front());
-            ififo_elem_num = ififo.used();
+            WARPS[warp_id].ibuftop_ins.write(WARPS[warp_id].ififo.front());
+            WARPS[warp_id].ififo_elem_num = WARPS[warp_id].ififo.used();
             // cout << "ififo has " << ififo.used() << " elems in it at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
         }
-        ev_ibuf_updated.notify();
+        WARPS[warp_id].ev_ibuf_updated.notify();
     }
 }
 
@@ -187,8 +198,8 @@ void BASE::UPDATE_SCORE(int warp_id)
     REG_TYPE regtype_;
     while (true)
     {
-        wait();
-        if (wb_ena)
+        wait(clk.posedge_event());
+        if (wb_ena && wb_warpid == warp_id)
         {
             tmpins = wb_ins;
             // cout << "scoreboard: wb_ins is " << tmpins << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
@@ -207,36 +218,38 @@ void BASE::UPDATE_SCORE(int warp_id)
                 regtype_ = f;
                 break;
             }
-            it = score.find(SCORE_TYPE(regtype_, tmpins.d));
+            it = WARPS[warp_id].score.find(SCORE_TYPE(regtype_, tmpins.d));
             // cout << "scoreboard写回: 正在寻找 SCORE " << SCORE_TYPE(regtype_, tmpins.d) << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-            if (it == score.end())
+            if (it == WARPS[warp_id].score.end())
             {
-                cout << "wb_ena error: scoreboard can't find rd in score set, wb_ins=" << wb_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                break;
+                cout << "warp" << warp_id << "_wb_ena error: scoreboard can't find rd in score set, wb_ins=" << wb_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
-            score.erase(it);
-            cout << "scoreboard: succesfully erased SCORE " << SCORE_TYPE(regtype_, tmpins.d) << ", wb_ins=" << wb_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+            else
+            {
+                WARPS[warp_id].score.erase(it);
+            }
+            // cout << "warp" << warp_id << "_scoreboard: succesfully erased SCORE " << SCORE_TYPE(regtype_, tmpins.d) << ", wb_ins=" << wb_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         }
-        if (branch_sig)
+        if (WARPS[warp_id].branch_sig)
         {
-            if (wait_bran == 0)
+            if (WARPS[warp_id].wait_bran == 0)
             {
-                cout << "scoreboard error: detect branch_sig=1(from salu) while wait_bran=0 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "warp" << warp_id << "_scoreboard error: detect branch_sig=1(from salu) while wait_bran=0 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
-            else if (dispatch)
+            else if (WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
             {
-                cout << "scoreboard error: detect branch_sig=1(from salu) while dispatch=1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "warp" << warp_id << "_scoreboard error: detect branch_sig=1(from salu) while dispatch=1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
-            wait_bran = 0;
+            WARPS[warp_id].wait_bran = 0;
         }
-        else if (ibuftop_ins.read().op == beq_ && dispatch)
+        else if (WARPS[warp_id].ibuftop_ins.read().op == beq_ && WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
         {
             // cout << "ibuf let wait_bran=1 at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-            wait_bran = 1;
+            WARPS[warp_id].wait_bran = 1;
         }
-        if (dispatch)
+        if (WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
         {
-            tmpins = ibuftop_ins; // this ibuftop_ins is the old data
+            tmpins = WARPS[warp_id].ibuftop_ins; // this ibuftop_ins is the old data
             if (tmpins.op != beq_)
             {
                 switch (tmpins.op)
@@ -254,12 +267,12 @@ void BASE::UPDATE_SCORE(int warp_id)
                     regtype_ = f;
                     break;
                 }
-                score.insert(SCORE_TYPE(regtype_, tmpins.d));
-                cout << "scoreboard insert " << SCORE_TYPE(regtype_, tmpins.d)
-                     << " because of dispatch " << tmpins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                WARPS[warp_id].score.insert(SCORE_TYPE(regtype_, tmpins.d));
+                // cout << "warp" << warp_id << "_scoreboard: insert " << SCORE_TYPE(regtype_, tmpins.d)
+                //      << " because of dispatch " << tmpins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
         }
-        ev_judge_dispatch.notify();
+        WARPS[warp_id].ev_judge_dispatch.notify();
     }
 }
 
@@ -268,100 +281,120 @@ void BASE::JUDGE_DISPATCH(int warp_id)
     I_TYPE _readibuf;
     while (true)
     {
-        wait(ev_judge_dispatch & ev_ibuf_updated);
+        wait(WARPS[warp_id].ev_judge_dispatch & WARPS[warp_id].ev_ibuf_updated);
         // cout << "scoreboard: ibuftop_ins=" << ibuftop_ins << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-        if (wait_bran | jump)
+        if (WARPS[warp_id].wait_bran | WARPS[warp_id].jump)
         {
-            can_dispatch = false;
+            WARPS[warp_id].can_dispatch = false;
         }
-        else if (!ififo.isempty())
+        else if (!WARPS[warp_id].ififo.isempty())
         {
-            _readibuf = ififo.front();
+            _readibuf = WARPS[warp_id].ififo.front();
             switch (_readibuf.op)
             {
             case lw_:
                 // cout << "JUDGE_DISPATCH switch to lw_ case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                if (score.find(SCORE_TYPE(s, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(s, _readibuf.d)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.d)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
-                    can_dispatch = false;
+                    WARPS[warp_id].can_dispatch = false;
                 break;
             case add_:
                 // cout << "JUDGE_DISPATCH switch to add_ case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                if (score.find(SCORE_TYPE(s, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(s, _readibuf.s2)) == score.end() &&
-                    score.find(SCORE_TYPE(s, _readibuf.d)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.s2)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.d)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
-                    can_dispatch = false;
+                    WARPS[warp_id].can_dispatch = false;
                 break;
             case beq_:
-                if (score.find(SCORE_TYPE(s, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(s, _readibuf.s2)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.s2)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
-                    can_dispatch = false;
+                    WARPS[warp_id].can_dispatch = false;
                 break;
             case vload_:
-                if (score.find(SCORE_TYPE(v, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(v, _readibuf.d)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.d)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
-                    can_dispatch = false;
+                    WARPS[warp_id].can_dispatch = false;
                 break;
             case vaddvv_:
                 // cout << "JUDGE_DISPATCH switch to vaddvv_ case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                if (score.find(SCORE_TYPE(v, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(v, _readibuf.s2)) == score.end() &&
-                    score.find(SCORE_TYPE(v, _readibuf.d)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s2)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.d)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
-                    can_dispatch = false;
+                    WARPS[warp_id].can_dispatch = false;
                 break;
             case vaddvx_:
                 // cout << "JUDGE_DISPATCH switch to vaddvx_ case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                if (score.find(SCORE_TYPE(v, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(s, _readibuf.s2)) == score.end() &&
-                    score.find(SCORE_TYPE(v, _readibuf.d)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(s, _readibuf.s2)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.d)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
                 {
-                    can_dispatch = false;
-                    // cout << "JUDGE_DISPATCH don't dispatch vaddvx_, ins is " << ibuftop_ins << ", at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
+                    WARPS[warp_id].can_dispatch = false;
+                    // cout << "warp" << warp_id << ": JUDGE_DISPATCH don't dispatch vaddvx_, ins is " << _readibuf << ", at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 }
                 break;
             case vfadd_:
                 // cout << "JUDGE_DISPATCH switch to vfadd_ case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                if (score.find(SCORE_TYPE(f, _readibuf.s1)) == score.end() &&
-                    score.find(SCORE_TYPE(f, _readibuf.s2)) == score.end() &&
-                    score.find(SCORE_TYPE(f, _readibuf.d)) == score.end())
-                    can_dispatch = true;
+                if (WARPS[warp_id].score.find(SCORE_TYPE(f, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(f, _readibuf.s2)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(f, _readibuf.d)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
                 else
-                    can_dispatch = false;
+                    WARPS[warp_id].can_dispatch = false;
                 break;
             default:
-                can_dispatch = false;
+                WARPS[warp_id].can_dispatch = false;
                 // cout << "JUDGE_DISPATCH switch to default case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 break;
             }
         }
-        ev_issue.notify();
+        WARPS[warp_id].ev_issue.notify();
     }
 }
 
 void BASE::ISSUE_ACTION()
 {
+    bool find_dispatchwarp = 0;
+    last_dispatch_warpid = 0;
     while (true)
     {
-        wait(ev_issue);
-        if (can_dispatch && (emit == true | opc_full == false))
+        wait(ev_issue_list);
+        // cout << "ISSUE start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        if (!opc_full | doemit) // 这是dispatch_ready (ready-valid机制)
         {
-            dispatch = true;
-            issue_ins = ififo.front();
+            find_dispatchwarp = 0;
+            for (int i = last_dispatch_warpid; i < last_dispatch_warpid + num_warp; i++)
+            {
+                if (!find_dispatchwarp && WARPS[i % num_warp].can_dispatch)
+                {
+                    // cout << "ISSUE: opc_full=" << opc_full << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                    WARPS[i % num_warp].dispatch_warp_valid = true;
+                    dispatch_valid = true;
+                    issue_ins = WARPS[i % num_warp].ififo.front();
+                    issueins_warpid = i % num_warp;
+                    find_dispatchwarp = true;
+                    last_dispatch_warpid = i % num_warp + 1;
+                }
+                else
+                {
+                    WARPS[i % num_warp].dispatch_warp_valid = false;
+                    // cout << "ISSUE: let warp" << i % num_warp << " dispatch_warp_valid=false at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                }
+            }
+            if (!find_dispatchwarp)
+                dispatch_valid = false;
         }
-        else
-            dispatch = false;
     }
 }
 
@@ -369,13 +402,22 @@ bank_t BASE::bank_decode(int warp_id, int srcaddr)
 {
     bank_t tmp;
     tmp.bank_id = srcaddr % BANK_NUM;
-    tmp.addr = warp_id * 32 / BANK_NUM + srcaddr / BANK_NUM;
+    tmp.addr = warp_id * 32 / BANK_NUM + srcaddr / BANK_NUM; // 32是每个warp寄存器有32个元素
+    return tmp;
+}
+
+warpaddr_t BASE::bank_undecode(int bank_id, int bankaddr)
+{
+    warpaddr_t tmp;
+    tmp.warp_id = bankaddr / 8;
+    tmp.addr = (bankaddr % (32 / BANK_NUM)) * BANK_NUM + bank_id;
     return tmp;
 }
 
 void BASE::OPC_FIFO()
 {
     I_TYPE _readdata4;
+    int _readwarpid;
     std::array<bool, 4> in_ready;
     std::array<bool, 4> in_valid;
     std::array<bank_t, 4> in_srcaddr;
@@ -384,83 +426,79 @@ void BASE::OPC_FIFO()
     {
         wait();
         // cout << "OPC_FIFO start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-        if (jump)
+        if (doemit)
         {
-            opcfifo.clear();
-            opc_full = false;
-            opc_empty = true;
-            opctop_ins = I_TYPE(INVALID_, 0, 0, 0);
-            opcfifo_elem_num = 0;
-            ev_opc_pop.notify();
+            // cout << "opcfifo is popping index " << emit_idx << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
+            opcfifo.pop(emit_idx); // last cycle emit
         }
-        else
+        ev_opc_pop.notify();
+        // 目前的事件顺序，若某ins进入OPC而立刻ready，则会有问题，后续要修改
+        if (dispatch_valid)
         {
-            if (emit)
+            // cout << "opc begin to put at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+            if (opc_full && doemit == false) // 相当于上一cycle dispatch_ready
             {
-                // cout << "opcfifo is popping index " << emit_idx << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                opcfifo.pop(emit_idx); // last cycle emit
+                // if not ready, just wait, no need throw ERROR
+                // cout << "OPC ERROR: is full but receive ins from issue at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
-            ev_opc_pop.notify();
-            if (dispatch && jump == false)
+            else
             {
-                // cout << "opc begin to put at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                if (opc_full)
+                _readdata4 = issue_ins.read();
+                _readwarpid = issueins_warpid;
+                switch (_readdata4.op)
                 {
-                    cout << "OPC ERROR: is full but receive ins from issue at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                case lw_:
+                case vload_:
+                    in_ready = {0, 1, 1, 1};
+                    in_valid = {1, 0, 0, 0};
+                    in_srcaddr[0] = bank_decode(_readwarpid, _readdata4.s1);
+                    in_banktype = {0, 0, 0, 0};
+                    break;
+                case add_:
+                case beq_:
+                    in_ready = {0, 0, 1, 1};
+                    in_valid = {1, 1, 0, 0};
+                    in_srcaddr[0] = bank_decode(_readwarpid, _readdata4.s1);
+                    in_srcaddr[1] = bank_decode(_readwarpid, _readdata4.s2);
+                    in_banktype = {0, 0, 0, 0};
+                    break;
+                case vaddvv_:
+                case vfadd_:
+                    in_ready = {0, 0, 1, 1};
+                    in_valid = {1, 1, 0, 0};
+                    in_srcaddr[0] = bank_decode(_readwarpid, _readdata4.s1);
+                    in_srcaddr[1] = bank_decode(_readwarpid, _readdata4.s2);
+                    in_banktype = {1, 1, 0, 0};
+                    break;
+                case vaddvx_:
+                    in_ready = {0, 0, 1, 1};
+                    in_valid = {1, 1, 0, 0};
+                    in_srcaddr[0] = bank_decode(_readwarpid, _readdata4.s1);
+                    in_srcaddr[1] = bank_decode(_readwarpid, _readdata4.s2);
+                    in_banktype = {1, 0, 0, 0};
+                    break;
+                case INVALID_:
+                    cout << "OPC error: issue_ins INVALID_ at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                    break;
+                default:
+                    cout << "OPC warning: OPC_FIFO switch to unrecognized branch\n";
                 }
-                else
-                {
-                    _readdata4 = issue_ins.read();
-                    switch (_readdata4.op)
-                    {
-                    case lw_:
-                    case vload_:
-                        in_ready = {0, 1, 1, 1};
-                        in_valid = {1, 0, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1); // 暂时warp_id=0
-                        in_banktype = {0, 0, 0, 0};
-                        break;
-                    case add_:
-                    case beq_:
-                        in_ready = {0, 0, 1, 1};
-                        in_valid = {1, 1, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1);
-                        in_srcaddr[1] = bank_decode(0, _readdata4.s2);
-                        in_banktype = {0, 0, 0, 0};
-                        break;
-                    case vaddvv_:
-                    case vfadd_:
-                        in_ready = {0, 0, 1, 1};
-                        in_valid = {1, 1, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1);
-                        in_srcaddr[1] = bank_decode(0, _readdata4.s2);
-                        in_banktype = {1, 1, 0, 0};
-                        break;
-                    case vaddvx_:
-                        in_ready = {0, 0, 1, 1};
-                        in_valid = {1, 1, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1);
-                        in_srcaddr[1] = bank_decode(0, _readdata4.s2);
-                        in_banktype = {1, 0, 0, 0};
-                        break;
-                    case INVALID_:
-                        cout << "OPC error: issue_ins INVALID_ at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                        break;
-                    default:
-                        cout << "OPC warning: OPC_FIFO switch to unrecognized branch\n";
-                    }
-                }
-                opcfifo.push(opcfifo_t(_readdata4, in_ready, in_valid, in_srcaddr, in_banktype));
-                // cout << "opcfifo has put issue_ins " << issue_ins << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
+                // cout << "opcfifo push issue_ins " << issue_ins << "warp" << issueins_warpid
+                //      << ", srcaddr=(" << in_srcaddr[0].bank_id << "," << in_srcaddr[0].addr
+                //      << ";" << in_srcaddr[1].bank_id << "," << in_srcaddr[1].addr << ")"
+                //      << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                opcfifo.push(opcfifo_t(_readdata4, _readwarpid,
+                                       in_ready, in_valid, in_srcaddr, in_banktype));
             }
         }
         opcfifo_elem_num = opcfifo.get_size();
-        opc_full = opcfifo_elem_num == OPCFIFO_SIZE;
-        opc_empty = opcfifo_elem_num == 0;
-        //  由ready写入entry
+        opc_full = opcfifo.get_size() == OPCFIFO_SIZE;
+        opc_empty = opcfifo.get_size() == 0;
         // cout << "OPC_FIFO waiting ev_opc_judge_emit at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         wait(ev_opc_judge_emit);
         // cout << "OPC_FIFO get ev_opc_judge_emit at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+
+        //  由ready写入entry，不能影响当前cycle判断emit
         for (int i = 0; i < OPCFIFO_SIZE; i++)
         {
             for (int j = 0; j < 4; j++)
@@ -483,18 +521,22 @@ void BASE::OPC_EMIT()
     while (true)
     {
         wait(ev_opc_pop);
-        emit = 0;
+        doemit = false;
         findemit = 0;
-        emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
+        emito_salu = false;
+        emito_valu = false;
+        emito_vfpu = false;
+        emito_lsu = false;
         for (int i = 0; i < OPCFIFO_SIZE; i++)
         {
             if (findemit)
                 break;
             if (opcfifo.tag_valid(i) && opcfifo[i].all_ready())
             {
-                opctop_ins = opcfifo[i].ins;
-                // cout << "opcfifo[" << i << "]-" << opctop_ins << "is all ready, at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                switch (opctop_ins.op)
+                emit_ins = opcfifo[i].ins;
+                emitins_warpid = opcfifo[i].warp_id;
+                // cout << "opcfifo[" << i << "]-" << emit_ins << "is all ready, at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                switch (opcfifo[i].ins.op)
                 {
                 case add_:
                 case beq_:
@@ -502,15 +544,11 @@ void BASE::OPC_EMIT()
                     {
                         emit_idx = i;
                         findemit = 1;
+                        doemit = true;
                         // cout << "OPC: salu is ready at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                         emito_salu = true;
-                        emito_valu = emito_vfpu = emito_lsu = false;
                         rss1_data = opcfifo[i].data[0][0];
                         rss2_data = opcfifo[i].data[1][0];
-                    }
-                    else
-                    {
-                        emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
                     }
                     break;
                 case vaddvv_:
@@ -518,40 +556,36 @@ void BASE::OPC_EMIT()
                     {
                         emit_idx = i;
                         findemit = 1;
+                        doemit = true;
                         emito_valu = true;
-                        emito_salu = emito_vfpu = emito_lsu = false;
                         for (int j = 0; j < num_thread; j++)
                         {
                             rsv1_data[j] = opcfifo[i].data[0][j];
                             rsv2_data[j] = opcfifo[i].data[1][j];
                         }
                     }
-                    else
-                        emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
                     break;
                 case vaddvx_:
                     if (valu_ready)
                     {
                         emit_idx = i;
                         findemit = 1;
+                        doemit = true;
                         emito_valu = true;
-                        emito_salu = emito_vfpu = emito_lsu = false;
                         for (int j = 0; j < num_thread; j++)
                         {
                             rsv1_data[j] = opcfifo[i].data[0][j];
                         }
                         rss2_data = opcfifo[i].data[1][0];
                     }
-                    else
-                        emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
                     break;
                 case vfadd_:
                     if (vfpu_ready)
                     {
                         emit_idx = i;
                         findemit = 1;
+                        doemit = true;
                         emito_vfpu = true;
-                        emito_salu = emito_valu = emito_lsu = false;
                         for (int j = 0; j < num_thread; j++)
                         {
                             pa1 = &(opcfifo[i].data[0][j]);
@@ -560,8 +594,6 @@ void BASE::OPC_EMIT()
                             rsf2_data[j] = *((float *)pa2);
                         }
                     }
-                    else
-                        emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
                     break;
                 case lw_:
                 case vload_:
@@ -569,23 +601,16 @@ void BASE::OPC_EMIT()
                     {
                         emit_idx = i;
                         findemit = 1;
+                        doemit = true;
                         emito_lsu = true;
-                        emito_salu = emito_valu = emito_vfpu = false;
                         rss1_data = opcfifo[i].data[0][0];
-                    }
-                    else
-                    {
-                        // 注意，一旦写连等式，就不能用sc_signal，否则左侧变量会被右侧变量的旧值赋值
-                        emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
                     }
                     break;
                 case INVALID_:
-                    emito_salu = emito_valu = emito_vfpu = emito_lsu = false;
                     break;
                 }
             }
         }
-        emit = emito_salu | emito_valu | emito_vfpu | emito_lsu;
         // cout << "emit_idx is set to " << emit_idx << "\n";
         ev_opc_judge_emit.notify();
     }
@@ -613,14 +638,16 @@ void BASE::OPC_FETCH()
     }
 }
 
-std::pair<int, int> BASE::reg_arbiter(const std::array<std::array<bank_t, 4>, OPCFIFO_SIZE> &addr_arr, // opc_srcaddr
-                                      const std::array<std::array<bool, 4>, OPCFIFO_SIZE> &valid_arr,  // opc_valid
-                                      std::array<std::array<bool, 4>, OPCFIFO_SIZE> &ready_arr,        // opc_ready
-                                      int bank_id,
-                                      std::array<int, BANK_NUM> &REGcurrentIdx)
+std::pair<int, int> BASE::reg_arbiter(
+    const std::array<std::array<bank_t, 4>, OPCFIFO_SIZE> &addr_arr, // opc_srcaddr
+    const std::array<std::array<bool, 4>, OPCFIFO_SIZE> &valid_arr,  // opc_valid
+    std::array<std::array<bool, 4>, OPCFIFO_SIZE> &ready_arr,        // opc_ready
+    int bank_id,
+    std::array<int, BANK_NUM> &REGcurrentIdx,
+    std::array<int, BANK_NUM> &read_bank_addr)
 {
     const int rows = OPCFIFO_SIZE; // = addr_arr.size()
-    const int cols = 4;            // = addr_arr[0].size()
+    const int cols = 4;            // = addr_arr[0].size(), 每个opc_fifo_t四个待取元素
     const int size = rows * cols;
     std::pair<int, int> result(-1, -1); // 默认值表示没有找到有效数据
     int index, i, j;
@@ -634,7 +661,9 @@ std::pair<int, int> BASE::reg_arbiter(const std::array<std::array<bank_t, 4>, OP
         {
             if (addr_arr[i][j].bank_id == bank_id)
             {
-                read_bank_addr[bank_id] == addr_arr[i][j].addr;
+                read_bank_addr[bank_id] = addr_arr[i][j].addr; // 下周期读数据
+                // cout << "let read_bank_addr(bank" << bank_id << ")="
+                //      << addr_arr[i][j].addr << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 result.first = i;
                 result.second = j;
                 ready_arr[i][j] = true;
@@ -651,64 +680,58 @@ void BASE::READ_REG()
     std::pair<int, int> temp_pair(-1, -1);
     int row, col;
     REGselectIdx.fill({-1, -1});
+    warpaddr_t tmp;
     while (true)
     {
-        wait();
+        wait(clk.posedge_event());
+        // 先根据上一cycle regfile arbiter的结果读数据
         for (int i = 0; i < BANK_NUM; i++)
         {
             row = REGselectIdx[i].first;
             col = REGselectIdx[i].second;
             if (REGselectIdx[i] != temp_pair)
             {
+                tmp = bank_undecode(i, read_bank_addr[i]);
+                // cout << opcfifo[row].ins << "warp" << opcfifo[row].warp_id;
+                // cout << " decode(bank" << i << ",addr" << read_bank_addr[i]
+                //      << ") undecode --> warp_id=" << tmp.warp_id << ", addr=" << tmp.addr << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 // cout << "从regfile读出: REGselectIdx[" << i << "] to opc(" << REGselectIdx[i].first << "," << REGselectIdx[i].second << ") at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 if (opc_banktype[row][col] == 0)
                 {
-                    read_data[i][0] = s_regfile[read_bank_addr[i]];
+                    read_data[i][0] = WARPS[tmp.warp_id].s_regfile[tmp.addr];
                 }
                 else
                 {
-                    read_data[i] = v_regfile[read_bank_addr[i]];
+                    read_data[i] = WARPS[tmp.warp_id].v_regfile[tmp.addr];
                 }
             }
         }
         wait(ev_opc_collect);
-
         for (auto &elem : opc_ready)
             elem.fill(0);
-        // cout << "opc_ready is set to { ";
-        // for (int i = 0; i < OPCFIFO_SIZE; i++)
-        // {
-
-        //     for (int j = 0; j < 4; j++)
-        //     {
-        //         cout << opc_ready[i][j];
-        //     }
-        //     cout << " ";
-        // }
-        // cout << "} at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
         for (int i = 0; i < BANK_NUM; i++)
         {
-            REGselectIdx[i] = reg_arbiter(opc_srcaddr, opc_valid, opc_ready, i, REGcurrentIdx);
+            REGselectIdx[i] = reg_arbiter(opc_srcaddr, opc_valid, opc_ready, i, REGcurrentIdx, read_bank_addr);
         }
     }
 }
 
-void BASE::WRITE_REG()
+void BASE::WRITE_REG(int warp_id)
 {
     float f1;
     float *pa1;
     while (true)
     {
-        wait();
+        wait(clk.posedge_event());
         // 后续regfile要一次只能写一个，否则报错
         if (write_s)
         {
-            s_regfile[rds1_addr.read()] = rds1_data;
+            WARPS[warp_id].s_regfile[rds1_addr.read()] = rds1_data;
         }
         if (write_v)
         {
             for (int i = 0; i < num_thread; i++)
-                v_regfile[rdv1_addr.read()][i] = rdv1_data[i];
+                WARPS[warp_id].v_regfile[rdv1_addr.read()][i] = rdv1_data[i];
         }
         if (write_f)
         {
@@ -716,7 +739,7 @@ void BASE::WRITE_REG()
             {
                 f1 = rdf1_data[i];
                 pa1 = &f1;
-                v_regfile[rdf1_addr.read()][i] = *(reg_t *)(pa1);
+                WARPS[warp_id].v_regfile[rdf1_addr.read()][i] = *(reg_t *)(pa1);
             }
         }
     }
@@ -730,9 +753,12 @@ void BASE::SALU_IN()
     while (true)
     {
         wait();
-        jump = 0;
-        branch_sig = 0;
-        if (emito_salu && jump == false)
+        for (auto &warp_ : WARPS)
+        {
+            warp_.jump = false;
+            warp_.branch_sig = false;
+        }
+        if (emito_salu)
         {
             // cout << "SALU_IN: emito_salu is " << emito_salu << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             if (salu_ready_old == false)
@@ -740,21 +766,24 @@ void BASE::SALU_IN()
                 cout << "salu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             salu_unready.notify();
-            switch (opctop_ins.op)
+            switch (emit_ins.read().op)
             {
             case beq_:
-                branch_sig = 1;
+                WARPS[emitins_warpid].branch_sig = true;
                 b_delay = 0;
                 salu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 if (rss1_data == rss2_data)
                 {
-                    jump = 1;
-                    jump_addr = opctop_ins.jump_addr;
-                    cout << "jump is updated to 1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                    WARPS[emitins_warpid].jump = 1;
+                    WARPS[emitins_warpid].jump_addr = emit_ins.read().jump_addr;
+                    cout << "warp" << emitins_warpid << ": jump is updated to 1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 }
+                if (!salueqa_triggered)
+                    ev_salufifo_pushed.notify();
                 break;
             case add_:
-                new_data.ins = opctop_ins;
+                new_data.ins = emit_ins;
+                new_data.warp_id = emitins_warpid;
                 new_data.rss1_data = rss1_data;
                 new_data.rss2_data = rss2_data;
                 salu_dq.push(new_data);
@@ -763,24 +792,24 @@ void BASE::SALU_IN()
                 b_delay = 1;
                 if (a_delay == 0)
                     salu_eva.notify();
-                else if (salu_eqa.default_event().triggered())
+                else if (salueqa_triggered)
                     salu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 else
                 {
                     salu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
-                    ev_salufifo_updated.notify();
+                    ev_salufifo_pushed.notify();
                 }
-                cout << "SALU triggered eva/eqa at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                // cout << "SALU triggered eva/eqa at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 salu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 // cout << "SALU_IN switch to add_ (from opc input) at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 break;
             default:
-                cout << "salu error: receive wrong ins " << opctop_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "salu error: receive wrong ins " << emit_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 break;
             }
         }
-        else if (!salu_eqa.default_event().triggered())
-            ev_salufifo_updated.notify();
+        else if (!salueqa_triggered)
+            ev_salufifo_pushed.notify();
     }
 }
 
@@ -788,13 +817,12 @@ void BASE::SALU_CALC()
 {
     salufifo_elem_num = 0;
     salufifo_empty = 1;
-    salu_in_t salutmp1;
-    salu_out_t salutmp2;
+    salueqa_triggered = false;
     bool succeed;
     while (true)
     {
         wait(salu_eva | salu_eqa.default_event());
-        cout << "SALU_OUT: triggered by eva/eqa at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        // cout << "SALU_OUT: triggered by eva/eqa at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         salutmp1 = salu_dq.front();
         // cout << "salu_dq.front's ins is " << salutmp1.ins << ", data is " << salutmp1.rss1_data << "," << salutmp1.rss2_data << "\n";
         salu_dq.pop();
@@ -803,12 +831,21 @@ void BASE::SALU_CALC()
         {
         case add_:
             salutmp2.ins = salutmp1.ins;
+            salutmp2.warp_id = salutmp1.warp_id;
             salutmp2.data = salutmp1.rss1_data + salutmp1.rss2_data;
             // cout << "SALU_OUT: do add at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             salufifo.push(salutmp2);
             break;
         }
-        ev_salufifo_updated.notify();
+        if (salu_eqa.default_event().triggered())
+        {
+            salueqa_triggered = true;
+            wait(SC_ZERO_TIME);
+            salueqa_triggered = false;
+            ev_salufifo_pushed.notify();
+        }
+        else
+            ev_salufifo_pushed.notify();
     }
 }
 
@@ -817,11 +854,6 @@ void BASE::SALU_OUT()
     while (true)
     {
         wait();
-        if (execpop_salu)
-        {
-            cout << "SALU_OUT: detected execpop at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-            salufifo.pop();
-        }
     }
 }
 
@@ -854,17 +886,18 @@ void BASE::VALU_IN()
     while (true)
     {
         wait();
-        if (emito_valu && jump == false)
+        if (emito_valu)
         {
             if (valu_ready == false)
             {
                 cout << "valu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             valu_unready.notify();
-            switch (opctop_ins.op)
+            switch (emit_ins.read().op)
             {
             case vaddvv_:
-                new_data.ins = opctop_ins;
+                new_data.ins = emit_ins;
+                new_data.warp_id = emitins_warpid;
                 for (int i = 0; i < num_thread; i++)
                 {
                     new_data.rsv1_data[i] = rsv1_data[i];
@@ -876,17 +909,18 @@ void BASE::VALU_IN()
                 // cout << "valu: receive vaddvv_, will notify eq, at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 if (a_delay == 0)
                     valu_eva.notify();
-                else if (valu_eqa.default_event().triggered())
+                else if (valueqa_triggered)
                     valu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 else
                 {
                     valu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
-                    ev_valufifo_updated.notify();
+                    ev_valufifo_pushed.notify();
                 }
                 valu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 break;
             case vaddvx_:
-                new_data.ins = opctop_ins;
+                new_data.ins = emit_ins;
+                new_data.warp_id = emitins_warpid;
                 for (int i = 0; i < num_thread; i++)
                 {
                     new_data.rsv1_data[i] = rsv1_data[i];
@@ -898,22 +932,22 @@ void BASE::VALU_IN()
                 // cout << "valu: receive vaddvx_, will notify eq, at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 if (a_delay == 0)
                     valu_eva.notify();
-                else if (valu_eqa.default_event().triggered())
+                else if (valueqa_triggered)
                     valu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 else
                 {
                     valu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
-                    ev_valufifo_updated.notify();
+                    ev_valufifo_pushed.notify();
                 }
                 valu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 break;
             default:
-                cout << "valu error: receive wrong ins " << opctop_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "valu error: receive wrong ins " << emit_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 break;
             }
         }
-        else if (!valu_eqa.default_event().triggered())
-            ev_valufifo_updated.notify();
+        else if (!valueqa_triggered)
+            ev_valufifo_pushed.notify();
     }
 }
 
@@ -921,19 +955,21 @@ void BASE::VALU_CALC()
 {
     valufifo_elem_num = 0;
     valufifo_empty = 1;
+    valueqa_triggered = false;
     valu_in_t valutmp1;
     valu_out_t valutmp2;
     bool succeed;
     while (true)
     {
         wait(valu_eva | valu_eqa.default_event());
-        // cout << "valu_eqa.default_event triggered at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
+        // cout << "valu_eqa.default_event triggered at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         valutmp1 = valu_dq.front();
         valu_dq.pop();
         switch (valutmp1.ins.op)
         {
         case vaddvv_:
             valutmp2.ins = valutmp1.ins;
+            valutmp2.warp_id = valutmp1.warp_id;
             for (int i = 0; i < num_thread; i++)
             {
                 valutmp2.rdv1_data[i] = valutmp1.rsv1_data[i] + valutmp1.rsv2_data[i];
@@ -942,6 +978,7 @@ void BASE::VALU_CALC()
             break;
         case vaddvx_:
             valutmp2.ins = valutmp1.ins;
+            valutmp2.warp_id = valutmp1.warp_id;
             for (int i = 0; i < num_thread; i++)
             {
                 valutmp2.rdv1_data[i] = valutmp1.rsv1_data[i] + valutmp1.rss2_data;
@@ -949,7 +986,15 @@ void BASE::VALU_CALC()
             valufifo.push(valutmp2);
             break;
         }
-        ev_valufifo_updated.notify();
+        if (valu_eqa.default_event().triggered())
+        {
+            valueqa_triggered = true;
+            wait(SC_ZERO_TIME);
+            valueqa_triggered = false;
+            ev_valufifo_pushed.notify();
+        }
+        else
+            ev_valufifo_pushed.notify();
     }
 }
 
@@ -958,8 +1003,6 @@ void BASE::VALU_OUT()
     while (true)
     {
         wait();
-        if (execpop_valu)
-            valufifo.pop();
     }
 }
 
@@ -988,17 +1031,18 @@ void BASE::VFPU_IN()
     while (true)
     {
         wait();
-        if (emito_vfpu && jump == false)
+        if (emito_vfpu)
         {
             if (vfpu_ready == false)
             {
                 cout << "vfpu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             vfpu_unready.notify();
-            switch (opctop_ins.op)
+            switch (emit_ins.read().op)
             {
             case vfadd_:
-                new_data.ins = opctop_ins;
+                new_data.ins = emit_ins;
+                new_data.warp_id = emitins_warpid;
                 for (int i = 0; i < num_thread; i++)
                 {
                     new_data.rsf1_data[i] = rsf1_data[i].read();
@@ -1009,21 +1053,21 @@ void BASE::VFPU_IN()
                 b_delay = 1;
                 if (a_delay == 0)
                     vfpu_eva.notify();
-                else if (vfpu_eqa.default_event().triggered())
+                else if (vfpueqa_triggered)
                     vfpu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 else
                 {
                     vfpu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
-                    ev_vfpufifo_updated.notify();
+                    ev_vfpufifo_pushed.notify();
                 }
                 vfpu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 break;
             default:
-                cout << "vfpu error: receive wrong ins " << opctop_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "vfpu error: receive wrong ins " << emit_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
         }
-        else if (!vfpu_eqa.default_event().triggered())
-            ev_vfpufifo_updated.notify();
+        else if (!vfpueqa_triggered)
+            ev_vfpufifo_pushed.notify();
     }
 }
 
@@ -1031,6 +1075,7 @@ void BASE::VFPU_CALC()
 {
     vfpufifo_elem_num = 0;
     vfpufifo_empty = true;
+    vfpueqa_triggered = false;
     vfpu_in_t vfputmp1;
     vfpu_out_t vfputmp2;
     bool succeed;
@@ -1044,6 +1089,7 @@ void BASE::VFPU_CALC()
         {
         case vfadd_:
             vfputmp2.ins = vfputmp1.ins;
+            vfputmp2.warp_id = vfputmp1.warp_id;
             for (int i = 0; i < num_thread; i++)
             {
                 vfputmp2.rdf1_data[i] = vfputmp1.rsf1_data[i] + vfputmp1.rsf2_data[i];
@@ -1051,8 +1097,15 @@ void BASE::VFPU_CALC()
             vfpufifo.push(vfputmp2);
             break;
         }
-
-        ev_vfpufifo_updated.notify();
+        if (vfpu_eqa.default_event().triggered())
+        {
+            vfpueqa_triggered = true;
+            wait(SC_ZERO_TIME);
+            vfpueqa_triggered = false;
+            ev_vfpufifo_pushed.notify();
+        }
+        else
+            ev_vfpufifo_pushed.notify();
     }
 }
 
@@ -1061,8 +1114,6 @@ void BASE::VFPU_OUT()
     while (true)
     {
         wait();
-        if (execpop_vfpu)
-            vfpufifo.pop();
     }
 }
 
@@ -1091,56 +1142,58 @@ void BASE::LSU_IN()
     while (true)
     {
         wait();
-        if (emito_lsu && jump == false)
+        if (emito_lsu)
         {
             if (lsu_ready == false)
             {
                 cout << "lsu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             lsu_unready.notify();
-            switch (opctop_ins.op)
+            switch (emit_ins.read().op)
             {
             case lw_:
-                new_data.ins = opctop_ins;
+                new_data.ins = emit_ins;
+                new_data.warp_id = emitins_warpid;
                 new_data.rss1_data = rss1_data;
                 lsu_dq.push(new_data);
                 a_delay = 5;
                 b_delay = 3;
                 if (a_delay == 0)
                     lsu_eva.notify();
-                else if (lsu_eqa.default_event().triggered())
+                else if (lsueqa_triggered)
                     lsu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 else
                 {
                     lsu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
-                    ev_lsufifo_updated.notify();
+                    ev_lsufifo_pushed.notify();
                 }
                 lsu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 break;
             case vload_:
-                new_data.ins = opctop_ins;
+                new_data.ins = emit_ins;
+                new_data.warp_id = emitins_warpid;
                 new_data.rss1_data = rss1_data;
                 lsu_dq.push(new_data);
                 a_delay = 6;
                 b_delay = 3;
                 if (a_delay == 0)
                     lsu_eva.notify();
-                else if (lsu_eqa.default_event().triggered())
+                else if (lsueqa_triggered)
                     lsu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
                 else
                 {
                     lsu_eqa.notify(sc_time((a_delay)*PERIOD, SC_NS));
-                    ev_lsufifo_updated.notify();
+                    ev_lsufifo_pushed.notify();
                 }
                 lsu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
                 break;
             default:
-                cout << "lsu error: receive wrong ins " << opctop_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "lsu error: receive wrong ins " << emit_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 break;
             }
         }
-        else if (!lsu_eqa.default_event().triggered())
-            ev_lsufifo_updated.notify();
+        else if (!lsueqa_triggered)
+            ev_lsufifo_pushed.notify();
     }
 }
 
@@ -1148,30 +1201,41 @@ void BASE::LSU_CALC()
 {
     lsufifo_elem_num = 0;
     lsufifo_empty = 1;
+    lsueqa_triggered = false;
     lsu_in_t lsutmp1;
     lsu_out_t lsutmp2;
     bool succeed;
     while (true)
     {
         wait(lsu_eva | lsu_eqa.default_event());
-        cout << "LSU_OUT: triggered by eva/eqa at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        // cout << "LSU_OUT: triggered by eva/eqa at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         lsutmp1 = lsu_dq.front();
         lsu_dq.pop();
         switch (lsutmp1.ins.op)
         {
         case lw_:
             lsutmp2.ins = lsutmp1.ins;
+            lsutmp2.warp_id = lsutmp1.warp_id;
             lsutmp2.rds1_data = s_memory[lsutmp1.rss1_data + lsutmp1.ins.s2];
             lsufifo.push(lsutmp2);
             break;
         case vload_:
             lsutmp2.ins = lsutmp1.ins;
+            lsutmp2.warp_id = lsutmp1.warp_id;
             for (int i = 0; i < num_thread; i++)
                 lsutmp2.rdv1_data[i] = v_memory[lsutmp1.rss1_data + lsutmp1.ins.s2][i];
             lsufifo.push(lsutmp2);
             break;
         }
-        ev_lsufifo_updated.notify();
+        if (lsu_eqa.default_event().triggered())
+        {
+            lsueqa_triggered = true;
+            wait(SC_ZERO_TIME);
+            lsueqa_triggered = false;
+            ev_lsufifo_pushed.notify();
+        }
+        else
+            ev_lsufifo_pushed.notify();
     }
 }
 
@@ -1180,8 +1244,6 @@ void BASE::LSU_OUT()
     while (true)
     {
         wait();
-        if (execpop_lsu)
-            lsufifo.pop();
     }
 }
 
@@ -1209,9 +1271,20 @@ void BASE::WRITE_BACK()
 
     while (true)
     {
-        wait(ev_salufifo_updated & ev_valufifo_updated & ev_vfpufifo_updated &
-             ev_lsufifo_updated);
-
+        wait(ev_salufifo_pushed & ev_valufifo_pushed & ev_vfpufifo_pushed &
+             ev_lsufifo_pushed);
+        // cout << "WRITEBACK: start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        if (execpop_salu)
+            salufifo.pop();
+        if (execpop_valu)
+        {
+            valufifo.pop();
+            // cout << "valu: execute pop at "<< sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        }
+        if (execpop_vfpu)
+            vfpufifo.pop();
+        if (execpop_lsu)
+            lsufifo.pop();
         salufifo_empty = salufifo.isempty();
         if (!salufifo_empty)
             salutop_dat = salufifo.front();
@@ -1229,7 +1302,7 @@ void BASE::WRITE_BACK()
             lsutop_dat = lsufifo.front();
         lsufifo_elem_num = lsufifo.used();
 
-        cout << "WriteBack start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+        // cout << "WriteBack start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         if (salufifo_empty == false)
         {
             write_s = true;
@@ -1244,6 +1317,7 @@ void BASE::WRITE_BACK()
             wb_ins = salutop_dat.ins;
             rds1_addr = salutop_dat.ins.d;
             rds1_data = salutop_dat.data;
+            wb_warpid = salutop_dat.warp_id;
         }
         else if (valufifo_empty == false)
         {
@@ -1261,6 +1335,7 @@ void BASE::WRITE_BACK()
             {
                 rdv1_data[i] = valutop_dat.rdv1_data[i];
             }
+            wb_warpid = valutop_dat.warp_id;
         }
         else if (vfpufifo_empty == false)
         {
@@ -1278,6 +1353,7 @@ void BASE::WRITE_BACK()
             {
                 rdf1_data[i] = vfputop_dat.rdf1_data[i];
             }
+            wb_warpid = vfputop_dat.warp_id;
         }
         else if (lsufifo_empty == false)
         {
@@ -1312,6 +1388,7 @@ void BASE::WRITE_BACK()
                 cout << "wb error: lsu unrecognized ins\n";
                 break;
             }
+            wb_warpid = lsutop_dat.warp_id;
         }
         else
         {

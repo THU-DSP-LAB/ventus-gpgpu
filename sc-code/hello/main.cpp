@@ -100,9 +100,15 @@ int sc_main(int argc, char *argv[])
   // T.clk(clk);
   // sc_start(100, SC_NS);
 
-  // 测试event_queue和nothing在执行单元中的使用
+  // // 测试event_queue和nothing在执行单元中的使用
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // eq_nothing_test T("nothingtester");
+  // T.clk(clk);
+  // sc_start(100, SC_NS);
+
+  // 测试event.triggered能探测到什么时间的事件
   sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
-  eq_nothing_test T("nothingtester");
+  triggered_test T("nothingtester");
   T.clk(clk);
   sc_start(100, SC_NS);
 

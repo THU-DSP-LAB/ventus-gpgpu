@@ -384,76 +384,76 @@ void BASE::OPC_FIFO()
     {
         wait();
         // cout << "OPC_FIFO start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-        if (jump)
+        // if (jump)
+        // {
+        //     opcfifo.clear();
+        //     opc_full = false;
+        //     opc_empty = true;
+        //     opctop_ins = I_TYPE(INVALID_, 0, 0, 0);
+        //     opcfifo_elem_num = 0;
+        //     ev_opc_pop.notify();
+        // }
+        // else
+        // {
+        if (emit)
         {
-            opcfifo.clear();
-            opc_full = false;
-            opc_empty = true;
-            opctop_ins = I_TYPE(INVALID_, 0, 0, 0);
-            opcfifo_elem_num = 0;
-            ev_opc_pop.notify();
+            // cout << "opcfifo is popping index " << emit_idx << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
+            opcfifo.pop(emit_idx); // last cycle emit
         }
-        else
+        ev_opc_pop.notify();
+        if (dispatch && jump == false)
         {
-            if (emit)
+            // cout << "opc begin to put at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+            if (opc_full)
             {
-                // cout << "opcfifo is popping index " << emit_idx << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                opcfifo.pop(emit_idx); // last cycle emit
+                cout << "OPC ERROR: is full but receive ins from issue at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
-            ev_opc_pop.notify();
-            if (dispatch && jump == false)
+            else
             {
-                // cout << "opc begin to put at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                if (opc_full)
+                _readdata4 = issue_ins.read();
+                switch (_readdata4.op)
                 {
-                    cout << "OPC ERROR: is full but receive ins from issue at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                case lw_:
+                case vload_:
+                    in_ready = {0, 1, 1, 1};
+                    in_valid = {1, 0, 0, 0};
+                    in_srcaddr[0] = bank_decode(0, _readdata4.s1); // 暂时warp_id=0
+                    in_banktype = {0, 0, 0, 0};
+                    break;
+                case add_:
+                case beq_:
+                    in_ready = {0, 0, 1, 1};
+                    in_valid = {1, 1, 0, 0};
+                    in_srcaddr[0] = bank_decode(0, _readdata4.s1);
+                    in_srcaddr[1] = bank_decode(0, _readdata4.s2);
+                    in_banktype = {0, 0, 0, 0};
+                    break;
+                case vaddvv_:
+                case vfadd_:
+                    in_ready = {0, 0, 1, 1};
+                    in_valid = {1, 1, 0, 0};
+                    in_srcaddr[0] = bank_decode(0, _readdata4.s1);
+                    in_srcaddr[1] = bank_decode(0, _readdata4.s2);
+                    in_banktype = {1, 1, 0, 0};
+                    break;
+                case vaddvx_:
+                    in_ready = {0, 0, 1, 1};
+                    in_valid = {1, 1, 0, 0};
+                    in_srcaddr[0] = bank_decode(0, _readdata4.s1);
+                    in_srcaddr[1] = bank_decode(0, _readdata4.s2);
+                    in_banktype = {1, 0, 0, 0};
+                    break;
+                case INVALID_:
+                    cout << "OPC error: issue_ins INVALID_ at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                    break;
+                default:
+                    cout << "OPC warning: OPC_FIFO switch to unrecognized branch\n";
                 }
-                else
-                {
-                    _readdata4 = issue_ins.read();
-                    switch (_readdata4.op)
-                    {
-                    case lw_:
-                    case vload_:
-                        in_ready = {0, 1, 1, 1};
-                        in_valid = {1, 0, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1); // 暂时warp_id=0
-                        in_banktype = {0, 0, 0, 0};
-                        break;
-                    case add_:
-                    case beq_:
-                        in_ready = {0, 0, 1, 1};
-                        in_valid = {1, 1, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1);
-                        in_srcaddr[1] = bank_decode(0, _readdata4.s2);
-                        in_banktype = {0, 0, 0, 0};
-                        break;
-                    case vaddvv_:
-                    case vfadd_:
-                        in_ready = {0, 0, 1, 1};
-                        in_valid = {1, 1, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1);
-                        in_srcaddr[1] = bank_decode(0, _readdata4.s2);
-                        in_banktype = {1, 1, 0, 0};
-                        break;
-                    case vaddvx_:
-                        in_ready = {0, 0, 1, 1};
-                        in_valid = {1, 1, 0, 0};
-                        in_srcaddr[0] = bank_decode(0, _readdata4.s1);
-                        in_srcaddr[1] = bank_decode(0, _readdata4.s2);
-                        in_banktype = {1, 0, 0, 0};
-                        break;
-                    case INVALID_:
-                        cout << "OPC error: issue_ins INVALID_ at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                        break;
-                    default:
-                        cout << "OPC warning: OPC_FIFO switch to unrecognized branch\n";
-                    }
-                }
-                opcfifo.push(opcfifo_t(_readdata4, in_ready, in_valid, in_srcaddr, in_banktype));
-                // cout << "opcfifo has put issue_ins " << issue_ins << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             }
+            opcfifo.push(opcfifo_t(_readdata4, 1, in_ready, in_valid, in_srcaddr, in_banktype));
+            // cout << "opcfifo has put issue_ins " << issue_ins << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
         }
+
         opcfifo_elem_num = opcfifo.get_size();
         opc_full = opcfifo_elem_num == OPCFIFO_SIZE;
         opc_empty = opcfifo_elem_num == 0;
@@ -494,7 +494,7 @@ void BASE::OPC_EMIT()
             {
                 opctop_ins = opcfifo[i].ins;
                 // cout << "opcfifo[" << i << "]-" << opctop_ins << "is all ready, at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                switch (opctop_ins.op)
+                switch (opcfifo[i].ins.op)
                 {
                 case add_:
                 case beq_:
@@ -740,7 +740,7 @@ void BASE::SALU_IN()
                 cout << "salu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             salu_unready.notify();
-            switch (opctop_ins.op)
+            switch (opctop_ins.read().op)
             {
             case beq_:
                 branch_sig = 1;
@@ -749,7 +749,7 @@ void BASE::SALU_IN()
                 if (rss1_data == rss2_data)
                 {
                     jump = 1;
-                    jump_addr = opctop_ins.jump_addr;
+                    jump_addr = opctop_ins.read().jump_addr;
                     cout << "jump is updated to 1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 }
                 break;
@@ -861,7 +861,7 @@ void BASE::VALU_IN()
                 cout << "valu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             valu_unready.notify();
-            switch (opctop_ins.op)
+            switch (opctop_ins.read().op)
             {
             case vaddvv_:
                 new_data.ins = opctop_ins;
@@ -995,7 +995,7 @@ void BASE::VFPU_IN()
                 cout << "vfpu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             vfpu_unready.notify();
-            switch (opctop_ins.op)
+            switch (opctop_ins.read().op)
             {
             case vfadd_:
                 new_data.ins = opctop_ins;
@@ -1098,7 +1098,7 @@ void BASE::LSU_IN()
                 cout << "lsu error: not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
             lsu_unready.notify();
-            switch (opctop_ins.op)
+            switch (opctop_ins.read().op)
             {
             case lw_:
                 new_data.ins = opctop_ins;

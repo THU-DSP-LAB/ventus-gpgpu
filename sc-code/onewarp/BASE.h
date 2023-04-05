@@ -191,7 +191,7 @@ public:
     sc_signal<int> emit_idx{"emit_idx"};                    // 上一周期emit的ins在opc中的索引，最大是BANK_NUM
     sc_signal<bool> opc_full{"opc_full"};
     bool opc_empty;
-    I_TYPE opctop_ins;
+    sc_signal<I_TYPE> opctop_ins{"opctop_ins"};
     int opcfifo_elem_num;
     bool salu_ready, valu_ready, vfpu_ready, lsu_ready;
     sc_signal<bool> salu_ready_old{"salu_ready_old"},

@@ -1,0 +1,287 @@
+[*]
+[*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
+[*] Mon Apr  3 17:45:49 2023
+[*]
+[dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp1.vcd"
+[dumpfile_mtime] "Mon Apr  3 17:45:12 2023"
+[dumpfile_size] 41421
+[savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp1.gtkw"
+[timestart] 495
+[size] 2548 1347
+[pos] -1 -1
+*-5.000000 665 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] SystemC.
+[treeopen] SystemC.salutmp2.
+[treeopen] SystemC.salutop_dat.
+[treeopen] SystemC.valutop_dat.
+[sst_width] 214
+[signals_width] 369
+[sst_expanded] 1
+[sst_vpaned_height] 396
+@420
+SystemC.Clk
+SystemC.Rst_n
+[color] 2
+SystemC.jump
+SystemC.pc[31:0]
+[color] 1
+SystemC.fetch_ins.op[31:0]
+[color] 1
+SystemC.fetch_ins.s1[31:0]
+[color] 1
+SystemC.fetch_ins.s2[31:0]
+[color] 1
+SystemC.fetch_ins.d[31:0]
+[color] 1
+SystemC.fetch_valid
+[color] 3
+SystemC.ififo_elem_num[31:0]
+[color] 3
+SystemC.ibuf_swallow
+[color] 3
+SystemC.ibuf_empty
+[color] 2
+SystemC.ibuftop_ins.op[31:0]
+[color] 2
+SystemC.ibuftop_ins.s1[31:0]
+[color] 2
+SystemC.ibuftop_ins.s2[31:0]
+[color] 2
+SystemC.ibuftop_ins.d[31:0]
+SystemC.wait_bran
+[color] 3
+SystemC.can_dispatch
+@28
+[color] 3
+SystemC.dispatch_warp_valid
+@420
+[color] 7
+SystemC.issue_ins.op[31:0]
+[color] 7
+SystemC.issue_ins.s1[31:0]
+[color] 7
+SystemC.issue_ins.s2[31:0]
+[color] 7
+SystemC.issue_ins.d[31:0]
+[color] 7
+SystemC.issueins_warpid[31:0]
+@25
+[color] 1
+SystemC.last_dispatch_warpid[31:0]
+@28
+SystemC.dispatch_valid
+SystemC.dispatch_ready
+@420
+[color] 1
+SystemC.opc_full
+[color] 1
+SystemC.opcfifo_elem_num[31:0]
+[color] 6
+SystemC.emit_ins.op[31:0]
+[color] 6
+SystemC.emit_ins.s1[31:0]
+[color] 6
+SystemC.emit_ins.s2[31:0]
+[color] 6
+SystemC.emit_ins.d[31:0]
+[color] 6
+SystemC.emit_idx[31:0]
+[color] 6
+SystemC.emitins_warpid[31:0]
+SystemC.findemit
+[color] 6
+SystemC.emit
+[color] 4
+SystemC.emito_salu
+[color] 4
+SystemC.salu_ready
+SystemC.rss1_data[31:0]
+SystemC.rss2_data[31:0]
+SystemC.salufifo_empty
+@24
+SystemC.salufifo_elem_num[31:0]
+@420
+SystemC.execpop_salu
+[color] 2
+SystemC.salutmp2.data[31:0]
+@c00420
+[color] 2
+SystemC.salutmp2.warp_id[31:0]
+@28
+[color] 2
+(0)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(1)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(2)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(3)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(4)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(5)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(6)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(7)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(8)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(9)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(10)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(11)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(12)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(13)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(14)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(15)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(16)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(17)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(18)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(19)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(20)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(21)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(22)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(23)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(24)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(25)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(26)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(27)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(28)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(29)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(30)SystemC.salutmp2.warp_id[31:0]
+[color] 2
+(31)SystemC.salutmp2.warp_id[31:0]
+@1401200
+-group_end
+@420
+[color] 2
+SystemC.salutmp2.ins.op[31:0]
+[color] 2
+SystemC.salutmp2.ins.s1[31:0]
+[color] 2
+SystemC.salutmp2.ins.s2[31:0]
+[color] 2
+SystemC.salutmp2.ins.d[31:0]
+[color] 5
+SystemC.salutop_dat.data[31:0]
+[color] 5
+SystemC.salutop_dat.warp_id[31:0]
+[color] 5
+SystemC.salutop_dat.ins.op[31:0]
+[color] 5
+SystemC.salutop_dat.ins.s1[31:0]
+[color] 5
+SystemC.salutop_dat.ins.s2[31:0]
+[color] 5
+SystemC.salutop_dat.ins.d[31:0]
+[color] 3
+SystemC.emito_lsu
+[color] 3
+SystemC.lsu_ready
+[color] 3
+SystemC.lsufifo_elem_num[31:0]
+[color] 3
+SystemC.lsufifo_empty
+[color] 3
+SystemC.execpop_lsu
+[color] 1
+SystemC.emito_valu
+[color] 1
+SystemC.valu_ready
+[color] 1
+SystemC.rsv1_data.data(0)[31:0]
+[color] 1
+SystemC.rsv2_data.data(0)[31:0]
+[color] 1
+SystemC.valufifo_empty
+[color] 1
+SystemC.valufifo_elem_num[31:0]
+[color] 1
+SystemC.execpop_valu
+[color] 1
+SystemC.valutop_dat.warp_id[31:0]
+[color] 1
+SystemC.valutop_dat.rdv1_data(0)[31:0]
+SystemC.valutop_dat.ins.op[31:0]
+SystemC.valutop_dat.ins.s1[31:0]
+SystemC.valutop_dat.ins.s2[31:0]
+SystemC.valutop_dat.ins.d[31:0]
+[color] 7
+SystemC.emito_vfpu
+[color] 7
+SystemC.vfpu_ready
+[color] 7
+SystemC.execpop_vfpu
+[color] 2
+SystemC.write_s
+[color] 2
+SystemC.write_v
+[color] 2
+SystemC.write_f
+[color] 3
+SystemC.wb_ena
+[color] 2
+SystemC.wb_ins.op[31:0]
+[color] 2
+SystemC.wb_ins.s1[31:0]
+[color] 2
+SystemC.wb_ins.s2[31:0]
+[color] 2
+SystemC.wb_ins.d[31:0]
+[color] 2
+SystemC.wb_warpid[31:0]
+[color] 4
+SystemC.s_regfile(0)[31:0]
+[color] 4
+SystemC.s_regfile(1)[31:0]
+[color] 4
+SystemC.s_regfile(2)[31:0]
+[color] 4
+SystemC.s_regfile(3)[31:0]
+[color] 4
+SystemC.s_regfile(4)[31:0]
+[color] 4
+SystemC.s_regfile(5)[31:0]
+[color] 4
+SystemC.s_regfile(6)[31:0]
+[color] 4
+SystemC.s_regfile(7)[31:0]
+[color] 5
+SystemC.v_regfile(0)(0)[31:0]
+[color] 5
+SystemC.v_regfile(1)(0)[31:0]
+[color] 5
+SystemC.v_regfile(2)(0)[31:0]
+[color] 5
+SystemC.v_regfile(3)(0)[31:0]
+[color] 5
+SystemC.v_regfile(4)(0)[31:0]
+[color] 5
+SystemC.v_regfile(5)(0)[31:0]
+[color] 5
+SystemC.v_regfile(6)(0)[31:0]
+[color] 5
+SystemC.v_regfile(7)(0)[31:0]
+[pattern_trace] 1
+[pattern_trace] 0
