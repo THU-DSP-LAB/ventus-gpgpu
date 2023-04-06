@@ -57,7 +57,15 @@ class GPGPU_SimWrapper() extends Module{
     val host_rsp = DecoupledIO(new CTA2host_data)
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
+    val cnt = Output(UInt(32.W))
   })
+
+  val counter = new Counter(200000)
+  counter.reset()
+  when(true.B){
+    counter.inc()
+  }
+  io.cnt := counter.value
 
   val GPU = Module(new GPGPU_top()(L1param))
 

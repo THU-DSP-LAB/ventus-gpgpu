@@ -7,8 +7,8 @@ import chisel3.experimental.VecLiterals._
 import parameters._
 
 object helper{
-  def BigInt2ByteArray(n: BigInt, len: Int): Array[Byte] = n.toByteArray.takeRight(len).reverse
-  def Hex2ByteArray(hex: String, len: Int): Array[Byte] = BigInt("00" ++ hex, 16).toByteArray.takeRight(len).reverse
+  def BigInt2ByteArray(n: BigInt, len: Int): Array[Byte] = n.toByteArray.takeRight(len).reverse.padTo(len, 0.toByte)
+  def Hex2ByteArray(hex: String, len: Int): Array[Byte] = BigInt("00" ++ hex, 16).toByteArray.takeRight(len).reverse.padTo(len, 0.toByte)
   def ByteArray2BigInt(ba: Array[Byte]) = BigInt(0.toByte +: ba.reverse)
 }
 
@@ -24,8 +24,8 @@ class MetaData{
   var vgprUsage: BigInt = 0
   var pdsBaseAddr: BigInt = 0
   var num_buffer: BigInt = 1
-  var buffer_base = new Array[BigInt](1)
-  var buffer_size = new Array[BigInt](1)
+  var buffer_base = new Array[BigInt](0)
+  var buffer_size = new Array[BigInt](0)
 
   def generateHostReq(i: BigInt, j: BigInt, k: BigInt) = {
     val blockID = (i * kernel_size(1) + j) * kernel_size(2) + k
@@ -33,7 +33,7 @@ class MetaData{
       _.host_wg_id -> ("b" + blockID.toString(2) + "0" * CU_ID_WIDTH).U,
       _.host_num_wf -> wg_size.U,
       _.host_wf_size -> wf_size.U,
-      _.host_start_pc -> 0.U,
+      _.host_start_pc -> "h80000000".U,
       _.host_vgpr_size_total -> (wg_size * vgprUsage).U,
       _.host_sgpr_size_total -> (wg_size * sgprUsage).U,
       _.host_lds_size_total -> ldsSize.U,
@@ -41,7 +41,7 @@ class MetaData{
       _.host_vgpr_size_per_wf -> vgprUsage.U,
       _.host_sgpr_size_per_wf -> sgprUsage.U,
       _.host_gds_baseaddr -> 0.U,
-      _.host_pds_baseaddr -> (blockID * pdsSize * wf_size * wg_size).U,
+      _.host_pds_baseaddr -> (pdsBaseAddr + blockID * pdsSize * wf_size * wg_size).U,
       _.host_csr_knl -> metaDataBaseAddr.U,
       _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U)
     )
@@ -71,10 +71,12 @@ object MetaData{
       vgprUsage = parseHex(buf, 64)
       pdsBaseAddr = parseHex(buf, 64)
       num_buffer = parseHex(buf, 64)
-      buffer_base = new Array[BigInt](num_buffer.toInt)
-      buffer_base.map(_ => parseHex(buf, 64))
-      buffer_size = new Array[BigInt](num_buffer.toInt)
-      buffer_size.map(_ => parseHex(buf, 64))
+      for( i <- 0 until num_buffer.toInt){
+        buffer_base = buffer_base :+ parseHex(buf, 64)
+      }
+      for (i <- 0 until num_buffer.toInt) {
+        buffer_size = buffer_size :+ parseHex(buf, 64)
+      }
     }
   }
 }
