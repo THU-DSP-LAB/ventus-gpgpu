@@ -41,9 +41,9 @@ make patch
 
 2. IDE support  `make bsp # generate IDE bsp`
 
-3. to generate verilog file, use `make verilog`. The output file is `GPGPU_axi_top.v`
+3. to generate verilog file, use `make verilog`. The output file is `GPGPU_axi_top.v` . Notice that if you install 'mill' with 'curl', use `./mill ` to replace `mill` in Makefile commands.
 
-4. to run tests, use `make tests`. Output waveform file is at `test_run_dir` 
+4. to run tests, use `make tests`. Output waveform file is at `test_run_dir`  
 
    *Notice that current codes are not stable and there are conflicts between existing codes and testcase `gaussian` `gemm`. We are preparing new testcase format to integrate with software toolchain and please wait for our new version.*
 
