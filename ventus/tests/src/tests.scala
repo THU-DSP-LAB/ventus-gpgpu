@@ -96,9 +96,10 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
   "adv_test" in {
-    val caseName = "saxpy"
-    val metaFileDir = "saxpy.meta" // TODO: rename
-    val dataFileDir = "saxpy.data"
+    val caseName = "vecadd"
+    val metaFileDir = "./ventus/txt/vecadd.riscv.meta" // TODO: rename
+    val dataFileDir = "./ventus/txt/vecadd.riscv.data"
+    val maxCycle = 100
     val mem = new MemBox(metaFileDir, dataFileDir)
     val size3d = mem.metaData.kernel_size.map(_.toInt)
     var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
@@ -111,7 +112,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(TestCaseList(caseName).cycles)
+      c.clock.setTimeout(100)
       c.clock.step(5)
       fork{ // HOST <-> GPU
         val enq = fork{
@@ -119,49 +120,53 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                j <- 0 until size3d(1);
                k <- 0 until size3d(2)
                ) {
-            c.io.host_req.enq(mem.metaData.generateHostReq(i, j, k))
+            c.io.host_req.enqueue(mem.metaData.generateHostReq(i, j, k))
           }
         }
         val deq = fork{
-          while(!wg_list.reduce(_ && _)){
-            c.io.host_rsp.ready.poke(true.B)
-            c.io.host_rsp.waitForValid()
-            val rsp = c.io.host_rsp.bits.peek().litValue.toInt
-            wg_list(rsp) = true
-            c.clock.step(1)
+          c.io.host_rsp.ready.poke(true.B)
+          c.io.host_rsp.waitForValid()
+          val rsp = c.io.host_rsp.bits.peek().litValue.toInt
+          wg_list(rsp) = true
+          c.clock.step(1)
+        }
+        while(c.io.cnt.peek().litValue.toInt <= maxCycle) {
+          enq.join()
+          while (!wg_list.reduce(_ && _)) {
+            deq.join()
           }
         }
-        enq.join()
-        deq.join()
         c.clock.step(20)
       }.fork{ // GPU <-> MEM
         val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
-        while(!wg_list.reduce(_ && _)){
-          fork{
-            timescope{
+        while(!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
+          fork {
+            timescope {
               c.io.out_a.ready.poke(true.B)
               c.io.out_a.waitForValid()
               val addr = c.io.out_a.bits.address.peek().litValue
-              val opcode = c.io.out_a.bits.opcode.peek().litValue
+              var opcode_rsp = 0
               val source = c.io.out_a.bits.source.peek().litValue
               var data = new Array[Byte](data_byte_count)
-              if(c.io.out_a.bits.opcode.peek().litValue == 4){ // read
+              if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
                 data = mem.readMem(addr, data_byte_count) // read operation
+                opcode_rsp = 1
               }
-              else if(c.io.out_a.bits.opcode.peek().litValue == 1){ // write
+              else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
                 data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
                 val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).padTo(c.io.out_a.bits.mask.getWidth, '0').map {
                   case '1' => true
-                  case _  => false
+                  case _ => false
                 }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
                 mem.writeMem(addr, data_byte_count, data, mask) // write operation
                 data = Array.fill(data_byte_count)(0.toByte) // response = 0
+                opcode_rsp = 0
               }
-              else{
+              else {
                 data = Array.fill(data_byte_count)(0.toByte)
               }
               c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
-                _.opcode -> opcode.U,
+                _.opcode -> opcode_rsp.U, // w:0 r:1
                 _.data -> ByteArray2BigInt(data).U,
                 _.source -> source.U,
                 _.size -> 0.U // TODO: Unused
