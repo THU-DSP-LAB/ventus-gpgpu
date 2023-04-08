@@ -54,7 +54,7 @@ class unifiedBank extends Module  {
   switch(io.rsType.get){
     is(1.U){//scalar
       io.rs(0) := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd(0), regs.read(io.rsidx)(num_thread+1))
-      when(io.rdwen & io.rdidx.orR) {
+      when(io.rdwen) {
         regs(io.rdidx)(num_thread+1) := io.rd(0)
       }
     }
