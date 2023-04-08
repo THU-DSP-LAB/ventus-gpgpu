@@ -130,6 +130,7 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf0, BASE_impl.WARPS[0].v_regfile[5][0], "v_regfile(5)(0)");
     sc_trace(tf0, BASE_impl.WARPS[0].v_regfile[6][0], "v_regfile(6)(0)");
     sc_trace(tf0, BASE_impl.WARPS[0].v_regfile[7][0], "v_regfile(7)(0)");
+    sc_trace(tf0, BASE_impl.external_mem[0], "external_mem.data(0)");
     // sc_trace(tf0, BASE_impl., "");
 
     sc_trace_file *tf1 = sc_create_vcd_trace_file("BASE_wave_warp1");
@@ -249,7 +250,7 @@ int sc_main(int argc, char *argv[])
     sc_trace(tf1, BASE_impl.WARPS[2].v_regfile[6][0], "v_regfile(6)(0)");
     sc_trace(tf1, BASE_impl.WARPS[2].v_regfile[7][0], "v_regfile(7)(0)");
 
-    sc_start(80000, SC_NS);
+    sc_start(300, SC_NS);
     sc_close_vcd_trace_file(tf0);
     sc_close_vcd_trace_file(tf1);
 

@@ -29,23 +29,24 @@ enum OP_TYPE
     INVALID_ = 0,
     lw_,
     add_,
-    vload_,
+    vle32v_,
     vaddvv_,
     vaddvx_,
-    vfadd_,
-    beq_
+    vfaddvv_,
+    beq_,
+    addi_,
 };
 class I_TYPE // type of per instruction
 {
 public:
     int s1 = -1;        // load指令为寄存器addr
-    int s2 = -1;        // load指令为offset
+    int s2 = -1;        // load指令为offset, addi指令为imm
     int d = -1;         // beq指令为imm
     int op;             // trace不支持enum，只能定义op为int型
     int jump_addr = -1; // 分支指令才有用
     bool willwb;        // 是否写回寄存器
     I_TYPE(){};
-    I_TYPE(OP_TYPE _op, int _s1, int _s2, int _d) : op(_op), s1(_s1), s2(_s2), d(_d){};
+    I_TYPE(OP_TYPE _op, int _d, int _s1, int _s2) : op(_op), s1(_s1), s2(_s2), d(_d){};
     I_TYPE(I_TYPE _ins, int _jump_addr) : op(_ins.op), s1(_ins.s1), s2(_ins.s2), d(_ins.d), jump_addr(_jump_addr){};
     bool operator==(const I_TYPE &rhs) const
     {

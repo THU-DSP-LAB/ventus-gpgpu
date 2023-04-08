@@ -15,6 +15,7 @@ public:
     void debug_display1();
     void debug_display2();
     void debug_display3();
+    void INIT_MEM();
 
     // fetch
     void INIT_INS(int warp_id);
@@ -90,7 +91,7 @@ public:
         // SC_THREAD(debug_display1);
         // SC_THREAD(debug_display2);
         // SC_THREAD(debug_display3);
-        SC_METHOD(memory_init);
+        SC_THREAD(INIT_MEM);
 
         for (int i = 0; i < num_warp; i++)
         {
@@ -201,7 +202,7 @@ public:
     sc_vector<sc_signal<float>> rdf1_data{"rdf1_data", num_thread};
     // exec
     sc_event_queue salu_eqa, salu_eqb; // 分别负责a time和b time，最后一个是SALU_IN的，优先级比eqb低
-    sc_event salu_eva, salu_unready, salu_nothinghappen, ev_salufifo_pushed;
+    sc_event salu_eva, salu_evb, salu_unready, salu_nothinghappen, ev_salufifo_pushed;
     std::queue<salu_in_t> salu_dq;
     StaticQueue<salu_out_t, 3> salufifo;
     salu_out_t salutop_dat;
@@ -212,7 +213,7 @@ public:
     sc_signal<bool> salueqa_triggered;
 
     sc_event_queue valu_eqa, valu_eqb;
-    sc_event valu_eva, valu_unready, valu_nothinghappen, ev_valufifo_pushed;
+    sc_event valu_eva, valu_evb, valu_unready, valu_nothinghappen, ev_valufifo_pushed;
     std::queue<valu_in_t> valu_dq;
     StaticQueue<valu_out_t, 3> valufifo;
     valu_out_t valutop_dat;
@@ -221,7 +222,7 @@ public:
     sc_signal<bool> valueqa_triggered;
 
     sc_event_queue vfpu_eqa, vfpu_eqb;
-    sc_event vfpu_eva, vfpu_unready, vfpu_nothinghappen, ev_vfpufifo_pushed;
+    sc_event vfpu_eva, vfpu_evb, vfpu_unready, vfpu_nothinghappen, ev_vfpufifo_pushed;
     std::queue<vfpu_in_t> vfpu_dq;
     StaticQueue<vfpu_out_t, 3> vfpufifo;
     vfpu_out_t vfputop_dat;
@@ -230,7 +231,7 @@ public:
     sc_signal<bool> vfpueqa_triggered;
 
     sc_event_queue lsu_eqa, lsu_eqb;
-    sc_event lsu_eva, lsu_unready, lsu_nothinghappen, ev_lsufifo_pushed;
+    sc_event lsu_eva, lsu_evb, lsu_unready, lsu_nothinghappen, ev_lsufifo_pushed;
     std::queue<lsu_in_t> lsu_dq;
     StaticQueue<lsu_out_t, 3> lsufifo;
     lsu_out_t lsutop_dat;
@@ -244,20 +245,11 @@ public:
     sc_signal<int> wb_warpid{"wb_warpid"};
     sc_signal<bool> wb_ena{"wb_ena"};
 
-    // debug
+    // debug，没实际用处
     sc_signal<bool> dispatch_ready;
-    // 外部存储，暂时在BASE中实现
-    std::array<reg_t, 512> s_memory;
-    std::array<v_regfile_t, 512> v_memory;
-    std::array<v_regfile_t, 512> f_memory;
-    void memory_init()
-    {
-        s_memory[25] = 34;
-        s_memory[41] = 67;
-        v_memory[20].fill(666);
-        v_memory[41].fill(777);
-    }
 
+    // 外部存储，暂时在BASE中实现
+    std::array<reg_t, 8192> external_mem;
 };
 
 #endif
