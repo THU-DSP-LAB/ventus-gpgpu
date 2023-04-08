@@ -17,9 +17,9 @@ class RegFileBankIO extends Bundle  {
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
   val regs = SyncReadMem(32*num_warp/num_bank, UInt(xLen.W))
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,Mux(RegNext(io.rsidx.orR), regs.read(io.rsidx), 0.U))
+  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd, regs.read(io.rsidx))
   //io.ready := true.B
-  when (io.rdwen & io.rdidx.orR) {
+  when (io.rdwen) {
     regs.write(io.rdidx, io.rd)
   }
 }
@@ -53,7 +53,7 @@ class unifiedBank extends Module  {
   val internalMask = Wire(Vec(num_thread, Bool()))
   switch(io.rsType.get){
     is(1.U){//scalar
-      io.rs(0) := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd(0), Mux(io.rsidx.orR, regs.read(io.rsidx)(num_thread+1), 0.U))
+      io.rs(0) := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd(0), regs.read(io.rsidx)(num_thread+1))
       when(io.rdwen & io.rdidx.orR) {
         regs(io.rdidx)(num_thread+1) := io.rd(0)
       }
