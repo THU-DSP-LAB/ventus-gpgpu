@@ -82,7 +82,7 @@ class collectorUnit extends Module{
   //Lookup table for address transformation
   // bankID = (wid + regIdx) % num_bank
   // rsAddr =  [gpr_base(i) + regIdx)] / num_bank
-  val bankIdLookup = (0 until num_warp + 32).map { x =>
+  val bankIdLookup = (0 until num_warp + NUMBER_SGPR_SLOTS).map { x =>
     (x -> x % num_bank)
   }.map { x => (x._1.U -> x._2.U) }
   val addrLookupScalar = (0 until num_warp).map { x =>
@@ -475,7 +475,7 @@ class operandCollector extends Module{
   //writeback control
   // bankID = (wid + regIdx) % num_bank
   // rsAddr =  [gpr_base(i) + regIdx)] / num_bank
-  val bankIdLookup = (0 until num_warp + 32).map { x =>
+  val bankIdLookup = (0 until num_warp + NUMBER_SGPR_SLOTS).map { x =>
     (x -> x % num_bank)
   }.map { x => (x._1.U -> x._2.U) }
   val addrLookupScalar = (0 until num_warp).map { x =>
