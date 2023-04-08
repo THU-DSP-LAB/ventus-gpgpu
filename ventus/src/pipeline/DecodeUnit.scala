@@ -416,6 +416,14 @@ object IDecodeLUT_VL{
   import IDecode._
   // with code 0000111, 0100111, 0101011
   val table = Array(
+
+    VLE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_X, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
+    VLSE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_RS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
+    VLOXEI32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_VRS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
+    VSE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_X, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
+    VSSE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_RS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
+    VSOXEI32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_VRS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
+
     VLW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
     VLH_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_H,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
     VLB_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_L11,MEM_B,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
@@ -431,14 +439,7 @@ object IDecodeLUT_VL{
     VLBU12_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_B,FN_ADD,N,M_XRD,Y,N,N,Y,Y,N,N,N,Y,N,N),
     VSW12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
     VSH12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_H,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
-    VSB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N),
-
-    VLE32_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,N,N,N,N,N,N,N),
-    VLSE32_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,N,N,N,N,N,N,N),
-    VLOXEI32_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,N,N,N,N,N,N,N),
-    VSE32_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_X,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,N,N,N,N,N,N,N),
-    VSSE32_V->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,N,N,N,N,N,N,N),
-    VSOXEI32_V->List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_VRS2,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,N,N,N,N,N,N,N)
+    VSB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_B,FN_ADD,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N)
   )
 }
 
@@ -593,7 +594,8 @@ class InstrDecodeV2 extends Module {
     ListLookup(io.inst(i)(6, 0), lut(0),
       Array(
         BitPat("b1010111") -> lut(1),
-        BitPat("b0?00111") -> lut(2),
+        BitPat("b0000111") -> lut(2),
+        BitPat("b0100111") -> lut(2),
         BitPat("b0101011") -> lut(2),
         BitPat("b1011011") -> lut(3),
         BitPat("b0001011") -> lut(3)
