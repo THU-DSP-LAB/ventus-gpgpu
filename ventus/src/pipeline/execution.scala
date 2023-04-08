@@ -671,6 +671,9 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
             resultReg.reg_idxw := inReg.ctrl.reg_idxw
             resultReg.wvd := inReg.ctrl.wvd
             resultReg.wvd_mask := inReg.mask
+            if (SPIKE_OUTPUT) {
+              resultReg.spike_info.get := inReg.ctrl.spike_info.get
+            }
 
             simtReg.wid := inReg.ctrl.wid
             recv_wvd := inReg.ctrl.wvd

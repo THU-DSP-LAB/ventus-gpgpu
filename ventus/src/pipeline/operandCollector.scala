@@ -458,7 +458,7 @@ class operandCollector extends Module{
     x.rdwen := false.B
   })
   vectorBank(wbVecBankId).rdwen := io.writeVecCtrl.bits.wvd & io.writeVecCtrl.valid
-  scalarBank(wbScaBankId).rdwen := io.writeScalarCtrl.bits.wxd & io.writeScalarCtrl.valid
+  scalarBank(wbScaBankId).rdwen := io.writeScalarCtrl.bits.wxd & io.writeScalarCtrl.valid & io.writeScalarCtrl.bits.reg_idxw.orR
   io.writeScalarCtrl.ready := true.B
   io.writeVecCtrl.ready := true.B
 
