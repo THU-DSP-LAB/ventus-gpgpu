@@ -160,7 +160,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
   
-  val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   requests.io.valid(i)&&(m.io.status.tag === directory.io.result.bits.tag)&& (!directory.io.result.bits.hit)}.reverse) 
+  val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   requests.io.valid(i)&&(m.io.status.tag === directory.io.result.bits.tag)&&(m.io.status.set === directory.io.result.bits.set)&& (!directory.io.result.bits.hit)}.reverse) 
   val alloc = !tagMatches.orR() 
 
   val mshr_validOH = requests.io.valid 
