@@ -10,7 +10,7 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache
 
-import L1Cache.{HasL1CacheParameters, L1CacheModule, getEntryStatus}
+import L1Cache.{HasL1CacheParameters, L1CacheModule}
 import chisel3._
 import chisel3.util._
 import pipeline.parameters._
@@ -40,19 +40,30 @@ class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: 
   //val last = Bool()
 }
 
-class getEntryStatus(nEntry: Int) extends Module{
+class getEntryStatusReq(nEntry: Int) extends Module{
   val io = IO(new Bundle{
     val valid_list = Input(UInt(nEntry.W))
     //val alm_full = Output(Bool())
     val full = Output(Bool())
     val next = Output(UInt(log2Up(nEntry).W))
-    val used = Output(UInt())
+    //val used = Output(UInt())
   })
 
-  io.used := PopCount(io.valid_list)
+  //io.used := PopCount(io.valid_list)
   //io.alm_full := io.used === (nEntry.U-1.U)
   io.full := io.valid_list.andR
   io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
+}
+
+class getEntryStatusRsp(nEntry: Int) extends Module{
+  val io = IO(new Bundle{
+    val valid_list = Input(UInt(nEntry.W))
+    val next2cancel = Output(UInt(log2Up(nEntry).W))
+    val used = Output(UInt(log2Up(nEntry).W))
+  })
+  io.next2cancel := VecInit(io.valid_list.asBools).indexWhere(_ === true.B)
+  io.used := PopCount(io.valid_list)
+
 }
 
 
@@ -93,15 +104,15 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   * this iI will be recorded as iI for this missing cache line fetch request to L2
   * */
 
-  //  ******     decide selected subentries are full or not     ******
+  //  ******     missReq decide selected subentries are full or not     ******
   val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
   val entryMatchProbe = Wire(UInt(NMshrEntry.W))
-  val subentrySelected = subentry_valid(Mux(io.missRspIn.valid,OHToUInt(entryMatchMissRsp),OHToUInt(entryMatchProbe)))
-  val subentryStatus = Module(new getEntryStatus(NMshrSubEntry)) // Output: alm_full, full, next
-  subentryStatus.io.valid_list := Reverse(Cat(subentrySelected))
+  val subentrySelectedForReq = subentry_valid(OHToUInt(entryMatchProbe))
+  val subentryStatus = Module(new getEntryStatusReq(NMshrSubEntry)) // Output: alm_full, full, next
+  subentryStatus.io.valid_list := Reverse(Cat(subentrySelectedForReq))
 
-  //  ******     decide MSHR is full or not     ******
-  val entryStatus = Module(new getEntryStatus(NMshrEntry))
+  //  ******     missReq decide MSHR is full or not     ******
+  val entryStatus = Module(new getEntryStatusReq(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
 
   // ******     enum vec_mshr_status     ******
@@ -156,20 +167,27 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   io.probeOut_st1.a_source := real_SRAMAddrUp
 
   //  ******      mshr::vec_arrange_core_rsp    ******
+  val subentryStatusForRsp = Module(new getEntryStatusRsp(NMshrSubEntry))
+  subentryStatusForRsp.io.valid_list := Reverse(Cat(subentry_valid(OHToUInt(entryMatchMissRsp))))
   // priority: missRspIn > missReq
   //assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
   //This version allow missRspIn fire when no subentry are left
-  io.missRspIn.ready := !(subentryStatus.io.used >= 2.U || (subentryStatus.io.used === 1.U && !io.missRspOut.ready))
+  io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
+    (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
 
   entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
   assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn时，禁止多个entry比对instrId成功")
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
-  subentry_next2cancel := subentrySelected.indexWhere(_ === true.B)
+  subentry_next2cancel := subentryStatusForRsp.io.next2cancel
 
-  io.missRspOut.bits.targetInfo := targetInfo_Accesss(OHToUInt(entryMatchMissRsp))(subentry_next2cancel)
-  io.missRspOut.bits.blockAddr := blockAddr_Access(OHToUInt(entryMatchMissRsp))
-  io.missRspOut.bits.instrId := instrId_Access(OHToUInt(entryMatchMissRsp))
-  io.missRspOut.valid := io.missRspIn.valid && subentryStatus.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
+  val missRspTargetInfo_st0 = targetInfo_Accesss(OHToUInt(entryMatchMissRsp))(subentry_next2cancel)
+  val missRspBlockAddr_st0 = blockAddr_Access(OHToUInt(entryMatchMissRsp))
+
+  io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
+  io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
+  io.missRspOut.bits.instrId := io.missRspIn.bits.instrId
+  io.missRspOut.valid := RegNext(io.missRspIn.valid) &&
+    subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
   //  ******     maintain subentries    ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
