@@ -17,7 +17,7 @@ class RegFileBankIO extends Bundle  {
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
   val regs = SyncReadMem(NUMBER_SGPR_SLOTS/num_bank, UInt(xLen.W))
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,Mux(RegNext(io.rsidx.orR), regs.read(io.rsidx), 0.U))
+  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd, regs.read(io.rsidx))
   //io.ready := true.B
   when (io.rdwen) {
     regs.write(io.rdidx, io.rd)

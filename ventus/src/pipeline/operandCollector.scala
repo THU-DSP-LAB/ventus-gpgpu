@@ -73,7 +73,9 @@ class collectorUnit extends Module{
 
   val rsTypeWire = Wire(Vec(4, UInt(2.W)))
   val readyWire = Wire(Vec(4, Bool()))
-  val regIdxWire = Wire(Vec(4, UInt(5.W)))
+  val regIdxWire = Wire(Vec(4, UInt(8.W)))
+  val validWire = Wire(Vec(4, Bool()))
+
 
   val imm = Module(new ImmGen)
 
@@ -120,7 +122,7 @@ class collectorUnit extends Module{
     io.outArbiterIO(i).valid :=
       MuxLookup(state, false.B,
         Array(s_idle->(io.control.fire && (readyWire(i)===0.U)),
-          s_add->((valid(i) === true.B) && (ready(i)===false.B))
+          s_add->((validWire(i) === true.B) && (ready(i)===false.B))
         ))
   }
   //  io.issue.valid := (valid.asUInt === ready.asUInt) && ready.asUInt.andR
@@ -180,6 +182,7 @@ class collectorUnit extends Module{
         regIdx(2) := regIdxWire(2)
         regIdx(3) := 0.U // mask of vector instructions
         valid.foreach(_:= true.B)
+        validWire.foreach(_:=true.B)
         ready.foreach(_:= false.B)
         //using an iterable variable to indicate sel_alu signals
         rsTypeWire(0) := io.control.bits.sel_alu1
@@ -269,6 +272,7 @@ class collectorUnit extends Module{
     }
     is(s_out) {
       valid.foreach(_ := false.B)
+      validWire.foreach(_:=false.B)
       ready.foreach(_ := false.B)
     }
   }
@@ -441,10 +445,10 @@ class operandCollector extends Module{
     Arbiter.io.readArbiterOutScalar(i).ready := true.B
   })
   //connecting crossbar and banks, as well as signal readchosen. Readchosen needs to delay one tick to match bank reading
-  crossBar.io.chosenScalar := RegNext(Arbiter.io.readchosenScalar)
-  crossBar.io.validArbiterScalar := RegNext(VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)))
-  crossBar.io.chosenVector := RegNext(Arbiter.io.readchosenVector)
-  crossBar.io.validArbiterVector := RegNext(VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)))
+  crossBar.io.chosenScalar := (Arbiter.io.readchosenScalar)
+  crossBar.io.validArbiterScalar := (VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)))
+  crossBar.io.chosenVector := (Arbiter.io.readchosenVector)
+  crossBar.io.validArbiterVector := (VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)))
   for( i <- 0 until num_bank){
     crossBar.io.dataInScalar.rs(i) := scalarBank(i).rs
     crossBar.io.dataInVector.rs(i) := vectorBank(i).rs
