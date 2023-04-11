@@ -10,7 +10,7 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache.ICache
 
-import L1Cache.{HasL1CacheParameters, L1CacheModule, getEntryStatus}
+import L1Cache.{HasL1CacheParameters, L1CacheModule, getEntryStatusReq}
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
@@ -49,6 +49,21 @@ class MSHRmiss2mem(val bABits: Int, val WIdBits: Int) extends Bundle {//Use this
 /*class MSHRmiss2Mem(val bAWidth: Int) extends Bundle{
   val blockAddr = UInt(bAWidth.W)
 }*/
+
+class getEntryStatus(nEntry: Int) extends Module{
+  val io = IO(new Bundle{
+    val valid_list = Input(UInt(nEntry.W))
+    //val alm_full = Output(Bool())
+    val full = Output(Bool())
+    val next = Output(UInt(log2Up(nEntry).W))
+    val used = Output(UInt())
+  })
+
+  io.used := PopCount(io.valid_list)
+  //io.alm_full := io.used === (nEntry.U-1.U)
+  io.full := io.valid_list.andR
+  io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
+}
 
 class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheModule{
   //TODO parameterization method need improvement
