@@ -99,7 +99,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val caseName = "vecadd"
     val metaFileDir = "./ventus/txt/vecadd.riscv.meta" // TODO: rename
     val dataFileDir = "./ventus/txt/vecadd.riscv.data"
-    val maxCycle = 100
+    val maxCycle = 1000
     val mem = new MemBox(metaFileDir, dataFileDir)
     val size3d = mem.metaData.kernel_size.map(_.toInt)
     var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
@@ -112,7 +112,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(100)
+      c.clock.setTimeout(300)
       c.clock.step(5)
       fork{ // HOST <-> GPU
         val enq = fork{
@@ -143,34 +143,36 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           fork {
             timescope {
               c.io.out_a.ready.poke(true.B)
-              c.io.out_a.waitForValid()
-              val addr = c.io.out_a.bits.address.peek().litValue
-              var opcode_rsp = 0
-              val source = c.io.out_a.bits.source.peek().litValue
-              var data = new Array[Byte](data_byte_count)
-              if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
-                data = mem.readMem(addr, data_byte_count) // read operation
-                opcode_rsp = 1
+              if(!wg_list.reduce(_ && _)){
+                c.io.out_a.waitForValid()
+                val addr = c.io.out_a.bits.address.peek().litValue
+                var opcode_rsp = 0
+                val source = c.io.out_a.bits.source.peek().litValue
+                var data = new Array[Byte](data_byte_count)
+                if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
+                  data = mem.readMem(addr, data_byte_count) // read operation
+                  opcode_rsp = 1
+                }
+                else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
+                  data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
+                  val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).padTo(c.io.out_a.bits.mask.getWidth, '0').map {
+                    case '1' => true
+                    case _ => false
+                  }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
+                  mem.writeMem(addr, data_byte_count, data, mask) // write operation
+                  data = Array.fill(data_byte_count)(0.toByte) // response = 0
+                  opcode_rsp = 0
+                }
+                else {
+                  data = Array.fill(data_byte_count)(0.toByte)
+                }
+                c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
+                  _.opcode -> opcode_rsp.U, // w:0 r:1
+                  _.data -> ByteArray2BigInt(data).U,
+                  _.source -> source.U,
+                  _.size -> 0.U // TODO: Unused
+                ))
               }
-              else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
-                data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
-                val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).padTo(c.io.out_a.bits.mask.getWidth, '0').map {
-                  case '1' => true
-                  case _ => false
-                }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
-                mem.writeMem(addr, data_byte_count, data, mask) // write operation
-                data = Array.fill(data_byte_count)(0.toByte) // response = 0
-                opcode_rsp = 0
-              }
-              else {
-                data = Array.fill(data_byte_count)(0.toByte)
-              }
-              c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
-                _.opcode -> opcode_rsp.U, // w:0 r:1
-                _.data -> ByteArray2BigInt(data).U,
-                _.source -> source.U,
-                _.size -> 0.U // TODO: Unused
-              ))
             }
           }.join
         }
