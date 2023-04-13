@@ -322,7 +322,7 @@ class CSRexe extends Module {
   result.io.deq<>io.out
 
   io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid
-  result.io.enq.valid:=io.in.valid
+  result.io.enq.valid:=io.in.fire
   result.io.enq.bits:=0.U.asTypeOf(new WriteScalarCtrl)
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
   result.io.enq.bits.wxd:=io.in.bits.ctrl.wxd
