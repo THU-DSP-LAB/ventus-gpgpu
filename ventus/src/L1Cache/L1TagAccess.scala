@@ -79,7 +79,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   ))
   timeAccess.io.r.req.valid := io.allocateWrite.fire
   timeAccess.io.r.req.bits.setIdx := io.allocateWrite.bits.setIdx
-  //io.allocateWrite.ready := true.B//TODO be conditional after add memReq_Q
+  //io.allocateWrite.ready := true.B
   //although use arb, src0 and src1 should not come in same cycle
   val timeAccessWArb = Module(new Arbiter (new SRAMBundleAW(UInt(Length_Replace_time_SRAM.W),set,way),2))
   assert(!(timeAccessWArb.io.in(0).valid && timeAccessWArb.io.in(1).valid), s"tag probe and allocate in same cycle")
@@ -215,7 +215,7 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   io.cache_hit := io.waymask.orR
 }
 
-class minIdxTree(width: Int, numInput: Int) extends Module{//TODO turn this to be minIdxTree
+class minIdxTree(width: Int, numInput: Int) extends Module{
   val treeLevel = log2Ceil(numInput)
   val io = IO(new Bundle{
     val candidateIn = Input(Vec(numInput, UInt(width.W)))
