@@ -84,7 +84,7 @@ class collectorUnit extends Module{
   //Lookup table for address transformation
   // bankID = (wid + regIdx) % num_bank
   // rsAddr =  [gpr_base(i) + regIdx)] / num_bank
-  val bankIdLookup = (0 until num_warp + NUMBER_SGPR_SLOTS).map { x =>
+  val bankIdLookup = (0 until num_warp + 256).map { x =>
     (x -> x % num_bank)
   }.map { x => (x._1.U -> x._2.U) }
   val addrLookupScalar = (0 until num_warp).map { x =>
@@ -97,26 +97,46 @@ class collectorUnit extends Module{
   //reading the register bank for those operand which type is not an immediate
   for (i <- 0 until 4) {
 
-    val addrTypeScalar = MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupScalar)
-    val addrTypeVector = MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupVector)
-    io.outArbiterIO(i).bits.bankID := MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid+regIdxWire(i), controlReg.wid+regIdx(i)), 0.U, bankIdLookup)
-    io.outArbiterIO(i).bits.rsType := Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))
+    //    val addrTypeScalar = MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupScalar)
+    //    val addrTypeVector = MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupVector)
+    //    io.outArbiterIO(i).bits.bankID := MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid+regIdxWire(i), controlReg.wid+regIdx(i)), 0.U, bankIdLookup)
+    //    io.outArbiterIO(i).bits.rsType := Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))
+    //
+    //    when(Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))===1.U) {
+    //      io.outArbiterIO(i).bits.rsAddr := addrTypeScalar + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
+    //    }.elsewhen(Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))===2.U) {
+    //      io.outArbiterIO(i).bits.rsAddr := addrTypeVector + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
+    //    }.otherwise {
+    //      io.outArbiterIO(i).bits.rsAddr := addrTypeScalar + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
+    //    }
 
-    when(Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))===1.U) {
-      io.outArbiterIO(i).bits.rsAddr := addrTypeScalar + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
-    }.elsewhen(Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))===2.U) {
-      io.outArbiterIO(i).bits.rsAddr := addrTypeVector + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
+    io.outArbiterIO(i).bits.bankID := Mux(io.control.fire && (state === s_idle),
+      io.control.bits.wid(log2Ceil(num_bank)-1, 0) + regIdxWire(i)(log2Ceil(num_bank)-1, 0),
+      controlReg.wid(log2Ceil(num_bank)-1, 0) + regIdx(i)(log2Ceil(num_bank)-1, 0))
+    io.outArbiterIO(i).bits.rsType := Mux(io.control.fire && (state === s_idle), rsTypeWire(i), rsType(i))
+
+    when(Mux(io.control.fire && (state === s_idle), rsTypeWire(i), rsType(i)) === 1.U) {
+      when(io.control.fire && (state === s_idle)) {
+        io.outArbiterIO(i).bits.rsAddr := (io.sgpr_base(io.control.bits.wid) >> log2Ceil(num_bank).U).asUInt + (regIdxWire(i) >> log2Ceil(num_bank).U)
+      }.otherwise {
+        io.outArbiterIO(i).bits.rsAddr := (io.sgpr_base(controlReg.wid) >> log2Ceil(num_bank).U).asUInt + (regIdx(i) >> log2Ceil(num_bank).U)
+      }
+    }.elsewhen(Mux(io.control.fire && (state === s_idle), rsTypeWire(i), rsType(i)) === 2.U) {
+      when(io.control.fire && (state === s_idle)) {
+        io.outArbiterIO(i).bits.rsAddr := (io.vgpr_base(io.control.bits.wid) >> log2Ceil(num_bank).U).asUInt + (regIdxWire(i) >> log2Ceil(num_bank).U)
+      }.otherwise {
+        io.outArbiterIO(i).bits.rsAddr := (io.vgpr_base(controlReg.wid) >> log2Ceil(num_bank).U).asUInt + (regIdx(i) >> log2Ceil(num_bank).U)
+      }
     }.otherwise {
-      io.outArbiterIO(i).bits.rsAddr := addrTypeScalar + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
+      when(io.control.fire && (state === s_idle)) {
+        io.outArbiterIO(i).bits.rsAddr := (io.sgpr_base(io.control.bits.wid) >> log2Ceil(num_bank).U).asUInt + (regIdxWire(i) >> log2Ceil(num_bank).U)
+      }.otherwise {
+        io.outArbiterIO(i).bits.rsAddr := (io.sgpr_base(controlReg.wid) >> log2Ceil(num_bank).U).asUInt + (regIdx(i) >> log2Ceil(num_bank).U)
+      }
     }
-    //      io.outArbiterIO(i).bits.rsAddr := MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupScalar) +
-    //        Mux(io.control.fire&&(state===s_idle),regIdxWire(i), regIdx(i))  >> log2Ceil(num_bank)
-    //      io.outArbiterIO(i).bits.rsAddr := Mux(io.control.fire&&(state===s_idle),
-    //        MuxLookup(io.control.bits.wid, 0.U, addrLookupScalar)+regIdxWire(i)>>log2Ceil(num_bank),
-    //        MuxLookup(controlReg.wid, 0.U, addrLookupScalar)+regIdx(i)>>log2Ceil(num_bank))
   }
   (0 until 4).foreach(i => {
-    io.bankIn(i).ready := (state === s_add) && (ready(i)===0.U)
+    io.bankIn(i).ready := (state === s_add  && (ready(i)===0.U)) || (io.control.fire && (readyWire(i)===0.U))
   })
   for (i <- 0 until 4) {
     io.outArbiterIO(i).valid :=
@@ -130,8 +150,11 @@ class collectorUnit extends Module{
   io.control.ready := (state===s_idle && !valid.asUInt.orR)
 
   when(state === s_idle) {
-    when(io.control.fire && !valid.asUInt.orR ){
-      state := s_add
+
+    when(io.control.fire){
+      when(!readyWire.asUInt.andR) {state := s_add}
+        .elsewhen(readyWire.asUInt.andR) {state := s_out}
+        .otherwise{state := s_idle}
     }.otherwise{state := s_idle}
   }.elsewhen (state === s_add) {
     when(valid.asUInt =/= ready.asUInt ) {
@@ -145,9 +168,11 @@ class collectorUnit extends Module{
     }.otherwise{state := s_out}
   }.otherwise{state := s_idle}
 
+  validWire := 0.U.asTypeOf(validWire)
   regIdxWire := 0.U.asTypeOf(regIdxWire)
   rsTypeWire := 0.U.asTypeOf(rsTypeWire)
   readyWire := 0.U.asTypeOf(readyWire)
+
   imm.io.inst := MuxLookup(state, 0.U,
     Array(s_idle->io.control.bits.inst,
       s_add->controlReg.inst
@@ -235,45 +260,44 @@ class collectorUnit extends Module{
         }
       }
     }
-    is(s_add) {
-      for (i <- 0 until 4) {
-        when(io.bankIn(i).fire) {
-          when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
-            rsReg(0) := MuxLookup(rsType(0), VecInit.fill(num_thread)(0.U(xLen.W)),
-              Array(
-                A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
-                A1_VRS1 -> io.bankIn(i).bits.data)
-            )
-            ready(0) := 1.U
-          }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
-            rsReg(1) := MuxLookup(rsType(1), VecInit.fill(num_thread)(0.U(xLen.W)),
-              Array(
-                A2_RS2 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
-                A2_VRS2 -> io.bankIn(i).bits.data)
-            )
-            ready(1) := 1.U
-          }.elsewhen(io.bankIn(i).bits.regOrder === 2.U) { //operand3
-            rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)),
-              Array(A3_PC -> VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)),
-                A3_VRS3 -> io.bankIn(i).bits.data,
-                A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))),
-                A3_FRS3 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))
-              )
-            )
-            ready(2) := 1.U
-          }.elsewhen(io.bankIn(i).bits.regOrder === 3.U) {
-            (0 until num_thread).foreach(x => {
-              mask(x) := io.bankIn(i).bits.v0(0).apply(x) //this instruction is an Vector with mask, the mask is read from vector register bank
-            })
-            ready(3) := 1.U
-          }
-        }
-      }
-    }
+
     is(s_out) {
       valid.foreach(_ := false.B)
       validWire.foreach(_:=false.B)
       ready.foreach(_ := false.B)
+    }
+  }
+  for (i <- 0 until 4) {
+    when(io.bankIn(i).fire) {
+      when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
+        rsReg(0) := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
+          Array(
+            A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+            A1_VRS1 -> io.bankIn(i).bits.data)
+        )
+        ready(0) := 1.U
+      }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
+        rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)),
+          Array(
+            A2_RS2 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+            A2_VRS2 -> io.bankIn(i).bits.data)
+        )
+        ready(1) := 1.U
+      }.elsewhen(io.bankIn(i).bits.regOrder === 2.U) { //operand3
+        rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)),
+          Array(A3_PC -> VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)),
+            A3_VRS3 -> io.bankIn(i).bits.data,
+            A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))),
+            A3_FRS3 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))
+          )
+        )
+        ready(2) := 1.U
+      }.elsewhen(io.bankIn(i).bits.regOrder === 3.U) {
+        (0 until num_thread).foreach(x => {
+          mask(x) := io.bankIn(i).bits.v0(0).apply(x) //this instruction is an Vector with mask, the mask is read from vector register bank
+        })
+        ready(3) := 1.U
+      }
     }
   }
   io.issue.bits.alu_src1 := rsReg(0)
@@ -356,6 +380,8 @@ class crossBar  extends Module{
   val CUIdVector = Wire(Vec(num_bank, UInt(log2Ceil(num_collectorUnit).W)))
   val regOrderScalar = Wire(Vec(num_bank, UInt(2.W)))
   val regOrderVector = Wire(Vec(num_bank, UInt(2.W)))
+//  val validDelay = Wire(Vec(num_collectorUnit,Vec(4, Bool())))
+//  val validDelayVector = Wire(Vec(num_collectorUnit,Vec(4, Bool())))
   // There is not conflict from crossbar to collector units, so don't need to deal with stall.
   // However, in situation bank conflict occurs, some banks may have invalid output.
   (0 until num_bank).foreach(i=>{
@@ -374,22 +400,28 @@ class crossBar  extends Module{
   //  })
   io.out.foreach(_.foreach(_.bits.data := 0.U.asTypeOf(Vec(num_thread, UInt(xLen.W)))))
   io.out.foreach(_.foreach(_.bits.v0 := 0.U.asTypeOf(Vec(num_thread, UInt(xLen.W)))))
-  io.out.foreach(_.foreach(_.valid := false.B))
+//  validDelay.foreach(_.foreach(_ := false.B))
+  io.out.foreach(_.foreach(_.valid := (false.B)))
   io.out.foreach(_.foreach(_.bits.regOrder := 0.U))
   for( i <- 0 until num_bank){
     for(j <- 0 until num_collectorUnit){
       for(k <- 0 until 4){
         when((CUIdScalar(i)===j.U) && io.validArbiterScalar(i) &&(regOrderScalar(i)===k.U)){
           io.out(j)(k).bits.data := VecInit.fill(num_thread)(io.dataInScalar.rs(i))
+//          validDelay(j)(k) := true.B
+//          io.out(j)(k).valid := validDelay
           io.out(j)(k).valid := true.B
           io.out(j)(k).bits.regOrder := regOrderScalar(i)
         }
         when((CUIdVector(i) === j.U) && io.validArbiterVector(i) && (regOrderVector(i) === k.U)) {
           io.out(j)(k).bits.data := io.dataInVector.rs(i)
           io.out(j)(k).bits.v0 := io.dataInVector.v0(i)
+//          validDelay(j)(k) := true.B
+//          io.out(j)(k).valid := validDelay
           io.out(j)(k).valid := true.B
           io.out(j)(k).bits.regOrder := regOrderVector(i)
         }
+//      io.out(j)(k).valid := RegNext(validDelay(j)(k))
       }
     }
   }
@@ -445,10 +477,10 @@ class operandCollector extends Module{
     Arbiter.io.readArbiterOutScalar(i).ready := true.B
   })
   //connecting crossbar and banks, as well as signal readchosen. Readchosen needs to delay one tick to match bank reading
-  crossBar.io.chosenScalar := (Arbiter.io.readchosenScalar)
-  crossBar.io.validArbiterScalar := (VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)))
-  crossBar.io.chosenVector := (Arbiter.io.readchosenVector)
-  crossBar.io.validArbiterVector := (VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)))
+  crossBar.io.chosenScalar := RegNext(Arbiter.io.readchosenScalar)
+  crossBar.io.validArbiterScalar := RegNext(VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)))
+  crossBar.io.chosenVector := RegNext(Arbiter.io.readchosenVector)
+  crossBar.io.validArbiterVector := RegNext(VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)))
   for( i <- 0 until num_bank){
     crossBar.io.dataInScalar.rs(i) := scalarBank(i).rs
     crossBar.io.dataInVector.rs(i) := vectorBank(i).rs
@@ -479,7 +511,7 @@ class operandCollector extends Module{
   //writeback control
   // bankID = (wid + regIdx) % num_bank
   // rsAddr =  [gpr_base(i) + regIdx)] / num_bank
-  val bankIdLookup = (0 until num_warp + NUMBER_SGPR_SLOTS).map { x =>
+  val bankIdLookup = (0 until num_warp + 256).map { x =>
     (x -> x % num_bank)
   }.map { x => (x._1.U -> x._2.U) }
   val addrLookupScalar = (0 until num_warp).map { x =>
@@ -494,10 +526,17 @@ class operandCollector extends Module{
   val wbVecBankAddr = Wire(UInt(depth_regBank.W))
   val wbScaBankAddr = Wire(UInt(depth_regBank.W))
 
-  wbVecBankId := MuxLookup(io.writeVecCtrl.bits.reg_idxw+io.writeVecCtrl.bits.warp_id, 0.U, bankIdLookup)
-  wbVecBankAddr := MuxLookup(io.writeVecCtrl.bits.warp_id, 0.U, addrLookupVector) + io.writeVecCtrl.bits.reg_idxw >> log2Ceil(num_bank).U
-  wbScaBankId := MuxLookup(io.writeScalarCtrl.bits.reg_idxw+io.writeScalarCtrl.bits.warp_id, 0.U, bankIdLookup)
-  wbScaBankAddr := MuxLookup(io.writeScalarCtrl.bits.warp_id, 0.U, addrLookupScalar) + io.writeScalarCtrl.bits.reg_idxw >> log2Ceil(num_bank).U
+  val sgprW = Wire(UInt(depth_regBank.W))
+  sgprW := io.sgpr_base(io.writeScalarCtrl.bits.warp_id) >> log2Ceil(num_bank).U
+  val regW = Wire(UInt(7.W))
+  regW := io.writeScalarCtrl.bits.reg_idxw >> log2Ceil(num_bank).U
+
+  wbVecBankId := io.writeVecCtrl.bits.reg_idxw(log2Ceil(num_bank)-1,0)+io.writeVecCtrl.bits.warp_id(log2Ceil(num_bank)-1,0)
+  wbVecBankAddr := (io.vgpr_base(io.writeVecCtrl.bits.warp_id) >> log2Ceil(num_bank).U).asUInt + (io.writeVecCtrl.bits.reg_idxw >> log2Ceil(num_bank).U)
+  wbScaBankId := io.writeScalarCtrl.bits.reg_idxw(log2Ceil(num_bank)-1,0)+io.writeScalarCtrl.bits.warp_id(log2Ceil(num_bank)-1,0)
+  wbScaBankAddr := (io.sgpr_base(io.writeScalarCtrl.bits.warp_id) >> log2Ceil(num_bank).U).asUInt + (io.writeScalarCtrl.bits.reg_idxw >> log2Ceil(num_bank).U)
+  val wbScaBankAddrtest = Wire(UInt(depth_regBank.W))
+  wbScaBankAddrtest := sgprW + regW
 
   vectorBank.foreach(x=>{
     x.rdidx := wbVecBankAddr
