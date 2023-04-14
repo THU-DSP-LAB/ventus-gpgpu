@@ -1,8 +1,8 @@
 import random
 import os
 
-scalar_regs = ["x{}".format(i) for i in range(1, 6)]
-vector_regs = ["v{}".format(i) for i in range(1, 6)]
+scalar_regs = ["x{}".format(i) for i in range(1, 31)]
+vector_regs = ["v{}".format(i) for i in range(1, 31)]
 
 insts = {
     "lw": {"rd": scalar_regs, "rs1": scalar_regs},
@@ -39,11 +39,20 @@ with open(file1_path, "w") as f1, open(cpp_path, "w") as f3:
         inst = insts[inst_name]
         rd = "x{}".format(i)
         rs1 = "x0"
-        imm = random.randint(500, 1000)
+        imm = random.randint(100, 200) + 8 * 128
         f1.write("{} {}, {}, {}\n".format(inst_name, rd, rs1, imm))
         i_type = "I_TYPE("
         i_type += "addi_" + f", {i}, 0, {imm}"
         i_type += ")"
+        f3.write(f"    WARPS[warp_id].ireg[{f3_idx}] = {i_type};\n")
+        f3_idx = f3_idx + 1
+        f1.write("{} {}, {}, {}\n".format("add", rd, rd, rd))
+        f1.write("{} {}, {}, {}\n".format("add", rd, rd, rd))
+        i_type = "I_TYPE("
+        i_type += "add_" + f", {i}, {i}, {i}"
+        i_type += ")"
+        f3.write(f"    WARPS[warp_id].ireg[{f3_idx}] = {i_type};\n")
+        f3_idx = f3_idx + 1
         f3.write(f"    WARPS[warp_id].ireg[{f3_idx}] = {i_type};\n")
         f3_idx = f3_idx + 1
 
@@ -60,7 +69,7 @@ with open(file1_path, "w") as f1, open(cpp_path, "w") as f3:
         f3.write(f"    WARPS[warp_id].ireg[{f3_idx}] = {i_type};\n")
         f3_idx = f3_idx + 1
 
-    for i in range(50):
+    for i in range(200):
         inst_name = random.choice(list(insts.keys()))
         inst = insts[inst_name]
 
@@ -81,7 +90,7 @@ with open(file1_path, "w") as f1, open(cpp_path, "w") as f3:
         i_type = "I_TYPE("
 
         if inst_name == "lw":
-            offset = random.randint(-50, 50)
+            offset = 4 * random.randint(-10, 10)
             f1.write("{} {}, {}({})\n".format(inst_name, rd, offset, rs1))
             i_type += "lw_" + f", {int(rd[1:])}, {int(rs1[1:])}, {offset}"
 
@@ -107,14 +116,14 @@ with open(file1_path, "w") as f1, open(cpp_path, "w") as f3:
 
         elif inst_name == "beq":
             label = "label{}".format(i + 1)
-            jump = random.randint(-5, 5)
+            # jump = random.randint(-5, 5)
             f1.write("{} {}, {}, {}\n".format(inst_name, rs1, rs2, label))
             # # 随机生成一个跳转标签
             f1.write("{}:\n".format(label))
             i_type += "beq_" + f", 0, {int(rs1[1:])}, {int(rs2[1:])}"
 
         elif inst_name == "addi":
-            imm = random.randint(-40, 40)
+            imm = 4 * random.randint(-2, 2)
             f1.write("{} {}, {}, {}\n".format(inst_name, rd, rs1, imm))
             i_type += "addi_" + f", {int(rd[1:])}, {int(rs1[1:])}, {imm}"
 
@@ -126,4 +135,3 @@ with open(file1_path, "w") as f1, open(cpp_path, "w") as f3:
         f3_idx = f3_idx + 1
 
     f3.write("}\n")
-    

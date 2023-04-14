@@ -1,19 +1,16 @@
 [*]
 [*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
-[*] Fri Apr  7 10:41:16 2023
+[*] Sun Apr  9 15:29:15 2023
 [*]
 [dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp0.vcd"
-[dumpfile_mtime] "Fri Apr  7 10:40:03 2023"
-[dumpfile_size] 122880
+[dumpfile_mtime] "Sun Apr  9 15:28:35 2023"
+[dumpfile_size] 1283004
 [savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp0.gtkw"
-[timestart] 4790
+[timestart] 30467
 [size] 2548 1347
 [pos] -1 -1
-*-5.000000 2977 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-5.000000 30847 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] SystemC.
-[treeopen] SystemC.salutmp2.
-[treeopen] SystemC.salutop_dat.
-[treeopen] SystemC.valutop_dat.
 [sst_width] 214
 [signals_width] 369
 [sst_expanded] 1
@@ -87,11 +84,12 @@ SystemC.emit_ins.s1[31:0]
 SystemC.emit_ins.s2[31:0]
 [color] 6
 SystemC.emit_idx[31:0]
-[color] 6
+@28
+[color] 2
+SystemC.doemit
+@420
+[color] 2
 SystemC.emitins_warpid[31:0]
-SystemC.findemit
-[color] 6
-SystemC.emit
 [color] 4
 SystemC.emito_salu
 [color] 4
@@ -218,10 +216,8 @@ SystemC.rsv2_data.data(0)[31:0]
 SystemC.valufifo_empty
 [color] 1
 SystemC.valufifo_elem_num[31:0]
-@421
 [color] 1
 SystemC.execpop_valu
-@420
 [color] 1
 SystemC.valutop_dat.warp_id[31:0]
 [color] 1
@@ -254,22 +250,40 @@ SystemC.wb_ins.s1[31:0]
 SystemC.wb_ins.s2[31:0]
 [color] 2
 SystemC.wb_warpid[31:0]
-[color] 4
-SystemC.s_regfile(0)[31:0]
-[color] 4
-SystemC.s_regfile(1)[31:0]
-[color] 4
-SystemC.s_regfile(2)[31:0]
-[color] 4
-SystemC.s_regfile(3)[31:0]
-[color] 4
-SystemC.s_regfile(4)[31:0]
-[color] 4
-SystemC.s_regfile(5)[31:0]
-[color] 4
-SystemC.s_regfile(6)[31:0]
-[color] 4
-SystemC.s_regfile(7)[31:0]
+@421
+SystemC.s_regfile.data(0)[31:0]
+@420
+SystemC.s_regfile.data(1)[31:0]
+SystemC.s_regfile.data(2)[31:0]
+SystemC.s_regfile.data(3)[31:0]
+SystemC.s_regfile.data(4)[31:0]
+SystemC.s_regfile.data(5)[31:0]
+SystemC.s_regfile.data(6)[31:0]
+SystemC.s_regfile.data(7)[31:0]
+SystemC.s_regfile.data(8)[31:0]
+SystemC.s_regfile.data(9)[31:0]
+SystemC.s_regfile.data(10)[31:0]
+SystemC.s_regfile.data(11)[31:0]
+SystemC.s_regfile.data(12)[31:0]
+SystemC.s_regfile.data(13)[31:0]
+SystemC.s_regfile.data(14)[31:0]
+SystemC.s_regfile.data(15)[31:0]
+SystemC.s_regfile.data(16)[31:0]
+SystemC.s_regfile.data(17)[31:0]
+SystemC.s_regfile.data(18)[31:0]
+SystemC.s_regfile.data(19)[31:0]
+SystemC.s_regfile.data(20)[31:0]
+SystemC.s_regfile.data(21)[31:0]
+SystemC.s_regfile.data(22)[31:0]
+SystemC.s_regfile.data(23)[31:0]
+SystemC.s_regfile.data(24)[31:0]
+SystemC.s_regfile.data(25)[31:0]
+SystemC.s_regfile.data(26)[31:0]
+SystemC.s_regfile.data(27)[31:0]
+SystemC.s_regfile.data(28)[31:0]
+SystemC.s_regfile.data(29)[31:0]
+SystemC.s_regfile.data(30)[31:0]
+SystemC.s_regfile.data(31)[31:0]
 [color] 5
 SystemC.v_regfile(0)(0)[31:0]
 [color] 5

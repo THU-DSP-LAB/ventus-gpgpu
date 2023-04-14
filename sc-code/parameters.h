@@ -13,7 +13,7 @@ inline constexpr int num_warp = 4;
 inline constexpr int depth_warp = 2; //
 inline constexpr int xLen = 32;
 inline constexpr long unsigned int num_thread = 8;
-inline constexpr int ireg_bitsize = 9;
+inline constexpr int ireg_bitsize = 10;
 inline constexpr int ireg_size = 1 << ireg_bitsize;
 inline constexpr int INS_LENGTH = 32; // the length of per instruction
 inline constexpr double PERIOD = 10;
@@ -23,6 +23,34 @@ inline constexpr int BANK_NUM = 4;
 
 using reg_t = sc_int<32>;
 using v_regfile_t = std::array<reg_t, num_thread>;
+struct vector_t : std::array<reg_t, num_thread>
+{
+    friend std::ostream &operator<<(std::ostream &os, const v_regfile_t &arr)
+    {
+        os << "{" << std::hex;
+        for (const auto &item : arr)
+        {
+            os << item << ",";
+        }
+        os << std::dec << "}";
+        return os;
+    }
+    bool operator==(const std::array<reg_t, num_thread> &other) const
+    {
+        for (int i = 0; i < 8; ++i)
+            if ((*this)[i] != other[i])
+                return false;
+        return true;
+    }
+    v_regfile_t &operator=(const std::array<reg_t, num_thread> &other)
+    {
+        for (int i = 0; i < 8; ++i)
+        {
+            (*this)[i] = other[i];
+        }
+        return *this;
+    }
+};
 
 enum OP_TYPE
 { // start at 1, so 0 is invalid op
@@ -63,7 +91,7 @@ public:
     }
     friend ostream &operator<<(ostream &os, I_TYPE const &v)
     {
-        os << "(" << v.op << "," << v.s1 << "," << v.s2 << "," << v.d << ")";
+        os << "(" << v.op << "," << v.d << "," << v.s1 << "," << v.s2 << ")";
         return os;
     }
     friend void sc_trace(sc_trace_file *tf, const I_TYPE &v, const std::string &NAME)
@@ -125,6 +153,11 @@ struct bank_t
 {
     int bank_id;
     int addr;
+    friend std::ostream &operator<<(std::ostream &os, const bank_t &arr)
+    {
+        os << "bank" << arr.bank_id << "-" << arr.addr;
+        return os;
+    }
 };
 struct warpaddr_t
 {
@@ -162,6 +195,11 @@ struct opcfifo_t
 template <typename T, size_t N>
 class StaticEntry
 { // for OPC entry
+private:
+    std::array<T, N> data_;
+    std::array<bool, N> tag_; // 标志位置是否有效
+    size_t size_;
+
 public:
     StaticEntry() : size_(0)
     {
@@ -227,11 +265,6 @@ public:
     T *end() { return data_.end(); }
     const T *begin() const { return data_.begin(); }
     const T *end() const { return data_.end(); }
-
-private:
-    std::array<T, N> data_;
-    std::array<bool, N> tag_; // 标志位置是否有效
-    size_t size_;
 };
 
 template <typename T, std::size_t capacity>
@@ -572,6 +605,21 @@ public:
     // regfile
     std::array<reg_t, 32> s_regfile;
     std::array<v_regfile_t, 32> v_regfile;
+};
+
+union FloatAndInt
+{
+    float f;
+    int i;
+};
+inline std::ostream &operator<<(std::ostream &os, const FloatAndInt &val)
+{
+    os << val.f;
+    return os;
+};
+inline bool operator==(const FloatAndInt &left, const FloatAndInt &right)
+{
+    return left.i == right.i;
 };
 
 #endif

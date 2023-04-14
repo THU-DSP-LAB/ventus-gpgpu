@@ -161,9 +161,10 @@ public:
     sc_event_and_list ev_issue_list;
     sc_signal<I_TYPE> issue_ins{"issue_ins"};
     sc_signal<int> issueins_warpid;
-    sc_signal<int> last_dispatch_warpid; // 需要设为sc_signal，否则ISSUE_ACTION对i的循环边界【i < last_dispatch_warpid + num_warp】会变化
+    sc_signal<int> last_dispatch_warpid{"last_dispatch_warpid"}; // 需要设为sc_signal，否则ISSUE_ACTION对i的循环边界【i < last_dispatch_warpid + num_warp】会变化
     sc_signal<bool> dispatch_valid{"dispatch_valid"};
     // opc
+    sc_signal<int> last_emit_entryid{"last_emit_entryid"};
     sc_event ev_opc_pop,
         ev_opc_judge_emit, ev_opc_store, ev_opc_collect;
     StaticEntry<opcfifo_t, OPCFIFO_SIZE> opcfifo; // tlm::tlm_fifo<I_TYPE> opcfifo;
@@ -199,10 +200,11 @@ public:
     sc_signal<int> rds1_addr{"rds1_addr"}, rdv1_addr{"rdv1_addr"}, rdf1_addr{"rdf1_addr"};
     sc_signal<reg_t> rds1_data{"rds1_data"};
     sc_vector<sc_signal<reg_t>> rdv1_data{"rdv1_data", num_thread};
-    sc_vector<sc_signal<float>> rdf1_data{"rdf1_data", num_thread};
+    sc_vector<sc_signal<FloatAndInt>> rdf1_data{"rdf1_data", num_thread};
     // exec
     sc_event_queue salu_eqa, salu_eqb; // 分别负责a time和b time，最后一个是SALU_IN的，优先级比eqb低
-    sc_event salu_eva, salu_evb, salu_unready, salu_nothinghappen, ev_salufifo_pushed;
+    sc_event salu_eva, salu_evb, salu_unready, salu_nothinghappen,
+        ev_salufifo_pushed, ev_saluready_updated;
     std::queue<salu_in_t> salu_dq;
     StaticQueue<salu_out_t, 3> salufifo;
     salu_out_t salutop_dat;
@@ -210,34 +212,37 @@ public:
     int salufifo_elem_num;
     salu_in_t salutmp1;
     salu_out_t salutmp2;
-    sc_signal<bool> salueqa_triggered;
+    sc_signal<bool> salueqa_triggered, salueqb_triggered; // 例如eqa_triggered，仅在eqa被触发时，delta 0变为1，delta 1给SALU_IN看，同时又变回0
 
     sc_event_queue valu_eqa, valu_eqb;
-    sc_event valu_eva, valu_evb, valu_unready, valu_nothinghappen, ev_valufifo_pushed;
+    sc_event valu_eva, valu_evb, valu_unready, valu_nothinghappen,
+        ev_valufifo_pushed, ev_valuready_updated;
     std::queue<valu_in_t> valu_dq;
     StaticQueue<valu_out_t, 3> valufifo;
     valu_out_t valutop_dat;
     bool valufifo_empty, valufifo_push;
     int valufifo_elem_num;
-    sc_signal<bool> valueqa_triggered;
+    sc_signal<bool> valueqa_triggered, valueqb_triggered;
 
     sc_event_queue vfpu_eqa, vfpu_eqb;
-    sc_event vfpu_eva, vfpu_evb, vfpu_unready, vfpu_nothinghappen, ev_vfpufifo_pushed;
+    sc_event vfpu_eva, vfpu_evb, vfpu_unready, vfpu_nothinghappen,
+        ev_vfpufifo_pushed, ev_vfpuready_updated;
     std::queue<vfpu_in_t> vfpu_dq;
     StaticQueue<vfpu_out_t, 3> vfpufifo;
     vfpu_out_t vfputop_dat;
     bool vfpufifo_empty, vfpufifo_push;
     int vfpufifo_elem_num;
-    sc_signal<bool> vfpueqa_triggered;
+    sc_signal<bool> vfpueqa_triggered, vfpueqb_triggered;
 
     sc_event_queue lsu_eqa, lsu_eqb;
-    sc_event lsu_eva, lsu_evb, lsu_unready, lsu_nothinghappen, ev_lsufifo_pushed;
+    sc_event lsu_eva, lsu_evb, lsu_unready, lsu_nothinghappen,
+        ev_lsufifo_pushed, ev_lsuready_updated;
     std::queue<lsu_in_t> lsu_dq;
-    StaticQueue<lsu_out_t, 3> lsufifo;
+    StaticQueue<lsu_out_t, 10> lsufifo;
     lsu_out_t lsutop_dat;
     bool lsufifo_empty;
     int lsufifo_elem_num;
-    sc_signal<bool> lsueqa_triggered;
+    sc_signal<bool> lsueqa_triggered, lsueqb_triggered;
     // writeback
     sc_signal<bool> write_s, write_v, write_f;
     sc_signal<bool> execpop_salu, execpop_valu, execpop_vfpu, execpop_lsu;
@@ -249,7 +254,7 @@ public:
     sc_signal<bool> dispatch_ready;
 
     // 外部存储，暂时在BASE中实现
-    std::array<reg_t, 8192> external_mem;
+    std::array<reg_t, 81920> external_mem;
 };
 
 #endif

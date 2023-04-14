@@ -128,7 +128,6 @@ void BASE::IBUF_ACTION(int warp_id)
     {
         wait(clk.posedge_event());
         WARPS[warp_id].ibuf_swallow = false;
-        // cout << "IBUF: entering ibuf at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         if (rst_n.read() == 0)
             WARPS[warp_id].ififo.clear();
         else
@@ -155,9 +154,7 @@ void BASE::IBUF_ACTION(int warp_id)
                     WARPS[warp_id].ibuf_swallow = true;
                 }
                 // cout << "before put, ififo has " << ififo.used() << " elems at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-
                 // cout << "after put, ififo has " << ififo.used() << " elems at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                // cout << "ififo has put ins " << fetch_ins << ", whose jump_addr is " << fetch_ins.jump_addr << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             }
             else if (WARPS[warp_id].jump)
             {
@@ -200,7 +197,7 @@ void BASE::UPDATE_SCORE(int warp_id)
     {
         wait(clk.posedge_event());
         if (wb_ena && wb_warpid == warp_id)
-        {
+        { // 删除score
             tmpins = wb_ins;
             // cout << "scoreboard: wb_ins is " << tmpins << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             switch (tmpins.op)
@@ -216,7 +213,7 @@ void BASE::UPDATE_SCORE(int warp_id)
                 regtype_ = v;
                 break;
             case vfaddvv_:
-                regtype_ = f;
+                regtype_ = v;
                 break;
             }
             it = WARPS[warp_id].score.find(SCORE_TYPE(regtype_, tmpins.d));
@@ -249,7 +246,7 @@ void BASE::UPDATE_SCORE(int warp_id)
             WARPS[warp_id].wait_bran = 1;
         }
         if (WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
-        {
+        {                                        // 加入 score
             tmpins = WARPS[warp_id].ibuftop_ins; // this ibuftop_ins is the old data
             if (tmpins.op != beq_)
             {
@@ -266,7 +263,7 @@ void BASE::UPDATE_SCORE(int warp_id)
                     regtype_ = v;
                     break;
                 case vfaddvv_:
-                    regtype_ = f;
+                    regtype_ = v;
                     break;
                 }
                 WARPS[warp_id].score.insert(SCORE_TYPE(regtype_, tmpins.d));
@@ -425,6 +422,7 @@ warpaddr_t BASE::bank_undecode(int bank_id, int bankaddr)
 
 void BASE::OPC_FIFO()
 {
+    vector_t printdata_;
     I_TYPE _readdata4;
     int _readwarpid;
     std::array<bool, 4> in_ready;
@@ -440,7 +438,7 @@ void BASE::OPC_FIFO()
             // cout << "opcfifo is popping index " << emit_idx << " at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             auto popdat = opcfifo[emit_idx];
             opcfifo.pop(emit_idx); // last cycle emit
-            cout << "OPC_FIFO: poped ins " << popdat.ins << "warp" << popdat.warp_id << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+            // cout << "OPC_FIFO: poped ins " << popdat.ins << "warp" << popdat.warp_id << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         }
         ev_opc_pop.notify();
         // 按目前的事件顺序，若发生某ins进入OPC而立刻ready，则会有问题，后续要修改
@@ -500,9 +498,8 @@ void BASE::OPC_FIFO()
                 default:
                     cout << "OPC warning: OPC_FIFO switch to unrecognized branch\n";
                 }
-                // cout << "opcfifo push issue_ins " << issue_ins << "warp" << issueins_warpid
-                //      << ", srcaddr=(" << in_srcaddr[0].bank_id << "," << in_srcaddr[0].addr
-                //      << ";" << in_srcaddr[1].bank_id << "," << in_srcaddr[1].addr << ")"
+                // cout << "opcfifo push issue_ins " << _readdata4 << "warp" << _readwarpid
+                //      << ", srcaddr=(" << in_srcaddr[0] << ";" << in_srcaddr[1] << ")"
                 //      << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 opcfifo.push(opcfifo_t(_readdata4, _readwarpid,
                                        in_ready, in_valid, in_srcaddr, in_banktype));
@@ -526,6 +523,9 @@ void BASE::OPC_FIFO()
                     opcfifo[i].ready[j] = true;
                     opcfifo[i].valid[j] = false;
                     opcfifo[i].data[j] = read_data[opcfifo[i].srcaddr[j].bank_id];
+                    printdata_ = read_data[opcfifo[i].srcaddr[j].bank_id];
+                    // cout << "OPC_FIFO: store_in, ins=" << opcfifo[i].ins << "warp" << opcfifo[i].warp_id
+                    //      << ", data[" << j << "]=" << printdata_ << ", srcaddr=" << opcfifo[i].srcaddr[j] << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 }
         }
         ev_opc_store.notify();
@@ -534,82 +534,109 @@ void BASE::OPC_FIFO()
 
 void BASE::OPC_EMIT()
 {
-    reg_t *pa1, *pa2; // 用于int转float
+    reg_t pa1;
+    reg_t *pa2; // 用于int转float
+    float *pf1, *pf2;
+    FloatAndInt pr1, pr2;
+    last_emit_entryid = 0;
     while (true)
     {
-        wait(ev_opc_pop);
+        wait(ev_opc_pop & // 等opc当前cycle pop之后再判断下一cycle的pop
+             ev_saluready_updated & ev_valuready_updated &
+             ev_vfpuready_updated & ev_lsuready_updated);
+        // cout << "OPC_EMIT start at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         doemit = false;
         findemit = 0;
         emito_salu = false;
         emito_valu = false;
         emito_vfpu = false;
         emito_lsu = false;
-        for (int i = 0; i < OPCFIFO_SIZE; i++)
+        for (int i = last_emit_entryid; i < last_emit_entryid + OPCFIFO_SIZE; i++)
         {
+            int entryidx = i % OPCFIFO_SIZE;
             if (findemit)
                 break;
-            if (opcfifo.tag_valid(i) && opcfifo[i].all_ready())
+            if (opcfifo.tag_valid(entryidx) && opcfifo[entryidx].all_ready())
             {
-                emit_ins = opcfifo[i].ins;
-                emitins_warpid = opcfifo[i].warp_id;
-                // cout << "opcfifo[" << i << "]-" << emit_ins << "is all ready, at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                switch (opcfifo[i].ins.op)
+                emit_ins = opcfifo[entryidx].ins;
+                emitins_warpid = opcfifo[entryidx].warp_id;
+                // cout << "opcfifo[" << entryidx << "]-" << emit_ins << "is all ready, at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                switch (opcfifo[entryidx].ins.op)
                 {
                 case add_:
                 case addi_:
                 case beq_:
                     if (salu_ready)
                     {
-                        emit_idx = i;
+                        emit_idx = entryidx;
+                        last_emit_entryid = entryidx + 1;
                         findemit = 1;
                         doemit = true;
                         // cout << "OPC: salu is ready at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                         emito_salu = true;
-                        rss1_data = opcfifo[i].data[0][0];
-                        rss2_data = opcfifo[i].data[1][0];
+                        rss1_data = opcfifo[entryidx].data[0][0];
+                        rss2_data = opcfifo[entryidx].data[1][0];
+                    }
+                    else
+                    {
+                        // cout << "OPC_EMIT: find all_ready ins " << opcfifo[entryidx].ins << "warp" << opcfifo[entryidx].warp_id << " but salu not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                     }
                     break;
                 case vaddvv_:
                     if (valu_ready)
                     {
-                        emit_idx = i;
+                        emit_idx = entryidx;
+                        last_emit_entryid = entryidx + 1;
                         findemit = 1;
                         doemit = true;
                         emito_valu = true;
                         for (int j = 0; j < num_thread; j++)
                         {
-                            rsv1_data[j] = opcfifo[i].data[0][j];
-                            rsv2_data[j] = opcfifo[i].data[1][j];
+                            rsv1_data[j] = opcfifo[entryidx].data[0][j];
+                            rsv2_data[j] = opcfifo[entryidx].data[1][j];
                         }
                     }
                     break;
                 case vaddvx_:
                     if (valu_ready)
                     {
-                        emit_idx = i;
+                        emit_idx = entryidx;
+                        last_emit_entryid = entryidx + 1;
                         findemit = 1;
                         doemit = true;
                         emito_valu = true;
                         for (int j = 0; j < num_thread; j++)
                         {
-                            rsv1_data[j] = opcfifo[i].data[0][j];
+                            rsv1_data[j] = opcfifo[entryidx].data[0][j];
                         }
-                        rss2_data = opcfifo[i].data[1][0];
+                        rss2_data = opcfifo[entryidx].data[1][0];
                     }
                     break;
                 case vfaddvv_:
                     if (vfpu_ready)
                     {
-                        emit_idx = i;
+                        emit_idx = entryidx;
+                        last_emit_entryid = entryidx + 1;
                         findemit = 1;
                         doemit = true;
                         emito_vfpu = true;
+                        // cout << "OPC_EMIT: will emit ins" << opcfifo[entryidx].ins << "warp" << opcfifo[entryidx].warp_id << ", rs1_data={";
+                        // for (int j = 0; j < num_thread; j++)
+                        // {
+                        //     cout << std::hex << opcfifo[entryidx].data[0][j] << std::dec << ",";
+                        // }
+                        // cout << "}, rs2_data={";
+                        // for (int j = 0; j < num_thread; j++)
+                        // {
+                        //     cout << std::hex << opcfifo[entryidx].data[1][j] << std::dec << ",";
+                        // }
+                        // cout << "}, at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                         for (int j = 0; j < num_thread; j++)
                         {
-                            pa1 = &(opcfifo[i].data[0][j]);
-                            rsf1_data[j] = *((float *)pa1);
-                            pa2 = &(opcfifo[i].data[1][j]);
-                            rsf2_data[j] = *((float *)pa2);
+                            pr1.i = opcfifo[entryidx].data[0][j];
+                            rsf1_data[j] = pr1.f;
+                            pr2.i = opcfifo[entryidx].data[1][j];
+                            rsf2_data[j] = pr2.f;
                         }
                     }
                     break;
@@ -617,11 +644,12 @@ void BASE::OPC_EMIT()
                 case vle32v_:
                     if (lsu_ready)
                     {
-                        emit_idx = i;
+                        emit_idx = entryidx;
+                        last_emit_entryid = entryidx + 1;
                         findemit = 1;
                         doemit = true;
                         emito_lsu = true;
-                        rss1_data = opcfifo[i].data[0][0];
+                        rss1_data = opcfifo[entryidx].data[0][0];
                     }
                     break;
                 case INVALID_:
@@ -739,6 +767,8 @@ void BASE::WRITE_BACK()
     write_s = write_v = write_f = false;
     execpop_salu = execpop_valu = execpop_vfpu = execpop_lsu = false;
 
+    FloatAndInt newFI;
+
     while (true)
     {
         wait(ev_salufifo_pushed & ev_valufifo_pushed & ev_vfpufifo_pushed &
@@ -818,11 +848,15 @@ void BASE::WRITE_BACK()
             execpop_lsu = false;
             wb_ins = vfputop_dat.ins;
             rdf1_addr = vfputop_dat.ins.d;
+            // cout << "WB: let wb_ins=" << vfputop_dat.ins << "warp" << vfputop_dat.warp_id << ", rdf1_data={";
             for (int i = 0; i < num_thread; i++)
             {
-                rdf1_data[i] = vfputop_dat.rdf1_data[i];
+                newFI.f = vfputop_dat.rdf1_data[i];
+                // cout << std::hex << newFI.i << std::dec << ",";
+                rdf1_data[i].write(newFI);
             }
             wb_warpid = vfputop_dat.warp_id;
+            // cout << "} at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         }
         else if (lsufifo_empty == false)
         {
@@ -840,6 +874,7 @@ void BASE::WRITE_BACK()
                 wb_ins = lsutop_dat.ins;
                 rds1_addr = lsutop_dat.ins.d;
                 rds1_data = lsutop_dat.rds1_data;
+                // cout << "WB: arbit lw_ writeback, ins=" << lsutop_dat.ins << "warp" << lsutop_dat.warp_id << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 break;
             case vle32v_:
                 write_v = true;
@@ -885,30 +920,36 @@ void BASE::WRITE_REG(int warp_id)
             // 后续regfile要一次只能写一个，否则报错
             if (write_s)
             {
-                cout << "WRITE_REG warp" << warp_id << ": scalar, s_regfile[" << rds1_addr.read() << "]=" << rds1_data
+                cout << "WRITE_REG ins" << wb_ins << "warp" << warp_id << ": scalar, s_regfile[" << rds1_addr.read() << "]="
+                     << std::hex << rds1_data << std::dec
                      << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 WARPS[warp_id].s_regfile[rds1_addr.read()] = rds1_data;
             }
             if (write_v)
             {
-                cout << "WRITE_REG warp" << warp_id << ": vector, v_regfile[" << rdv1_addr.read() << "]={"
+                cout << "WRITE_REG ins" << wb_ins << "warp" << warp_id << ": vector, v_regfile[" << rdv1_addr.read() << "]={"
+                     << std::hex
                      << rdv1_data[0] << "," << rdv1_data[1] << "," << rdv1_data[2] << "," << rdv1_data[3] << ","
-                     << rdv1_data[4] << "," << rdv1_data[5] << "," << rdv1_data[6] << "," << rdv1_data[7] << "}"
-                     << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                     << rdv1_data[4] << "," << rdv1_data[5] << "," << rdv1_data[6] << "," << rdv1_data[7]
+                     << std::dec
+                     << "} at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 for (int i = 0; i < num_thread; i++)
                     WARPS[warp_id].v_regfile[rdv1_addr.read()][i] = rdv1_data[i];
             }
             if (write_f)
             {
-                cout << "WRITE_REG warp" << warp_id << ": float, v_regfile[" << rdv1_addr.read() << "]={"
-                     << rdf1_data[0] << "," << rdf1_data[1] << "," << rdf1_data[2] << "," << rdf1_data[3] << ","
-                     << rdf1_data[4] << "," << rdf1_data[5] << "," << rdf1_data[6] << "," << rdf1_data[7] << "}"
-                     << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                cout << "WRITE_REG ins" << wb_ins << "warp" << warp_id << ": float, v_regfile[" << rdf1_addr.read() << "]={"
+                     << std::hex
+                     << rdf1_data[0].read().i << "," << rdf1_data[1].read().i << "," << rdf1_data[2].read().i << "," << rdf1_data[3].read().i << ","
+                     << rdf1_data[4].read().i << "," << rdf1_data[5].read().i << "," << rdf1_data[6].read().i << "," << rdf1_data[7].read().i
+                     << std::dec
+                     << "} at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 for (int i = 0; i < num_thread; i++)
                 {
-                    f1 = rdf1_data[i];
-                    pa1 = &f1;
-                    WARPS[warp_id].v_regfile[rdf1_addr.read()][i] = *(reg_t *)(pa1);
+                    // f1 = rdf1_data[i];
+                    // pa1 = &f1;
+                    // WARPS[warp_id].v_regfile[rdf1_addr.read()][i] = *(reg_t *)(pa1);
+                    WARPS[warp_id].v_regfile[rdf1_addr.read()][i] = rdf1_data[i].read().i;
                 }
             }
         }
