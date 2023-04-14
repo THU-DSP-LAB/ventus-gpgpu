@@ -133,7 +133,7 @@ for(i<- 0 until params.cache.sets){
   val setQuash=wen1 && io.write.bits.set === set
   val tagMatch_1= io.write.bits.data.tag===io.read.bits.tag
   val tagMatch = io.write.bits.data.tag === tag //这是之前打算read的tag
-  val writeWay1 = RegInit(0.U(2.W))
+  val writeWay1 = RegInit(0.U(params.wayBits.W))
   writeWay1:=io.write.bits.way
   val ways = regout.asTypeOf(Vec(params.cache.ways,new DirectoryEntry_lite(params)))
   // 这边作为LLC，没有块儿权限之说，这里hit，不用检查权限
