@@ -36,7 +36,7 @@ class MetaData{
       _.host_start_pc -> "h80000000".U,
       _.host_vgpr_size_total -> (wg_size * vgprUsage).U,
       _.host_sgpr_size_total -> (wg_size * sgprUsage).U,
-      _.host_lds_size_total -> ldsSize.U,
+      _.host_lds_size_total -> 128.U, // TODO: fix // ldsSize
       _.host_gds_size_total -> 0.U,
       _.host_vgpr_size_per_wf -> vgprUsage.U,
       _.host_sgpr_size_per_wf -> sgprUsage.U,
@@ -103,14 +103,17 @@ class MemBox(metafile: String, datafile: String){
   */
   def readMem(addr: BigInt, len: Int): Array[Byte] = {
     val findBuf = (0 until metaData.num_buffer.toInt).filter(i =>
-      addr >= metaData.buffer_base(i) && addr + len <= metaData.buffer_base(i) + metaData.buffer_size(i)
+      addr >= metaData.buffer_base(i) && addr < metaData.buffer_base(i) + metaData.buffer_size(i)
     )
     if(findBuf.isEmpty){
       Array.fill(len)(0.toByte)
     }
     else{
       val paddr = mem_base(findBuf.head) + addr - metaData.buffer_base(findBuf.head)
-      memory.slice(paddr.toInt, paddr.toInt + len)
+      val paddr_tail = paddr + len
+      val buffer_tail = mem_base(findBuf.head) + metaData.buffer_size(findBuf.head)
+      val true_tail: BigInt = if(paddr_tail <= buffer_tail) paddr_tail else buffer_tail
+      memory.slice(paddr.toInt, true_tail.toInt).padTo(len, 0.toByte)
     }
   }
   def writeMem(addr: BigInt, len: Int, data: Array[Byte], mask: IndexedSeq[Boolean]): Unit = { // 1-bit mask <-> 1 byte data

@@ -120,7 +120,7 @@ object myhardfloat extends dependencies.`berkeley-hardfloat`.build.hardfloat {
 
 object ventus extends CommonModule {
 
-  override def forkArgs = Seq("-Xmx8G", "-Xss128m")
+  override def forkArgs = Seq("-Xmx14G", "-Xss192m")
 
   override def scalacOptions = Seq(
     "-Xsource:2.11",

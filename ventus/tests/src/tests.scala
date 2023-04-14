@@ -99,7 +99,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val caseName = "vecadd"
     val metaFileDir = "./ventus/txt/vecadd.riscv.meta" // TODO: rename
     val dataFileDir = "./ventus/txt/vecadd.riscv.data"
-    val maxCycle = 800
+    val maxCycle = 500
     val mem = new MemBox(metaFileDir, dataFileDir)
     val size3d = mem.metaData.kernel_size.map(_.toInt)
     var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
