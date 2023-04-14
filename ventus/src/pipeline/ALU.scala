@@ -44,6 +44,7 @@ object ALUOps {
   def FN_MAXU=18.U(5.W)
   def FN_MINU=19.U(5.W)
   def FN_A1ZERO = 8.U(5.W)
+  def FN_A2ZERO: UInt = 9.U(5.W)
   def FN_MUL = 20.U(5.W)
   def FN_MULH = 21.U(5.W)
   def FN_MULHU = 22.U(5.W)
@@ -115,7 +116,8 @@ class ScalarALU() extends Module{
                   Mux(io.func===FN_MINU,minu,maxu) ) )
 
   io.out := Mux(io.func===FN_A1ZERO,io.in2,
-            Mux(isMIN(io.func),minmaxout, out))
+            Mux(io.func===FN_A2ZERO,io.in1,
+            Mux(isMIN(io.func),minmaxout, out)))
   //debug
   //printf(p"0x${Hexadecimal(io.in1)} op 0x${Hexadecimal(io.in2)} = 0x${Hexadecimal(io.out)}\n")
   //~debug
