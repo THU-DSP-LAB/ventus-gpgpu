@@ -99,7 +99,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val caseName = "vecadd"
     val metaFileDir = "./ventus/txt/vecadd.riscv.meta" // TODO: rename
     val dataFileDir = "./ventus/txt/vecadd.riscv.data"
-    val maxCycle = 500
+    val maxCycle = 700
     val mem = new MemBox(metaFileDir, dataFileDir)
     val size3d = mem.metaData.kernel_size.map(_.toInt)
     var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
@@ -133,19 +133,20 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
             c.io.host_req.enqueue(mem.metaData.generateHostReq(i, j, k))
           }
         }
-        val deq = fork{
-          c.io.host_rsp.ready.poke(true.B)
-          if(waitForValid(c.io.host_rsp, maxCycle)){
-            val rsp = c.io.host_rsp.bits.peek().litValue.toInt
-            wg_list(rsp) = true
-          }
-          c.clock.step(1)
-        }
-        while(c.io.cnt.peek().litValue.toInt <= maxCycle) {
-          enq.join()
-          while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
-            deq.join()
-          }
+        //val deq =
+        enq.join()
+        while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
+          fork {
+            timescope {
+              c.io.host_rsp.ready.poke(true.B)
+              c.clock.step(1)
+              if (waitForValid(c.io.host_rsp, maxCycle)) {
+                val rsp = c.io.host_rsp.bits.peek().litValue
+                val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
+                wg_list(extract_rsp) = true
+              }
+            }
+          }.join()
         }
         c.clock.step(20)
       }.fork{ // GPU <-> MEM
