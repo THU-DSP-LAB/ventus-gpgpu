@@ -125,7 +125,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.clock.setTimeout(300)
       c.clock.step(5)
       fork{ // HOST <-> GPU
-        val enq = fork{
+        def enq = fork{
           for (i <- 0 until size3d(0);
                j <- 0 until size3d(1);
                k <- 0 until size3d(2)
@@ -133,20 +133,20 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
             c.io.host_req.enqueue(mem.metaData.generateHostReq(i, j, k))
           }
         }
-        //val deq =
+        def deq = fork {
+          timescope {
+            c.io.host_rsp.ready.poke(true.B)
+            if (waitForValid(c.io.host_rsp, maxCycle)) {
+              val rsp = c.io.host_rsp.bits.peek().litValue
+              val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
+              wg_list(extract_rsp) = true
+            }
+            c.clock.step(1)
+          }
+        }
         enq.join()
         while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
-          fork {
-            timescope {
-              c.io.host_rsp.ready.poke(true.B)
-              c.clock.step(1)
-              if (waitForValid(c.io.host_rsp, maxCycle)) {
-                val rsp = c.io.host_rsp.bits.peek().litValue
-                val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
-                wg_list(extract_rsp) = true
-              }
-            }
-          }.join()
+          deq.join()
         }
         c.clock.step(20)
       }.fork{ // GPU <-> MEM
