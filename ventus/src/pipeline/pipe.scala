@@ -67,7 +67,13 @@ class pipe extends Module{
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
 //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
-  val exe_data=Queue(Decoupled(new vExeData),0,pipe=true) // TODO: delete delay
+  val exe_data=Module(new Module{
+    val io = IO(new Bundle{
+      val enq = Flipped(DecoupledIO(new vExeData))
+      val deq = DecoupledIO(Output(new vExeData))
+    })
+    io.deq <> io.enq
+  })
   val simt_stack=Module(new SIMT_STACK(num_thread))
   val branch_back=Module(new Branch_back)
   val csrfile=Module(new CSRexe())
@@ -131,8 +137,8 @@ class pipe extends Module{
 
   io.icache_rsp.ready:=ibuffer.io.in.ready
 
-  val ibuffer_ready=Wire(Vec(num_warp,Bool()))
-  warp_sche.io.exe_busy:= ~ibuffer_ready.asUInt()
+  //val ibuffer_ready=Wire(Vec(num_warp,Bool()))
+  warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt()
 
   for (i <- 0 until num_warp) {
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
@@ -141,14 +147,14 @@ class pipe extends Module{
     if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
     ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
     val ctrl=ibuffer.io.out(i).bits
-    ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
+    /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
         Mux(ctrl.csr.orR(),csrfile.io.in.ready,
           Mux(ctrl.mem,lsu.io.lsu_req.ready,
             Mux(ctrl.isvec&ctrl.simt_stack&ctrl.simt_stack_op===0.U,valu.io.in.ready&simt_stack.io.branch_ctl.ready,
               Mux(ctrl.isvec&ctrl.simt_stack,simt_stack.io.branch_ctl.ready,
                 Mux(ctrl.isvec,valu.io.in.ready,
-                  Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))
+                  Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))*/
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
     scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
     scoreb(i).if_ctrl:= (ibuffer2issue.io.out.bits)
