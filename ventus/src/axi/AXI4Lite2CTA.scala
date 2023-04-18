@@ -74,7 +74,7 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
   val out_sIdle::out_sOutput::Nil=Enum(2)
   val out_state=RegInit(out_sIdle)
   val input_valid=regs(0)(0)
-  io.data.valid:=input_valid & out_state===out_sOutput
+  io.data.valid:=input_valid & out_state===out_sOutput // TODO: New AXI
   io.data.bits.host_wg_id:=regs(1)
   io.data.bits.host_num_wf:=regs(2)
   io.data.bits.host_wf_size:=regs(3)

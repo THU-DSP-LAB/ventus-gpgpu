@@ -67,7 +67,7 @@ class pipe extends Module{
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
 //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
-  val exe_data=Module(new Queue(new vExeData,1,pipe=true))
+  val exe_data=Queue(Decoupled(new vExeData),0,pipe=true) // TODO: delete delay
   val simt_stack=Module(new SIMT_STACK(num_thread))
   val branch_back=Module(new Branch_back)
   val csrfile=Module(new CSRexe())

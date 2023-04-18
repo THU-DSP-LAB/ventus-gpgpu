@@ -17,7 +17,7 @@ class RegFileBankIO extends Bundle  {
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
   val regs = SyncReadMem(NUMBER_SGPR_SLOTS/num_bank, UInt(xLen.W))
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd, regs.read(io.rsidx))
+  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),RegNext(io.rd), regs.read(io.rsidx))
   //io.ready := true.B
   when (io.rdwen) {
     regs.write(io.rdidx, io.rd)
@@ -40,7 +40,7 @@ class FloatRegFileBank extends Module  {
   val internalMask = Wire(Vec(num_thread, Bool()))
 
   //  io.rs := regs.read(io.rsidx)
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,regs.read(io.rsidx))
+  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),RegNext(io.rd),regs.read(io.rsidx))
   io.v0 := regs.read(0.U)
   internalMask:=io.rdwmask
   when (io.rdwen) {
