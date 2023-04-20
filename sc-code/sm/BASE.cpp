@@ -113,6 +113,11 @@ void BASE::DECODE(int warp_id)
                        WARPS[warp_id].pc.read() + 1 + WARPS[warp_id].fetch_ins.d);
             // cout << "decoding beq ins at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             break;
+        case join_:
+            WARPS[warp_id].decode_ins =
+                I_TYPE(WARPS[warp_id].fetch_ins,
+                       WARPS[warp_id].pc.read() + 1 + WARPS[warp_id].fetch_ins.d);
+            break;
         default:
             WARPS[warp_id].decode_ins = I_TYPE(WARPS[warp_id].fetch_ins, -1);
             break;
@@ -193,6 +198,7 @@ void BASE::UPDATE_SCORE(int warp_id)
     I_TYPE tmpins;
     std::set<SCORE_TYPE>::iterator it;
     REG_TYPE regtype_;
+    bool insertscore = false;
     while (true)
     {
         wait(clk.posedge_event());
@@ -228,6 +234,7 @@ void BASE::UPDATE_SCORE(int warp_id)
             }
             // cout << "warp" << warp_id << "_scoreboard: succesfully erased SCORE " << SCORE_TYPE(regtype_, tmpins.d) << ", wb_ins=" << wb_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         }
+        tmpins = WARPS[warp_id].ibuftop_ins; // this ibuftop_ins is the old data
         if (WARPS[warp_id].branch_sig)
         {
             if (WARPS[warp_id].wait_bran == 0)
@@ -240,36 +247,52 @@ void BASE::UPDATE_SCORE(int warp_id)
             }
             WARPS[warp_id].wait_bran = 0;
         }
-        else if (WARPS[warp_id].ibuftop_ins.read().op == beq_ && WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
+        else if ((tmpins.op == beq_ ||
+                  tmpins.op == vbeq_ ||
+                  tmpins.op == vbne_ ||
+                  tmpins.op == vblt_ ||
+                  tmpins.op == vbge_ ||
+                  tmpins.op == vbltu_ ||
+                  tmpins.op == vbgeu_ ||
+                  tmpins.op == join_) &&
+                 WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
         {
             // cout << "ibuf let wait_bran=1 at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
             WARPS[warp_id].wait_bran = 1;
         }
         if (WARPS[warp_id].dispatch_warp_valid && (!opc_full | doemit))
-        {                                        // 加入 score
-            tmpins = WARPS[warp_id].ibuftop_ins; // this ibuftop_ins is the old data
-            if (tmpins.op != beq_)
+        { // 加入 score
+            insertscore = true;
+            switch (tmpins.op)
             {
-                switch (tmpins.op)
-                {
-                case lw_:
-                case add_:
-                case addi_:
-                    regtype_ = s;
-                    break;
-                case vaddvv_:
-                case vaddvx_:
-                case vle32v_:
-                    regtype_ = v;
-                    break;
-                case vfaddvv_:
-                    regtype_ = v;
-                    break;
-                }
-                WARPS[warp_id].score.insert(SCORE_TYPE(regtype_, tmpins.d));
-                // cout << "warp" << warp_id << "_scoreboard: insert " << SCORE_TYPE(regtype_, tmpins.d)
-                //      << " because of dispatch " << tmpins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+            case lw_:
+            case add_:
+            case addi_:
+                regtype_ = s;
+                break;
+            case vaddvv_:
+            case vaddvx_:
+            case vle32v_:
+                regtype_ = v;
+                break;
+            case vfaddvv_:
+                regtype_ = v;
+                break;
+            case beq_:
+            case vbeq_:
+            case vbne_:
+            case vblt_:
+            case vbge_:
+            case vbltu_:
+            case vbgeu_:
+            case join_:
+                insertscore = false;
+                break;
             }
+            if (insertscore)
+                WARPS[warp_id].score.insert(SCORE_TYPE(regtype_, tmpins.d));
+            // cout << "warp" << warp_id << "_scoreboard: insert " << SCORE_TYPE(regtype_, tmpins.d)
+            //      << " because of dispatch " << tmpins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
         }
         WARPS[warp_id].ev_judge_dispatch.notify();
     }
@@ -322,6 +345,18 @@ void BASE::JUDGE_DISPATCH(int warp_id)
                 else
                     WARPS[warp_id].can_dispatch = false;
                 break;
+            case vbeq_:
+            case vbne_:
+            case vblt_:
+            case vbge_:
+            case vbltu_:
+            case vbgeu_:
+                if (WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s2)) == WARPS[warp_id].score.end())
+                    WARPS[warp_id].can_dispatch = true;
+                else
+                    WARPS[warp_id].can_dispatch = false;
+                break;
             case vle32v_:
                 if (WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s1)) == WARPS[warp_id].score.end() &&
                     WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.d)) == WARPS[warp_id].score.end())
@@ -352,9 +387,9 @@ void BASE::JUDGE_DISPATCH(int warp_id)
                 break;
             case vfaddvv_:
                 // cout << "JUDGE_DISPATCH switch to vfaddvv_ case at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
-                if (WARPS[warp_id].score.find(SCORE_TYPE(f, _readibuf.s1)) == WARPS[warp_id].score.end() &&
-                    WARPS[warp_id].score.find(SCORE_TYPE(f, _readibuf.s2)) == WARPS[warp_id].score.end() &&
-                    WARPS[warp_id].score.find(SCORE_TYPE(f, _readibuf.d)) == WARPS[warp_id].score.end())
+                if (WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s1)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.s2)) == WARPS[warp_id].score.end() &&
+                    WARPS[warp_id].score.find(SCORE_TYPE(v, _readibuf.d)) == WARPS[warp_id].score.end())
                     WARPS[warp_id].can_dispatch = true;
                 else
                     WARPS[warp_id].can_dispatch = false;
@@ -477,6 +512,12 @@ void BASE::OPC_FIFO()
                     in_srcaddr[1] = bank_decode(_readwarpid, _readdata4.s2);
                     in_banktype = {0, 0, 0, 0};
                     break;
+                case vbeq_:
+                case vbne_:
+                case vblt_:
+                case vbge_:
+                case vbltu_:
+                case vbgeu_:
                 case vaddvv_:
                 case vfaddvv_:
                     in_ready = {0, 0, 1, 1};
@@ -580,6 +621,27 @@ void BASE::OPC_EMIT()
                     else
                     {
                         // cout << "OPC_EMIT: find all_ready ins " << opcfifo[entryidx].ins << "warp" << opcfifo[entryidx].warp_id << " but salu not ready at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                    }
+                    break;
+                case vbeq_:
+                case vbne_:
+                case vblt_:
+                case vbge_:
+                case vbltu_:
+                case vbgeu_:
+                    if (valu_ready)
+                    {
+                        emit_idx = entryidx;
+                        last_emit_entryid = entryidx + 1;
+                        findemit = 1;
+                        doemit = true;
+                        emito_valu = true;
+                        emito_simtstk = true;
+                        for (int j = 0; j < num_thread; j++)
+                        {
+                            rsv1_data[j] = opcfifo[entryidx].data[0][j];
+                            rsv2_data[j] = opcfifo[entryidx].data[1][j];
+                        }
                     }
                     break;
                 case vaddvv_:

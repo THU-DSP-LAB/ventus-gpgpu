@@ -188,6 +188,25 @@ void BASE::VALU_IN()
             valu_unready.notify();
             switch (emit_ins.read().op)
             {
+            case vbeq_:
+                WARPS[emitins_warpid].branch_sig = true;
+                b_delay = 0;
+                if (b_delay == 0)
+                    salu_evb.notify();
+                else
+                {
+                    salu_eqb.notify(sc_time((b_delay)*PERIOD, SC_NS));
+                    ev_saluready_updated.notify();
+                }
+                if (rss1_data == rss2_data)
+                {
+                    WARPS[emitins_warpid].jump = 1;
+                    WARPS[emitins_warpid].jump_addr = emit_ins.read().jump_addr;
+                    cout << "warp" << emitins_warpid << ": jump is updated to 1 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                }
+                if (!salueqa_triggered)
+                    ev_salufifo_pushed.notify();
+                break;
             case vaddvv_:
                 new_data.ins = emit_ins;
                 new_data.warp_id = emitins_warpid;
@@ -668,6 +687,101 @@ void BASE::LSU_CTRL()
             lsu_ready = false;
             lsu_ready_old = lsu_ready;
             ev_lsuready_updated.notify();
+        }
+    }
+}
+
+void BASE::SIMT_STACK(int warp_id)
+{
+    simtstack_t newstkelem;
+    I_TYPE readins;
+    while (true)
+    {
+        wait(clk.posedge_event());
+        WARPS[warp_id].simtstk_jump = false;
+        WARPS[warp_id].simtstk_flush = false;
+        if (valuto_simtstk) // VALU计算的beq类指令
+        {
+            if (emito_simtstk)
+                cout << "SIMT-STACK error: receive join & beq at the same time at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+
+            /*** 以下为stack管理 ***/
+            if (std::bitset<num_thread>(branch_elsemask.read().to_string()) == 0)
+            { // elsemask全为0
+                newstkelem.pair = 1;
+                newstkelem.is_part = 1;
+            }
+            else if (std::bitset<num_thread>(branch_elsemask.read().to_string()) == std::bitset<num_thread>().set())
+            { // ifmask全为0
+                newstkelem.pair = 0;
+                newstkelem.is_part = 1;
+            }
+            else
+            {
+                newstkelem.pair = 0;
+                newstkelem.is_part = 0;
+            }
+            newstkelem.rmask = WARPS[warp_id].current_mask;
+            newstkelem.elsepc = branch_elsepc;
+            newstkelem.elsemask = branch_elsemask;
+            WARPS[warp_id].simt_stack.push(newstkelem);
+
+            /*** 以下为分支控制 ***/
+            if (std::bitset<num_thread>(branch_elsemask.read().to_string()) == std::bitset<num_thread>().set())
+            { // ifmask全为0
+                WARPS[warp_id].simtstk_jumpaddr = branch_elsepc;
+                WARPS[warp_id].current_mask = branch_elsemask;
+                WARPS[warp_id].simtstk_jump = true;
+                WARPS[warp_id].simtstk_flush = true;
+            }
+            else
+            { // 需要先走if path
+                WARPS[warp_id].current_mask = branch_ifmask;
+            }
+        }
+        if (emito_simtstk) // OPC发射的join指令
+        {
+            simtstack_t &tmpstkelem = WARPS[warp_id].simt_stack.top();
+            readins = emit_ins;
+            /*** 以下为分支控制 ***/
+            if (tmpstkelem.pair == 1)
+            { // 意味着elsemask全为0，此时遇到的是if path的join
+                // ↓直接跳转到汇合点，跳转地址可以说join携带的地址，也可以是stack条目的rmask
+                WARPS[warp_id].simtstk_jumpaddr = readins.jump_addr;
+                WARPS[warp_id].current_mask = tmpstkelem.rmask;
+                WARPS[warp_id].simtstk_jump = true;
+                WARPS[warp_id].simtstk_flush = true;
+            }
+            else if (tmpstkelem.is_part == 1 && readins.d == 1)
+            { // else path结束，汇合点紧跟着else path的指令
+                // 所以readins.d==1，即join指令的跳转为1
+                WARPS[warp_id].current_mask = tmpstkelem.rmask;
+                WARPS[warp_id].simtstk_jump = false;
+                WARPS[warp_id].simtstk_flush = false;
+            }
+            else if (tmpstkelem.is_part == 1)
+            { // else path结束，汇合点紧跟着else path的指令
+                // 所以readins.d==1，即join指令的跳转为1
+                WARPS[warp_id].simtstk_jumpaddr = readins.jump_addr;
+                WARPS[warp_id].current_mask = tmpstkelem.rmask;
+                WARPS[warp_id].simtstk_jump = true;
+                WARPS[warp_id].simtstk_flush = true;
+            }
+            else
+            {
+                WARPS[warp_id].current_mask = tmpstkelem.elsemask;
+                // 不用跳转到else pc???
+            }
+
+            /*** 以下为stack管理 ***/
+            if (tmpstkelem.is_part == 1)
+            {
+                WARPS[warp_id].simt_stack.pop();
+            }
+            else
+            {
+                tmpstkelem.is_part = 1;
+            }
         }
     }
 }

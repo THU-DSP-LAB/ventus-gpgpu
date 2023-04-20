@@ -6,6 +6,8 @@
 // #include "tlm_core/tlm_1/tlm_req_rsp/tlm_channels/tlm_fifo/tlm_fifo.h"
 #include <set>
 #include <queue>
+#include <stack>
+#include <bitset>
 #include <math.h>
 #include <iostream>
 
@@ -63,6 +65,13 @@ enum OP_TYPE
     vfaddvv_,
     beq_,
     addi_,
+    vbeq_,
+    vbne_,
+    vblt_,
+    vbge_,
+    vbltu_,
+    vbgeu_,
+    join_
 };
 class I_TYPE // type of per instruction
 {
@@ -127,8 +136,7 @@ private:
 enum REG_TYPE
 {
     s = 1,
-    v,
-    f
+    v
 };
 class SCORE_TYPE // every score in scoreboard
 {
@@ -605,6 +613,12 @@ public:
     // regfile
     std::array<reg_t, 32> s_regfile;
     std::array<v_regfile_t, 32> v_regfile;
+    // simt-stack
+    std::stack<simtstack_t> simt_stack;
+    sc_signal<sc_bv<num_thread>> current_mask; // 在dispatch时随指令存入OPC
+    sc_signal<int> simtstk_jumpaddr;           // out_pc
+    sc_signal<bool> simtstk_jump;              // fetch跳转的控制信号
+    sc_signal<bool> simtstk_flush;             // 流水线冲刷信号
 };
 
 union FloatAndInt
@@ -620,6 +634,19 @@ inline std::ostream &operator<<(std::ostream &os, const FloatAndInt &val)
 inline bool operator==(const FloatAndInt &left, const FloatAndInt &right)
 {
     return left.i == right.i;
+};
+
+class simtstack_t
+{
+    // 对于SIMT-stack来说，else分支（对于elsemask等数据）指的是分支指令判断跳转的path，
+    // 无论是beq还是bne，也不用管编程模型定义的if和else。
+public:
+    int rpc;                 // 在ventus中没有用处
+    sc_bv<num_thread> rmask; // 汇合点mask
+    int elsepc;
+    sc_bv<num_thread> elsemask;
+    bool is_part;
+    bool pair;
 };
 
 #endif

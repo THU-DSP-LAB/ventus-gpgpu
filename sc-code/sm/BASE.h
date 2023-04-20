@@ -65,6 +65,7 @@ public:
     void LSU_CALC();
     void LSU_OUT();
     void LSU_CTRL();
+    void SIMT_STACK(int warp_id);
     // writeback
     void WRITE_BACK();
 
@@ -104,6 +105,7 @@ public:
             sc_spawn(sc_bind(&BASE::JUDGE_DISPATCH, this, i), ("warp" + std::to_string(i) + "_JUDGE_DISPATCH").c_str());
             sc_spawn(sc_bind(&BASE::UPDATE_SCORE, this, i), ("warp" + std::to_string(i) + "_UPDATE_SCORE").c_str());
             sc_spawn(sc_bind(&BASE::INIT_REG, this, i), ("warp" + std::to_string(i) + "_INIT_REG").c_str());
+            sc_spawn(sc_bind(&BASE::SIMT_STACK, this, i), ("warp" + std::to_string(i) + "_SIMT_STACK").c_str());
             sc_spawn(sc_bind(&BASE::WRITE_REG, this, i), ("warp" + std::to_string(i) + "_WRITE_REG").c_str());
         }
 
@@ -243,6 +245,14 @@ public:
     bool lsufifo_empty;
     int lsufifo_elem_num;
     sc_signal<bool> lsueqa_triggered, lsueqb_triggered;
+
+    sc_signal<bool> emito_simtstk, valuto_simtstk; // 分别对应join和beq类，由于wait_bran的存在，这两个不会同时为1
+    simtstack_t simtstk_newelem;                   // from VALU to SIMT-stack
+    sc_signal<int> simtstk_new_warpid;             // newelem对应的warp
+    sc_signal<sc_bv<num_thread>> branch_elsemask;  // VALU计算出的elsemask，将发给SIMT-stack
+    sc_signal<sc_bv<num_thread>> branch_ifmask;
+    sc_signal<int> branch_elsepc; // VALU处理分支跳转的else分支pc
+
     // writeback
     sc_signal<bool> write_s, write_v, write_f;
     sc_signal<bool> execpop_salu, execpop_valu, execpop_vfpu, execpop_lsu;
