@@ -82,11 +82,15 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
   io.data.bits.host_vgpr_size_total:=regs(5)
   io.data.bits.host_sgpr_size_total:=regs(6)
   io.data.bits.host_lds_size_total:=regs(7)
-  io.data.bits.host_gds_baseaddr:=regs(8)
-  io.data.bits.host_vgpr_size_per_wf:=regs(9)
-  io.data.bits.host_sgpr_size_per_wf:=regs(10)
-  //io.data.bits.host_pc_base_addr:=regs(11)
-  io.data.bits.host_gds_size_total:=regs(12)
+  io.data.bits.host_gds_size_total:=0.U
+  io.data.bits.host_vgpr_size_per_wf:=regs(8)
+  io.data.bits.host_sgpr_size_per_wf:=regs(9)
+  io.data.bits.host_gds_baseaddr:=regs(10)
+  io.data.bits.host_pds_baseaddr:=regs(11)
+  io.data.bits.host_csr_knl:=regs(12)
+  io.data.bits.host_kernel_size_3d(0):=regs(13)
+  io.data.bits.host_kernel_size_3d(1):=regs(14)
+  io.data.bits.host_kernel_size_3d(2):=regs(15)
 
   switch(out_state) {
     is(out_sIdle) {
