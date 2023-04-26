@@ -27,13 +27,13 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
 
 
 
-  val regs = RegInit(VecInit(Seq.fill(16)(0.U(busWidth.W))))
+  val regs = RegInit(VecInit(Seq.fill(18)(0.U(busWidth.W))))
 
   io.rsp.ready:=false.B
-  when(io.rsp.valid& !regs(15)(0)){
+  when(io.rsp.valid& !regs(17)(0)){
     io.rsp.ready:=true.B
-    regs(15):=1.U
-    regs(14):=io.rsp.bits.inflight_wg_buffer_host_wf_done_wg_id
+    regs(17):=1.U
+    regs(16):=io.rsp.bits.inflight_wg_buffer_host_wf_done_wg_id
   }
 
   val sIdle :: sReadAddr :: sReadData :: sWriteAddr :: sWriteData :: sWriteResp :: Nil = Enum(6)
