@@ -11,7 +11,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   val wid_to_check = 2
   def num_bank = 4
   def num_collectorUnit = num_warp
-  def depth_regBank = log2Ceil(num_warp*32/num_bank)
+  def num_vgpr:Int = 1024
+  def num_sgpr:Int = 1024
+  def depth_regBank = log2Ceil(num_vgpr/num_bank)
   def regidx_width = 5
 
   def regext_width = 3
@@ -20,7 +22,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def depth_warp = log2Ceil(num_warp)
 
-  def num_thread = 4
+  def num_thread = 8
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -112,8 +114,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   var NUMBER_CU = num_sm
   var NUMBER_RES_TABLE = 1 // <NUMBER_CU
-  var NUMBER_VGPR_SLOTS = 1024
-  var NUMBER_SGPR_SLOTS = 1024
+  var NUMBER_VGPR_SLOTS = num_vgpr
+  var NUMBER_SGPR_SLOTS = num_sgpr
   var NUMBER_LDS_SLOTS = 131072 //TODO:check LDS max value. 128kB -> 2^17
   var NUMBER_WF_SLOTS = num_block // max num of wg in a CU
   var WG_ID_WIDTH = 2 + log2Ceil(NUMBER_WF_SLOTS) + log2Ceil(NUMBER_CU) //Format: prefer scheduler (if multi-schedulers) + wg id + prefer cu

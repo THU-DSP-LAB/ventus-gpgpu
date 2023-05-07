@@ -78,6 +78,7 @@ object IDecode //extends DecodeConstants
   def FN_MAXU=18.U(6.W)
   def FN_MINU=19.U(6.W)
   def FN_A1ZERO = 8.U(6.W)
+  def FN_A2ZERO = 9.U(6.W)
   def FN_MUL = 20.U(6.W)
   def FN_MULH = 21.U(6.W)
   def FN_MULHU = 22.U(6.W)
@@ -398,11 +399,14 @@ object IDecodeLUT_V{
     VFCVT_F_XU_V->List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_IU2F,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCVT_F_X_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_I2F,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCLASS_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_FCLASS,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
-    VMV_V_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_VRS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
-    VFMV_V_F->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
-    VMV_V_I->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_IMM,IMM_V,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
-    VMV_V_X->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
-    VMV_X_S->   List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
+    VMV_V_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_VRS1,IMM_X,MEM_X,FN_A2ZERO,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VFMV_V_F->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_A2ZERO,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VMV_V_I->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_X,IMM_V,MEM_X,FN_A1ZERO,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VMV_V_X->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_A2ZERO,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VMV_X_S->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_A1ZERO,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),//TODO:
+    VMV_S_X->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_A2ZERO,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VFMV_F_S -> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_A1ZERO,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
+    VFMV_S_F -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_X, A1_RS1, IMM_X, MEM_X, FN_A2ZERO, N, M_X, N, N, N, Y, N, N, N, N, N, N, N),
     VSETVLI->   List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,Y,N,N),
     VSETIVLI->  List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,Y,N,N),
     VSETVL->    List(Y,N,N,B_N,N,N,CSR.S,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,Y,N,N)
@@ -463,65 +467,6 @@ object IDecodeLUT_VC{
     //VBTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTB,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
 
   )
-}
-
-class Control extends Module{
-  val io=IO(new Bundle(){
-    val inst=Input(UInt(32.W))
-    val pc=Input(UInt(32.W))
-    val wid=Input(UInt(depth_warp.W))
-    val control=Output(new CtrlSigs())
-  })
-  val lut = Seq(IDecodeLUT_IMF.table, IDecodeLUT_V.table, IDecodeLUT_VL.table, IDecodeLUT_VC.table).map{ t =>
-    ListLookup(io.inst, IDecode.default, t)
-  }
-  val ctrlsignals = ListLookup(io.inst(6, 0), lut(0),
-    Array(
-      BitPat("b1010111") -> lut(1),
-      BitPat("b0?00111") -> lut(2),
-      BitPat("b0101011") -> lut(2),
-      BitPat("b1011011") -> lut(3),
-      BitPat("b0001011") -> lut(3)
-    ))
-  io.control.inst:=io.inst
-  io.control.wid:=io.wid
-  io.control.pc:=io.pc
-  io.control.mop:=Mux(io.control.readmask,3.U(2.W),io.inst(27,26))
-  io.control.fp:=ctrlsignals(1)//fp=1->vFPU
-  io.control.barrier:=ctrlsignals(2)//barrier or endprg->to warp_scheduler
-  io.control.branch:=ctrlsignals(3)
-  io.control.simt_stack:=ctrlsignals(4)
-  io.control.simt_stack_op:=ctrlsignals(5)
-  io.control.csr:=ctrlsignals(6)
-  io.control.reverse:=ctrlsignals(7)//for some vector inst,change in1 and in2, e.g. subr
-  io.control.isvec:=ctrlsignals(0)//isvec=1->vALU/vFPU
-  io.control.sel_alu3:=ctrlsignals(8)
-  io.control.mask:=((~io.inst(25)).asBool() | io.control.alu_fn===pipeline.IDecode.FN_VMERGE ) & io.control.isvec & !io.control.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
-  io.control.sel_alu2:=ctrlsignals(9)
-  io.control.sel_alu1:=ctrlsignals(10)
-  io.control.sel_imm:=ctrlsignals(11)
-  io.control.mem_whb:=ctrlsignals(12)
-  io.control.alu_fn:=ctrlsignals(13)
-  io.control.mul:=ctrlsignals(14)
-  io.control.mem:=io.control.mem_cmd.orR
-  io.control.mem_cmd:=ctrlsignals(15)
-  io.control.mem_unsigned:=ctrlsignals(16)
-  io.control.fence:=ctrlsignals(17)
-  io.control.sfu:=ctrlsignals(18)
-  io.control.wvd:=ctrlsignals(19)
-  io.control.readmask:=ctrlsignals(20) //read mode is mask - for mask bitwise opcode  // also means mop is unused.
-  io.control.writemask:=ctrlsignals(21)//write mode is mask - for mask bitwise opcode
-  io.control.wxd:=ctrlsignals(22)
-  io.control.tc:=ctrlsignals(23)
-  io.control.disable_mask:=ctrlsignals(24) //do not use mask for some vector inst.
-  io.control.reg_idx1:=io.inst(19,15)
-  io.control.reg_idx2:=io.inst(24,20)
-  io.control.reg_idx3:=Mux(io.control.fp & !io.control.isvec,io.inst(31,27),io.inst(11,7))
-  io.control.reg_idxw:=io.inst(11,7)
-  if(SPIKE_OUTPUT){
-    io.control.spike_info.get.inst:=io.control.inst
-    io.control.spike_info.get.pc:=io.control.pc
-  }
 }
 
 //trait DecodeParameters{}
@@ -591,8 +536,8 @@ class InstrDecodeV2 extends Module {
     ListLookup(io.inst(i)(6, 0), lut(0),
       Array(
         BitPat("b1010111") -> lut(1),
-        BitPat("b0000111") -> lut(2),
-        BitPat("b0100111") -> lut(2),
+        BitPat("b1111011") -> lut(2),
+        BitPat("b0?00111") -> lut(2),
         BitPat("b0101011") -> lut(2),
         BitPat("b1011011") -> lut(3),
         BitPat("b0001011") -> lut(3)

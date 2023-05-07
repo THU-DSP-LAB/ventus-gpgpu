@@ -27,7 +27,7 @@ compile:
 	mill -i -j 0 __.compile
 
 test:
-	mill ventus.tests
+	mill -i ventus.tests.testOnly play.hello_test2
 
 verilog:
 	mill ventus.run
