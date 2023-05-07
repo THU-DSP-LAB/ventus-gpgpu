@@ -17,9 +17,11 @@ class RegFileBankIO extends Bundle  {
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
   val regs = SyncReadMem(NUMBER_SGPR_SLOTS/num_bank, UInt(xLen.W))
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,Mux(RegNext(io.rsidx.orR), regs.read(io.rsidx), 0.U))
+  val bypassSignal = Wire(Bool())
+  bypassSignal := RegNext((io.rsidx===io.rdidx)&io.rdwen)
+  io.rs := Mux(bypassSignal,RegNext(io.rd), regs.read(io.rsidx))
   //io.ready := true.B
-  when (io.rdwen & io.rdidx.orR) {
+  when (io.rdwen) {
     regs.write(io.rdidx, io.rd)
   }
 }
@@ -39,8 +41,9 @@ class FloatRegFileBank extends Module  {
   val regs = SyncReadMem(NUMBER_VGPR_SLOTS/num_bank, Vec(num_thread,UInt(xLen.W)))  //Register files of all warps are divided to number of bank
   val internalMask = Wire(Vec(num_thread, Bool()))
 
-  //  io.rs := regs.read(io.rsidx)
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,regs.read(io.rsidx))
+  val bypassSignal = Wire(Bool())
+  bypassSignal := RegNext((io.rsidx === io.rdidx) & io.rdwen)
+  io.rs := Mux(bypassSignal,RegNext(io.rd),regs.read(io.rsidx))
   io.v0 := regs.read(0.U)
   internalMask:=io.rdwmask
   when (io.rdwen) {
@@ -53,8 +56,8 @@ class unifiedBank extends Module  {
   val internalMask = Wire(Vec(num_thread, Bool()))
   switch(io.rsType.get){
     is(1.U){//scalar
-      io.rs(0) := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd(0), Mux(io.rsidx.orR, regs.read(io.rsidx)(num_thread+1), 0.U))
-      when(io.rdwen & io.rdidx.orR) {
+      io.rs(0) := Mux(((io.rsidx===io.rdidx) & io.rdwen), io.rd(0), regs.read(io.rsidx)(num_thread+1))
+      when(io.rdwen) {
         regs(io.rdidx)(num_thread+1) := io.rd(0)
       }
     }
