@@ -11,7 +11,9 @@ We are calling for contributors. If you are interested in Ventus GPGPU, please c
 
 ## Architecture
 
-The micro-architecture overview of Ventus(承影) is shown below. Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/Ventus-GPGPU-doc.md). English version will come soon.
+The micro-architecture overview of Ventus(承影) is shown below. Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/Ventus-GPGPU-doc.md). 
+
+ISA and micro-architecture docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/ventus%20GPGPU%20architecture%20whitepaper%20v1.95.pdf).
 
 For ISA simulator and riscv-gnu-toolchain, see [ventus-gpgpu-isa-simulator](https://github.com/THU-DSP-LAB/ventus-gpgpu-isa-simulator) and [ventus-riscv-gnu-toolchain](https://github.com/THU-DSP-LAB/riscv-gnu-toolchain).
 
