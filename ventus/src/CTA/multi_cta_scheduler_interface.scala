@@ -26,6 +26,12 @@ class multi_cta_scheduler_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: In
         val host_gds_size_total = Input(UInt((GDS_ID_WIDTH + 1).W))
         val host_vgpr_size_per_wf = Input(UInt((VGPR_ID_WIDTH + 1).W))
         val host_sgpr_size_per_wf = Input(UInt((SGPR_ID_WIDTH + 1).W))
+
+        val host_gds_baseaddr = Input(UInt(MEM_ADDR_WIDTH.W))
+        val host_kernel_size_3d = Input(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
+        val host_csr_knl = Input(UInt(MEM_ADDR_WIDTH.W))
+        val host_pds_baseaddr = Input(UInt(MEM_ADDR_WIDTH.W))
+
         val inflight_wg_buffer_host_rcvd_ack = Output(Bool())
         val inflight_wg_buffer_host_wf_done = Vec(NUM_SCHEDULER, Output(Bool()))
         val inflight_wg_buffer_host_wf_done_wg_id = Vec(NUM_SCHEDULER, Output(UInt(WG_ID_WIDTH.W)))
@@ -41,6 +47,12 @@ class multi_cta_scheduler_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: In
         val host_gds_size_total_s = Vec(NUM_SCHEDULER, Output(UInt((GDS_ID_WIDTH + 1).W)))
         val host_vgpr_size_per_wf_s = Vec(NUM_SCHEDULER, Output(UInt((VGPR_ID_WIDTH + 1).W)))
         val host_sgpr_size_per_wf_s = Vec(NUM_SCHEDULER, Output(UInt((SGPR_ID_WIDTH + 1).W)))
+
+        val host_gds_baseaddr_s = Vec(NUM_SCHEDULER, Output(UInt(MEM_ADDR_WIDTH.W)))
+        val host_kernel_size_3d_s = Vec(NUM_SCHEDULER, Output(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W))))
+        val host_csr_knl_s = Vec(NUM_SCHEDULER, Output(UInt(MEM_ADDR_WIDTH.W)))
+        val host_pds_baseaddr_s = Vec(NUM_SCHEDULER, Output(UInt(MEM_ADDR_WIDTH.W)))
+
         val inflight_wg_buffer_scheduler_rcvd_ack_s = Vec(NUM_SCHEDULER, Input(Bool()))
         val inflight_wg_buffer_scheduler_wf_done_s = Vec(NUM_SCHEDULER, Input(Bool()))
         val inflight_wg_buffer_scheduler_wf_done_wg_id_s = Vec(NUM_SCHEDULER, Input(UInt(WG_ID_WIDTH.W)))
@@ -90,6 +102,12 @@ class multi_cta_scheduler_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: In
     val host_gds_size_total_i = RegInit(0.U((GDS_ID_WIDTH + 1).W))
     val host_vgpr_size_per_wf_i = RegInit(0.U((VGPR_ID_WIDTH + 1).W))
     val host_sgpr_size_per_wf_i = RegInit(0.U((SGPR_ID_WIDTH + 1).W))
+
+    val host_gds_baseaddr_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
+    val host_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3){0.U(top.parameters.WG_SIZE_X_WIDTH.W)}))
+    val host_csr_knl_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
+    val host_pds_baseaddr_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
+
     for(i <- 0 until NUM_SCHEDULER){
         io.host_wg_valid_s(i) := host_wg_valid_s_i(i)
     }
@@ -133,6 +151,24 @@ class multi_cta_scheduler_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: In
     for(i <- 0 until NUM_SCHEDULER){
         io.host_sgpr_size_per_wf_s(i) := host_sgpr_size_per_wf_s_i(i)
     }
+
+    val host_gds_baseaddr_s_i = RegInit(VecInit(Seq.fill(NUM_SCHEDULER)(0.U(MEM_ADDR_WIDTH))))
+    for (i <- 0 until NUM_SCHEDULER) {
+        io.host_gds_baseaddr_s(i) := host_gds_baseaddr_s_i(i)
+    }
+    val host_kernel_size_3d_s_i = RegInit(VecInit(Seq.fill(NUM_SCHEDULER)(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))))
+    for (i <- 0 until NUM_SCHEDULER) {
+        io.host_kernel_size_3d_s(i) := host_kernel_size_3d_s_i(i)
+    }
+    val host_csr_knl_s_i = RegInit(VecInit(Seq.fill(NUM_SCHEDULER)(0.U(MEM_ADDR_WIDTH.W))))
+    for (i <- 0 until NUM_SCHEDULER) {
+        io.host_csr_knl_s(i) := host_csr_knl_s_i(i)
+    }
+    val host_pds_baseaddr_s_i = RegInit(VecInit(Seq.fill(NUM_SCHEDULER)(0.U(MEM_ADDR_WIDTH.W))))
+    for (i <- 0 until NUM_SCHEDULER) {
+        io.host_pds_baseaddr_s(i) := host_pds_baseaddr_s_i(i)
+    }
+
     switch(interface_state){
         is(INTERFACE_IDLE){
             when(io.host_wg_valid){
@@ -147,6 +183,12 @@ class multi_cta_scheduler_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: In
                 host_gds_size_total_i := io.host_gds_size_total
                 host_vgpr_size_per_wf_i := io.host_vgpr_size_per_wf
                 host_sgpr_size_per_wf_i := io.host_sgpr_size_per_wf
+
+                host_gds_baseaddr_i := io.host_gds_baseaddr
+                host_kernel_size_3d_i := io.host_kernel_size_3d
+                host_csr_knl_i := io.host_csr_knl
+                host_pds_baseaddr_i := io.host_pds_baseaddr
+
                 interface_state := INTERFACE_SENDING
             }
         }
@@ -165,6 +207,12 @@ class multi_cta_scheduler_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: In
                 host_gds_size_total_s_i(select_id) := host_gds_size_total_i
                 host_vgpr_size_per_wf_s_i(select_id) := host_vgpr_size_per_wf_i
                 host_sgpr_size_per_wf_s_i(select_id) := host_sgpr_size_per_wf_i
+
+                host_pds_baseaddr_s_i(select_id) := host_pds_baseaddr_i
+                host_gds_baseaddr_s_i(select_id) := host_gds_baseaddr_i
+                host_csr_knl_s_i(select_id) := host_csr_knl_i
+                host_kernel_size_3d_s_i(select_id) := host_kernel_size_3d_i
+
                 interface_state := INTERFACE_ACK
             }
         }

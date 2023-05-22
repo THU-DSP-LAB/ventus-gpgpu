@@ -51,7 +51,7 @@ class CTAinterface extends Module{
     val CTA2warp=Vec(NUMBER_CU,DecoupledIO(new CTAreqData))
     val warp2CTA=Vec(NUMBER_CU,Flipped(DecoupledIO(new CTArspData)))
   })
-  val cta_sche=Module(new cta_scheduler( NUMBER_CU: Int,  CU_ID_WIDTH: Int,  RES_TABLE_ADDR_WIDTH: Int,  VGPR_ID_WIDTH: Int,  NUMBER_VGPR_SLOTS: Int,  SGPR_ID_WIDTH: Int,  NUMBER_SGPR_SLOTS: Int,  LDS_ID_WIDTH: Int,  NUMBER_LDS_SLOTS: Int,  WG_ID_WIDTH: Int,  WF_COUNT_WIDTH: Int,  WG_SLOT_ID_WIDTH: Int,  NUMBER_WF_SLOTS: Int,  WF_COUNT_MAX: Int,  NUMBER_RES_TABLE: Int,  GDS_ID_WIDTH: Int,  GDS_SIZE: Int,  ENTRY_ADDR_WIDTH: Int,  NUMBER_ENTRIES: Int,  WAVE_ITEM_WIDTH: Int,  MEM_ADDR_WIDTH: Int,  TAG_WIDTH: Int,  INIT_MAX_WG_COUNT: Int,WF_COUNT_WIDTH_PER_WG: Int))
+  val cta_sche=Module(new multi_cta_scheduler(NUM_SCHEDULER: Int, NUMBER_CU: Int,  CU_ID_WIDTH: Int,  RES_TABLE_ADDR_WIDTH: Int,  VGPR_ID_WIDTH: Int,  NUMBER_VGPR_SLOTS: Int,  SGPR_ID_WIDTH: Int,  NUMBER_SGPR_SLOTS: Int,  LDS_ID_WIDTH: Int,  NUMBER_LDS_SLOTS: Int,  WG_ID_WIDTH: Int,  WF_COUNT_WIDTH: Int,  WG_SLOT_ID_WIDTH: Int,  NUMBER_WF_SLOTS: Int,  WF_COUNT_MAX: Int,  NUMBER_RES_TABLE: Int,  GDS_ID_WIDTH: Int,  GDS_SIZE: Int,  ENTRY_ADDR_WIDTH: Int,  NUMBER_ENTRIES: Int,  WAVE_ITEM_WIDTH: Int,  MEM_ADDR_WIDTH: Int,  TAG_WIDTH: Int,  INIT_MAX_WG_COUNT: Int, NUM_SCHEDULER_WIDTH: Int, WF_COUNT_WIDTH_PER_WG: Int))
   cta_sche.io.host_wg_valid         := io.host2CTA.valid
   cta_sche.io.host_wg_id            := io.host2CTA.bits.host_wg_id
   cta_sche.io.host_num_wf           := io.host2CTA.bits.host_num_wf
