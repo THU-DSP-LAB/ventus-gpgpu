@@ -86,8 +86,8 @@ SC_MODULE(itype_test)
   void test_action()
   {
     // initialize
-    mem[0] = I_TYPE(add_, 2, 3, 4);
-    mem[1] = I_TYPE(lw_, 6, 7, 8);
+    mem[0] = I_TYPE((OP_TYPE)1, 2, 3, 4);
+    mem[1] = I_TYPE((OP_TYPE)1, 6, 7, 8);
     while (true)
     {
 
@@ -529,6 +529,83 @@ SC_MODULE(triggered_test)
   {
     SC_THREAD(genev);
     SC_THREAD(display);
+  }
+};
+
+SC_MODULE(example)
+{
+  sc_in_clk clk;
+  void func1()
+  {
+    while (true)
+    {
+      wait(clk.posedge_event());
+      a = a + 1;
+      cout << "b=" << b << " at " << sc_time_stamp() << "\n";
+    }
+  };
+  void func2()
+  {
+    while (true)
+    {
+      wait(clk.posedge_event());
+      b = b + 1;
+      cout << "a=" << a << " at " << sc_time_stamp() << "\n";
+    }
+  };
+  example(sc_module_name name) : sc_module(name)
+  {
+    SC_HAS_PROCESS(example);
+    SC_THREAD(func1);
+    SC_THREAD(func2);
+  }
+  sc_signal<int> a, b;
+};
+
+SC_MODULE(STAGE)
+{
+  SC_CTOR(STAGE)
+  { // elaboration
+    std::cout << sc_time_stamp() << ": Elaboration: constructor" << std::endl;
+    SC_THREAD(thread); // initialization + simulation
+  };
+  ~STAGE()
+  { // cleanup
+    std::cout << sc_time_stamp() << ": Cleanup: desctructor" << std::endl;
+  }
+  void thread()
+  {
+    std::cout << sc_time_stamp() << ": Execution.initialization" << std::endl;
+    int i = 0;
+    while (true)
+    {
+      wait(1, SC_SEC);                                                       // advance-time
+      std::cout << sc_time_stamp() << ": Execution.simulation" << std::endl; // evaluation
+      if (++i >= 2)
+      {
+        sc_stop(); // stop simulation after 2 iterations
+      }
+    }
+  }
+  void before_end_of_elaboration()
+  {
+    std::cout << "before end of elaboration" << std::endl;
+  }
+  void end_of_elaboration()
+  {
+    std::cout << "end of elaboration" << std::endl;
+  }
+  void start_of_simulation()
+  {
+    std::cout << "start of simulation" << std::endl;
+  }
+  void end_of_simulation()
+  {
+    std::cout << "end of simulation" << std::endl;
+  }
+  void printinmain()
+  {
+    std::cout << "in sc_main call" << std::endl;
   }
 };
 

@@ -4,10 +4,10 @@ import struct
 i = 608
 b = struct.pack('i', i)
 f = struct.unpack('f', b)[0]
-print(f)  # 1.48221219e-34
+print(f)
 
 # 将十六进制整数转换为32bit float
 h = 0x348d3ac0
 b = struct.pack('I', h)
 f = struct.unpack('f', b)[0]
-print(f)  # 1.0
+print(f)

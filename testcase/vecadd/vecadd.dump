@@ -1,0 +1,311 @@
+
+tests/vecadd/vecadd.riscv:     file format elf32-littleriscv
+
+
+Disassembly of section .text:
+
+80000000 <_start>:
+80000000:	00003197          	auipc	gp,0x3
+80000004:	80018193          	addi	gp,gp,-2048 # 80002800 <__global_pointer$>
+80000008:	02000e93          	li	t4,32
+8000000c:	0d0efed7          	vsetvli	t4,t4,e32,m1,ta,ma
+80000010:	00002eb7          	lui	t4,0x2
+80000014:	300eaef3          	.4byte	0x300eaef3
+80000018:	00000e93          	li	t4,0
+8000001c:	80602173          	.4byte	0x80602173
+80000020:	80702273          	.4byte	0x80702273
+
+80000024 <.Lpcrel_hi1>:
+80000024:	00002517          	auipc	a0,0x2
+80000028:	fe850513          	addi	a0,a0,-24 # 8000200c <__BSS_END__>
+
+8000002c <.Lpcrel_hi2>:
+8000002c:	00002617          	auipc	a2,0x2
+80000030:	fe060613          	addi	a2,a2,-32 # 8000200c <__BSS_END__>
+80000034:	00c50863          	beq	a0,a2,80000044 <.Ltmp0>
+
+80000038 <.Ltmp1>:
+80000038:	00052023          	sw	zero,0(a0)
+8000003c:	00450513          	addi	a0,a0,4
+80000040:	fec56ce3          	bltu	a0,a2,80000038 <.Ltmp1>
+
+80000044 <.Ltmp0>:
+80000044:	803022f3          	.4byte	0x803022f3
+80000048:	0002a303          	lw	t1,0(t0)
+8000004c:	0042a503          	lw	a0,4(t0)
+80000050:	000300e7          	jalr	t1
+80000054:	0000400b          	endprg	zero,zero,zero
+80000058:	7f10006f          	j	80001048 <spike_end>
+
+8000005c <vectorAdd>:
+8000005c:	01010113          	addi	sp,sp,16
+80000060:	01020213          	addi	tp,tp,16 # 10 <__eh_frame_hdr_end+0x10>
+80000064:	fe112c23          	sw	ra,-8(sp)
+80000068:	fe812a23          	sw	s0,-12(sp)
+8000006c:	fe912823          	sw	s1,-16(sp)
+80000070:	00052403          	lw	s0,0(a0)
+80000074:	00452483          	lw	s1,4(a0)
+80000078:	42006057          	vmv.s.x	v0,zero
+8000007c:	038000ef          	jal	ra,800000b4 <_Z13get_global_idj>
+80000080:	96013057          	vsll.vi	v0,v0,2
+80000084:	0204c0d7          	vadd.vx	v1,v0,s1
+80000088:	0000a0fb          	vlw12.v	v1,0(v1)
+8000008c:	02044057          	vadd.vx	v0,v0,s0
+80000090:	0000217b          	vlw12.v	v2,0(v0) # 0 <__eh_frame_hdr_end>
+80000094:	021110d7          	vfadd.vv	v1,v1,v2
+80000098:	0010607b          	vsw12.v	v1,0(v0) # 0 <__eh_frame_hdr_end>
+8000009c:	ff812083          	lw	ra,-8(sp)
+800000a0:	ff412403          	lw	s0,-12(sp)
+800000a4:	ff012483          	lw	s1,-16(sp)
+800000a8:	ff010113          	addi	sp,sp,-16
+800000ac:	ff020213          	addi	tp,tp,-16 # fffffff0 <__global_pointer$+0x7fffd7f0>
+800000b0:	00008067          	ret
+
+800000b4 <_Z13get_global_idj>:
+800000b4:	00200513          	li	a0,2
+800000b8:	420560d7          	vmv.s.x	v1,a0
+800000bc:	00100e5b          	vbeq	v1,v0,800000d8 <.LBB0_4>
+800000c0:	00100513          	li	a0,1
+800000c4:	420560d7          	vmv.s.x	v1,a0
+800000c8:	00100a5b          	vbeq	v1,v0,800000dc <.LBB0_5>
+800000cc:	420060d7          	vmv.s.x	v1,zero
+800000d0:	0010185b          	vbne	v1,v0,800000e0 <.LBB0_6>
+800000d4:	1500006f          	j	80000224 <__builtin_riscv_global_id_x>
+
+800000d8 <.LBB0_4>:
+800000d8:	1940006f          	j	8000026c <__builtin_riscv_global_id_z>
+
+800000dc <.LBB0_5>:
+800000dc:	16c0006f          	j	80000248 <__builtin_riscv_global_id_y>
+
+800000e0 <.LBB0_6>:
+800000e0:	42006057          	vmv.s.x	v0,zero
+800000e4:	00008067          	ret
+
+800000e8 <__builtin_riscv_workitem_linear_id>:
+800000e8:	80302573          	.4byte	0x80302573
+800000ec:	80002373          	.4byte	0x80002373
+800000f0:	5208a157          	vid.v	v2
+800000f4:	02234057          	vadd.vx	v0,v2,t1
+800000f8:	00008067          	ret
+
+800000fc <__builtin_riscv_global_linear_id>:
+800000fc:	803026f3          	.4byte	0x803026f3
+80000100:	0086a283          	lw	t0,8(a3)
+80000104:	120000ef          	jal	ra,80000224 <__builtin_riscv_global_id_x>
+80000108:	0246ae83          	lw	t4,36(a3)
+8000010c:	0a0ec2d7          	vsub.vx	v5,v0,t4
+80000110:	00100f13          	li	t5,1
+80000114:	05e28263          	beq	t0,t5,80000158 <.GLR>
+
+80000118 <.GL_2DIM>:
+80000118:	130000ef          	jal	ra,80000248 <__builtin_riscv_global_id_y>
+8000011c:	00c6af83          	lw	t6,12(a3)
+80000120:	0106af03          	lw	t5,16(a3)
+80000124:	0a0f4357          	vsub.vx	v6,v0,t5
+80000128:	966fe357          	vmul.vx	v6,v6,t6
+8000012c:	025302d7          	vadd.vv	v5,v5,v6
+80000130:	00200f13          	li	t5,2
+80000134:	03e28263          	beq	t0,t5,80000158 <.GLR>
+
+80000138 <.GL_3DIM>:
+80000138:	134000ef          	jal	ra,8000026c <__builtin_riscv_global_id_z>
+8000013c:	00c6af83          	lw	t6,12(a3)
+80000140:	0106a303          	lw	t1,16(a3)
+80000144:	02c6af03          	lw	t5,44(a3)
+80000148:	0a0f4357          	vsub.vx	v6,v0,t5
+8000014c:	966fe357          	vmul.vx	v6,v6,t6
+80000150:	96636357          	vmul.vx	v6,v6,t1
+80000154:	025302d7          	vadd.vv	v5,v5,v6
+
+80000158 <.GLR>:
+80000158:	02504057          	vadd.vx	v0,v5,zero
+8000015c:	00008067          	ret
+
+80000160 <__builtin_riscv_workgroup_id_x>:
+80000160:	80802573          	.4byte	0x80802573
+80000164:	42056057          	vmv.s.x	v0,a0
+80000168:	00008067          	ret
+
+8000016c <__builtin_riscv_workgroup_id_y>:
+8000016c:	80902573          	.4byte	0x80902573
+80000170:	42056057          	vmv.s.x	v0,a0
+80000174:	00008067          	ret
+
+80000178 <__builtin_riscv_workgroup_id_z>:
+80000178:	80a02573          	.4byte	0x80a02573
+8000017c:	42056057          	vmv.s.x	v0,a0
+80000180:	00008067          	ret
+
+80000184 <__builtin_riscv_workitem_id_x>:
+80000184:	80302573          	.4byte	0x80302573
+80000188:	00852283          	lw	t0,8(a0)
+8000018c:	80002373          	.4byte	0x80002373
+80000190:	5208a157          	vid.v	v2
+80000194:	02234057          	vadd.vx	v0,v2,t1
+80000198:	00100393          	li	t2,1
+8000019c:	02728263          	beq	t0,t2,800001c0 <.WIXR>
+800001a0:	01852e03          	lw	t3,24(a0)
+800001a4:	00300393          	li	t2,3
+800001a8:	00728663          	beq	t0,t2,800001b4 <.WIX3>
+
+800001ac <.WIX2>:
+800001ac:	8a0e6057          	vremu.vx	v0,v0,t3
+800001b0:	00008067          	ret
+
+800001b4 <.WIX3>:
+800001b4:	01c52e83          	lw	t4,28(a0)
+800001b8:	03ce8eb3          	mul	t4,t4,t3
+800001bc:	8a0ee057          	vremu.vx	v0,v0,t4
+
+800001c0 <.WIXR>:
+800001c0:	00008067          	ret
+
+800001c4 <__builtin_riscv_workitem_id_y>:
+800001c4:	80302573          	.4byte	0x80302573
+800001c8:	00852283          	lw	t0,8(a0)
+800001cc:	80002373          	.4byte	0x80002373
+800001d0:	5208a157          	vid.v	v2
+800001d4:	02234057          	vadd.vx	v0,v2,t1
+800001d8:	01852e03          	lw	t3,24(a0)
+800001dc:	00300393          	li	t2,3
+800001e0:	00728663          	beq	t0,t2,800001ec <.WIY3>
+
+800001e4 <.WIY2>:
+800001e4:	820e6057          	vdivu.vx	v0,v0,t3
+800001e8:	00008067          	ret
+
+800001ec <.WIY3>:
+800001ec:	01c52e83          	lw	t4,28(a0)
+800001f0:	03ce8eb3          	mul	t4,t4,t3
+800001f4:	8a0ee057          	vremu.vx	v0,v0,t4
+800001f8:	820e6057          	vdivu.vx	v0,v0,t3
+800001fc:	00008067          	ret
+
+80000200 <__builtin_riscv_workitem_id_z>:
+80000200:	80302573          	.4byte	0x80302573
+80000204:	80002373          	.4byte	0x80002373
+80000208:	5208a157          	vid.v	v2
+8000020c:	02234057          	vadd.vx	v0,v2,t1
+80000210:	01852e03          	lw	t3,24(a0)
+80000214:	01c52e83          	lw	t4,28(a0)
+80000218:	03ce8eb3          	mul	t4,t4,t3
+8000021c:	820ee057          	vdivu.vx	v0,v0,t4
+80000220:	00008067          	ret
+
+80000224 <__builtin_riscv_global_id_x>:
+80000224:	80302573          	.4byte	0x80302573
+80000228:	80802373          	.4byte	0x80802373
+8000022c:	800023f3          	.4byte	0x800023f3
+80000230:	5208a157          	vid.v	v2
+80000234:	0223c157          	vadd.vx	v2,v2,t2
+80000238:	01852e03          	lw	t3,24(a0)
+8000023c:	03c30e33          	mul	t3,t1,t3
+80000240:	022e4057          	vadd.vx	v0,v2,t3
+80000244:	00008067          	ret
+
+80000248 <__builtin_riscv_global_id_y>:
+80000248:	80302573          	.4byte	0x80302573
+8000024c:	80902373          	.4byte	0x80902373
+80000250:	800023f3          	.4byte	0x800023f3
+80000254:	5208a157          	vid.v	v2
+80000258:	0223c157          	vadd.vx	v2,v2,t2
+8000025c:	01c52e03          	lw	t3,28(a0)
+80000260:	03c30e33          	mul	t3,t1,t3
+80000264:	022e4057          	vadd.vx	v0,v2,t3
+80000268:	00008067          	ret
+
+8000026c <__builtin_riscv_global_id_z>:
+8000026c:	80302573          	.4byte	0x80302573
+80000270:	80a02373          	.4byte	0x80a02373
+80000274:	800023f3          	.4byte	0x800023f3
+80000278:	5208a157          	vid.v	v2
+8000027c:	0223c157          	vadd.vx	v2,v2,t2
+80000280:	02052e03          	lw	t3,32(a0)
+80000284:	03c30e33          	mul	t3,t1,t3
+80000288:	022e4057          	vadd.vx	v0,v2,t3
+8000028c:	00008067          	ret
+
+80000290 <__builtin_riscv_local_size_x>:
+80000290:	80302573          	.4byte	0x80302573
+80000294:	01852283          	lw	t0,24(a0)
+80000298:	4202e057          	vmv.s.x	v0,t0
+8000029c:	00008067          	ret
+
+800002a0 <__builtin_riscv_local_size_y>:
+800002a0:	80302573          	.4byte	0x80302573
+800002a4:	01c52283          	lw	t0,28(a0)
+800002a8:	4202e057          	vmv.s.x	v0,t0
+800002ac:	00008067          	ret
+
+800002b0 <__builtin_riscv_local_size_z>:
+800002b0:	80302573          	.4byte	0x80302573
+800002b4:	02052283          	lw	t0,32(a0)
+800002b8:	4202e057          	vmv.s.x	v0,t0
+800002bc:	00008067          	ret
+
+800002c0 <__builtin_riscv_global_size_x>:
+800002c0:	80302573          	.4byte	0x80302573
+800002c4:	00c52283          	lw	t0,12(a0)
+800002c8:	4202e057          	vmv.s.x	v0,t0
+800002cc:	00008067          	ret
+
+800002d0 <__builtin_riscv_global_size_y>:
+800002d0:	80302573          	.4byte	0x80302573
+800002d4:	01052283          	lw	t0,16(a0)
+800002d8:	4202e057          	vmv.s.x	v0,t0
+800002dc:	00008067          	ret
+
+800002e0 <__builtin_riscv_global_size_z>:
+800002e0:	80302573          	.4byte	0x80302573
+800002e4:	01452283          	lw	t0,20(a0)
+800002e8:	4202e057          	vmv.s.x	v0,t0
+800002ec:	00008067          	ret
+
+800002f0 <__builtin_riscv_global_offset_x>:
+800002f0:	80302573          	.4byte	0x80302573
+800002f4:	02452283          	lw	t0,36(a0)
+800002f8:	4202e057          	vmv.s.x	v0,t0
+800002fc:	00008067          	ret
+
+80000300 <__builtin_riscv_global_offset_y>:
+80000300:	80302573          	.4byte	0x80302573
+80000304:	02852283          	lw	t0,40(a0)
+80000308:	4202e057          	vmv.s.x	v0,t0
+8000030c:	00008067          	ret
+
+80000310 <__builtin_riscv_global_offset_z>:
+80000310:	80302573          	.4byte	0x80302573
+80000314:	02c52283          	lw	t0,44(a0)
+80000318:	4202e057          	vmv.s.x	v0,t0
+8000031c:	00008067          	ret
+
+80000320 <__builtin_riscv_num_groups_x>:
+80000320:	80302573          	.4byte	0x80302573
+80000324:	00c52303          	lw	t1,12(a0)
+80000328:	01852283          	lw	t0,24(a0)
+8000032c:	02535333          	divu	t1,t1,t0
+80000330:	42036057          	vmv.s.x	v0,t1
+80000334:	00008067          	ret
+
+80000338 <__builtin_riscv_num_groups_y>:
+80000338:	80302573          	.4byte	0x80302573
+8000033c:	01052303          	lw	t1,16(a0)
+80000340:	01c52283          	lw	t0,28(a0)
+80000344:	02535333          	divu	t1,t1,t0
+80000348:	42036057          	vmv.s.x	v0,t1
+8000034c:	00008067          	ret
+
+80000350 <__builtin_riscv_num_groups_z>:
+80000350:	80302573          	.4byte	0x80302573
+80000354:	01452303          	lw	t1,20(a0)
+80000358:	02052383          	lw	t2,32(a0)
+8000035c:	02735333          	divu	t1,t1,t2
+80000360:	42036057          	vmv.s.x	v0,t1
+80000364:	00008067          	ret
+
+80000368 <__builtin_riscv_work_dim>:
+80000368:	80302573          	.4byte	0x80302573
+8000036c:	00852283          	lw	t0,8(a0)
+80000370:	4202e057          	vmv.s.x	v0,t0
+80000374:	00008067          	ret

@@ -53,5 +53,6 @@
         "typeindex": "cpp",
         "typeinfo": "cpp"
     },
-    "C_Cpp.errorSquiggles": "Enabled"
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.default.cppStandard": "c++23"
 }

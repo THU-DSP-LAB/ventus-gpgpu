@@ -1,15 +1,15 @@
 [*]
 [*] GTKWave Analyzer v3.3.104 (w)1999-2020 BSI
-[*] Wed Apr 26 15:46:28 2023
+[*] Sun Apr 30 09:11:12 2023
 [*]
-[dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp1.vcd"
-[dumpfile_mtime] "Wed Apr 26 15:45:35 2023"
-[dumpfile_size] 16610
-[savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp1.gtkw"
+[dumpfile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp3.vcd"
+[dumpfile_mtime] "Sun Apr 30 09:04:24 2023"
+[dumpfile_size] 20480
+[savefile] "/home/lan/work/ventus-gpgpu/sc-code/sm/BASE_wave_warp3.gtkw"
 [timestart] 0
 [size] 2548 1347
 [pos] -1 -1
-*-5.000000 55 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+*-5.000000 175 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
 [treeopen] SystemC.
 [sst_width] 214
 [signals_width] 369
@@ -22,6 +22,8 @@ SystemC.Rst_n
 SystemC.jump
 @28
 SystemC.bramch_sig
+@29
+SystemC.vbran_sig
 @420
 SystemC.pc[31:0]
 [color] 1
@@ -68,7 +70,7 @@ SystemC.last_dispatch_warpid[31:0]
 [color] 3
 SystemC.dispatch_warp_valid
 SystemC.dispatch_valid
-@20001
+@20000
 -
 @28
 SystemC.dispatch_ready
@@ -313,37 +315,6 @@ SystemC.wb_ins.s2[31:0]
 [color] 2
 SystemC.wb_warpid[31:0]
 SystemC.s_regfile.data(0)[31:0]
-SystemC.s_regfile.data(1)[31:0]
-SystemC.s_regfile.data(2)[31:0]
-SystemC.s_regfile.data(3)[31:0]
-SystemC.s_regfile.data(4)[31:0]
-SystemC.s_regfile.data(5)[31:0]
-SystemC.s_regfile.data(6)[31:0]
-SystemC.s_regfile.data(7)[31:0]
-SystemC.s_regfile.data(8)[31:0]
-SystemC.s_regfile.data(9)[31:0]
-SystemC.s_regfile.data(10)[31:0]
-SystemC.s_regfile.data(11)[31:0]
-SystemC.s_regfile.data(12)[31:0]
-SystemC.s_regfile.data(13)[31:0]
-SystemC.s_regfile.data(14)[31:0]
-SystemC.s_regfile.data(15)[31:0]
-SystemC.s_regfile.data(16)[31:0]
-SystemC.s_regfile.data(17)[31:0]
-SystemC.s_regfile.data(18)[31:0]
-SystemC.s_regfile.data(19)[31:0]
-SystemC.s_regfile.data(20)[31:0]
-SystemC.s_regfile.data(21)[31:0]
-SystemC.s_regfile.data(22)[31:0]
-SystemC.s_regfile.data(23)[31:0]
-SystemC.s_regfile.data(24)[31:0]
-SystemC.s_regfile.data(25)[31:0]
-SystemC.s_regfile.data(26)[31:0]
-SystemC.s_regfile.data(27)[31:0]
-SystemC.s_regfile.data(28)[31:0]
-SystemC.s_regfile.data(29)[31:0]
-SystemC.s_regfile.data(30)[31:0]
-SystemC.s_regfile.data(31)[31:0]
 [color] 5
 SystemC.v_regfile(0)(0)[31:0]
 [color] 5

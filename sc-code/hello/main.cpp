@@ -106,11 +106,22 @@ int sc_main(int argc, char *argv[])
   // T.clk(clk);
   // sc_start(100, SC_NS);
 
-  // 测试event.triggered能探测到什么时间的事件
-  sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
-  triggered_test T("nothingtester");
-  T.clk(clk);
-  sc_start(100, SC_NS);
+  // // 测试event.triggered能探测到什么时间的事件
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // triggered_test T("nothingtester");
+  // T.clk(clk);
+  // sc_start(100, SC_NS);
 
-  return 0; // Terminate simulation
+  // // 写毕业论文用
+  // sc_clock clk("clk", PERIOD, SC_NS, 0.5, 0, SC_NS, false);
+  // example T("example");
+  // T.clk(clk);
+  // sc_start(100, SC_NS);
+  // return 0; // Terminate simulation
+
+  // 不同仿真阶段
+  STAGE stage("stage"); // Elaboration
+  stage.printinmain();
+  sc_start(); // Execution till sc_stop
+  return 0;   // Cleanup
 }
