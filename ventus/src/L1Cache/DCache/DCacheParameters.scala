@@ -23,7 +23,7 @@ case class DCacheParameters
   NWays: Int = dcache_NWays,
   //BlockWords: Int = dcache_BlockWords,
   NMshrEntry: Int = 4,
-  NMshrSubEntry: Int = 4,
+  NMshrSubEntry: Int = 2,
   //NBanks: Int = 2,
   WdbDepth: Int = 4,
 )
