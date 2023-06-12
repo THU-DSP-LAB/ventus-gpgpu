@@ -10,7 +10,8 @@
  * See the Mulan PSL v2 for more details. */
 package play
 
-import L1Cache.MyConfig
+import L1Cache.DCache.DataCache
+import L1Cache._
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
@@ -19,9 +20,12 @@ import chiseltest._
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
 import chiseltest.simulator.WriteVcdAnnotation
+
+import scala.util.Random
 //import chiseltest.simulator.
 import pipeline.pipe
 import top._
+import scala.io.Source
 
 // add new testcases here!
 object TestCaseList{
@@ -38,7 +42,130 @@ object TestCaseList{
 
   def apply(s: String) = TestCaseList.L(s)
 }
+object test_Gen extends App {
+  val param = (new MyConfig).toInstance
+  (new chisel3.stage.ChiselStage).emitVerilog(new DataCache( )(param))
+}
 
+object L1MSHRGen extends App {
+  (new chisel3.stage.ChiselStage).emitVerilog(new MSHR(bABits=20,tIWidth=50,WIdBits=5,NMshrEntry = 4, NMshrSubEntry = 4))
+}
+object L1TagAccessGen extends App {
+  (new chisel3.stage.ChiselStage).emitVerilog(new L1TagAccess(set=32,way=2,tagBits=20,true))
+}
+class test_tb extends AnyFreeSpec with ChiselScalatestTester{
+  "tag_test" in {
+    val timeLength = 5
+    val way = 4
+    test(new ReplacementUnit(timeLength,way,true)).withAnnotations(Seq(WriteVcdAnnotation)) { DUT =>
+      println("****** ReplacementUnit ******")
+      DUT.clock.step(5)
+      DUT.io.validOfSet.poke("b1110".U)
+      for (i <- 0 until way){
+        val temp = (1+i).asUInt
+        DUT.io.timeOfSet_st1(i).poke(temp)
+      }
+      DUT.clock.step(1)
+      DUT.io.validOfSet.poke("b1111".U)
+      for (i <- 0 until way) {
+        val temp = (way-i).asUInt
+        DUT.io.timeOfSet_st1(i).poke(temp)
+      }
+      DUT.clock.step(1)
+    }
+  }
+}
+
+class DCache_RRRRRmiss_diff extends AnyFreeSpec with ChiselScalatestTester{
+  //implicit val p = (new MyConfig).toInstance
+  "DCache_RRRRRmiss_diff" in {
+    test(new DCacheWraper).withAnnotations(Seq(WriteVcdAnnotation)){ DUT =>
+      println("****** L1Cache.DCache RRRRRmiss_diff ******")
+      //println("wordOffsetBits = ",DUT.DCache.WordOffsetBits)
+      println("blockOffsetBits = "+DUT.DCache.BlockOffsetBits)
+      println("SetIdxBits = "+DUT.DCache.SetIdxBits)
+      println("tagIdxBits = "+DUT.DCache.TagBits)
+      println("MSHR depth = "+DUT.DCache.NMshrEntry+". Subentries = "+DUT.DCache.NMshrSubEntry)
+
+      DUT.io.memReq_ready.poke(true.B)
+      //DUT.io.pipe_req.bits.addr := Cat(blockAddr, blockAddrOffset)
+
+      DUT.io.coreReq.valid.poke(false.B)
+      DUT.io.coreRsp.ready.poke(true.B)
+
+      DUT.reset.poke(true.B)
+      DUT.clock.step(1)
+      DUT.reset.poke(false.B)
+      DUT.clock.step(5)
+
+      val filename = "dcache_coreReq.txt"
+      val file = Source.fromFile(filename)
+      val fileLines = file.getLines()
+
+      for (line <- fileLines) {
+        if (line.trim.nonEmpty) { // 检测line变量是否为空行
+          val fields = line.split(",")// 字段中不允许存在空格
+          // fields格式：
+          // 0: op,
+          // 1: param,
+          // 2: warp id,
+          // 3: reg idx,
+          // 4: block idx,
+          // 5: block offset(0),
+          // 6: vector or scalar,
+          // 7: data(0)
+          if (fields.length != 8) {
+            println("错误：元素个数不为8！")
+            sys.exit(1)
+          }
+          DUT.io.coreReq.valid.poke(true.B)
+          DUT.io.coreReq.bits.opcode.poke(fields(0).U)
+          DUT.io.coreReq.bits.param.poke(fields(1).U)
+          DUT.io.coreReq.bits.instrId.poke(fields(3).U)
+          val blockIdxFromTxt = fields(4).U
+          val tagFromTxt = blockIdxFromTxt(DUT.DCache.SetIdxBits+DUT.DCache.TagBits-1,DUT.DCache.SetIdxBits)
+          val setIdxFromTxt = blockIdxFromTxt(DUT.DCache.SetIdxBits-1,0)
+          DUT.io.coreReq.bits.tag.poke(tagFromTxt)
+          DUT.io.coreReq.bits.setIdx.poke(setIdxFromTxt)
+          // 目前只支持测试标量
+          DUT.io.coreReq.bits.perLaneAddr(0).blockOffset.poke(fields(5).U)
+          if(fields(6) == "0"){
+            DUT.io.coreReq.bits.perLaneAddr(0).activeMask.poke(true.B)
+            DUT.io.coreReq.bits.perLaneAddr(0).wordOffset1H.poke("b1111".U)
+            (1 until DUT.DCache.NLanes).foreach { iofL =>
+              DUT.io.coreReq.bits.perLaneAddr(iofL).activeMask.poke(false.B)
+              DUT.io.coreReq.bits.perLaneAddr(iofL).wordOffset1H.poke("b1111".U)
+            }
+          } else if (fields(6) == "1"){
+            (1 until DUT.DCache.NLanes).foreach { iofL =>
+              DUT.io.coreReq.bits.perLaneAddr(iofL).activeMask.poke(true.B)
+              DUT.io.coreReq.bits.perLaneAddr(iofL).wordOffset1H.poke("b1111".U)
+            }
+          } else {
+            println("错误：vector or scalar栏格式错误！")
+            sys.exit(1)
+          }
+          DUT.io.coreReq.bits.data(0).poke(fields(7).U)
+          fork
+            .withRegion(Monitor) {
+              while (DUT.io.coreReq.ready.peek().litToBoolean == false) {
+                DUT.clock.step(1)
+              }
+            }
+            .joinAndStep(DUT.clock)
+        } else {
+          DUT.io.coreReq.valid.poke(false.B)
+          DUT.clock.step(1)
+        }
+      }
+      //DUT.io.coreReq.enqueueSeq()
+      DUT.io.coreReq.valid.poke(false.B)
+
+      DUT.clock.step(15)
+      file.close()
+    }
+  }
+}
 class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
   "first_test" in {
     val caseName = "gaussian"
