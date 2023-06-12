@@ -152,7 +152,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
   io.missReq.ready := !(mshrStatus_st1 === 1.U || mshrStatus_st1 === 3.U)// || io.missRspIn.valid)
-  assert(!io.missReq.valid || (io.missReq.valid && !io.missRspIn.valid),"MSHR的Req和Rsp禁止同时valid，后者优先")
+  assert(!io.missReq.valid || (io.missReq.valid && !io.missRspIn.valid),"MSHR cant have Req & Rsp valid in same cycle, later the prior")
   val real_SRAMAddrUp = Mux(mshrStatus_st1===2.U,OHToUInt(entryMatchProbe_st1),entryStatus.io.next)
   val real_SRAMAddrDown = Mux(mshrStatus_st1===2.U,subentryStatus.io.next,0.U)
   when (io.missReq.fire){
@@ -176,7 +176,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
 
   entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
-  assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn时，禁止多个entry比对instrId成功")
+  assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn, cant match multiple entries")
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
   subentry_next2cancel := subentryStatusForRsp.io.next2cancel
 
