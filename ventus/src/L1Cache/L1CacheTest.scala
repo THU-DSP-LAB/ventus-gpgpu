@@ -37,7 +37,7 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
     val memReq_data = Output(Vec(BlockWords,UInt(WordLength.W)))
     val memReq_mask = Output(Vec(BlockWords,Bool()))
   })
-  val memory = Mem(4096*BlockWords,UInt(WordLength.W))
+  val memory = Mem(64*BlockWords,UInt(WordLength.W))
   loadMemoryFromFile(memory,"./L2Image.txt")
   val raw_vec = Wire(Vec(BlockWords,UInt(WordLength.W)))
   for (i<- 0 until BlockWords){//do not include blockWords
@@ -47,22 +47,28 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
   val data_out = Wire(Vec(BlockWords,UInt(WordLength.W)))
   data_out := raw_vec
 
+  val a_opcode = io.memReq.bits.a_opcode
+  val d_opcode = (a_opcode === 0.U)||(a_opcode === 1.U && io.memReq.bits.a_param===0.U)
+  val opcode_out1 = RegEnable(!d_opcode,io.memReq.fire())
   val instrIdx_out1 = RegEnable(io.memReq.bits.a_source,io.memReq.fire())
   val data_out1 = RegEnable(data_out,io.memReq.fire())
   val addr_out1 = RegEnable(Cat(get_blockAddr(io.memReq.bits.a_addr),
     Fill(32-(TagBits+SetIdxBits),0.U(1.W))),io.memReq.fire())
   val fire_out1 = RegNext(io.memReq.fire()&(io.memReq.bits.a_opcode===TLAOp_Get))
 
+  val opcode_out2 = RegNext(opcode_out1)
   val instrIdx_out2 = RegNext(instrIdx_out1)
   val data_out2 = RegNext(data_out1)
   val addr_out2 = RegNext(addr_out1)
   val fire_out2 = RegNext(fire_out1)
 
+  val opcode_out3 = RegNext(opcode_out2)
   val instrIdx_out3 = RegNext(instrIdx_out2)
   val data_out3 = RegNext(data_out2)
   val addr_out3 = RegNext(addr_out2)
   val fire_out3 = RegNext(fire_out2)
 
+  val opcode_out4 = RegNext(opcode_out3)
   val instrIdx_out4 = RegNext(instrIdx_out3)
   val data_out4 = RegNext(data_out3)
   val addr_out4 = RegNext(addr_out3)
@@ -70,6 +76,7 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
   //
   val mem_rsp_Q = Module(new Queue(new DCacheMemRsp, 6))
   mem_rsp_Q.io.enq.valid := fire_out4
+  mem_rsp_Q.io.enq.bits.d_opcode := opcode_out4
   mem_rsp_Q.io.enq.bits.d_source := instrIdx_out4
   mem_rsp_Q.io.enq.bits.d_addr := addr_out4
   mem_rsp_Q.io.enq.bits.d_data := data_out4
