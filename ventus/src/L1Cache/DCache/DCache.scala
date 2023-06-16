@@ -119,11 +119,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
   val coreReq_st1_ready = Wire(Bool())
+  val coreReq_st1_valid = Wire(Bool())
+  coreReq_st1_valid := RegNext(io.coreReq.valid)
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
-  cacheHit_st1 := TagAccess.io.hit_st1 && RegEnable(io.coreReq.valid,io.coreReq.fire)
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.valid,io.coreReq.fire)
+  cacheHit_st1 := TagAccess.io.hit_st1 && coreReq_st1_valid
+  val cacheMiss_st1 = !TagAccess.io.hit_st1 && coreReq_st1_valid
   //RegEnable indicate whether the signal is consumed
   /*val wayIdxAtHit_st1 = Wire(UInt(WayIdxBits.W))
   wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
