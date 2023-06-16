@@ -98,7 +98,7 @@ class DCache_RRRRRmiss_diff extends AnyFreeSpec with ChiselScalatestTester{
       DUT.reset.poke(false.B)
       DUT.clock.step(5)
 
-      val filename = "DCache/RRRRRmiss_diff.txt"
+      val filename = "ventus/txt/DCache/RRRRRmiss_diff.txt"
       val file = Source.fromFile(filename)
       val fileLines = file.getLines()
 
