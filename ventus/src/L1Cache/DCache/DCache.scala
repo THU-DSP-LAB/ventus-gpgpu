@@ -253,6 +253,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }
     }
+  }.otherwise{
+    coreReq_st1_ready := true.B
   }
 
   /*when(cacheHit_st1){//TODO consider memRsp
@@ -270,7 +272,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memRsp_Q.io.enq <> io.memRsp
   memRsp_Q.io.deq.ready := MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready//TODO add tag_array
   // && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
-  when(memReq_Q.io.deq.fire){
+  when(memRsp_Q.io.deq.fire){
     memRsp_st1 := memRsp_Q_st0
   }
   //val memRspData_st1 = Wire(Vec(BlockWords,UInt(WordLength.W)))
