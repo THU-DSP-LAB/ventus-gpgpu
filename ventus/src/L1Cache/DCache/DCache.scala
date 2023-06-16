@@ -242,18 +242,21 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       when(coreRsp_Q.io.enq.ready){
         coreReq_st1_ready := true.B
       }
-    }.otherwise{
-      assert(cacheMiss_st1,s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
+    }.elsewhen(cacheMiss_st1){
+      //assert(cacheMiss_st1,s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
       when(coreReqControl_st1.isRead){
         //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
         when(MshrAccess.mshrProbeAvail && memReq_Q.io.enq.ready){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
+        //TODO before 6.30: add hit in-flight miss
         when(coreRsp_Q.io.enq.ready && memReq_Q.io.enq.ready){
           coreReq_st1_ready := true.B
         }
       }
+    }.otherwise{//coreReq is not valid
+      coreReq_st1_ready := true.B
     }
   }.otherwise{
     coreReq_st1_ready := true.B
