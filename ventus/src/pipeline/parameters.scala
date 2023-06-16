@@ -14,7 +14,7 @@ import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCachePa
 import chisel3._
 import chisel3.util._
 object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
-  def num_sm=2
+  def num_sm=1
 
   val SINGLE_INST:Boolean=false
   val SPIKE_OUTPUT:Boolean=true
@@ -36,7 +36,7 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def depth_ibuffer=log2Ceil(num_ibuffer)
   def lsu_num_entry_each_warp=4//blocking for each warp
   def lsu_nMshrEntry = num_warp // less than num_warp
-  def dcache_NSets: Int = 32
+  def dcache_NSets: Int = 4
   def dcache_NWays: Int = 2
   def dcache_BlockWords: Int = num_thread
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
