@@ -98,7 +98,7 @@ class DCache_RRRRRmiss_diff extends AnyFreeSpec with ChiselScalatestTester{
       DUT.reset.poke(false.B)
       DUT.clock.step(5)
 
-      val filename = "dcache_coreReq.txt"
+      val filename = "DCache/RRRRRmiss_diff.txt"
       val file = Source.fromFile(filename)
       val fileLines = file.getLines()
 
@@ -129,14 +129,14 @@ class DCache_RRRRRmiss_diff extends AnyFreeSpec with ChiselScalatestTester{
           DUT.io.coreReq.bits.setIdx.poke(setIdxFromTxt)
           // 目前只支持测试标量
           DUT.io.coreReq.bits.perLaneAddr(0).blockOffset.poke(fields(5).U)
-          if(fields(6) == "0"){
+          if(fields(6) == "d0"){
             DUT.io.coreReq.bits.perLaneAddr(0).activeMask.poke(true.B)
             DUT.io.coreReq.bits.perLaneAddr(0).wordOffset1H.poke("b1111".U)
             (1 until DUT.DCache.NLanes).foreach { iofL =>
               DUT.io.coreReq.bits.perLaneAddr(iofL).activeMask.poke(false.B)
               DUT.io.coreReq.bits.perLaneAddr(iofL).wordOffset1H.poke("b1111".U)
             }
-          } else if (fields(6) == "1"){
+          } else if (fields(6) == "d1"){
             (1 until DUT.DCache.NLanes).foreach { iofL =>
               DUT.io.coreReq.bits.perLaneAddr(iofL).activeMask.poke(true.B)
               DUT.io.coreReq.bits.perLaneAddr(iofL).wordOffset1H.poke("b1111".U)
