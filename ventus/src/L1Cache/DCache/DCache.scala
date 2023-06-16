@@ -119,11 +119,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
   val coreReq_st1_ready = Wire(Bool())
+  val coreReq_st1_valid = Wire(Bool())
+  coreReq_st1_valid := RegNext(io.coreReq.valid)
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
-  cacheHit_st1 := TagAccess.io.hit_st1 && RegEnable(io.coreReq.valid,io.coreReq.fire)
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegEnable(io.coreReq.valid,io.coreReq.fire)
+  cacheHit_st1 := TagAccess.io.hit_st1 && coreReq_st1_valid
+  val cacheMiss_st1 = !TagAccess.io.hit_st1 && coreReq_st1_valid
   //RegEnable indicate whether the signal is consumed
   /*val wayIdxAtHit_st1 = Wire(UInt(WayIdxBits.W))
   wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
@@ -253,6 +255,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }
     }
+  }.otherwise{
+    coreReq_st1_ready := true.B
   }
 
   /*when(cacheHit_st1){//TODO consider memRsp
@@ -270,7 +274,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memRsp_Q.io.enq <> io.memRsp
   memRsp_Q.io.deq.ready := MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready//TODO add tag_array
   // && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
-  when(memReq_Q.io.deq.fire){
+  when(memRsp_Q.io.deq.fire){
     memRsp_st1 := memRsp_Q_st0
   }
   //val memRspData_st1 = Wire(Vec(BlockWords,UInt(WordLength.W)))
