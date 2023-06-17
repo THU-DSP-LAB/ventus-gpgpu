@@ -116,7 +116,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   entryStatus.io.valid_list := entry_valid
 
   // ******     enum vec_mshr_status     ******
-  val mshrStatus_st1 = RegInit(0.U(2.W))
+  val mshrStatus_st1 = Wire(UInt(2.W))
   /*PRIMARY_AVAIL   00
   * PRIMARY_FULL    01
   * SECONDARY_AVAIL 10
