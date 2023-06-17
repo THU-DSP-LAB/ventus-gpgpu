@@ -84,8 +84,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     val memReq = DecoupledIO(new DCacheMemReq)})
 
   // ******     important submodules     ******
-  //val BankConfArb = Module(new BankConflictArbiter)
-  //val bankConflict_reg = Reg(Bool())
   val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry))
   val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
@@ -105,17 +103,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val memReq_Q = Module(new Queue(new DCacheMemReq,entries = 8,flow=false,pipe=false))
   val MemReqArb = Module(new Arbiter(new DCacheMemReq, 2))
 
-  //val coreReqHolding = RegInit(false.B)
-  /*val coreReq_st2 = RegNext(coreReq_st1)
-  val coreReqInstrId_st3 = RegNext(coreReq_st2.instrId)
-  val writeMiss_st3 = Reg(Bool())
-  val coreReqActvMask_st3 = Mux(writeMiss_st3,
-    //WRITE Miss case
-    RegNext(VecInit(coreReq_st2.perLaneAddr.map(_.activeMask))),
-    //READ/WRITE Hit case
-    ShiftRegister(BankConfArb.io.activeLane,2))
-  val coreReqIsWrite_st3 = RegNext(coreReq_st2.isWrite)*/
-
   // ******     pipeline regs      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
   val coreReq_st1_ready = Wire(Bool())
@@ -126,28 +113,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val cacheHit_st1 = Wire(Bool())
   cacheHit_st1 := TagAccess.io.hit_st1 && coreReq_st1_valid
   val cacheMiss_st1 = !TagAccess.io.hit_st1 && coreReq_st1_valid
-  //RegEnable indicate whether the signal is consumed
-  /*val wayIdxAtHit_st1 = Wire(UInt(WayIdxBits.W))
-  wayIdxAtHit_st1 := OHToUInt(TagAccess.io.waymaskHit_st1)
-  //val wayIdxAtHit_st2 = RegNext(wayIdxAtHit_st1)
-  val wayIdxReplace_st0 = Wire(UInt(WayIdxBits.W))
-  wayIdxReplace_st0 := OHToUInt(TagAccess.io.waymaskReplacement_st1)*/
-
-  /*val writeFullWordBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.andR)) //mem Order
-  val writeTouchBank_st1 = Cat(BankConfArb.io.addrCrsbarOut.map(_.wordOffset1H.orR)) //mem Order
-  val writeSubWordBank_st1 = writeFullWordBank_st1 ^ writeTouchBank_st1 //mem Order*/
-  //val byteEn_st1 : Bool = writeFullWordBank_st1 =/= writeTouchBank_st1
 
   val readHit_st1 = cacheHit_st1 & coreReqControl_st1.isRead
   val readMiss_st1 = cacheMiss_st1 & coreReqControl_st1.isRead
   val writeHit_st1 = cacheHit_st1 & coreReqControl_st1.isWrite
   val writeMiss_st1 = cacheMiss_st1 & coreReqControl_st1.isWrite
-  //val writeHitSubWord_st1 = writeHit_st1 & byteEn_st1
-  //val writeMissSubWord_st1 = writeMiss_st1 & byteEn_st1
-
-  /*val writeMiss_st2 = RegNext(writeMiss_st1)
-  //val writeMissSubWord_st2 = RegNext(writeMissSubWord_st1)
-  writeMiss_st3 := writeMiss_st2*/
 
   val coreRsp_st2 =Reg(new DCacheCoreRsp)
   val coreRsp_st2_valid =Wire(Bool())
@@ -230,12 +200,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val DataAccessReadHitSRAMRReq = Wire(Vec(BlockWords,new SRAMBundleA(NSets*NWays)))
   DataAccessReadHitSRAMRReq.foreach(_.setIdx := Cat(coreReq_st1.setIdx,TagAccess.io.waymaskHit_st1))
 
-  /*!(BankConfArb.io.bankConflict && (cacheHit_st1 || cacheHit_st2)) &
-    !missRspFromMshr_st1 & !(io.memRsp.valid && !ShiftRegister(io.coreReq.bits.isWrite && io.coreReq.fire(), 2)) &
-    !(cacheHit_st1 & coreRsp_QAlmstFull) &
-    !(coreReq_st1.isWrite & WriteDataBuf.io.wdbAlmostFull) &
-    !(readHit_st2 & coreReq_st1.isWrite) &
-    (MshrAccess.io.missReq.ready || (!MshrAccess.io.missReq.ready && io.coreReq.bits.isWrite))*/
   coreReq_st1_ready := false.B
   when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
     when(cacheHit_st1){
@@ -261,14 +225,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.otherwise{
     coreReq_st1_ready := true.B
   }
-
-  /*when(cacheHit_st1){//TODO consider memRsp
-    coreRsp_st2_valid := true.B
-    coreRsp_st2.data := DontCare
-    coreRsp_st2.isWrite := coreReqControl_st1.isWrite
-    coreRsp_st2.instrId := coreReq_st1.instrId
-    coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
-  }*/
 
   // ******     l1_data_cache::memRsp_pipe1_cycle      ******
   val memRsp_st1 = Reg(new DCacheMemRsp)
@@ -392,16 +348,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val DataAccessReadHitSRAMRRsp: Vec[UInt] = VecInit(DataAccessesRRsp)
 
   // ******      data crossbar     ******
-  /*  DataCrsCore2Mem.io.DataIn := Mux(readMissRsp_st2,
-    VecInit((0 until NBanks).map{i => memRspData_st2(arbAddrCrsbarOut_st2(i).bankOffset.getOrElse(0.U))(i)}),//READ missRsp case
-    Mux(coreReq_st2.isWrite,
-      coreReq_st2.data,//WRITE case(all 3
-      dataAccess_data_st3//READ hit case
-    ))
-  //Sel from st2 on each WRITE flow, and READ missRsp
-  DataCrsCore2Mem.io.Select1H := Mux(coreReq_st2.isWrite | readMissRsp_st2,
-    arbDataCrsbarSel1H_st2,
-    arbDataCrsbarSel1H_st3)*/
 
   // ******      core rsp
   when(cacheHit_st1) {
@@ -434,23 +380,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   when(readHit_st2){
     coreRsp_Q.io.enq.bits.data := DataAccessReadHitSRAMRRsp
   }
-  /*.isWrite := Mux(writeMissRsp_st2,
-    //WRITE miss Rsp
-    true.B,
-    //WRITE hit
-    coreReqIsWrite_st3)
-  coreRsp_Q.io.enq.bits.data := DataCorssBar.io.DataOut
-  coreRsp_Q.io.enq.bits.instrId := Mux(readMissRsp_st2,
-    //READ miss Rsp
-    memRspInstrId_st2,
-    //READ hit
-    coreReqInstrId_st3)
-  coreRsp_Q.io.enq.bits.activeMask := Mux(readMissRsp_st2,
-    //READ miss Rsp
-    missRspTILaneMask_st2,
-    //Mux of READ/WRITE hit or WRITE miss case
-    coreReqActvMask_st3)//refer to generation of this signal
-  coreRsp_QAlmstFull := coreRsp_Q.io.count === coreRsp_Q_entries.asUInt - 2.U*/
 
   // ******      m_memReq_Q.m_Q.push_back      ******
   memReq_Q.io.enq <> MemReqArb.io.out
