@@ -150,7 +150,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   writeMiss_st3 := writeMiss_st2*/
 
   val coreRsp_st2 =Reg(new DCacheCoreRsp)
-  val coreRsp_st2_valid =Reg(Bool())
+  val coreRsp_st2_valid =Wire(Bool())
 
   /*val cacheHit_st2 = RegInit(false.B)
   cacheHit_st2 := cacheHit_st1 || (cacheHit_st2 && RegNext(BankConfArb.io.bankConflict))*/
@@ -404,19 +404,29 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     arbDataCrsbarSel1H_st3)*/
 
   // ******      core rsp
-  when(cacheHit_st1) { //TODO consider memRsp
-    coreRsp_st2_valid := true.B
+  when(cacheHit_st1) {
+    //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
     coreRsp_st2.instrId := coreReq_st1.instrId
     coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
   }.elsewhen(missRspFromMshr_st1){//TODO tiao jian yao gai
-    coreRsp_st2_valid := true.B
+    //coreRsp_st2_valid := true.B
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
     coreRsp_st2.instrId := missRspTI_st1.instrId
     coreRsp_st2.activeMask := missRspTI_st1.perLaneAddr.map(_.activeMask)
-  }
+  }//TODO add memReq st2
+
+  //assert(!(coreReq_st1_valid && missRspFromMshr_st1),s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
+  val coreRsp_st2_valid_from_coreReq = Wire(Bool())
+  val coreRsp_st2_valid_from_memRsp = Wire(Bool())
+
+  coreRsp_st2_valid_from_coreReq := RegNext(coreReq_st1_valid &&
+    (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
+  coreRsp_st2_valid_from_memRsp := RegNext(missRspFromMshr_st1)
+  assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
+  coreRsp_st2_valid := coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memRsp
 
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreRsp_st2_valid
