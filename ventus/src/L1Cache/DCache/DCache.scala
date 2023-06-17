@@ -141,6 +141,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.fire
   MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
+  val mshrProbeAvail = MshrAccess.io.probeOut_st1.probeStatus === 0.U || MshrAccess.io.probeOut_st1.probeStatus === 2.U
 
   val genCtrl = Module(new genControl)
   genCtrl.io.opcode := io.coreReq.bits.opcode
@@ -210,7 +211,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       //assert(cacheMiss_st1,s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
       when(coreReqControl_st1.isRead){
         //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
-        when(MshrAccess.mshrProbeAvail && memReq_Q.io.enq.ready){
+        when(mshrProbeAvail && memReq_Q.io.enq.ready){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
