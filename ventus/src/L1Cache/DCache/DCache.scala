@@ -106,8 +106,12 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
   val coreReq_st1_ready = Wire(Bool())
-  val coreReq_st1_valid = Wire(Bool())
-  coreReq_st1_valid := RegNext(io.coreReq.valid)
+  val coreReq_st1_valid = RegInit(false.B)
+  val coreReq_st1_fire = coreReq_st1_ready && coreReq_st1_valid
+  //is a 1-bit 2-status FSM
+  when(io.coreReq.fire ^ coreReq_st1_fire){
+    coreReq_st1_valid := io.coreReq.fire
+  }
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
