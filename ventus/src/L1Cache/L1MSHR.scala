@@ -147,7 +147,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
   io.probeOut_st1.probeStatus := mshrStatus_st1
-  def mshrProbeAvail: Bool = this.io.probeOut_st1.probeStatus === 0.U || this.io.probeOut_st1.probeStatus === 2.U
+  //def mshrProbeAvail: Bool = this.io.probeOut_st1.probeStatus === 0.U || this.io.probeOut_st1.probeStatus === 2.U
 
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
