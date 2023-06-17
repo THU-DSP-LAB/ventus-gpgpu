@@ -130,21 +130,21 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val primaryMiss = !secondaryMiss
   val mainEntryFull = entryStatus.io.full
   val subEntryFull = subentryStatus.io.full
-  when(io.probe.valid){
-    when(primaryMiss){
-      when(mainEntryFull){
-        mshrStatus_st1 := 1.U//PRIMARY_FULL
-      }.otherwise{
-        mshrStatus_st1 := 0.U//PRIMARY_AVAIL
-      }
-    }.otherwise{
-      when(subEntryFull){
-        mshrStatus_st1 := 3.U//SECONDARY_FULL
-      }.otherwise{
-        mshrStatus_st1 := 2.U//SECONDARY_AVAIL
-      }
+  //when(io.probe.valid){
+  when(primaryMiss) {
+    when(mainEntryFull) {
+      mshrStatus_st1 := 1.U //PRIMARY_FULL
+    }.otherwise {
+      mshrStatus_st1 := 0.U //PRIMARY_AVAIL
+    }
+  }.otherwise {
+    when(subEntryFull) {
+      mshrStatus_st1 := 3.U //SECONDARY_FULL
+    }.otherwise {
+      mshrStatus_st1 := 2.U //SECONDARY_AVAIL
     }
   }
+  //}
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
   io.probeOut_st1.probeStatus := mshrStatus_st1
   //def mshrProbeAvail: Bool = this.io.probeOut_st1.probeStatus === 0.U || this.io.probeOut_st1.probeStatus === 2.U
