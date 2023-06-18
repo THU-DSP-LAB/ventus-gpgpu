@@ -66,8 +66,8 @@ class L1CacheMemReq extends Bundle{
   val a_mask = Vec(dcache_BlockWords, Bool())
 }
 
-class DCacheMemReq(implicit p: Parameters) extends L1CacheMemReq{
-  override val a_source = UInt((3+log2Up(NMshrEntry)+log2Up(NSets)).W)
+class DCacheMemReq extends L1CacheMemReq{
+  override val a_source = UInt((3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
