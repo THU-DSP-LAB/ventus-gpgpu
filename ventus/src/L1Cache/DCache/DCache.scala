@@ -106,12 +106,15 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
   val coreReq_st1_ready = Wire(Bool())
-  val coreReq_st1_valid = RegInit(false.B)
-  val coreReq_st1_fire = coreReq_st1_ready && coreReq_st1_valid
+  val coreReq_st1_valid_pre = RegInit(false.B)
+  val coreReq_st1_valid = Wire(Bool())
+  val memRsp_st1_valid = RegInit(false.B)//early definition
+  val coreReq_st1_fire = coreReq_st1_ready && coreReq_st1_valid_pre
   //is a 1-bit 2-status FSM
   when(io.coreReq.fire ^ coreReq_st1_fire){
-    coreReq_st1_valid := io.coreReq.fire
+    coreReq_st1_valid_pre := io.coreReq.fire
   }
+  coreReq_st1_valid := coreReq_st1_valid_pre && !memRsp_st1_valid
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
@@ -233,7 +236,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     l1_data_cache::memRsp_pipe1_cycle      ******
   val memRsp_st1 = Reg(new DCacheMemRsp)
+  //val memRsp_st1_valid = RegInit(false.B) early definition
   val memRsp_st1_ready = Wire(Bool())
+  val memRsp_st1_fire = memRsp_st1_ready && memRsp_st1_valid
+  //is a 1-bit 2-status FSM
+  when(memRsp_Q.io.deq.fire ^ memRsp_st1_fire) {
+    memRsp_st1_valid := memRsp_Q.io.deq.fire
+  }
 
   memRsp_Q.io.enq <> io.memRsp
   memRsp_Q.io.deq.ready := MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready//TODO add tag_array
