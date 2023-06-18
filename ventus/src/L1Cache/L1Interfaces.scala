@@ -54,7 +54,7 @@ class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
   val d_data = Vec(BlockWords, UInt(WordLength.W))//UInt((WordLength * BlockWords).W)
 }
 
-class L1CacheMemReq(implicit p: Parameters) extends DCacheBundle{
+class L1CacheMemReq extends Bundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)
   //val a_size
