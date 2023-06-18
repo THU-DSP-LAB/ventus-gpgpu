@@ -22,8 +22,8 @@ case class DCacheParameters
   NSets: Int = dcache_NSets,
   NWays: Int = dcache_NWays,
   //BlockWords: Int = dcache_BlockWords,
-  NMshrEntry: Int = 4,
-  NMshrSubEntry: Int = 2,
+  NMshrEntry: Int = dcache_MshrEntry,
+  NMshrSubEntry: Int = dcache_MshrSubEntry,
   //NBanks: Int = 2,
   WdbDepth: Int = 4,
 )
