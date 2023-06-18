@@ -49,16 +49,16 @@ class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
   val d_opcode = UInt(3.W)// AccessAckData only
   //val d_param
   //val d_size
-  val d_source = UInt(WIdBits.W)//cut off head log2Up(NSms) bits at outside
+  val d_source = UInt((3+log2Up(NMshrEntry)+log2Up(NSets)).W)//cut off head log2Up(NSms) bits at outside
   val d_addr = UInt(WordLength.W)
   val d_data = Vec(BlockWords, UInt(WordLength.W))//UInt((WordLength * BlockWords).W)
 }
 
-class L1CacheMemReq extends Bundle{
+class L1CacheMemReq(implicit p: Parameters) extends DCacheBundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)
   //val a_size
-  val a_source = UInt(depth_warp.W)//TODO width not determined
+  val a_source = UInt((3+log2Up(NMshrEntry)+log2Up(NSets)).W)
   val a_addr = UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
@@ -66,8 +66,8 @@ class L1CacheMemReq extends Bundle{
   val a_mask = Vec(dcache_BlockWords, Bool())
 }
 
-class DCacheMemReq extends L1CacheMemReq{
-  override val a_source = UInt((5+depth_warp).W)
+class DCacheMemReq(implicit p: Parameters) extends L1CacheMemReq{
+  override val a_source = UInt((3+log2Up(NMshrEntry)+log2Up(NSets)).W)
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
