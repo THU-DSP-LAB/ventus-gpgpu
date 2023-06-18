@@ -43,14 +43,14 @@ class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: 
 class getEntryStatusReq(nEntry: Int) extends Module{
   val io = IO(new Bundle{
     val valid_list = Input(UInt(nEntry.W))
-    //val alm_full = Output(Bool())
+    val alm_full = Output(Bool())
     val full = Output(Bool())
     val next = Output(UInt(log2Up(nEntry).W))
     //val used = Output(UInt())
   })
 
-  //io.used := PopCount(io.valid_list)
-  //io.alm_full := io.used === (nEntry.U-1.U)
+  val used: UInt = PopCount(io.valid_list)
+  io.alm_full := used === (nEntry.U-1.U)
   io.full := io.valid_list.andR
   io.next := VecInit(io.valid_list.asBools).indexWhere(_ === false.B)
 }
@@ -116,11 +116,13 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   entryStatus.io.valid_list := entry_valid
 
   // ******     enum vec_mshr_status     ******
-  val mshrStatus_st1 = Wire(UInt(2.W))
-  /*PRIMARY_AVAIL   00
-  * PRIMARY_FULL    01
-  * SECONDARY_AVAIL 10
-  * SECONDARY_FULL  11
+  val mshrStatus_st1 = RegInit(0.U(3.W))
+  /*PRIMARY_AVAIL         000
+  * PRIMARY_FULL          001
+  * SECONDARY_AVAIL       010
+  * SECONDARY_FULL        011
+  * PRIMARY_ALM_FULL      101
+  * SECONDARY_ALM_FULL    111
   * see as always valid, validity relies on external procedures
   * */
   // ******      mshr::probe_vec    ******
@@ -129,24 +131,42 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val secondaryMiss = entryMatchProbe.orR
   val primaryMiss = !secondaryMiss
   val mainEntryFull = entryStatus.io.full
+  val mainEntryAlmFull = entryStatus.io.alm_full
   val subEntryFull = subentryStatus.io.full
-  //when(io.probe.valid){
-  when(primaryMiss) {
-    when(mainEntryFull) {
-      mshrStatus_st1 := 1.U //PRIMARY_FULL
+  val subEntryAlmFull = subentryStatus.io.alm_full
+  when(io.probe.valid){
+    when(primaryMiss) {
+      when(mainEntryFull) {
+        mshrStatus_st1 := 1.U //PRIMARY_FULL
+      //}.elsewhen(mainEntryAlmFull) {
+      //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
+      }.otherwise {
+        mshrStatus_st1 := 0.U //PRIMARY_AVAIL
+      }
     }.otherwise {
-      mshrStatus_st1 := 0.U //PRIMARY_AVAIL
+      when(subEntryFull) {
+        mshrStatus_st1 := 3.U //SECONDARY_FULL
+      //}.elsewhen(subEntryAlmFull) {
+      //  mshrStatus_st1 := 7.U //SECONDARY_ALM_FULL
+      }.otherwise {
+        mshrStatus_st1 := 2.U //SECONDARY_AVAIL
+      }
     }
-  }.otherwise {
-    when(subEntryFull) {
+  }.elsewhen(io.missReq.fire){
+    when(primaryMiss && mainEntryAlmFull){
+      mshrStatus_st1 := 1.U //PRIMARY_FULL
+    }.elsewhen(secondaryMiss && subEntryAlmFull){
       mshrStatus_st1 := 3.U //SECONDARY_FULL
-    }.otherwise {
-      mshrStatus_st1 := 2.U //SECONDARY_AVAIL
     }
   }
-  //}
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
-  io.probeOut_st1.probeStatus := mshrStatus_st1
+  when(mainEntryAlmFull && io.missReq.fire && primaryMiss){//PRIMARY_ALM_FULL
+    io.probeOut_st1.probeStatus := 1.U //PRIMARY_FULL
+  }.elsewhen(subEntryAlmFull && io.missReq.fire && secondaryMiss){
+    io.probeOut_st1.probeStatus := 3.U //SECONDARY_FULL
+  }.otherwise{
+    io.probeOut_st1.probeStatus := mshrStatus_st1
+  }
   //def mshrProbeAvail: Bool = this.io.probeOut_st1.probeStatus === 0.U || this.io.probeOut_st1.probeStatus === 2.U
 
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
