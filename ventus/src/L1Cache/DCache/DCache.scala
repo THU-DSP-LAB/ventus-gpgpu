@@ -264,8 +264,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source
 
   // ******      tag write      ******
-  TagAccess.io.allocateWrite.valid := memReq_Q.io.deq.valid//TODO 一次memRsp只允许一次握手
-  TagAccess.io.allocateWrite.bits.setIdx := memReq_Q.io.deq.bits.a_source(SetIdxBits-1,0)
+  TagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.valid//TODO 一次memRsp只允许一次握手
+  TagAccess.io.allocateWrite.bits.setIdx := memRsp_Q.io.deq.bits.d_source(SetIdxBits-1,0)
   //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
 
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
