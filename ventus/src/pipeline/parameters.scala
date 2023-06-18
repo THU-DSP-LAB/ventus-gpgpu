@@ -45,6 +45,9 @@ object  parameters{//notice log2Ceil(4) returns 2.that is ,n is the total num, n
   def dcache_BlockOffsetBits = log2Ceil(dcache_BlockWords)// select word in block
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
 
+  def dcache_MshrEntry: Int = 4
+  def dcache_MshrSubEntry: Int = 2
+
   def num_sfu = (num_thread >> 2).max(1)
 
   def sharedmem_depth = 128
