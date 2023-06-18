@@ -58,7 +58,7 @@ class L1CacheMemReq(implicit p: Parameters) extends DCacheBundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)
   //val a_size
-  val a_source = UInt((3+log2Up(NMshrEntry)+log2Up(NSets)).W)
+  val a_source = UInt(xLen.W)
   val a_addr = UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
