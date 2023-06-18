@@ -126,7 +126,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   if(!readOnly){
     when(io.allocateWrite.fire) {
       allocateWrite_st1_valid := true.B
-    }.elsewhen(io.memReq.get.fire) {
+    }.elsewhen(io.memReq.get.fire) {//TODO bugs here, allocate may not induce memReq
       allocateWrite_st1_valid := false.B
     }
   }else{
