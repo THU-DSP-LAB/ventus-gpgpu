@@ -121,28 +121,32 @@ void CTA_Scheduler::activate_warp()
 
     // 处理metadata数据
     uint64_t knum_workgroup = mtd.kernel_size[0] * mtd.kernel_size[1] * mtd.kernel_size[2]; // k means kernel
-    if (knum_workgroup != 1)
-        cout << "CTA warning: currently not support many workgroups\n";
+    cout << "CTA: knum_workgroup=" << knum_workgroup << "\n";
+    if (knum_workgroup > 2)
+        cout << "CTA warning: currently not support so many workgroups\n";
     int warp_limit = num_warp;
     if (mtd.wg_size > warp_limit)
         cout << "CTA error: wg_size > warp_limit per SM\n";
-    int warp_counter = 0;
-    while (warp_counter < mtd.wg_size)
+    for (int i = 0; i < knum_workgroup; i++)
     {
-        cout << "CTA: warp" << warp_counter << " is activated\n";
-        sm_group->WARPS[warp_counter].is_warp_activated = true;
-        sm_group->WARPS[warp_counter].CSR_reg[1] = mtd.wg_size;
-        sm_group->WARPS[warp_counter].CSR_reg[2] = num_thread;
+        int warp_counter = 0;
+        while (warp_counter < mtd.wg_size)
+        {
+            cout << "CTA: SM" << i << " warp" << warp_counter << " is activated\n";
+            sm_group[i]->WARPS[warp_counter].is_warp_activated = true;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[1] = mtd.wg_size;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[2] = num_thread;
 
-        sm_group->WARPS[warp_counter].CSR_reg[4] = 0;
-        sm_group->WARPS[warp_counter].CSR_reg[5] = warp_counter;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[4] = 0;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[5] = warp_counter;
 
-        sm_group->WARPS[warp_counter].CSR_reg[8] = 0;
-        sm_group->WARPS[warp_counter].CSR_reg[9] = 0;
-        sm_group->WARPS[warp_counter].CSR_reg[10] = 0;
-        ++warp_counter;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[8] = 0;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[9] = 0;
+            sm_group[i]->WARPS[warp_counter].CSR_reg[10] = 0;
+            ++warp_counter;
+        }
+        sm_group[i]->num_warp_activated = warp_counter;
     }
-    sm_group->num_warp_activated = warp_counter;
 }
 
 void CTA_Scheduler::CTA_INIT()

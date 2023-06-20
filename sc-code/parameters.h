@@ -26,6 +26,7 @@ inline constexpr double PERIOD = 10;
 inline constexpr int IFIFO_SIZE = 10;
 inline constexpr int OPCFIFO_SIZE = 4;
 inline constexpr int BANK_NUM = 4;
+inline constexpr int NUM_SM = 2;
 
 using reg_t = sc_int<32>;
 using v_regfile_t = std::array<reg_t, num_thread>;
@@ -924,7 +925,7 @@ public:
     }
     friend ostream &operator<<(ostream &os, I_TYPE const &v)
     {
-        os << "(" << v.op << "," << v.d << "," << v.s1 << "," << v.s2 << "," << v.s3 << ")";
+        os << "(" << (magic_enum::enum_name((OP_TYPE)v.op)) << "," << v.d << "," << v.s1 << "," << v.s2 << "," << v.s3 << ")";
         return os;
     }
     friend void sc_trace(sc_trace_file *tf, const I_TYPE &v, const std::string &NAME)

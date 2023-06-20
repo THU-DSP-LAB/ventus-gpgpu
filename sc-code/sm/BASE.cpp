@@ -5,8 +5,8 @@ void BASE::debug_sti()
     while (true)
     {
         wait(clk.posedge_event());
-        // wait(SC_ZERO_TIME);
-        // dispatch_ready = !opc_full | doemit;
+        wait(SC_ZERO_TIME);
+        dispatch_ready = !opc_full | doemit;
     }
 }
 void BASE::debug_display()
@@ -44,7 +44,7 @@ void BASE::debug_display3()
 
 void BASE::PROGRAM_COUNTER(int warp_id)
 {
-    WARPS[warp_id].pc = 0;
+    WARPS[warp_id].pc = 0x80000000;
     while (true)
     {
         wait(clk.posedge_event());
@@ -56,7 +56,7 @@ void BASE::PROGRAM_COUNTER(int warp_id)
         {
             if (rst_n == 0)
             {
-                WARPS[warp_id].pc = -4;
+                WARPS[warp_id].pc = 0x80000000 - 4;
                 WARPS[warp_id].fetch_valid = false;
             }
             else if (WARPS[warp_id].jump == 1)
@@ -114,8 +114,8 @@ void BASE::INSTRUCTION_REG(int warp_id)
                 else if (inssrc == "imem")
                 {
                     WARPS[warp_id].fetch_ins =
-                        (WARPS[warp_id].pc.read() >= 0)
-                            ? I_TYPE(ins_mem[WARPS[warp_id].pc.read() / 4])
+                        (WARPS[warp_id].pc.read() >= 0x80000000)
+                            ? I_TYPE(ins_mem[(WARPS[warp_id].pc.read() - 0x80000000) / 4])
                             : I_TYPE(INVALID_, 0, 0, 0);
                     // cout << "ICACHE: ins_mem[" << std::dec << WARPS[warp_id].pc.read() / 4 << "]=" << std::hex << ins_mem[WARPS[warp_id].pc.read() / 4] << ", fetch_ins.bit=" << WARPS[warp_id].fetch_ins.origin32bit << std::dec << "\n";
                 }
@@ -165,7 +165,7 @@ void BASE::DECODE(int warp_id)
             }
             else
             {
-                cout << "warp" << warp_id << " DECODE: match ins bit=" << std::bitset<32>(tmpins.origin32bit) << " with " << magic_enum::enum_name((OP_TYPE)tmpins.op) << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                // cout << "warp" << warp_id << " DECODE: match ins bit=" << std::bitset<32>(tmpins.origin32bit) << " with " << magic_enum::enum_name((OP_TYPE)tmpins.op) << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
             }
         }
         tmpins.ddd = decode_table[(OP_TYPE)tmpins.op];
@@ -780,8 +780,17 @@ void BASE::OPC_FIFO()
                 // cout << "opcfifo push issue_ins " << _readdata4 << "warp" << _readwarpid
                 //      << ", srcaddr=(" << in_srcaddr[0] << ";" << in_srcaddr[1] << ")"
                 //      << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                opcfifo.push(opcfifo_t(_readdata4, _readwarpid,
-                                       in_ready, in_valid, in_srcaddr, in_banktype));
+
+                newopcdat.ins = _readdata4;
+                newopcdat.warp_id = _readwarpid;
+                newopcdat.ready = in_ready;
+                newopcdat.valid = in_valid;
+                newopcdat.srcaddr = in_srcaddr;
+                newopcdat.banktype = in_banktype;
+
+                // opcfifo.push(opcfifo_t(_readdata4, _readwarpid,
+                //                        in_ready, in_valid, in_srcaddr, in_banktype));
+                opcfifo.push(newopcdat);
             }
         }
         opcfifo_elem_num = opcfifo.get_size();
@@ -794,20 +803,24 @@ void BASE::OPC_FIFO()
         //  由ready写入entry，不能影响当前cycle判断emit
         for (int i = 0; i < OPCFIFO_SIZE; i++)
         {
-            for (int j = 0; j < 4; j++)
+            for (int j = 0; j < 3; j++)
                 if (opc_ready[i][j] == true)
                 {
                     if (opcfifo[i].valid[j] == false)
-                        cout << "opc collect error[" << i << "," << j << "]: ready=1 but valid=0 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                        cout << "opc collect error[" << i << "," << j << "]: ins " << magic_enum::enum_name((OP_TYPE)opcfifo[i].ins.op) << " ready=1 but valid=0 at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                     opcfifo[i].ready[j] = true;
                     opcfifo[i].valid[j] = false;
                     opcfifo[i].data[j] = read_data[opcfifo[i].srcaddr[j].bank_id];
                     printdata_ = read_data[opcfifo[i].srcaddr[j].bank_id];
-                    // cout << "OPC_FIFO: store_in, ins=" << opcfifo[i].ins << "warp" << opcfifo[i].warp_id
+                    // cout << "OPC_FIFO: store_in[" << i << "," << j << "], ins=" << magic_enum::enum_name((OP_TYPE)opcfifo[i].ins.op) << "warp" << opcfifo[i].warp_id
                     //      << ", data[" << j << "]=" << printdata_ << ", srcaddr=" << opcfifo[i].srcaddr[j] << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 }
         }
         ev_opc_store.notify();
+        // cout << "OPC: entry[0]: ins=" << magic_enum::enum_name((OP_TYPE)opcfifo[0].ins.op) << ", tag_valid="<<opcfifo.tag_valid(0)<<", valid={" << opcfifo[0].valid[0] << "," << opcfifo[0].valid[1] << "," << opcfifo[0].valid[2] << "}, ready={" << opcfifo[0].ready[0] << "," << opcfifo[0].ready[1] << "," << opcfifo[0].ready[2] << "}\n";
+        // cout << "     entry[1]: ins=" << magic_enum::enum_name((OP_TYPE)opcfifo[1].ins.op) << ", tag_valid="<<opcfifo.tag_valid(1)<<", valid={" << opcfifo[1].valid[0] << "," << opcfifo[1].valid[1] << "," << opcfifo[1].valid[2] << "}, ready={" << opcfifo[1].ready[0] << "," << opcfifo[1].ready[1] << "," << opcfifo[1].ready[2] << "}\n";
+        // cout << "     entry[2]: ins=" << magic_enum::enum_name((OP_TYPE)opcfifo[2].ins.op) << ", tag_valid="<<opcfifo.tag_valid(2)<<", valid={" << opcfifo[2].valid[0] << "," << opcfifo[2].valid[1] << "," << opcfifo[2].valid[2] << "}, ready={" << opcfifo[2].ready[0] << "," << opcfifo[2].ready[1] << "," << opcfifo[2].ready[2] << "}\n";
+        // cout << "     entry[3]: ins=" << magic_enum::enum_name((OP_TYPE)opcfifo[3].ins.op) << ", tag_valid="<<opcfifo.tag_valid(3)<<", valid={" << opcfifo[3].valid[0] << "," << opcfifo[3].valid[1] << "," << opcfifo[3].valid[2] << "}, ready={" << opcfifo[3].ready[0] << "," << opcfifo[3].ready[1] << "," << opcfifo[3].ready[2] << "} at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
     }
 }
 
@@ -876,7 +889,6 @@ void BASE::OPC_EMIT()
                         {
                             tovalu_data1[j] = opcfifo[entryidx].data[0][j];
                             tovalu_data2[j] = opcfifo[entryidx].data[1][j];
-                            
                         }
 
                         // if (opcfifo[entryidx].ins.ddd.sel_alu2 == DecodeParams::A2_VRS2)
@@ -1222,15 +1234,15 @@ void BASE::WRITE_REG(int warp_id)
             // 后续regfile要一次只能写一个，否则报错
             if (write_s)
             {
-                cout << "WRITE_REG ins" << wb_ins << "warp" << warp_id << ": scalar, s_regfile[" << rds1_addr.read() << "]="
-                     << std::dec << rds1_data << std::dec
+                cout << "SM" << sm_id << " WRITE_REG ins" << wb_ins << "warp" << warp_id << ": scalar, s_regfile[" << rds1_addr.read() << "]="
+                     << std::hex << rds1_data << std::dec
                      << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
                 WARPS[warp_id].s_regfile[rds1_addr.read()] = rds1_data;
             }
             if (write_v)
             {
                 cout << "WRITE_REG ins" << wb_ins << "warp" << warp_id << ": vector, v_regfile[" << rdv1_addr.read() << "]={"
-                     << std::dec
+                     << std::hex
                      << rdv1_data[0] << "," << rdv1_data[1] << "," << rdv1_data[2] << "," << rdv1_data[3] << ","
                      << rdv1_data[4] << "," << rdv1_data[5] << "," << rdv1_data[6] << "," << rdv1_data[7]
                      << std::dec

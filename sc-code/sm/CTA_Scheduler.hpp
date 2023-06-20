@@ -20,7 +20,7 @@ public:
     void assignMetadata(const std::vector<uint64_t> &metadata, meta_data &mtd);
     void activate_warp();
 
-    BASE *sm_group;
+    BASE **sm_group;
     meta_data mtd;
 
 private:

@@ -16,43 +16,7 @@ void BASE::SALU_IN()
             salu_unready.notify();
             switch (emit_ins.read().op)
             {
-            case BNE_:
-            case BEQ_:
-            case BLT_:
-            case BLTU_:
-            case BGE_:
-            case BGEU_:
-            case JAL_:
-            case JALR_:
-            case AUIPC_:
-            case LUI_:
-            case ADD_:
-            case ADDI_:
-            case SLT_:
-            case SLTI_:
-            case SLTIU_:
-            case SLTU_:
-            case AND_:
-            case ANDI_:
-            case OR_:
-            case ORI_:
-            case XOR_:
-            case XORI_:
-            case SUB_:
-            case SLL_:
-            case SRL_:
-            case SRA_:
-            case SLLI_:
-            case SRLI_:
-            case SRAI_:
-            case MUL_:
-            case MULH_:
-            case MULHSU_:
-            case MULHU_:
-            case DIV_:
-            case DIVU_:
-            case REM_:
-            case REMU_:
+            default:
                 new_data.ins = emit_ins;
                 new_data.warp_id = emitins_warpid;
                 new_data.rss1_data = tosalu_data1;
@@ -89,9 +53,9 @@ void BASE::SALU_IN()
                 }
                 // cout << "SALU_IN switch to ADD_ (from opc input) at " << sc_time_stamp() <<","<< sc_delta_count_at_current_time() << "\n";
                 break;
-            default:
-                cout << "salu error: receive wrong ins " << emit_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
-                break;
+                // default:
+                //     cout << "salu error: receive wrong ins " << emit_ins << " at " << sc_time_stamp() << "," << sc_delta_count_at_current_time() << "\n";
+                //     break;
             }
         }
         else

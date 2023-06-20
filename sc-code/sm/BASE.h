@@ -91,8 +91,8 @@ public:
         issue_ins = I_TYPE(INVALID_, 0, 0, 0);
     }
 
-    BASE(sc_core::sc_module_name name, std::string _inssrc)
-        : sc_module(name), inssrc(_inssrc)
+    BASE(sc_core::sc_module_name name, std::string _inssrc, int _sm_id)
+        : sc_module(name), inssrc(_inssrc), sm_id(_sm_id)
     {
         SC_HAS_PROCESS(BASE);
 
@@ -360,6 +360,7 @@ public:
     std::string datafile;
 
     int num_warp_activated;
+    int sm_id;
 };
 
 #endif
