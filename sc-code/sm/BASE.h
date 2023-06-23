@@ -361,6 +361,15 @@ public:
 
     int num_warp_activated;
     int sm_id;
+
+    //for CTA_Sceduler
+    int warp_available = num_warp; //剩余没被激活的warp数量
+    int sgpr_available = 1024;
+    int vgpr_available = 1024;
+    int lds_available = 1024;
+    
+    
+
 };
 
 #endif
