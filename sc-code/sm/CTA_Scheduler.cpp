@@ -173,12 +173,10 @@ int CTA_Scheduler::has_free_sm(int sm_group_working[], int NUM_SM)
     return 0;
 }
 
-//简化的模型：仅有CTA_buffer以及allocator
 //allocator根据SM的当前可用资源信息为CTA分配SM
-//CTA_buffer接收来自host的CTA
+//CTA queue接收来自host的CTA
 //并根据allocator的结果发送CTA给SM（表现的行为是唤醒SM的warp）
 
-//有个问题：mtd好像是kernel的数据，单个cta的资源使用情况从哪获得？
 //另外需要SM返回cta执行完的信息，然后再给它分配cta
 
 
