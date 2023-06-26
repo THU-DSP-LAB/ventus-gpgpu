@@ -153,10 +153,25 @@ void CTA_Scheduler::CTA_INIT()
 {
     CTA_Scheduler::readHexFile(metafilename, 64, metadata);
     CTA_Scheduler::assignMetadata(metadata, mtd);
-    CTA_Scheduler::activate_warp();
+    //CTA_Scheduler::activate_warp();
 
+    ev_queue_ready.notify(10,SC_NS);
+    ev_sm_available.notify(10,SC_NS);
+    ev_enq_finish.notify(10,SC_NS);
+    ev_send_finish.notify(10,SC_NS);
 }
 
+int CTA_Scheduler::has_free_sm(int sm_group_working[], int NUM_SM)
+{
+    for(int i = 0; i < NUM_SM; i++)
+        {
+        if(sm_group_working[i] == 0)
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
 
 //简化的模型：仅有CTA_buffer以及allocator
 //allocator根据SM的当前可用资源信息为CTA分配SM
@@ -167,72 +182,155 @@ void CTA_Scheduler::CTA_INIT()
 //另外需要SM返回cta执行完的信息，然后再给它分配cta
 
 
-void CTA_Scheduler::CTA_buffer_recv_CTA()
+//行为是：有kernel启动时，读入metadate，逐个发送CTA给CTA queue
+void CTA_Scheduler::host_send_CTA()
 {
-    //实际上host是逐个发送cta给cta buffer的，但是要关心的是cta的分配方式
-    //因此假设一个简单的情况作为模拟的起点：host已经将一个grid的cta全部放入cta buffer
+    //kernel启动
+    //kernel信息读入metadata
+    //获得cta数
+    //逐个发送cta给cta queue
+
     int num_CTA = mtd.kernel_size[0] * mtd.kernel_size[1] * mtd.kernel_size[2];
-    cout << "host发送CTA给CTA_Scheduler...  CTA的数量 = " << num_CTA << endl;
-    cta_buffer_cta_available = num_CTA;
-    //while(true)
-    //{
-        ev_buffer_not_empty.notify(); //即时通知，只通知一个sctime
-        cout << "buffer_not_empty" << endl;
-
-        //初始化,暂时放在这里
-        ev_sm_available.notify();
-    //}
-}
-
-void CTA_Scheduler::allocator()
-{
+    int cta_cnt = 0;
+    std::cout << "host发送CTA给CTA_Scheduler...  CTA的数量 = " << num_CTA << std::endl;
     while(true)
     {
-        next:
-        wait(ev_buffer_not_empty & ev_sm_available);
-        for(int i = 0; i < NUM_SM; i++)
+        wait(1,SC_NS);
+        wait(ev_queue_ready & ev_enq_finish);
+
+        if(num_CTA-- > 0)
         {
-            if(mtd.sgprUsage <= sm_group[i]->sgpr_available && mtd.vgprUsage <= sm_group[i]->vgpr_available && mtd.ldsSize <= sm_group[i]->lds_available && mtd.wg_size <= sm_group[i]->warp_available)
-            {
-                alloc_smid.write(i);
-                sm_groups_working[i] = 1;
-                if(! &sm_groups_working){
-                    ev_sm_available.notify();
-                }
-                else{
-                    ev_sm_available.cancel();
-                }
-                ev_alloc_finish.notify();
-                cout << "allocator分配成功    分配的SM ID = " << i << endl;
-                goto next; //分配结束进入wait状态
-            }
+            //发送一个cta的信息给cta queue
+            std::cout<<"=======  host准备好了一个cta  cta id="<< cta_cnt <<std::endl;
+            sig_cta_id.write(cta_cnt);
+            cta_cnt++;
+            sig_cta_num_warp.write(mtd.wg_size);
+            sig_cta_lds_size.write(mtd.ldsSize);
+            sig_cta_sgpr_size.write(mtd.sgprUsage);
+            sig_cta_vgpr_size.write(mtd.vgprUsage);
+          
+            ev_host_has_cta.notify(1,SC_NS);
+            std::cout<<"当前共有"<<num_CTA+1<<"个cta等待发送"<<std::endl;
         }
-        alloc_smid.write(-1);
-        ev_alloc_finish.notify();
-        cout << "allocator分配失败    未找到满足资源要求的SM" << endl;
+        else
+        {
+            ev_host_has_cta.cancel();
+            std::cout<<"host将cta发送完毕"<<std::endl;
+        }
     }
 }
 
-void CTA_Scheduler::CTA_buffer_send_CTA()
+void CTA_Scheduler::CTA_queue_recv_CTA()
 {
+    while(true)
+    {
+        wait(1,SC_NS);
+        wait(ev_host_has_cta);
+
+        CTA_INFO cta;
+        cta.id = sig_cta_id.read();
+        std::cout<<"queue收到cta,id="<< cta.id << std::endl;
+        cta.num_warp = sig_cta_num_warp.read();
+        cta.lds_size = sig_cta_lds_size.read();
+        cta.sgpr_size = sig_cta_sgpr_size.read();
+        cta.vgpr_size = sig_cta_vgpr_size.read();
+
+        cta_queue.push(cta);
+        ev_enq_finish.notify(1,SC_NS);
+
+        queue_num_cta += 1;
+        std::cout <<"queue中存入CTA,queue的长度="<< cta_queue.size() << std::endl;
+        if(cta_queue.size() == queue_size_total)
+        {
+            ev_queue_ready.cancel();
+            ev_queue_has_cta.notify(1,SC_NS);
+            std::cout<<"queue已满"<<std::endl;
+        }
+        else if(cta_queue.size() == 0)
+        {
+            ev_queue_ready.notify(1,SC_NS);
+            ev_queue_has_cta.cancel();
+            std::cout<<"queue空了"<<std::endl;
+        }
+        else
+        {
+            ev_queue_ready.notify(1,SC_NS);
+            ev_queue_has_cta.notify(1,SC_NS);
+            std::cout<<"queue没满"<<std::endl;
+        }
+        
+    }
+    
+}
+
+void CTA_Scheduler::allocator() 
+{
+    int alloc_result = 0;
+    while(true)
+    {
+        wait(1,SC_NS);
+        wait(ev_queue_has_cta & ev_sm_available & ev_send_finish);
+        CTA_INFO cta = cta_queue.front();
+        for(int i = 0; i < NUM_SM; i++)
+        {
+            if(sm_group_working[i]==0 && cta.lds_size <= sm_group[i]->lds_available && cta.sgpr_size <= sm_group[i]->sgpr_available && cta.vgpr_size <= sm_group[i]->vgpr_available && cta.num_warp <= sm_group[i]->warp_available)
+            { 
+                sig_alloc_smid.write(i);
+                ev_alloc_finish.notify(1,SC_NS);
+                std::cout << "allocator为cta "<<cta.id<<" 分配的SM ID = " << i << std::endl;
+                alloc_result = 1;
+                break;
+            }
+        }
+        if(alloc_result == 0)
+        {
+            sig_alloc_smid.write(-1);
+            ev_alloc_finish.notify(1,SC_NS);
+            std::cout << "allocator分配失败    未找到满足资源要求的SM" << std::endl;
+        }
+    }
+}
+
+//现在是一次性把全部warp给激活。待完善...逐个发送warp
+void CTA_Scheduler::CTA_queue_send_CTA() {
     int smid = -1;
     while(true)
     {
+        wait(1,SC_NS);
         wait(ev_alloc_finish);
-        smid = alloc_smid.read();
+        smid = sig_alloc_smid.read();
 
+        CTA_INFO cta = cta_queue.front();
         if(smid != -1)
         {
-            cta_buffer_cta_available -= 1;
-            if(cta_buffer_cta_available = 0){
-                ev_buffer_not_empty.cancel();
+            sm_group_working[smid] = 1;
+            for(int i=0;i<NUM_SM;i++)
+            {
+              std::cout<<"sm"<<i<<"使用情况="<<sm_group_working[i]<<std::endl;
             }
-            sm_group[smid]->warp_available -= mtd.wg_size; 
-            sm_group[smid]->sgpr_available -= mtd.sgprUsage;
-            sm_group[smid]->vgpr_available -= mtd.vgprUsage;
-            sm_group[smid]->lds_available -= mtd.ldsSize;
             
+            if(has_free_sm(sm_group_working,NUM_SM)){
+                ev_sm_available.notify(1,SC_NS);
+                std::cout << "存在空闲SM" << std::endl;
+            }
+            else{
+                ev_sm_available.cancel();
+                std::cout << "SM全部在工作中" << std::endl;
+            }
+            
+            cta_queue.pop();
+            queue_num_cta -= 1;
+            std::cout<<"queue中还有"<<queue_num_cta<<"个cta"<<std::endl;
+            if(queue_num_cta == 0){
+                ev_queue_has_cta.cancel();
+            }
+            sm_group[smid]->lds_available -= cta.lds_size; 
+            sm_group[smid]->warp_available -= cta.num_warp;
+            sm_group[smid]->sgpr_available -= cta.sgpr_size;
+            sm_group[smid]->vgpr_available -= cta.vgpr_size;
+
             // 激活smid的对应数量的warp
+            // 这里你可以完善一下...
             int cnt = sm_group[smid]->num_warp_activated;
             for(int i = cnt; i < cnt + mtd.wg_size; i++)
             {
@@ -250,11 +348,15 @@ void CTA_Scheduler::CTA_buffer_send_CTA()
             }
             sm_group[smid]->num_warp_activated += mtd.wg_size;
         }
-        else{
-            cout << "不执行发送CTA的任务..." << endl;
+        else
+        {
+            std::cout << "不执行发送CTA" << std::endl;
         }
         ev_alloc_finish.cancel();
+        ev_send_finish.notify(1,SC_NS);
+
+        std::cout << "cta" <<cta.id<<"被发送到sm"<<smid<< std::endl;
     }
 }
 
-//增加SM执行完warp的逻辑。。。。。
+//增加SM执行完warp的逻辑.....
