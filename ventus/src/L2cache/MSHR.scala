@@ -60,6 +60,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.d.valid:= io.valid && sink_d_reg
   io.schedule.d.bits:=request 
   io.schedule.d.bits.hit:=false.B
+  io.schedule.d.bits.dirty:=false.B
   io.schedule.d.bits.data :=Mux(sink_d_reg, RegEnable(io.sinkd.bits.data,io.sinkd.valid), request.data)
 
 
@@ -87,7 +88,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.dir.bits.data.tag:=request.tag
   //io.schedule.dir.bits.data.valid:=true.B
   io.schedule.dir.bits.way:=request.way
-
+  io.schedule.dir.bits.is_writemiss:= (request.opcode===PutFullData) ||(request.opcode===PutPartialData)
 
 
 

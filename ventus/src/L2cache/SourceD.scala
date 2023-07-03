@@ -123,13 +123,21 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
 val tobedone=RegInit(false.B) //all resources not ready
-
+val mshr_wait_reg =RegInit(false.B)
   switch(stateReg){
     is(stage_1){
       busy:=false.B
+      mshr_wait_reg :=false.B
       when (io.req.fire() || tobedone){
-        when( !s1_req.hit && s1_req.dirty){
-          io.mshr_wait:= true.B //used for kicking out victim way, to block premature potential miss request of victim way
+        mshr_wait_reg :=false.B
+        when( !s1_req.hit ){
+          when(s1_req.dirty) {
+            mshr_wait_reg := true.B //used for kicking out victim way, to block premature potential miss request of victim way
+          }.otherwise{
+            stateReg := stage_4
+            busy := true.B
+            tobedone := false.B
+          }
         }
 //        when(!s1_req.hit && s1_req.opcode===Get ){
 //          stateReg := stage_4
@@ -179,6 +187,7 @@ val tobedone=RegInit(false.B) //all resources not ready
         }.otherwise {
           busy := true.B
           tobedone := true.B
+
         }
       }
     }
@@ -192,7 +201,7 @@ val tobedone=RegInit(false.B) //all resources not ready
         stateReg:=stage_1
         busy := false.B
         tobedone:=false.B
-        io.mshr_wait:=false.B
+        mshr_wait_reg:=false.B
       }
     }
     is(stage_4){
@@ -200,10 +209,11 @@ val tobedone=RegInit(false.B) //all resources not ready
         busy := false.B
         stateReg := stage_1
         tobedone:=false.B //todo may cause fault
+        mshr_wait_reg:=false.B
       }
     }
   }
-
+  io.mshr_wait      :=mshr_wait_reg
   io.bs_wadr.valid   :=    s1_w_valid &&(!write_sent)
   io.bs_wadr.bits.set:=    s1_req.set
   io.bs_wadr.bits.way:=    s1_req.way
