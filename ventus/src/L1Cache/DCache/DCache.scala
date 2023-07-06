@@ -210,11 +210,12 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   coreReq_st1_ready := false.B
   when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
-    when(cacheHit_st1){
-      when(coreRsp_Q.io.enq.ready){
+    when(TagAccess.io.hit_st1) {
+      when(coreRsp_Q.io.enq.ready) {
         coreReq_st1_ready := true.B
       }
-    }.elsewhen(cacheMiss_st1){
+    }.otherwise{
+    //}.elsewhen(!TagAccess.io.hit_st1){
       //assert(cacheMiss_st1,s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
       when(coreReqControl_st1.isRead){
         //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
@@ -227,9 +228,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
           coreReq_st1_ready := true.B
         }
       }
-    }.otherwise{//coreReq is not valid
-      coreReq_st1_ready := true.B
-    }
+    }//.otherwise{//coreReq is not valid
+    //  coreReq_st1_ready := true.B
+    //}
   }.otherwise{
     coreReq_st1_ready := true.B
   }
