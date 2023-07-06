@@ -85,7 +85,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     important submodules     ******
   val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry))
-  val missRspFromMshr_st1 = Wire(Bool())
+  //val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
   //val DataCrsCore2Mem = Module(new DataCrossbar(num_thread,BlockWords))
@@ -266,21 +266,21 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source(SetIdxBits+log2Up(NMshrEntry)-1,SetIdxBits)
 
   // ******      tag write      ******
-  TagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.valid//TODO 一次memRsp只允许一次握手
+  TagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.valid && tagReqCurrentMissRspHasSent
   TagAccess.io.allocateWrite.bits.setIdx := memRsp_Q.io.deq.bits.d_source(SetIdxBits-1,0)
   //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
 
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
-  missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
-  missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
-  val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
+  //missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
+  missRspTI_st1 := MshrAccess.io.missRspOut.targetInfo.asTypeOf(new VecMshrTargetInfo)
+  val missRspBA_st1 = MshrAccess.io.missRspOut.blockAddr
   //val missRspTILaneMask_st2 = RegNext(BankConfArb.io.activeLane)
   //val memRspInstrId_st1 = MshrAccess.io.missRspOut.bits.instrId
   //val readMissRsp_st2 = missRspFromMshr_st2 & !missRspTI.isWrite
   //val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())
-  MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
+  //MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
-  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
+  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.blockAddr)
 
   // ******      dataAccess missRsp      ******
   val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets*NWays, BytesOfWord)))
@@ -322,7 +322,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       holdRead = false,
       singlePort = false
     ))
-    DataAccess.io.w.req.valid := Mux(missRspFromMshr_st1,//TODO 一次memRsp只允许一次握手
+    DataAccess.io.w.req.valid := Mux(memRsp_st1_valid && !tagReqCurrentMissRspHasSent,
       true.B,  //READ miss resp
       writeHit_st1 & getBankEn.io.perBankValid(i))       //WRITE hit
     /*val readMissRspCnter_if = if(BlockOffsetBits-BankIdxBits>0){
@@ -331,7 +331,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       0.U(1.W)
     }*/
     //DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCrsCore2Mem.io.DataOut)
-    DataAccess.io.w.req.bits := Mux(missRspFromMshr_st1,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))//TODO 一次memRsp只允许一次握手
+    DataAccess.io.w.req.bits := Mux(memRsp_st1_valid,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))
     /*DataAccess.io.w.req.bits.data := Mux(missRspFromMshr_st1,
       memRsp_st1.d_data(i),//READ miss resp
       coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)))
@@ -372,7 +372,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
     coreRsp_st2.instrId := coreReq_st1.instrId
     coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
-  }.elsewhen(missRspFromMshr_st1){//TODO tiao jian yao gai
+  }.elsewhen(memRsp_st1_valid){
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
@@ -386,7 +386,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   coreRsp_st2_valid_from_coreReq := RegNext(coreReq_st1_valid &&
     (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
-  coreRsp_st2_valid_from_memRsp := RegNext(missRspFromMshr_st1)
+  coreRsp_st2_valid_from_memRsp := RegNext(memRsp_st1_valid)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
   coreRsp_st2_valid := coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memRsp
 
