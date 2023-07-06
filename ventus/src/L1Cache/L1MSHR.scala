@@ -29,8 +29,8 @@ class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends B
   val instrId = UInt(WIdBits.W)
   val targetInfo = UInt(tIWdith.W)
 }
-class MSHRmissRspIn(val bABits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
-  val instrId = UInt(bABits.W)
+class MSHRmissRspIn(val NEntry: Int) extends Bundle {//Use this bundle when a block return from Lower cache
+  val instrId = UInt(log2Up(NEntry).W)
 }
 class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {
   val targetInfo = UInt(tIWdith.W)
