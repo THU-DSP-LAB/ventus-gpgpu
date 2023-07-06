@@ -261,7 +261,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     missRspIn      ******
   MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
-  MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source(log2Up(NMshrEntry),SetIdxBits)
+  MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source(log2Up(NMshrEntry)-1,SetIdxBits)
 
   // ******      tag write      ******
   TagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.valid//TODO 一次memRsp只允许一次握手

@@ -16,6 +16,7 @@ import L1Cache.ShareMem.{ShareMemParameters, ShareMemParamsKey}
 import chisel3._
 import chisel3.util._
 import config.config.Config
+import pipeline.parameters._
 
 class MyConfig extends Config((site, here, up) =>
 {
@@ -29,8 +30,8 @@ class MyConfig extends Config((site, here, up) =>
 trait HasL1CacheParameters extends HasRVGParameters{
   //val cacheParams: L1CacheParameters
 
-  def NSets: Int = 32// replace
-  def NWays: Int = 2// replace
+  def NSets: Int = dcache_NSets// replace
+  def NWays: Int = dcache_NWays// replace
   //def BlockWords: Int = 32// replace
   def BlockBytes = BlockWords * 4
   def BlockBits = BlockBytes * 8
