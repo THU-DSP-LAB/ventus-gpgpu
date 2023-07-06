@@ -195,7 +195,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
     (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
 
-  entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
+  entryMatchMissRsp := io.missRspIn.bits.instrId
+  //entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
   assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn, cant match multiple entries")
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
   subentry_next2cancel := subentryStatusForRsp.io.next2cancel
