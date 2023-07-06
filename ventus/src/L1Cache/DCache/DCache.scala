@@ -118,8 +118,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
-  cacheHit_st1 := TagAccess.io.hit_st1 && coreReq_st1_valid
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && coreReq_st1_valid
+  cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire)
+  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegNext(io.coreReq.fire)
 
   val readHit_st1 = cacheHit_st1 & coreReqControl_st1.isRead
   val readMiss_st1 = cacheMiss_st1 & coreReqControl_st1.isRead
