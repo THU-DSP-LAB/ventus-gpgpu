@@ -272,15 +272,15 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
   //missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
-  missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
-  val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
+  missRspTI_st1 := MshrAccess.io.missRspOut.targetInfo.asTypeOf(new VecMshrTargetInfo)
+  val missRspBA_st1 = MshrAccess.io.missRspOut.blockAddr
   //val missRspTILaneMask_st2 = RegNext(BankConfArb.io.activeLane)
   //val memRspInstrId_st1 = MshrAccess.io.missRspOut.bits.instrId
   //val readMissRsp_st2 = missRspFromMshr_st2 & !missRspTI.isWrite
   //val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())
-  MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
+  //MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
-  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
+  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.blockAddr)
 
   // ******      dataAccess missRsp      ******
   val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets*NWays, BytesOfWord)))
