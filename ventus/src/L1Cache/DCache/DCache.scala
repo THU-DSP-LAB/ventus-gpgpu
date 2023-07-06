@@ -240,13 +240,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val memRsp_st1_valid = RegInit(false.B) early definition
   val memRsp_st1_ready = Wire(Bool())
   val memRsp_st1_fire = memRsp_st1_ready && memRsp_st1_valid
+  val tagReqCurrentMissRspHasSent = RegInit(true.B)//before 7.30 TODO add logic for this
   //is a 1-bit 2-status FSM
   when(memRsp_Q.io.deq.fire ^ memRsp_st1_fire) {
     memRsp_st1_valid := memRsp_Q.io.deq.fire
   }
 
   memRsp_Q.io.enq <> io.memRsp
-  memRsp_Q.io.deq.ready := MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready//TODO add tag_array
+  memRsp_Q.io.deq.ready := memRsp_st1_ready//MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready
   // && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   when(memRsp_Q.io.deq.fire){
     memRsp_st1 := memRsp_Q_st0
@@ -289,7 +290,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
   }
 
-  memRsp_st1_ready := coreRsp_Q.io.enq.ready
+  memRsp_st1_ready := tagReqCurrentMissRspHasSent && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
 
   //val mshrMissRspStrobe = !RegNext(MshrAccess.io.missRspOut.valid) |
    // RegNext(RegNext(MshrAccess.io.missRspOut.ready) && MshrAccess.io.missRspOut.valid)
