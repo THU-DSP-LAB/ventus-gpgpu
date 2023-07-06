@@ -167,7 +167,6 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   }.otherwise{
     io.probeOut_st1.probeStatus := mshrStatus_st1
   }
-  //def mshrProbeAvail: Bool = this.io.probeOut_st1.probeStatus === 0.U || this.io.probeOut_st1.probeStatus === 2.U
 
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
@@ -192,8 +191,10 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   // priority: missRspIn > missReq
   //assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
   //This version allow missRspIn fire when no subentry are left
-  io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
-    (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
+  //如果后面发现missRspOut端口这一级不能取消，使用这段注释掉的代码
+  //io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
+  //  (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
+  io.missRspIn.ready := subentryStatusForRsp.io.used >= 2.U
 
   entryMatchMissRsp := io.missRspIn.bits.instrId
   //entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
