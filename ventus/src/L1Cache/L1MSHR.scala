@@ -72,7 +72,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val probe = Flipped(ValidIO(new MSHRprobe(bABits)))
     val probeOut_st1 = Output(new MSHRprobeOut(NMshrEntry,NMshrSubEntry))
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
-    val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(bABits)))
+    val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
     val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
     //val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
   })
