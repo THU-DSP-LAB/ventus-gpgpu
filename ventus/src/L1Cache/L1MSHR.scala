@@ -73,7 +73,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val probeOut_st1 = Output(new MSHRprobeOut(NMshrEntry,NMshrSubEntry))
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
-    val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
+    val missRspOut = Output(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
     //val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
   })
   // head of entry, for comparison
@@ -205,11 +205,11 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val missRspTargetInfo_st0 = targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
   val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
 
-  io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
-  io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
-  io.missRspOut.bits.instrId := io.missRspIn.bits.instrId
-  io.missRspOut.valid := RegNext(io.missRspIn.valid) &&
-    subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
+  io.missRspOut.targetInfo := RegNext(missRspTargetInfo_st0)
+  io.missRspOut.blockAddr := RegNext(missRspBlockAddr_st0)
+  io.missRspOut.instrId := io.missRspIn.bits.instrId
+  //io.missRspOut := RegNext(io.missRspIn.valid) &&
+  //  subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
   //  ******     maintain subentries    ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
@@ -220,7 +220,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===entryMatchMissRsp){
         when(iofSubEn.asUInt===subentry_next2cancel &&
-          io.missRspOut.fire){
+          io.missRspIn.fire){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
           io.missReq.fire && mshrStatus_st1 === 2.U){
