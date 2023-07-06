@@ -105,7 +105,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   * */
 
   //  ******     missReq decide selected subentries are full or not     ******
-  val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
+  val entryMatchMissRsp = Wire(UInt(log2Up(NMshrEntry).W))
   val entryMatchProbe = Wire(UInt(NMshrEntry.W))
   val subentrySelectedForReq = subentry_valid(OHToUInt(entryMatchProbe))
   val subentryStatus = Module(new getEntryStatusReq(NMshrSubEntry)) // Output: alm_full, full, next
@@ -188,7 +188,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
 
   //  ******      mshr::vec_arrange_core_rsp    ******
   val subentryStatusForRsp = Module(new getEntryStatusRsp(NMshrSubEntry))
-  subentryStatusForRsp.io.valid_list := Reverse(Cat(subentry_valid(OHToUInt(entryMatchMissRsp))))
+  subentryStatusForRsp.io.valid_list := Reverse(Cat(subentry_valid(entryMatchMissRsp)))
   // priority: missRspIn > missReq
   //assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
   //This version allow missRspIn fire when no subentry are left
@@ -197,12 +197,12 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
 
   entryMatchMissRsp := io.missRspIn.bits.instrId
   //entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
-  assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn, cant match multiple entries")
+  //assert(PopCount(entryMatchMissRsp) <= 1.U,"MSHR missRspIn, cant match multiple entries")
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
   subentry_next2cancel := subentryStatusForRsp.io.next2cancel
 
-  val missRspTargetInfo_st0 = targetInfo_Accesss(OHToUInt(entryMatchMissRsp))(subentry_next2cancel)
-  val missRspBlockAddr_st0 = blockAddr_Access(OHToUInt(entryMatchMissRsp))
+  val missRspTargetInfo_st0 = targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
+  val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
 
   io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
   io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
@@ -217,7 +217,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       when(iofEn.asUInt===entryStatus.io.next &&
         iofSubEn.asUInt===0.U && io.missReq.fire && mshrStatus_st1 === 0.U){
         subentry_valid(iofEn)(iofSubEn) := true.B
-      }.elsewhen(iofEn.asUInt===OHToUInt(entryMatchMissRsp)){
+      }.elsewhen(iofEn.asUInt===entryMatchMissRsp){
         when(iofSubEn.asUInt===subentry_next2cancel &&
           io.missRspOut.fire){
           subentry_valid(iofEn)(iofSubEn) := false.B
