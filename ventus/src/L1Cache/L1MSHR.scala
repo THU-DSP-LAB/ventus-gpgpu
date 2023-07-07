@@ -73,7 +73,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val probeOut_st1 = Output(new MSHRprobeOut(NMshrEntry,NMshrSubEntry))
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
-    val missRspOut = Output(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
+    val missRspOut = ValidIO(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
     //val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
   })
   // head of entry, for comparison
@@ -121,6 +121,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   * PRIMARY_FULL          001
   * SECONDARY_AVAIL       010
   * SECONDARY_FULL        011
+  * SECONDARY_FULL_RETURN 100
   * PRIMARY_ALM_FULL      101
   * SECONDARY_ALM_FULL    111
   * see as always valid, validity relies on external procedures
@@ -158,6 +159,13 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     }.elsewhen(secondaryMiss && subEntryAlmFull){
       mshrStatus_st1 := 3.U //SECONDARY_FULL
     }
+  }.elsewhen(io.missRspIn.fire){
+    //只有完成一个主entry才会fire
+    when(mshrStatus_st1 === 1.U){
+      mshrStatus_st1 := 0.U //PRIMARY_AVAIL
+    }.elsewhen(mshrStatus_st1 === 3.U){
+      mshrStatus_st1 := 4.U //SECONDARY_FULL_RETURN
+    }
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
   when(mainEntryAlmFull && io.missReq.fire && primaryMiss){//PRIMARY_ALM_FULL
@@ -194,7 +202,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //如果后面发现missRspOut端口这一级不能取消，使用这段注释掉的代码
   //io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
   //  (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
-  io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U)
+  io.missRspIn.ready := !((subentryStatusForRsp.io.used >= 2.U) || mshrStatus_st1 === 4.U)
 
   entryMatchMissRsp := io.missRspIn.bits.instrId
   //entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
@@ -205,9 +213,10 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val missRspTargetInfo_st0 = targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
   val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
 
-  io.missRspOut.targetInfo := RegNext(missRspTargetInfo_st0)
-  io.missRspOut.blockAddr := RegNext(missRspBlockAddr_st0)
-  io.missRspOut.instrId := io.missRspIn.bits.instrId
+  io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
+  io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
+  io.missRspOut.bits.instrId := io.missRspIn.bits.instrId
+  io.missRspOut.valid := io.missRspIn.valid && ((subentryStatusForRsp.io.used >= 1.U) || (mshrStatus_st1 === 4.U))
   //io.missRspOut := RegNext(io.missRspIn.valid) &&
   //  subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
