@@ -214,12 +214,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       when(coreRsp_Q.io.enq.ready) {
         coreReq_st1_ready := true.B
       }
-    }.otherwise{
-    //}.elsewhen(!TagAccess.io.hit_st1){
-      //assert(cacheMiss_st1,s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
+    }.otherwise{//Miss
       when(coreReqControl_st1.isRead){
         //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
-        when(mshrProbeAvail && memReq_Q.io.enq.ready){
+        when(mshrProbeAvail && memReq_Q.io.enq.ready && !memRsp_st1_valid){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
@@ -231,7 +229,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     }//.otherwise{//coreReq is not valid
     //  coreReq_st1_ready := true.B
     //}
-  }.otherwise{
+  }.otherwise{//目前是给Inv、flu、SC、AMO等预留
     coreReq_st1_ready := true.B
   }
 
