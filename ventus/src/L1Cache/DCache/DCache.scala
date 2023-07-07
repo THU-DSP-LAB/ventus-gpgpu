@@ -262,7 +262,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //memRspData_st2 := RegEnable(memRspData_st1,memRsp_Q.io.deq.fire() || (memRsp_Q.io.deq.valid && BankConfArb.io.bankConflict))
 
   // ******     missRspIn      ******
-  MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
+  MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid && coreRsp_Q.io.enq.ready// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source(SetIdxBits+log2Up(NMshrEntry)-1,SetIdxBits)
 
   // ******      tag write      ******
