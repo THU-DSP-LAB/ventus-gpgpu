@@ -272,15 +272,15 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
   //missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
-  missRspTI_st1 := MshrAccess.io.missRspOut.targetInfo.asTypeOf(new VecMshrTargetInfo)
-  val missRspBA_st1 = MshrAccess.io.missRspOut.blockAddr
+  missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
+  val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
   //val missRspTILaneMask_st2 = RegNext(BankConfArb.io.activeLane)
   //val memRspInstrId_st1 = MshrAccess.io.missRspOut.bits.instrId
   //val readMissRsp_st2 = missRspFromMshr_st2 & !missRspTI.isWrite
   //val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())
   //MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
-  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.blockAddr)
+  TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
 
   // ******      dataAccess missRsp      ******
   val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets*NWays, BytesOfWord)))
@@ -372,7 +372,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
     coreRsp_st2.instrId := coreReq_st1.instrId
     coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
-  }.elsewhen(memRsp_st1_valid){
+  }.elsewhen(MshrAccess.io.missRspOut.valid){
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
@@ -386,7 +386,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   coreRsp_st2_valid_from_coreReq := RegNext(coreReq_st1_valid &&
     (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
-  coreRsp_st2_valid_from_memRsp := RegNext(memRsp_st1_valid)
+  coreRsp_st2_valid_from_memRsp := RegNext(MshrAccess.io.missRspOut.valid)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
   coreRsp_st2_valid := coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memRsp
 
