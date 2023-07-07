@@ -161,7 +161,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
-  MshrAccess.io.missReq.valid := readMiss_st1
+  MshrAccess.io.missReq.valid := readMiss_st1 && !memRsp_st1_valid
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
