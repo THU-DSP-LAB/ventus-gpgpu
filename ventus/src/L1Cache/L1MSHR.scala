@@ -159,13 +159,15 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     }.elsewhen(secondaryMiss && subEntryAlmFull){
       mshrStatus_st1 := 3.U //SECONDARY_FULL
     }
-  }.elsewhen(io.missRspIn.fire){
-    //只有完成一个主entry才会fire
+  }.elsewhen(io.missRspIn.valid && subentryStatusForRsp.io.used === 1.U){
+    assert(!(mshrStatus_st1 === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
     when(mshrStatus_st1 === 1.U){
       mshrStatus_st1 := 0.U //PRIMARY_AVAIL
     }.elsewhen(mshrStatus_st1 === 3.U){
       mshrStatus_st1 := 4.U //SECONDARY_FULL_RETURN
     }
+  }.elsewhen(io.missRspIn.valid && mshrStatus_st1 === 4.U){
+    mshrStatus_st1 := 2.U //SECONDARY_AVAIL//TODO before 7.30 add has_secondary_full_return circuit in DCache.scala
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
   when(mainEntryAlmFull && io.missReq.fire && primaryMiss){//PRIMARY_ALM_FULL
@@ -229,7 +231,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===entryMatchMissRsp){
         when(iofSubEn.asUInt===subentry_next2cancel &&
-          io.missRspIn.fire){
+          io.missRspIn.valid){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
           io.missReq.fire && mshrStatus_st1 === 2.U){
