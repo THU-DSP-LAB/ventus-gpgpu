@@ -111,6 +111,9 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val subentryStatus = Module(new getEntryStatusReq(NMshrSubEntry)) // Output: alm_full, full, next
   subentryStatus.io.valid_list := Reverse(Cat(subentrySelectedForReq))
 
+  //  ******     missRsp status      ******
+  val subentryStatusForRsp = Module(new getEntryStatusRsp(NMshrSubEntry))
+
   //  ******     missReq decide MSHR is full or not     ******
   val entryStatus = Module(new getEntryStatusReq(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
@@ -196,7 +199,6 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   io.probeOut_st1.a_source := real_SRAMAddrUp
 
   //  ******      mshr::vec_arrange_core_rsp    ******
-  val subentryStatusForRsp = Module(new getEntryStatusRsp(NMshrSubEntry))
   subentryStatusForRsp.io.valid_list := Reverse(Cat(subentry_valid(entryMatchMissRsp)))
   // priority: missRspIn > missReq
   //assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
