@@ -216,7 +216,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     }.otherwise{//Miss
       when(coreReqControl_st1.isRead){
         //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
-        when(mshrProbeAvail && memReq_Q.io.enq.ready && !memRsp_st1_valid){
+        when(MshrAccess.io.missReq.ready && memReq_Q.io.enq.ready && !memRsp_st1_valid){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
