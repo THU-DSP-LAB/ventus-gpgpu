@@ -173,13 +173,14 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     mshrStatus_st1 := 2.U //SECONDARY_AVAIL//TODO before 7.30 add has_secondary_full_return circuit in DCache.scala
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
-  when(mainEntryAlmFull && io.missReq.fire && primaryMiss){//PRIMARY_ALM_FULL
+  io.probeOut_st1.probeStatus := mshrStatus_st1
+  /*when(mainEntryAlmFull && io.missReq.fire && primaryMiss){//PRIMARY_ALM_FULL
     io.probeOut_st1.probeStatus := 1.U //PRIMARY_FULL
   }.elsewhen(subEntryAlmFull && io.missReq.fire && secondaryMiss){
     io.probeOut_st1.probeStatus := 3.U //SECONDARY_FULL
   }.otherwise{
     io.probeOut_st1.probeStatus := mshrStatus_st1
-  }
+  }*/
 
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
