@@ -160,7 +160,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
-  MshrAccess.io.missReq.valid := readMiss_st1 && !memRsp_st1_valid
+  MshrAccess.io.missReq.valid := readMiss_st1 && !memRsp_st1_valid && coreReq_st1_valid
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
@@ -398,8 +398,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0) <> TagAccess.io.memReq.get
-  MemReqArb.io.in(1).valid := coreReq_st1_valid && (writeMiss_st1 ||
-    (readMiss_st1 && (mshrProbeStatus === 0.U || (mshrProbeStatus === 1.U && MshrAccess.io.missReq.ready))))
+  MemReqArb.io.in(1).valid := coreReq_st1_valid && (writeMiss_st1 || (readMiss_st1 && mshrProbeStatus === 0.U))
   MemReqArb.io.in(1).bits := missMemReq
   //TODO MemReqArb.io.in(1).ready need to be used
 
