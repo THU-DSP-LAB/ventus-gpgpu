@@ -221,7 +221,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
   io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
   io.missRspOut.bits.instrId := io.missRspIn.bits.instrId
-  io.missRspOut.valid := io.missRspIn.valid && ((subentryStatusForRsp.io.used >= 1.U) || (mshrStatus_st1 === 4.U))
+  io.missRspOut.valid := RegNext(io.missRspIn.valid && ((subentryStatusForRsp.io.used >= 1.U) || (mshrStatus_st1 === 4.U)))
   //io.missRspOut := RegNext(io.missRspIn.valid) &&
   //  subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
