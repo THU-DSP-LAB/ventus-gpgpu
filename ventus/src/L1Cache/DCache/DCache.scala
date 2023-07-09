@@ -119,8 +119,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
-  cacheHit_st1 := TagAccess.io.hit_st1 && RegNext(io.coreReq.fire)
-  val cacheMiss_st1 = !TagAccess.io.hit_st1 && RegNext(io.coreReq.fire)
+  cacheHit_st1 := TagAccess.io.hit_st1
+  val cacheMiss_st1 = !TagAccess.io.hit_st1
 
   val readHit_st1 = cacheHit_st1 & coreReqControl_st1.isRead
   val readMiss_st1 = cacheMiss_st1 & coreReqControl_st1.isRead
@@ -160,7 +160,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
-  MshrAccess.io.missReq.valid := readMiss_st1 && !memRsp_st1_valid
+  MshrAccess.io.missReq.valid := readMiss_st1 && RegNext(io.coreReq.fire) && !memRsp_st1_valid
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
@@ -363,7 +363,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      data crossbar     ******
 
   // ******      core rsp
-  when(cacheHit_st1) {
+  when(cacheHit_st1 && RegNext(io.coreReq.fire)) {//TODO coreReq fire or coreReq_Q deq?
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
@@ -397,7 +397,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      m_memReq_Q.m_Q.push_back      ******
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0) <> TagAccess.io.memReq.get
-  MemReqArb.io.in(1).valid := writeMiss_st1 || readMiss_st1
+  MemReqArb.io.in(1).valid := cacheMiss_st1 && RegNext(io.coreReq.fire)
   MemReqArb.io.in(1).bits := missMemReq
   //TODO MemReqArb.io.in(1).ready need to be used
 
