@@ -107,6 +107,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid
   io.coreReq.ready := coreReq_Q.io.enq.ready
+  coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
   val coreReq_st1_ready = Wire(Bool())
