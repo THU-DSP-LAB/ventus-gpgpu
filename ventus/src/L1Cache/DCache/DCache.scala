@@ -289,10 +289,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   memRsp_st1_ready := tagReqCurrentMissRspHasSent && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
 
-  //val mshrMissRspStrobe = !RegNext(MshrAccess.io.missRspOut.valid) |
-   // RegNext(RegNext(MshrAccess.io.missRspOut.ready) && MshrAccess.io.missRspOut.valid)
-  //val readMissRsp_st1 = (MshrAccess.io.missRspOut.fire() || (MshrAccess.io.missRspOut.valid && BankConfArb.io.bankConflict)) & !missRspTI_st1.isWrite
-  //val writeMissRsp_st1 = MshrAccess.io.missRspOut.fire() & missRspTI_st1.isWrite
   //only on subword miss
   //val readMissRsp_st2 = RegNext(readMissRsp_st1)
   //val writeMissRsp_st2 = RegNext(writeMissRsp_st1)
