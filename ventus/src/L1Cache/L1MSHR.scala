@@ -138,29 +138,29 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val mainEntryAlmFull = entryStatus.io.alm_full
   val subEntryFull = subentryStatus.io.full
   val subEntryAlmFull = subentryStatus.io.alm_full
-  when(io.probe.valid){
+  when(io.missReq.fire){
+    when(primaryMiss && mainEntryAlmFull) {
+      mshrStatus_st1 := 1.U //PRIMARY_FULL
+    }.elsewhen(secondaryMiss && subEntryAlmFull) {
+      mshrStatus_st1 := 3.U //SECONDARY_FULL
+    }
+  }.elsewhen(io.probe.valid){
     when(primaryMiss) {
       when(mainEntryFull) {
         mshrStatus_st1 := 1.U //PRIMARY_FULL
-      //}.elsewhen(mainEntryAlmFull) {
-      //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
+        //}.elsewhen(mainEntryAlmFull) {
+        //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
       }.otherwise {
         mshrStatus_st1 := 0.U //PRIMARY_AVAIL
       }
     }.otherwise {
       when(subEntryFull) {
         mshrStatus_st1 := 3.U //SECONDARY_FULL
-      //}.elsewhen(subEntryAlmFull) {
-      //  mshrStatus_st1 := 7.U //SECONDARY_ALM_FULL
+        //}.elsewhen(subEntryAlmFull) {
+        //  mshrStatus_st1 := 7.U //SECONDARY_ALM_FULL
       }.otherwise {
         mshrStatus_st1 := 2.U //SECONDARY_AVAIL
       }
-    }
-  }.elsewhen(io.missReq.fire){
-    when(primaryMiss && mainEntryAlmFull){
-      mshrStatus_st1 := 1.U //PRIMARY_FULL
-    }.elsewhen(secondaryMiss && subEntryAlmFull){
-      mshrStatus_st1 := 3.U //SECONDARY_FULL
     }
   }.elsewhen(io.missRspIn.valid && subentryStatusForRsp.io.used === 1.U){
     assert(!(mshrStatus_st1 === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
