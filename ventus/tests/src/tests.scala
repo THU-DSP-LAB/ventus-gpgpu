@@ -76,11 +76,11 @@ class test_tb extends AnyFreeSpec with ChiselScalatestTester{
   }
 }
 
-class DCache_RRRRRmiss_diff extends AnyFreeSpec with ChiselScalatestTester{
+class DCache_RRRRmiss_same extends AnyFreeSpec with ChiselScalatestTester{
   //implicit val p = (new MyConfig).toInstance
-  "DCache_RRRRRmiss_diff" in {
+  "DCache_RRRRmiss_same" in {
     test(new DCacheWraper).withAnnotations(Seq(WriteVcdAnnotation)){ DUT =>
-      println("****** L1Cache.DCache RRRRRmiss_diff ******")
+      println("****** L1Cache.DCache RRRRmiss_same ******")
       //println("wordOffsetBits = ",DUT.DCache.WordOffsetBits)
       println("blockOffsetBits = "+DUT.DCache.BlockOffsetBits)
       println("SetIdxBits = "+DUT.DCache.SetIdxBits)
