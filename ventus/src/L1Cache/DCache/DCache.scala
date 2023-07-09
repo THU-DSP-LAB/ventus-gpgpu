@@ -92,6 +92,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val DataCrsMem2Core = Module(new DataCrossbar(BlockWords,num_thread))
 
   // ******     queues     ******
+  val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 2,flow=false,pipe=false))
   val coreRsp_Q_entries :Int = NLanes
   val coreRsp_Q = Module(new Queue(new DCacheCoreRsp,entries = coreRsp_Q_entries,flow=false,pipe=false))
   //this queue also work as a pipeline reg, so cannot flow
@@ -104,17 +105,16 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val MemReqArb = Module(new Arbiter(new DCacheMemReq, 2))
 
   // ******     pipeline regs      ******
-  val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
+  coreReq_Q.io.enq.valid := io.coreReq.valid
+  io.coreReq.ready := coreReq_Q.io.enq.ready
+
+  val coreReq_st1 = coreReq_Q.io.deq.bits
   val coreReq_st1_ready = Wire(Bool())
-  val coreReq_st1_valid_pre = RegInit(false.B)
+  //val coreReq_st1_valid_pre = RegInit(false.B)
   val coreReq_st1_valid = Wire(Bool())
   val memRsp_st1_valid = RegInit(false.B)//early definition
-  val coreReq_st1_fire = coreReq_st1_ready && coreReq_st1_valid_pre
-  //is a 1-bit 2-status FSM
-  when(io.coreReq.fire ^ coreReq_st1_fire){
-    coreReq_st1_valid_pre := io.coreReq.fire
-  }
-  coreReq_st1_valid := coreReq_st1_valid_pre && !memRsp_st1_valid
+  coreReq_st1_valid := coreReq_Q.io.deq.valid && !memRsp_st1_valid
+  coreReq_Q.io.deq.ready:= coreReq_st1_ready
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
@@ -154,8 +154,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   genCtrl.io.opcode := io.coreReq.bits.opcode
   genCtrl.io.param := io.coreReq.bits.param
   coreReqControl_st0 := genCtrl.io.control
-
-  io.coreReq.ready := coreReq_st1_ready
 
   // ******      l1_data_cache::coreReq_pipe2_cycle      ******
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
