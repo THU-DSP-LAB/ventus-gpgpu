@@ -161,7 +161,7 @@ class DCache_RRRRRmiss_diff extends AnyFreeSpec with ChiselScalatestTester{
       //DUT.io.coreReq.enqueueSeq()
       DUT.io.coreReq.valid.poke(false.B)
 
-      DUT.clock.step(15)
+      DUT.clock.step(30)
       file.close()
     }
   }
