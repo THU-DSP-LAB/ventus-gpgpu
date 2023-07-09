@@ -186,8 +186,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
   io.missReq.ready := !(mshrStatus_st1 === 1.U || mshrStatus_st1 === 3.U)// || io.missRspIn.valid)
   assert(!io.missReq.fire || (io.missReq.fire && !io.missRspIn.fire),"MSHR cant have Req & Rsp valid in same cycle, later the prior")
-  val real_SRAMAddrUp = Mux(mshrStatus_st1===2.U,OHToUInt(entryMatchProbe_st1),entryStatus.io.next)
-  val real_SRAMAddrDown = Mux(mshrStatus_st1===2.U,subentryStatus.io.next,0.U)
+  val real_SRAMAddrUp = Mux(secondaryMiss,OHToUInt(entryMatchProbe_st1),entryStatus.io.next)
+  val real_SRAMAddrDown = Mux(secondaryMiss,subentryStatus.io.next,0.U)
   when (io.missReq.fire){
     targetInfo_Accesss(real_SRAMAddrUp)(real_SRAMAddrDown) := io.missReq.bits.targetInfo
   }
@@ -237,7 +237,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
           io.missRspIn.valid){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
-          io.missReq.fire && mshrStatus_st1 === 2.U){
+          io.missReq.fire && secondaryMiss){
           subentry_valid(iofEn)(iofSubEn) := true.B
         }
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
