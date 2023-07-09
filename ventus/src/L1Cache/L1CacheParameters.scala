@@ -48,7 +48,7 @@ trait HasL1CacheParameters extends HasRVGParameters{
   def NMshrEntry: Int = 4// replace
   def NMshrSubEntry: Int = 4// replace
   def bABits = TagBits+SetIdxBits
-  def tIBits = WIdBits+BlockOffsetBits+WordOffsetBits
+  def tIBits = WIdBits+NLanes*(BlockOffsetBits+1+BytesOfWord)
 
   //for addr with full width or just block addr
   def get_tag(addr: UInt) = (addr >> (addr.getWidth-TagBits)).asUInt()
