@@ -21,7 +21,7 @@ class MSHRprobe(val bABits: Int) extends Bundle {
   val blockAddr = UInt(bABits.W)
 }
 class MSHRprobeOut(val NEntry:Int, val NSub:Int) extends Bundle {
-  val probeStatus = UInt(2.W)
+  val probeStatus = UInt(3.W)
   val a_source = UInt(log2Up(NEntry).W)
 }
 class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
