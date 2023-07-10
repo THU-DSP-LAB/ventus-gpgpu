@@ -169,7 +169,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       mshrStatus_st1_r := 0.U //PRIMARY_AVAIL
     }.elsewhen(mshrStatus_st1_r === 3.U){
       mshrStatus_st1_r := 4.U //SECONDARY_FULL_RETURN
-    }.elsewhen(mshrStatus_st1_r === 4.U && subentryStatusForRsp.io.used <= 1.U) {
+    }.elsewhen(mshrStatus_st1_r === 4.U && subentryStatusForRsp.io.used <= 0.U) {
       mshrStatus_st1_r := 2.U //SECONDARY_AVAIL
     }
   }
@@ -213,7 +213,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //如果后面发现missRspOut端口这一级不能取消，使用这段注释掉的代码
   //io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
   //  (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
-  io.missRspIn.ready := !((subentryStatusForRsp.io.used >= 2.U) || mshrStatus_st1_w === 4.U)
+  io.missRspIn.ready := !((subentryStatusForRsp.io.used >= 2.U) || (mshrStatus_st1_w === 4.U && subentryStatusForRsp.io.used === 1.U))
 
   entryMatchMissRsp := io.missRspIn.bits.instrId
   //entryMatchMissRsp := Reverse(Cat(instrId_Access.map(_ === io.missRspIn.bits.instrId))) & entry_valid
