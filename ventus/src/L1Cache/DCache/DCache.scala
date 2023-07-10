@@ -359,6 +359,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      data crossbar     ******
 
   // ******      core rsp
+  val secondaryFullReturn = MshrAccess.io.probeOut_st1.probeStatus === 4.U
   when(cacheHit_st1 && RegNext(io.coreReq.fire)) {//TODO coreReq fire or coreReq_Q deq?
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
@@ -369,8 +370,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
-    coreRsp_st2.instrId := missRspTI_st1.instrId
-    coreRsp_st2.activeMask := missRspTI_st1.perLaneAddr.map(_.activeMask)
+    coreRsp_st2.instrId := Mux(secondaryFullReturn,coreReq_st1.instrId,missRspTI_st1.instrId)
+    coreRsp_st2.activeMask := Mux(secondaryFullReturn,
+      coreReq_st1.perLaneAddr.map(_.activeMask),
+      missRspTI_st1.perLaneAddr.map(_.activeMask))
   }//TODO add memReq st2
 
   //assert(!(coreReq_st1_valid && missRspFromMshr_st1),s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
