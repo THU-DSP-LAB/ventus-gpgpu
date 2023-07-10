@@ -59,7 +59,7 @@ class getEntryStatusRsp(nEntry: Int) extends Module{
   val io = IO(new Bundle{
     val valid_list = Input(UInt(nEntry.W))
     val next2cancel = Output(UInt(log2Up(nEntry).W))
-    val used = Output(UInt(log2Up(nEntry).W))
+    val used = Output(UInt((log2Up(nEntry)+1).W))
   })
   io.next2cancel := VecInit(io.valid_list.asBools).indexWhere(_ === true.B)
   io.used := PopCount(io.valid_list)
