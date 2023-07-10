@@ -13,7 +13,7 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
-import pipeline.parameters._
+import parameters._
 import L1Cache.ICache._
 import L1Cache.{RVGModule, _}
 import L1Cache.DCache._
@@ -30,6 +30,9 @@ class host2CTA_data extends Bundle{
   val host_num_wf           = (UInt(WF_COUNT_WIDTH.W))
   val host_wf_size          = (UInt(WAVE_ITEM_WIDTH.W))
   val host_start_pc         = (UInt(MEM_ADDR_WIDTH.W))
+  val host_kernel_size_3d   = Vec(3, UInt(WG_SIZE_X_WIDTH.W))
+  val host_pds_baseaddr     = (UInt(MEM_ADDR_WIDTH.W))
+  val host_csr_knl          = (UInt(MEM_ADDR_WIDTH.W))
   val host_vgpr_size_total  = (UInt((VGPR_ID_WIDTH + 1).W))
   val host_sgpr_size_total  = (UInt((SGPR_ID_WIDTH + 1).W))
   val host_lds_size_total   = (UInt((LDS_ID_WIDTH + 1).W))
@@ -54,6 +57,9 @@ class CTAinterface extends Module{
   cta_sche.io.host_num_wf           := io.host2CTA.bits.host_num_wf
   cta_sche.io.host_wf_size          := io.host2CTA.bits.host_wf_size
   cta_sche.io.host_start_pc         := io.host2CTA.bits.host_start_pc
+  cta_sche.io.host_kernel_size_3d   := io.host2CTA.bits.host_kernel_size_3d
+  cta_sche.io.host_pds_baseaddr     := io.host2CTA.bits.host_pds_baseaddr
+  cta_sche.io.host_csr_knl          := io.host2CTA.bits.host_csr_knl
   cta_sche.io.host_vgpr_size_total  := io.host2CTA.bits.host_vgpr_size_total
   cta_sche.io.host_sgpr_size_total  := io.host2CTA.bits.host_sgpr_size_total
   cta_sche.io.host_lds_size_total   := io.host2CTA.bits.host_lds_size_total
@@ -81,7 +87,13 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_wf_tag_dispatch    := cta_sche.io.dispatch2cu_wf_tag_dispatch
     io.CTA2warp(i).bits.dispatch2cu_lds_base_dispatch  := cta_sche.io.dispatch2cu_lds_base_dispatch
     io.CTA2warp(i).bits.dispatch2cu_start_pc_dispatch  := cta_sche.io.dispatch2cu_start_pc_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch :=cta_sche.io.dispatch2cu_gds_base_dispatch
+    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch := cta_sche.io.dispatch2cu_gds_base_dispatch
+    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch := cta_sche.io.dispatch2cu_pds_baseaddr_dispatch
+    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch := cta_sche.io.dispatch2cu_csr_knl_dispatch
+    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(0)
+    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(1)
+    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(2)
+    io.CTA2warp(i).bits.dispatch2cu_wg_id := 0.U
     cta_sche.io.cu2dispatch_ready_for_dispatch(i):=io.CTA2warp(i).ready
 
     cta_sche.io.cu2dispatch_wf_tag_done(i):=io.warp2CTA(i).bits.cu2dispatch_wf_tag_done
@@ -254,6 +266,7 @@ class SM_wrapper extends Module{
   icache.io.coreReq.valid:=pipe.io.icache_req.valid
   icache.io.coreReq.bits.addr:=pipe.io.icache_req.bits.addr
   icache.io.coreReq.bits.warpid:=pipe.io.icache_req.bits.warpid
+  icache.io.coreReq.bits.mask:=pipe.io.icache_req.bits.mask
   // ***********************
   // **** icache coreRsp ****
   pipe.io.icache_rsp.valid:=icache.io.coreRsp.valid
@@ -261,6 +274,7 @@ class SM_wrapper extends Module{
   pipe.io.icache_rsp.bits.data:=icache.io.coreRsp.bits.data
   pipe.io.icache_rsp.bits.addr:=icache.io.coreRsp.bits.addr
   pipe.io.icache_rsp.bits.status:=icache.io.coreRsp.bits.status
+  pipe.io.icache_rsp.bits.mask:=icache.io.coreRsp.bits.mask
   icache.io.coreRsp.ready:=pipe.io.icache_rsp.ready
   // ***********************
   icache.io.externalFlushPipe.bits.warpid :=pipe.io.externalFlushPipe.bits
@@ -452,16 +466,22 @@ class CPUtest(C: TestCase#Props) extends Module{
   io.host2cta.bits.host_num_wf:=C.num_warp.U
   io.host2cta.bits.host_wf_size:=num_thread.asUInt()
   io.host2cta.bits.host_start_pc:=0.U // start pc
-  io.host2cta.bits.host_vgpr_size_total:= 64.U
-  io.host2cta.bits.host_sgpr_size_total:= 64.U
+  io.host2cta.bits.host_vgpr_size_total:= (C.num_warp*32).U
+  io.host2cta.bits.host_sgpr_size_total:= (C.num_warp*32).U
   io.host2cta.bits.host_lds_size_total:= 128.U
   io.host2cta.bits.host_gds_size_total:= 128.U
   io.host2cta.bits.host_vgpr_size_per_wf:=32.U
   io.host2cta.bits.host_sgpr_size_per_wf:=32.U
   io.host2cta.bits.host_gds_baseaddr := sharemem_size.U
+  io.host2cta.bits.host_pds_baseaddr := sharemem_size.U
+  io.host2cta.bits.host_csr_knl:=10.U
+  io.host2cta.bits.host_kernel_size_3d:=0.U.asTypeOf(io.host2cta.bits.host_kernel_size_3d)
 
   val cnt=Counter(16)
   io.host2cta.bits.host_wg_id:=Cat(cnt.value + 3.U,0.U(CU_ID_WIDTH.W))
+  //io.host2cta.bits.host_pds_baseaddr:=cnt.value << 10
+  io.host2cta.bits.host_csr_knl:=cnt.value
+  io.host2cta.bits.host_kernel_size_3d:=VecInit(Seq(cnt.value,cnt.value+1.U,cnt.value+2.U))
   when(cnt.value < num_of_block){
     io.host2cta.valid:=true.B
     when(io.host2cta.ready){cnt.inc()}

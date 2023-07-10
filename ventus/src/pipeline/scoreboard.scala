@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util.{Decoupled, DecoupledIO, MuxLookup, Queue, UIntToOH}
-import parameters._
+import top.parameters._
 import IDecode._
 
 
@@ -31,19 +31,20 @@ class CtrlSigs extends Bundle {
   val isvec = Bool()
   val sel_alu3 = UInt(2.W)
   val mask=Bool()
-  val sel_imm = UInt(3.W)
+  val sel_imm = UInt(4.W)
   val mem_whb = UInt(2.W)
   val mem_unsigned = Bool()
   val alu_fn = UInt(6.W)
   val mem = Bool()
   val mul = Bool()
   val tc = Bool()
+  val disable_mask = Bool()
   val mem_cmd = UInt(2.W)
   val mop = UInt(2.W)
-  val reg_idx1 = UInt(5.W)
-  val reg_idx2 = UInt(5.W)
-  val reg_idx3 = UInt(5.W)
-  val reg_idxw = UInt(5.W)
+  val reg_idx1 = UInt((regidx_width + regext_width).W) // 8.W
+  val reg_idx2 = UInt((regidx_width + regext_width).W)
+  val reg_idx3 = UInt((regidx_width + regext_width).W)
+  val reg_idxw = UInt((regidx_width + regext_width).W)
   val wvd = Bool()
   val fence = Bool()
   val sfu = Bool()
@@ -51,6 +52,7 @@ class CtrlSigs extends Bundle {
   val writemask = Bool()
   val wxd = Bool()
   val pc=UInt(32.W)
+  val imm_ext = UInt(6.W) // new! immext
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
 }
@@ -87,11 +89,12 @@ class ScoreboardUtil(n: Int,zero:Boolean=false)
 }
 class Scoreboard extends Module{
   val io=IO(new scoreboardIO())
-  val vectorReg=new ScoreboardUtil(32)
-  val scalarReg=new ScoreboardUtil(32,true)
+  val vectorReg=new ScoreboardUtil(1 << (regidx_width + regext_width))
+  val scalarReg=new ScoreboardUtil(1 << (regidx_width + regext_width),true)
   val beqReg=new ScoreboardUtil(1)
   val OpColReg=new ScoreboardUtil(1)
-  val fenceReg=new ScoreboardUtil(1)
+  val fenceReg=new ScoreboardUtil(1) // after LSU rebuild, this could be cancelled.
+  // TODO: CSR operation may cause unexpected situation.
   vectorReg.set(io.if_fire & io.if_ctrl.wvd,io.if_ctrl.reg_idxw)
   vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wvd,io.wb_v_ctrl.reg_idxw)
   scalarReg.set(io.if_fire & io.if_ctrl.wxd,io.if_ctrl.reg_idxw)
@@ -104,7 +107,11 @@ class Scoreboard extends Module{
   fenceReg.clear(io.fence_end,0.U)
   val read1=MuxLookup(io.ibuffer_if_ctrl.sel_alu1,false.B,Array(A1_RS1->scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),A1_VRS1->vectorReg.read(io.ibuffer_if_ctrl.reg_idx1)))
   val read2=MuxLookup(io.ibuffer_if_ctrl.sel_alu2,false.B,Array(A2_RS2->scalarReg.read(io.ibuffer_if_ctrl.reg_idx2),A2_VRS2->vectorReg.read(io.ibuffer_if_ctrl.reg_idx2)))
-  val read3=MuxLookup(io.ibuffer_if_ctrl.sel_alu3,false.B,Array(A3_VRS3->vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),A3_SD->Mux(io.ibuffer_if_ctrl.isvec,vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),scalarReg.read(io.ibuffer_if_ctrl.reg_idx2))))
+  val read3=MuxLookup(io.ibuffer_if_ctrl.sel_alu3,false.B,Array(A3_VRS3->vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),
+    A3_SD->Mux(io.ibuffer_if_ctrl.isvec& (!io.ibuffer_if_ctrl.readmask),vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),Mux(io.ibuffer_if_ctrl.isvec,vectorReg.read(io.ibuffer_if_ctrl.reg_idx2),scalarReg.read(io.ibuffer_if_ctrl.reg_idx2))),
+    A3_FRS3->scalarReg.read(io.ibuffer_if_ctrl.reg_idx3),
+    A3_PC-> Mux(io.ibuffer_if_ctrl.branch===B_R, scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),false.B)
+  ))
   val readm=Mux(io.ibuffer_if_ctrl.mask,vectorReg.read(0.U),false.B)
   val readw=Mux(io.ibuffer_if_ctrl.wxd,scalarReg.read(io.ibuffer_if_ctrl.reg_idxw),false.B)|Mux(io.ibuffer_if_ctrl.wvd,vectorReg.read(io.ibuffer_if_ctrl.reg_idxw),false.B)
   val readb=beqReg.read(0.U)

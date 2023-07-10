@@ -54,10 +54,13 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val bs_wadr = Decoupled(new BankedStoreInnerAddress(params))
     val bs_wdat = Output(new BankedStoreInnerPoison(params))
     val a       = Decoupled(new FullRequest(params))
+    val mshr_wait = Output(Bool())
+
+    val finish_issue = Output(Bool())
   })
 
 
-  io.pb_pop.valid:=  io.req.fire()&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  && !io.req.bits.from_mem && io.req.bits.hit
+  io.pb_pop.valid:=  io.req.fire()&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  && !io.req.bits.from_mem && io.req.bits.hit  //all write acknowledgement response are from source D
   io.pb_pop.bits.index:=io.req.bits.put
   val pb_beat_reg_init=WireInit(0.U.asTypeOf(new PutBufferAEntry(params)))
   val pb_beat_reg=RegInit(pb_beat_reg_init)
@@ -78,7 +81,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   val s1_req =Mux(io.req.fire(), io.req.bits, s1_req_reg)  //stall if busy
   val s1_need_w =(s1_req.opcode===PutFullData || s1_req.opcode===PutPartialData) && !s1_req.from_mem &&s1_req.hit
 
-  val s1_need_r =(s1_req.opcode===Get) //&& s1_req.hit
+  val s1_need_r =((s1_req.opcode===Get) && s1_req.hit) || (!s1_req.hit && s1_req.dirty)//&& s1_req.hit  //read hit or miss dirty
 
 
   val s1_valid_r = s1_need_r
@@ -119,45 +122,72 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-val tobedone=RegInit(false.B)
-
+val tobedone=RegInit(false.B) //all resources not ready
+val mshr_wait_reg =RegInit(false.B)
   switch(stateReg){
     is(stage_1){
       busy:=false.B
+      mshr_wait_reg :=false.B
       when (io.req.fire() || tobedone){
+        mshr_wait_reg :=false.B
+        when( !s1_req.hit ){
+          when(s1_req.dirty) {
+            mshr_wait_reg := true.B //used for kicking out victim way, to block premature potential miss request of victim way
+          }.otherwise{
+            stateReg := stage_4
+            busy := true.B
+            tobedone := false.B
+          }
+        }
 //        when(!s1_req.hit && s1_req.opcode===Get ){
 //          stateReg := stage_4
 //          busy := true.B
 //          tobedone:=false.B
 //        }.else
         when(s1_valid_r && io.bs_radr.ready) {
-          stateReg := stage_4
-          busy := true.B
-          tobedone:=false.B
+          when(!s1_req.hit && s1_req.dirty) {
+              stateReg := stage_3
+              busy := true.B
+              tobedone := false.B
 
-        }.elsewhen((s1_req.opcode === PutFullData|| s1_req.opcode===PutPartialData)){
-            when(io.a.ready) {
-              when(io.bs_wadr.ready ||  !s1_need_w) {
-                stateReg := stage_4
-                busy := true.B
-                tobedone:=false.B
-              }.otherwise {
-                stateReg := stage_2
-                busy := true.B
-                tobedone:=false.B
-              }
-            }.otherwise {
-              when(io.bs_wadr.ready||  !s1_need_w) {
-                stateReg := stage_3
-                busy := true.B
-                tobedone:=false.B
-              }
-            }
+          }.otherwise{
+            stateReg := stage_4
+            busy := true.B
+            tobedone := false.B
+          }
+        }.elsewhen((s1_req.opcode === PutFullData|| s1_req.opcode===PutPartialData)&& !s1_req.from_mem &&s1_req.hit){
+          when(io.bs_wadr.ready){
+            stateReg := stage_4
+            busy := true.B
+            tobedone := false.B
+          }.otherwise{
+            stateReg :=stage_2
+            busy := true.B
+            tobedone:= false.B
+          }
+//            when(io.a.ready) {
+//              when(io.bs_wadr.ready ||  !s1_need_w) {
+//                stateReg := stage_4
+//                busy := true.B
+//                tobedone:=false.B
+//              }.otherwise {
+//                stateReg := stage_2
+//                busy := true.B
+//                tobedone:=false.B
+//              }
+//            }.otherwise {
+//              when(io.bs_wadr.ready||  !s1_need_w) {
+//                stateReg := stage_3
+//                busy := true.B
+//                tobedone:=false.B
+//              }
+//            }
 
 
         }.otherwise {
           busy := true.B
           tobedone := true.B
+
         }
       }
     }
@@ -168,17 +198,22 @@ val tobedone=RegInit(false.B)
     }
     is(stage_3){
       when(io.a.ready){
-        stateReg:=stage_4
+        stateReg:=stage_1
+        busy := false.B
+        tobedone:=false.B
+        mshr_wait_reg:=false.B
       }
     }
     is(stage_4){
       when(io.d.ready) {
         busy := false.B
         stateReg := stage_1
+        tobedone:=false.B //todo may cause fault
+        mshr_wait_reg:=false.B
       }
     }
   }
-
+  io.mshr_wait      :=mshr_wait_reg
   io.bs_wadr.valid   :=    s1_w_valid &&(!write_sent)
   io.bs_wadr.bits.set:=    s1_req.set
   io.bs_wadr.bits.way:=    s1_req.way
@@ -195,10 +230,11 @@ val tobedone=RegInit(false.B)
 ////将读出的数据返回给sourceA
 
 
-  io.a.valid      := (s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData) &&(!sourceA_sent)
-  io.a.bits       := s1_req
+  io.a.valid      := RegNext(stateReg===stage_3 && !s1_req.hit && s1_req.dirty)// !s_final_req.hit && (!sourceA_sent) && s_final_req.dirty//(s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData)  &&(!sourceA_sent)  //todo for miss kickout dirty cacheline no writethrough , write/read miss kickout dirty ,write allocate
+  io.a.bits       := s_final_req
 
-  io.a.bits.data  := Mux((s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData),s1_req.data,pb_beat.data)
+  io.a.bits.data  := io.bs_rdat.data//Mux((s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData),s1_req.data,pb_beat.data) //todo should be victim data
   io.a.bits.opcode:= PutFullData
 
+  io.finish_issue := io.a.valid && s_final_req.last_flush
 }
