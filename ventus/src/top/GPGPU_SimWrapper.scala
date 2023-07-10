@@ -38,7 +38,7 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1) extends Module {
   io.deq.bits := regs.last
 }
 
-class GPGPU_SimWrapper() extends Module{
+class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   val L1param = (new MyConfig).toInstance
   val L2param = InclusiveCacheParameters_lite(
     CacheParameters(
@@ -67,7 +67,7 @@ class GPGPU_SimWrapper() extends Module{
   }
   io.cnt := counter.value
 
-  val GPU = Module(new GPGPU_top()(L1param))
+  val GPU = Module(new GPGPU_top()(L1param, FakeCache))
 
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))
   val pipe_d = Module(new DecoupledPipe(new TLBundleD_lite(l2cache_params), 2))

@@ -23,21 +23,18 @@ class TLBundle_AD (params: InclusiveCacheParameters_lite)extends Bundle{
   val d = new  TLBundleD_lite(params)
 
 }
-
-class Scheduler(params: InclusiveCacheParameters_lite) extends Module
-{
+abstract class L2CacheIO(params: InclusiveCacheParameters_lite) extends Module{
   val io = IO(new Bundle {
-
-    val in_a =Flipped(Decoupled( new TLBundleA_lite(params))) 
-    val in_d =Decoupled(new TLBundleD_lite_plus(params))
-    val out_a =Decoupled(new TLBundleA_lite(params))
-    val out_d=Flipped(Decoupled(new TLBundleD_lite(params)))
-    val flush=Flipped(Decoupled(Bool()))
-    val invalidate= Flipped(Decoupled(Bool()))
+    val in_a = Flipped(Decoupled(new TLBundleA_lite(params)))
+    val in_d = Decoupled(new TLBundleD_lite_plus(params))
+    val out_a = Decoupled(new TLBundleA_lite(params))
+    val out_d = Flipped(Decoupled(new TLBundleD_lite(params)))
+    val flush = Flipped(Decoupled(Bool()))
+    val invalidate = Flipped(Decoupled(Bool()))
   })
-
-
- 
+}
+class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
+{
   val sourceA = Module(new SourceA(params))
 
   val sourceD = Module(new SourceD(params))

@@ -137,7 +137,7 @@ class GPGPU_axi_adapter_top extends Module{
   io.m<>gpgpu_axi_top.io.m
 }
 
-class GPGPU_top(implicit p: Parameters) extends RVGModule{
+class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGModule{
     val io = IO(new Bundle{
     val host_req=Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp=DecoupledIO(new CTA2host_data)
@@ -145,8 +145,8 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
     val out_d=Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
   })
   val cta = Module(new CTAinterface)
-  val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper).io))
-  val l2cache=Module(new Scheduler(l2cache_params))
+  val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache)).io))
+  val l2cache= if(FakeCache) Module(new FakeL2Cache(l2cache_params)) else Module(new Scheduler(l2cache_params))
   val sm2L2Arb = Module(new SM2L2Arbiter(l2cache_params))
 
   for (i<- 0 until NSms) {
@@ -155,7 +155,10 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
     sm_wrapper(i).memRsp <> sm2L2Arb.io.memRspVecOut(i)
     sm2L2Arb.io.memReqVecIn(i) <> sm_wrapper(i).memReq
   }
-
+  l2cache.io.flush.bits := DontCare
+  l2cache.io.flush.valid := false.B
+  l2cache.io.invalidate.bits := DontCare
+  l2cache.io.invalidate.valid := false.B
   l2cache.io.in_a <> sm2L2Arb.io.memReqOut
   l2cache.io.out_a <> io.out_a
   l2cache.io.out_d <> io.out_d
@@ -164,7 +167,7 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
   io.host_req<>cta.io.host2CTA
 }
 
-class SM_wrapper extends Module{
+class SM_wrapper(FakeCache: Boolean = false) extends Module{
   val param = (new MyConfig).toInstance
   val io = IO(new Bundle{
     val CTAreq=Flipped(Decoupled(new CTAreqData))
@@ -226,7 +229,7 @@ class SM_wrapper extends Module{
   icache.io.externalFlushPipe.bits.warpid :=pipe.io.externalFlushPipe.bits
   icache.io.externalFlushPipe.valid :=pipe.io.externalFlushPipe.valid
 
-  val dcache = Module(new DataCache()(param))
+  val dcache = if(FakeCache) Module(new FakeL1DCache()(param)) else Module(new DataCache()(param))
   // **** dcache memRsp ****
   dcache.io.memRsp.valid := l1Cache2L2Arb.io.memRspVecOut(1).valid
   dcache.io.memRsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_source
