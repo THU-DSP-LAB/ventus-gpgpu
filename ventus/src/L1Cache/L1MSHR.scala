@@ -21,7 +21,7 @@ class MSHRprobe(val bABits: Int) extends Bundle {
   val blockAddr = UInt(bABits.W)
 }
 class MSHRprobeOut(val NEntry:Int, val NSub:Int) extends Bundle {
-  val probeStatus = UInt(2.W)
+  val probeStatus = UInt(3.W)
   val a_source = UInt(log2Up(NEntry).W)
 }
 class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
@@ -163,15 +163,15 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         mshrStatus_st1_r := 2.U //SECONDARY_AVAIL
       }
     }
-  }.elsewhen(io.missRspIn.valid && subentryStatusForRsp.io.used === 1.U){
+  }.elsewhen(io.missRspIn.valid){// && subentryStatusForRsp.io.used === 1.U){
     assert(!(mshrStatus_st1_r === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
     when(mshrStatus_st1_r === 1.U){
       mshrStatus_st1_r := 0.U //PRIMARY_AVAIL
     }.elsewhen(mshrStatus_st1_r === 3.U){
       mshrStatus_st1_r := 4.U //SECONDARY_FULL_RETURN
+    }.elsewhen(mshrStatus_st1_r === 4.U) {
+      mshrStatus_st1_r := 2.U //SECONDARY_AVAIL
     }
-  }.elsewhen(io.missRspIn.valid && mshrStatus_st1_r === 4.U){
-    mshrStatus_st1_r := 2.U //SECONDARY_AVAIL//TODO before 7.30 add has_secondary_full_return circuit in DCache.scala
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
   //mshrStatus依赖primaryMiss和SecondaryMiss，它们依赖entryValid。
