@@ -34,8 +34,8 @@ class ExternalMemModel(C: TestCase#Props, params: InclusiveCacheParameters_lite)
   //整个External Memory model划分成了两个独立的存储空间
   //为了方便ICache和DCache各自使用不同的txt
   val ExtMemBase1 = 0
-  val ExtMemSize1 = pipeline.parameters.sharedmem_depth//Unit: block(typical 32 words)
-  val ExtMemBase2 = pipeline.parameters.sharedmem_depth
+  val ExtMemSize1 = parameters.sharedmem_depth//Unit: block(typical 32 words)
+  val ExtMemBase2 = top.parameters.sharedmem_depth
   val ExtMemSize2 = 128//Unit: block(typical 32 words)
   assert(ExtMemBase1 <= ExtMemBase2,"ExtMemBase1 > ExtMemBase2")
   assert(ExtMemBase1 + ExtMemSize1 <= ExtMemBase2,"space overlap in ExtMem")

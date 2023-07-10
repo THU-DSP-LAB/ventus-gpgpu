@@ -13,7 +13,7 @@ import chisel3._
 import L1Cache.ICache.ICacheParameters
 import chisel3.util.log2Up
 import config.config.{Field, Parameters}
-import pipeline.parameters._
+import top.parameters._
 
 
 case object RVGParamsKey extends Field [RVGParameters]

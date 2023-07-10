@@ -16,10 +16,10 @@ import L1Cache.ICache._
 import L1Cache.MyConfig
 import L1Cache.DCache._
 import pipeline._
-import pipeline.parameters._
+import parameters._
 import L2cache._
 import config.config._
-import pipeline.parameters.num_warp
+import parameters.num_warp
 
 class GPGPU_ExtMemWrapper(C: TestCase#Props) extends Module{
   val L1param = (new MyConfig).toInstance

@@ -41,6 +41,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
     val pb_beat =Output( new PutBufferAEntry(params))
     val pb_pop2  =Flipped( Decoupled(new PutBufferPop(params)))
     val pb_beat2 =Output( new PutBufferAEntry(params))
+    val empty =Output(Bool())
   })
   // No restrictions on the type of buffer
   val a = params.micro.innerBuf.a(io.a)
@@ -98,7 +99,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
   io.pb_beat := putbuffer.io.data
   io.pb_beat2:=putbuffer.io.data2.get
-
+  io.empty :=(lists | lists_set) & (~lists_clr).asUInt()
   when (io.pb_pop.fire()||io.pb_pop2.fire()) {
     when(io.pb_pop.fire()){
       when(io.pb_pop2.fire()){

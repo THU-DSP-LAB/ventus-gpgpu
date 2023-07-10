@@ -35,7 +35,7 @@ vse32.v     v11, (x11)
 L_END:
 join        v0, v0, L_ENDPRG
 L_ENDPRG:
-barrier     x0, x0, x0
+barrier     x0, x0, 0
 endprg      x0, x0, x0
 endprg      x0, x0, x0
 endprg      x0, x0, x0

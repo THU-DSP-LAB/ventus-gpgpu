@@ -13,7 +13,7 @@ package L1Cache.ICache
 import L1Cache.HasL1CacheParameters
 import chisel3._
 import config.config._
-import pipeline.parameters._
+import top.parameters._
 case object ICacheParamsKey extends Field [ICacheParameters]
 
 case class ICacheParameters

@@ -5,7 +5,7 @@ saxpy2.o:     file format elf64-littleriscv
 Disassembly of section .text:
 
 0000000000000000 <saxpy-0x20>:
-   0:	80702373          	csrrs	x6,0x807,x0
+   0:	80702373          	csrrs	x6,pds,x0
    4:	00032503          	lw	x10,0(x6)
    8:	00432683          	lw	x13,4(x6)
    c:	01f50393          	addi	x7,x10,31
@@ -25,6 +25,6 @@ Disassembly of section .text:
   3c:	02066427          	vse32.v	v8,(x12)
   40:	00e60633          	add	x12,x12,x14
   44:	fc051ee3          	bne	x10,x0,20 <saxpy>
-  48:	0000200b          	endprg	x0,x0,x0
-  4c:	0000200b          	endprg	x0,x0,x0
-  50:	0000200b          	endprg	x0,x0,x0
+  48:	0000400b          	endprg	x0,x0,x0
+  4c:	0000400b          	endprg	x0,x0,x0
+  50:	0000400b          	endprg	x0,x0,x0

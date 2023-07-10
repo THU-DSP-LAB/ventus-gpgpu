@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 
 class CTAreqData extends Bundle{
   val dispatch2cu_wg_wf_count        = (UInt(WF_COUNT_WIDTH.W)) // sum of wf in a wg
@@ -22,7 +22,13 @@ class CTAreqData extends Bundle{
   val dispatch2cu_wf_tag_dispatch    = (UInt(TAG_WIDTH.W))
   val dispatch2cu_lds_base_dispatch  = (UInt((LDS_ID_WIDTH + 1).W))
   val dispatch2cu_start_pc_dispatch  = (UInt(MEM_ADDR_WIDTH.W))
+  val dispatch2cu_pds_base_dispatch = UInt(MEM_ADDR_WIDTH.W)
   val dispatch2cu_gds_base_dispatch = UInt(MEM_ADDR_WIDTH.W)
+  val dispatch2cu_csr_knl_dispatch = UInt(MEM_ADDR_WIDTH.W)
+  val dispatch2cu_wgid_x_dispatch = UInt(WG_SIZE_X_WIDTH.W)
+  val dispatch2cu_wgid_y_dispatch = UInt(WG_SIZE_Y_WIDTH.W)
+  val dispatch2cu_wgid_z_dispatch = UInt(WG_SIZE_Z_WIDTH.W)
+  val dispatch2cu_wg_id = UInt(32.W)
 }
 class CTArspData extends Bundle{
   val cu2dispatch_wf_tag_done = (UInt(TAG_WIDTH.W))
