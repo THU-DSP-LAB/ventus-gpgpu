@@ -364,15 +364,19 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
-    coreRsp_st2.instrId := coreReq_st1.instrId
-    coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
   }.elsewhen(MshrAccess.io.missRspOut.valid){
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
-    coreRsp_st2.instrId := Mux(secondaryFullReturn,coreReq_st1.instrId,missRspTI_st1.instrId)
-    coreRsp_st2.activeMask := Mux(secondaryFullReturn, coreReq_st1.perLaneAddr.map(_.activeMask), missRspTI_st1.perLaneAddr.map(_.activeMask))
+
   }//TODO add memReq st2
+  when((cacheHit_st1 && RegNext(io.coreReq.fire)) || (secondaryFullReturn && MshrAccess.io.missRspOut.valid)){
+    coreRsp_st2.instrId := coreReq_st1.instrId
+    coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
+  }.elsewhen(MshrAccess.io.missRspOut.valid){
+    coreRsp_st2.instrId := missRspTI_st1.instrId
+    coreRsp_st2.activeMask := missRspTI_st1.perLaneAddr.map(_.activeMask)
+  }
 
   //assert(!(coreReq_st1_valid && missRspFromMshr_st1),s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
   val coreRsp_st2_valid_from_coreReq = Wire(Bool())
