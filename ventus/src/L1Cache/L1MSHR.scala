@@ -164,12 +164,12 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       }
     }
   }.elsewhen(io.missRspIn.valid){// && subentryStatusForRsp.io.used === 1.U){
-    assert(!(mshrStatus_st1_r === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
+    //assert(!(mshrStatus_st1_r === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
     when(mshrStatus_st1_r === 1.U){
       mshrStatus_st1_r := 0.U //PRIMARY_AVAIL
     }.elsewhen(mshrStatus_st1_r === 3.U){
       mshrStatus_st1_r := 4.U //SECONDARY_FULL_RETURN
-    }.elsewhen(mshrStatus_st1_r === 4.U) {
+    }.elsewhen(mshrStatus_st1_r === 4.U && subentryStatusForRsp.io.used <= 1.U) {
       mshrStatus_st1_r := 2.U //SECONDARY_AVAIL
     }
   }
@@ -227,7 +227,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
   io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
   io.missRspOut.bits.instrId := io.missRspIn.bits.instrId
-  io.missRspOut.valid := RegNext(io.missRspIn.valid && ((subentryStatusForRsp.io.used >= 1.U) || (mshrStatus_st1_w === 4.U)))
+  io.missRspOut.valid := RegNext(io.missRspIn.valid)
   //io.missRspOut := RegNext(io.missRspIn.valid) &&
   //  subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
