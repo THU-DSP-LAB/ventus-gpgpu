@@ -92,7 +92,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val DataCrsMem2Core = Module(new DataCrossbar(BlockWords,num_thread))
 
   // ******     queues     ******
-  val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 2,flow=false,pipe=false))
+  val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 1,flow=false,pipe=true))
+  //comb ready exist, be careful the latency!
   val coreRsp_Q_entries :Int = NLanes
   val coreRsp_Q = Module(new Queue(new DCacheCoreRsp,entries = coreRsp_Q_entries,flow=false,pipe=false))
   //this queue also work as a pipeline reg, so cannot flow
