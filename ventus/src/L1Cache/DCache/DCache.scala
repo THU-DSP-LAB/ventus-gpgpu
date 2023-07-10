@@ -114,7 +114,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val coreReq_st1_valid_pre = RegInit(false.B)
   val coreReq_st1_valid = Wire(Bool())
   val memRsp_st1_valid = RegInit(false.B)//early definition
-  coreReq_st1_valid := coreReq_Q.io.deq.valid && !memRsp_st1_valid
+  coreReq_st1_valid := coreReq_Q.io.deq.valid && !MshrAccess.io.missRspOut.valid
   coreReq_Q.io.deq.ready:= coreReq_st1_ready
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
@@ -160,7 +160,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
-  MshrAccess.io.missReq.valid := readMiss_st1 && !memRsp_st1_valid && coreReq_st1_valid
+  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
@@ -216,7 +216,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     }.otherwise{//Miss
       when(coreReqControl_st1.isRead){
         //when(MshrAccess.io.probeOut_st1.probeStatus(0).asBool//PRIMARY_AVAIL|SECONDARY_AVAIL
-        when(MshrAccess.io.missReq.ready && memReq_Q.io.enq.ready && !memRsp_st1_valid){
+        when(MshrAccess.io.missReq.ready && memReq_Q.io.enq.ready && !MshrAccess.io.missRspOut.valid){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
@@ -315,7 +315,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       holdRead = false,
       singlePort = false
     ))
-    DataAccess.io.w.req.valid := Mux(memRsp_st1_valid && !tagReqCurrentMissRspHasSent,
+    DataAccess.io.w.req.valid := Mux(memRsp_Q.io.deq.valid && !tagReqCurrentMissRspHasSent,
       true.B,  //READ miss resp
       writeHit_st1 & getBankEn.io.perBankValid(i))       //WRITE hit
     /*val readMissRspCnter_if = if(BlockOffsetBits-BankIdxBits>0){
@@ -324,7 +324,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       0.U(1.W)
     }*/
     //DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCrsCore2Mem.io.DataOut)
-    DataAccess.io.w.req.bits := Mux(memRsp_st1_valid,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))
+    DataAccess.io.w.req.bits := Mux(memRsp_Q.io.deq.valid,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))
     /*DataAccess.io.w.req.bits.data := Mux(missRspFromMshr_st1,
       memRsp_st1.d_data(i),//READ miss resp
       coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)))
