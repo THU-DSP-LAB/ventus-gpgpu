@@ -92,7 +92,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val DataCrsMem2Core = Module(new DataCrossbar(BlockWords,num_thread))
 
   // ******     queues     ******
-  val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 2,flow=false,pipe=false))
+  val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 1,flow=false,pipe=true))
+  //comb ready exist, be careful the latency!
   val coreRsp_Q_entries :Int = NLanes
   val coreRsp_Q = Module(new Queue(new DCacheCoreRsp,entries = coreRsp_Q_entries,flow=false,pipe=false))
   //this queue also work as a pipeline reg, so cannot flow
@@ -149,7 +150,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.fire
   MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
-  //val mshrProbeAvail = MshrAccess.io.probeOut_st1.probeStatus === 0.U || MshrAccess.io.probeOut_st1.probeStatus === 2.U
 
   val genCtrl = Module(new genControl)
   genCtrl.io.opcode := io.coreReq.bits.opcode
@@ -160,7 +160,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
-  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid
+  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && !RegNext(secondaryFullReturn)
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
@@ -359,7 +359,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      data crossbar     ******
 
   // ******      core rsp
-  val secondaryFullReturn = MshrAccess.io.probeOut_st1.probeStatus === 4.U
+  val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U)
   when(cacheHit_st1 && RegNext(io.coreReq.fire)) {//TODO coreReq fire or coreReq_Q deq?
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
