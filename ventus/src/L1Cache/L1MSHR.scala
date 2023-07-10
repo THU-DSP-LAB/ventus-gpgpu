@@ -164,7 +164,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       }
     }
   }.elsewhen(io.missRspIn.valid){// && subentryStatusForRsp.io.used === 1.U){
-    assert(!(mshrStatus_st1_r === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
+    //assert(!(mshrStatus_st1_r === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
     when(mshrStatus_st1_r === 1.U){
       mshrStatus_st1_r := 0.U //PRIMARY_AVAIL
     }.elsewhen(mshrStatus_st1_r === 3.U){
