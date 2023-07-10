@@ -174,6 +174,9 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     mshrStatus_st1_r := 2.U //SECONDARY_AVAIL//TODO before 7.30 add has_secondary_full_return circuit in DCache.scala
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
+  //mshrStatus依赖primaryMiss和SecondaryMiss，它们依赖entryValid。
+  //mshrStatus必须是寄存器，需要在probe valid的下个周期正确显示。entryValid更新的下一个周期已经来不及。
+  //所以用组合逻辑加工一次mshrStatus。
   when(secondaryMiss && (mshrStatus_st1_r === 0.U || mshrStatus_st1_r === 1.U)){
     when(subEntryFull) {
       mshrStatus_st1_w := 3.U //SECONDARY_FULL
