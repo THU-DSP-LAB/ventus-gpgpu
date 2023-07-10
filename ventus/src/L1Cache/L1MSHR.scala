@@ -230,7 +230,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   for (iofEn <- 0 until NMshrEntry){
     for (iofSubEn <- 0 until NMshrSubEntry){
       when(iofEn.asUInt===entryStatus.io.next &&
-        iofSubEn.asUInt===0.U && io.missReq.fire && mshrStatus_st1 === 0.U){
+        iofSubEn.asUInt===0.U && io.missReq.fire && primaryMiss){
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===entryMatchMissRsp){
         when(iofSubEn.asUInt===subentry_next2cancel &&
