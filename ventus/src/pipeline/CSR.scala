@@ -39,6 +39,7 @@ object CSR{
   val wg_id_y = 0x809.U(12.W)
   val wg_id_z = 0x80a.U(12.W)
   val csr_print = 0x80b.U(12.W)
+  val rpc = 0x80c.U(12.W)  // reconvergence PC, use set_rpc instruction to write, and read when vbranch occurs
 
   // Vector csr address
   val vstart = 0x008.U(12.W)
@@ -165,6 +166,8 @@ class CSRFile extends Module {
   val wg_id_z = RegInit(0.U(WG_SIZE_Z_WIDTH.W))
   val csr_print = RegInit(0.U(32.W))
 
+  val rpc = RegInit(0.U(addrLen.W))    // reconvergence PC CSR
+
   val sgpr_base_dispatch = Reg(UInt((SGPR_ID_WIDTH + 1).W))
   val vgpr_base_dispatch = Reg(UInt((VGPR_ID_WIDTH + 1).W))
   io.sgpr_base:=sgpr_base_dispatch
@@ -201,7 +204,7 @@ class CSRFile extends Module {
   val csr_input = io.in1
   val csr_rdata = Wire(UInt(xLen.W))
 
-  val wdata=Wire(UInt(xLen.W))
+  val wdata = Wire(UInt(xLen.W))
   wdata:=csr_rdata
   io.wb_wxd_rd:=wdata
 
@@ -233,12 +236,14 @@ class CSRFile extends Module {
     BitPat(CSR.wg_id_x)-> wg_id_x,
     BitPat(CSR.wg_id_y)-> wg_id_y,
     BitPat(CSR.wg_id_z)-> wg_id_z,
-    BitPat(CSR.csr_print)-> csr_print
+    BitPat(CSR.csr_print)-> csr_print,
+    BitPat(CSR.rpc)     -> rpc
   )
 
   csr_rdata := Lookup(csr_addr, 0.U(xLen.W), csrFile).asUInt
   val AVL=csr_input
 
+  // write CSR operation
     when(wen){
       when(io.ctrl.isvec){
         wdata:=Mux(AVL<VLMAX,AVL,VLMAX)
@@ -272,7 +277,9 @@ class CSRFile extends Module {
         mcause := csr_wdata
       } .elsewhen(csr_addr === CSR.mtval) {
         mtval := csr_wdata
-    }
+    } .elsewhen(csr_addr === CSR.rpc) {
+        rpc := csr_wdata
+      }
   }
   when(io.CTA2csr.valid){
     //是否应该清除原有的CSR配置？
