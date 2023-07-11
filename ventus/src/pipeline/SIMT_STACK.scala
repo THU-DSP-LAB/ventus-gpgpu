@@ -103,9 +103,13 @@ class simtExeData extends Bundle{
   val opcode  = UInt(1.W)
   val wid     = UInt(depth_warp.W)
   val PC_branch = UInt(32.W)
+  val PC_reconv = UInt(32.W)
+  val PC_execute = UInt(32.W)
   val mask_init = UInt(num_thread.W)
   val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
+//TODO: what's the difference between simtExeData and BranchCtrl
+//BranchCtrl is just for branch, doesn't need PC reconvergence
 
 class vec_alu_bus() extends Bundle{
   val if_mask =  UInt(num_thread.W)

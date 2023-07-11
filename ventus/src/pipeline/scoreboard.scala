@@ -72,8 +72,8 @@ class scoreboardIO extends Bundle{
 }
 class ScoreboardUtil(n: Int,zero:Boolean=false)
 {
-  def set(en: Bool, addr: UInt): Unit = update(en, _next.asUInt | mask(en, addr))
-  def clear(en: Bool, addr: UInt): Unit = update(en, _next.asUInt & (~mask(en, addr)).asUInt)
+  def set(en: Bool, addr: UInt): Unit = update(en, _next.asUInt | mask(en, addr)) // set r(addr) = 1
+  def clear(en: Bool, addr: UInt): Unit = update(en, _next.asUInt & (~mask(en, addr)).asUInt) //clear r(addr) = 0
   def read(addr: UInt): Bool = r(addr)
   def readBypassed(addr: UInt): Bool = _next(addr)
   private val _r = RegInit(0.U(n.W))
