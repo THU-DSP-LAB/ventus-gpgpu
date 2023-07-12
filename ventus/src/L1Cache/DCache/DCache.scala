@@ -160,6 +160,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
+  val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U)
   MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && !RegNext(secondaryFullReturn)
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
@@ -359,7 +360,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      data crossbar     ******
 
   // ******      core rsp
-  val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U)
   when(cacheHit_st1 && RegNext(io.coreReq.fire)) {//TODO coreReq fire or coreReq_Q deq?
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
