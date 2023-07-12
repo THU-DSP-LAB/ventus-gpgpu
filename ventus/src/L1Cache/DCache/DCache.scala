@@ -238,7 +238,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val memRsp_st1_valid = RegInit(false.B) early definition
   val memRsp_st1_ready = Wire(Bool())
   val memRsp_st1_fire = memRsp_st1_ready && memRsp_st1_valid
-  val tagReqCurrentMissRspHasSent = RegInit(true.B)//before 7.30 TODO add logic for this
+  val tagReqCurrentMissRspHasSent = RegInit(false.B)
+  when(memRsp_Q.io.deq.fire ^ TagAccess.io.allocateWrite.fire){
+    tagReqCurrentMissRspHasSent := memRsp_Q.io.deq.fire
+  }
   //is a 1-bit 2-status FSM
   when(memRsp_Q.io.deq.fire ^ memRsp_st1_fire) {
     memRsp_st1_valid := memRsp_Q.io.deq.fire
