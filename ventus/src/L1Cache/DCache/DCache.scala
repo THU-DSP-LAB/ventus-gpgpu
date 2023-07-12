@@ -238,10 +238,19 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val memRsp_st1_valid = RegInit(false.B) early definition
   val memRsp_st1_ready = Wire(Bool())
   val memRsp_st1_fire = memRsp_st1_ready && memRsp_st1_valid
-  val tagReqCurrentMissRspHasSent = RegInit(false.B)
-  when(memRsp_Q.io.deq.fire ^ TagAccess.io.allocateWrite.fire){
-    tagReqCurrentMissRspHasSent := memRsp_Q.io.deq.fire
+  val tagReqValidCtrl = RegInit(true.B)
+  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire){
+    tagReqValidCtrl := false.B
+  }.elsewhen(!tagReqValidCtrl && memRsp_Q.io.deq.fire){
+    tagReqValidCtrl := true.B
   }
+  val tagReqReadyCtrl = RegInit(false.B)
+  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire){
+    tagReqReadyCtrl := true.B
+  }.elsewhen(tagReqReadyCtrl && memRsp_Q.io.deq.fire){
+    tagReqReadyCtrl := false.B
+  }
+  val tagAllocateWriteReady = Mux(tagReqReadyCtrl,true.B,TagAccess.io.allocateWrite.ready)
   //is a 1-bit 2-status FSM
   when(memRsp_Q.io.deq.fire ^ memRsp_st1_fire) {
     memRsp_st1_valid := memRsp_Q.io.deq.fire
@@ -267,7 +276,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source(SetIdxBits+log2Up(NMshrEntry)-1,SetIdxBits)
 
   // ******      tag write      ******
-  TagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.valid && tagReqCurrentMissRspHasSent
+  TagAccess.io.allocateWrite.valid := Mux(tagReqValidCtrl,memRsp_Q.io.deq.valid,false.B)
   TagAccess.io.allocateWrite.bits.setIdx := memRsp_Q.io.deq.bits.d_source(SetIdxBits-1,0)
   //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
 
@@ -291,7 +300,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
   }
 
-  memRsp_st1_ready := tagReqCurrentMissRspHasSent && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
+  memRsp_st1_ready := tagAllocateWriteReady && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
 
   //only on subword miss
   //val readMissRsp_st2 = RegNext(readMissRsp_st1)
@@ -319,7 +328,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       holdRead = false,
       singlePort = false
     ))
-    DataAccess.io.w.req.valid := Mux(memRsp_Q.io.deq.valid && !tagReqCurrentMissRspHasSent,
+    DataAccess.io.w.req.valid := Mux(TagAccess.io.allocateWrite.fire,
       true.B,  //READ miss resp
       writeHit_st1 & getBankEn.io.perBankValid(i))       //WRITE hit
     /*val readMissRspCnter_if = if(BlockOffsetBits-BankIdxBits>0){
