@@ -233,32 +233,35 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreReq_st1_ready := true.B
   }
 
-  // ******     l1_data_cache::memRsp_pipe1_cycle      ******
-  val memRsp_st1 = Reg(new DCacheMemRsp)
-  //val memRsp_st1_valid = RegInit(false.B) early definition
+  memRsp_Q.io.enq <> io.memRsp
+  // ******     l1_data_cache::memRsp_pipe0_cycle      ******
   val memRsp_st1_ready = Wire(Bool())
-  val memRsp_st1_fire = memRsp_st1_ready && memRsp_st1_valid
   val tagReqValidCtrl = RegInit(true.B)
-  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire){
+  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire) {
     tagReqValidCtrl := false.B
-  }.elsewhen(!tagReqValidCtrl && memRsp_Q.io.deq.fire){
+  }.elsewhen(!tagReqValidCtrl && memRsp_Q.io.deq.fire) {
     tagReqValidCtrl := true.B
   }
   val tagReqReadyCtrl = RegInit(false.B)
-  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire){
+  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire) {
     tagReqReadyCtrl := true.B
-  }.elsewhen(tagReqReadyCtrl && memRsp_Q.io.deq.fire){
+  }.elsewhen(tagReqReadyCtrl && memRsp_Q.io.deq.fire) {
     tagReqReadyCtrl := false.B
   }
-  val tagAllocateWriteReady = Mux(tagReqReadyCtrl,true.B,TagAccess.io.allocateWrite.ready)
-  //is a 1-bit 2-status FSM
+  val tagAllocateWriteReady = Mux(tagReqReadyCtrl, true.B, TagAccess.io.allocateWrite.ready)
+  memRsp_Q.io.deq.ready := tagAllocateWriteReady && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
+
+  // ******     l1_data_cache::memRsp_pipe1_cycle      ******
+  val memRsp_st1 = Reg(new DCacheMemRsp)
+  //val memRsp_st1_valid = RegInit(false.B) early definition
+  val memRsp_st1_fire = memRsp_st1_ready && memRsp_st1_valid
+
   when(memRsp_Q.io.deq.fire ^ memRsp_st1_fire) {
     memRsp_st1_valid := memRsp_Q.io.deq.fire
   }
+  //1-bit FSM
+  val tagReplaceStatus = RegInit(false.B)
 
-  memRsp_Q.io.enq <> io.memRsp
-  memRsp_Q.io.deq.ready := memRsp_st1_ready//MshrAccess.io.missRspIn.ready && memRsp_st1_ready && TagAccess.io.allocateWrite.ready
-  // && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   when(memRsp_Q.io.deq.fire){
     memRsp_st1 := memRsp_Q_st0
   }
@@ -299,8 +302,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   for (i <- 0 until BlockWords) {
     DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
   }
-
-  memRsp_st1_ready := tagAllocateWriteReady && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
 
   //only on subword miss
   //val readMissRsp_st2 = RegNext(readMissRsp_st1)
