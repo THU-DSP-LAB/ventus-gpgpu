@@ -72,19 +72,23 @@ class Issue extends Module{
     io.out_SIMT.bits.spike_info.get:=inputBuf.bits.ctrl.spike_info.get
     when(io.out_LSU.fire&&io.out_LSU.bits.ctrl.mem/*&&io.out_LSU.bits.ctrl.wid===wid_to_check.U*/){
       printf(p"warp${Decimal(io.out_LSU.bits.ctrl.wid)} ")
-      printf(p"0x00000000${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
-      when(io.out_LSU.bits.ctrl.mem_cmd===1.U){
-        printf(p" ${io.out_LSU.bits.ctrl.reg_idxw} op${io.out_LSU.bits.ctrl.mop}base${Hexadecimal(io.out_LSU.bits.in1(0))}bias${Hexadecimal(io.out_LSU.bits.in2(0))}\n")
+      printf(p"0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
+      when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XRD){
+        printf(p" r ")
+      }.elsewhen(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR){
+        printf(p" w ")
       }
-    when(io.out_LSU.bits.ctrl.mem_cmd===2.U){
-      printf(p" ${io.out_LSU.bits.ctrl.reg_idx3}op${io.out_LSU.bits.ctrl.mop}base${Hexadecimal(io.out_LSU.bits.in1(0))}bias${Hexadecimal(io.out_LSU.bits.in2(0))}")
-      io.out_LSU.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
-      printf(p"\n")
+      when(!io.out_LSU.bits.ctrl.isvec){
+        printf(p"x${io.out_LSU.bits.ctrl.reg_idxw} op ${io.out_LSU.bits.ctrl.mop} base ${Hexadecimal(io.out_LSU.bits.in1(0))} bias ${Hexadecimal(io.out_LSU.bits.in2(0))}\n")
+      }.otherwise{
+        printf(p"v${io.out_LSU.bits.ctrl.reg_idx3} op ${io.out_LSU.bits.ctrl.mop} base ${Hexadecimal(io.out_LSU.bits.in1(0))} bias ")
+        io.out_LSU.bits.in2.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
+        printf(p"\n")
+      }
     }
-  }
     when(io.out_warpscheduler.fire/*&&io.out_LSU.bits.ctrl.wid===wid_to_check.U*/){
       printf(p"warp${Decimal(io.out_LSU.bits.ctrl.wid)} ")
-      printf(p"0x00000000${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
+      printf(p"0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
       when(io.out_warpscheduler.bits.ctrl.barrier & !io.out_warpscheduler.bits.ctrl.simt_stack_op){printf(p" barrier\n")}
       when(io.out_warpscheduler.bits.ctrl.simt_stack_op){printf(p" endprg\n")}
     }
