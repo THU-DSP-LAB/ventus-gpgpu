@@ -115,7 +115,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val coreReq_st1_valid_pre = RegInit(false.B)
   val coreReq_st1_valid = Wire(Bool())
   //val memRsp_st1_valid = RegInit(false.B)//early definition
-  coreReq_st1_valid := coreReq_Q.io.deq.valid && !MshrAccess.io.missRspOut.valid
+  //secondaryFullReturn时cReq_st1可以valid，也可以fire。是missRspOut期间唯一例外
+  val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U)
+  coreReq_st1_valid := coreReq_Q.io.deq.valid && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)
   coreReq_Q.io.deq.ready:= coreReq_st1_ready
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
@@ -160,7 +162,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
-  val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U)
+  //val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U) early definition
   MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && !RegNext(secondaryFullReturn)
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
@@ -216,8 +218,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       }
     }.otherwise{//Miss
       when(coreReqControl_st1.isRead){
-        //memReq_Q.io.enq.ready
-        when(MshrAccess.io.missReq.ready && MemReqArb.io.in(1).ready && !MshrAccess.io.missRspOut.valid){
+        when(MshrAccess.io.missReq.ready && MemReqArb.io.in(1).ready//即memReq_Q.io.enq.ready
+          && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite

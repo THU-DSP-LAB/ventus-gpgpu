@@ -166,7 +166,7 @@ class ReplacementUnit(timeLength:Int, way: Int, debug:Boolean=false) extends Mod
     victimIdx := minTimeChooser.io.idxOfMin
   }else victimIdx := 0.U
 
-  io.waymask_st1 := Mux(io.Set_is_full, UIntToOH(victimIdx), PriorityEncoder(~io.validOfSet))
+  io.waymask_st1 := UIntToOH(Mux(io.Set_is_full, victimIdx, PriorityEncoder(~io.validOfSet)))
   // First case, set not full
   //Second case, full set, replacement happens
 
