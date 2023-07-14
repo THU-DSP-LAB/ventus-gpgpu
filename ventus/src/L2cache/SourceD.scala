@@ -61,7 +61,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
   io.pb_pop.valid:=  io.req.fire()&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  && !io.req.bits.from_mem && io.req.bits.hit  //all write acknowledgement response are from source D
-  io.pb_pop.bits.index:=io.req.bits.put
+  io.pb_pop.bits.index:=io.req.bits.put //sink D also support pop,source D only considers write hit pop
   val pb_beat_reg_init=WireInit(0.U.asTypeOf(new PutBufferAEntry(params)))
   val pb_beat_reg=RegInit(pb_beat_reg_init)
   //stage
