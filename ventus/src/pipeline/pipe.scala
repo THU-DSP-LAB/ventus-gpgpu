@@ -81,6 +81,11 @@ class pipe extends Module{
   io.externalFlushPipe.valid:=warp_sche.io.flush.valid|warp_sche.io.flushCache.valid
   io.externalFlushPipe.bits:=Mux(warp_sche.io.flush.valid,warp_sche.io.flush.bits,warp_sche.io.flushCache.bits)
 
+  csr.io.lsu_wid:=lsu.io.csr_wid
+  lsu.io.csr_pds:=csr.io.lsu_pds
+  lsu.io.csr_tid:=csr.io.lsu_tid
+  lsu.io.csr_numw:=csr.io.lsu_numw
+
   warp_sche.io.pc_reset:=io.pc_reset
   warp_sche.io.branch<>branch_back.io.out
   //warp_sche.io.pc_icache_ready:=pcfifo.io.icachebuf_ready
