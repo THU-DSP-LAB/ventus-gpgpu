@@ -29,6 +29,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //From memRsp_pipe0
     val allocateWrite = Flipped(ValidIO(new SRAMBundleA(set)))//Allocate Channel
     val allocateWriteData_st1 = Input(UInt(tagBits.W))
+    //From memRsp_pipe1
+    val allocateWriteTagSRAMWValid_st1 = Input(Bool())
     //To memRsp_pipe1
     val needReplace = if(!readOnly){
       Some(Output(Bool()))
@@ -137,7 +139,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
       allocateWrite_st1.setIdx), //setIdx
       0.U((dcache_BlockOffsetBits + dcache_WordOffsetBits).W)) //blockOffset+wordOffset
   }
-  tagBodyAccess.io.w.req.valid := RegNext(io.allocateWrite.valid)//meta_entry_t::allocate
+  tagBodyAccess.io.w.req.valid := io.allocateWriteTagSRAMWValid_st1//meta_entry_t::allocate
   tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
