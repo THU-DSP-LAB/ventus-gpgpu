@@ -34,6 +34,9 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
       Some(Output(Bool()))
     } else None
     val waymaskReplacement_st1 = Output(UInt(way.W))//one hot, for SRAMTemplate
+    val a_addrReplacement_st1 = if (!readOnly) {
+      Some(Output(UInt(tagBits.W)))
+    } else None
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
@@ -129,15 +132,11 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   Replacement.io.validOfSet := Cat(way_valid(io.allocateWrite.bits.setIdx))
   Replacement.io.timeOfSet_st1 := timeAccess.io.r.resp.data//meta_entry_t::get_access_time
   io.waymaskReplacement_st1 := Replacement.io.waymask_st1//tag_array::replace_choice
-  /*io.memReq.get.valid := replaceIsDirty.get && allocateWrite_st1_valid
-  io.memReq.get.bits.a_opcode := 0.U//PutFullData
-  io.memReq.get.bits.a_param := 0.U//regular write
-  io.memReq.get.bits.a_source := Cat("d2".U,allocateWrite_st1.setIdx)
-  io.memReq.get.bits.a_addr := Cat(Cat(tagBodyAccess.io.r.resp.data(Replacement.io.waymask_st1),//tag
-    allocateWrite_st1.setIdx),//setIdx
-    0.U((dcache_BlockOffsetBits+dcache_WordOffsetBits).W))//blockOffset+wordOffset
-  io.memReq.get.bits.a_mask := VecInit(Seq.fill(dcache_BlockWords)(true.B))
-  io.memReq.get.bits.a_data := DontCare//to be replaced by Data SRAM out*/
+  if (!readOnly) {
+    io.a_addrReplacement_st1.get := Cat(Cat(tagBodyAccess.io.r.resp.data(Replacement.io.waymask_st1), //tag
+      allocateWrite_st1.setIdx), //setIdx
+      0.U((dcache_BlockOffsetBits + dcache_WordOffsetBits).W)) //blockOffset+wordOffset
+  }
   tagBodyAccess.io.w.req.valid := RegNext(io.allocateWrite.valid)//meta_entry_t::allocate
   tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
