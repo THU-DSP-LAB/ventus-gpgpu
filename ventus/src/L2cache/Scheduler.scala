@@ -32,8 +32,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     val in_d =Decoupled(new TLBundleD_lite_plus(params))
     val out_a =Decoupled(new TLBundleA_lite(params))
     val out_d=Flipped(Decoupled(new TLBundleD_lite(params)))
-    val flush=Flipped(Decoupled(Bool()))
-    val invalidate= Flipped(Decoupled(Bool()))
+    val flush=Flipped(Decoupled(Bool()))  //bits not actually used
+    val invalidate= Flipped(Decoupled(Bool())) //bits not actually used
   })
 
 
@@ -65,10 +65,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     issue_flush_invalidate :=true.B
   }.elsewhen(sourceD.io.finish_issue){
     issue_flush_invalidate :=false.B
-  }
+  }// sourceD will decide when will finish flush/invalidate
 
-  io.flush.ready := !issue_flush_invalidate
-  io.invalidate.ready  := !issue_flush_invalidate
 
   sinkA.io.a.bits:= io.in_a.bits
   sinkA.io.a.valid:=io.in_a.valid
@@ -149,7 +147,9 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val mshr_free = (~mshr_validOH).asUInt.orR()
   val mshr_empty = (~mshr_validOH).asUInt.andR.asBool
-  
+  val putbuffer_empty= sinkA.io.empty
+  io.flush.ready := !issue_flush_invalidate &&  putbuffer_empty
+  io.invalidate.ready  := !issue_flush_invalidate &&  mshr_empty &&  putbuffer_empty
   val request = Wire(Decoupled(new FullRequest(params)))
   request.valid :=(sinkA.io.req.valid)
   request.bits := sinkA.io.req.bits  
@@ -157,19 +157,18 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sinkA.io.req.ready := request.ready   //if mshr still have entries and if dir ready
 
 
-  val putbuffer_empty= sinkA.io.empty
+
   directory.io.read.valid:=request.valid
   directory.io.read.bits:=request.bits
-  directory.io.flush.valid:= mshr_empty && putbuffer_empty
+
   directory.io.write.valid:=schedule.dir.valid
   directory.io.write.bits.is_writemiss:= schedule.dir.bits.is_writemiss
   directory.io.write.bits.way:=schedule.dir.bits.way
   directory.io.write.bits.set:=schedule.dir.bits.set
   directory.io.write.bits.data.tag:=schedule.dir.bits.data.tag
-  directory.io.invalidate.valid:= io.invalidate.valid
-  directory.io.invalidate.bits:= io.invalidate.bits
-  directory.io.flush.valid :=io.flush.valid
-  directory.io.flush.bits :=io.flush.bits
+  directory.io.invalidate := io.invalidate.fire  //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
+  directory.io.flush :=io.flush.fire
+
 
   //directory.io.write.bits.data.valid:=schedule.dir.bits.data.valid
 
@@ -218,7 +217,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.pop.bits  := mshr_select
 
 
-  request.ready := mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready)) && directory.io.ready && !issue_flush_invalidate
+  request.ready := mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready)) && directory.io.ready && !(issue_flush_invalidate || io.flush.valid ||io.invalidate.valid)
 
 
 
