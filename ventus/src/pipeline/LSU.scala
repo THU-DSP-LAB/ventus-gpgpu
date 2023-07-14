@@ -107,6 +107,10 @@ object ByteExtract{
 class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
+    val csr_wid = Output(UInt(depth_warp.W))
+    val csr_pds = Input(UInt(xLen.W))
+    val csr_numw = Input(UInt(xLen.W))
+    val csr_tid = Input(UInt(xLen.W))
     val to_mshr = DecoupledIO(new Bundle{
       val tag = new MshrTag
     })
@@ -119,6 +123,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   val state = RegInit(init = s_idle)
 
   val reg_save = Reg(new vExeData)
+  io.csr_wid:=reg_save.ctrl.wid
   //val rdy_fromFIFO = Reg(Bool())
   io.from_fifo.ready := state===s_idle
   val reg_entryID = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
@@ -127,13 +132,16 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   val is_shared = Wire(Vec(num_thread, Bool()))
   val all_shared = Wire(Bool())
 
+
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
-    addr(x) := Mux(reg_save.ctrl.isvec,
-      reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U, x.asUInt()<<2,
+    addr(x) := Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
+            Mux(reg_save.ctrl.custom_signal_0,reg_save.in1(x)+reg_save.in2(x),
+                  io.csr_pds + ((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread + (reg_save.in1(x)+reg_save.in2(x))(1,0) + (io.csr_tid + x.asUInt)<<2  ),
+       Mux(reg_save.ctrl.isvec,reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U, x.asUInt()<<2,
         Mux(reg_save.ctrl.mop===3.U,reg_save.in2(x),x.asUInt*reg_save.in2(x))),
       reg_save.in1(0) + reg_save.in2(0)
-    )
+    ))
     is_shared(x) := !reg_save.mask(x) || addr(x)<sharedmemory_addr_max
   })
   all_shared := Mux(reg_save.ctrl.isvec,
@@ -324,6 +332,11 @@ class LSUexe() extends Module{
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val fence_end = Output(UInt(num_warp.W))
+
+    val csr_wid = Output(UInt(depth_warp.W))
+    val csr_pds = Input(UInt(xLen.W))
+    val csr_numw = Input(UInt(xLen.W))
+    val csr_tid = Input(UInt(xLen.W))
   })
   val sharedmemory_addr_max = sharemem_size.U(32.W)
   //val sharedmemory = Module(new SharedMemoryV2(nSharedMemoryEntry, num_thread, xLen, lsu_nMshrEntry)) // default: 128
@@ -356,6 +369,11 @@ class LSUexe() extends Module{
   io.fence_end:=VecInit(shiftBoard.map(x=>x.empty)).asUInt()
   io.lsu_req.ready:=Mux(shiftBoard(io.lsu_req.bits.ctrl.wid).full,false.B,InputFIFO.io.enq.ready)
   InputFIFO.io.enq.valid:=Mux(shiftBoard(io.lsu_req.bits.ctrl.wid).full,false.B,io.lsu_req.valid)
+
+  io.csr_wid:=AddrCalc.io.csr_wid
+  AddrCalc.io.csr_tid:=io.csr_tid
+  AddrCalc.io.csr_pds:=io.csr_pds
+  AddrCalc.io.csr_numw:=io.csr_numw
 }
 
 class ShiftBoard(val depth:Int) extends Module{
