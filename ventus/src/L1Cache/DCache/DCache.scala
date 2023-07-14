@@ -236,20 +236,23 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memRsp_Q.io.enq <> io.memRsp
   // ******     l1_data_cache::memRsp_pipe0_cycle      ******
   //val memRsp_st1_ready = Wire(Bool())
+  // tagAllocateWrite fork hand shake
   val tagReqValidCtrl = RegInit(true.B)
-  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire) {
+  val tagReqReadyCtrl = RegInit(false.B)
+  val tagAllocateWriteReady = Wire(Bool())
+  val tagAllocateWriteReady_mod = Mux(tagReqReadyCtrl, true.B, tagAllocateWriteReady)
+  val tagAllocateWriteFire: Bool = TagAccess.io.allocateWrite.valid && tagAllocateWriteReady_mod
+  when(tagAllocateWriteFire && !memRsp_Q.io.deq.fire) {
     tagReqValidCtrl := false.B
   }.elsewhen(!tagReqValidCtrl && memRsp_Q.io.deq.fire) {
     tagReqValidCtrl := true.B
   }
-  val tagReqReadyCtrl = RegInit(false.B)
-  when(TagAccess.io.allocateWrite.fire && !memRsp_Q.io.deq.fire) {
+  when(tagAllocateWriteFire && !memRsp_Q.io.deq.fire) {
     tagReqReadyCtrl := true.B
   }.elsewhen(tagReqReadyCtrl && memRsp_Q.io.deq.fire) {
     tagReqReadyCtrl := false.B
   }
-  val tagAllocateWriteReady = Wire(Bool())
-  val tagAllocateWriteReady_mod = Mux(tagReqReadyCtrl, true.B, tagAllocateWriteReady)
+
   memRsp_Q.io.deq.ready := tagAllocateWriteReady_mod && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
 
   // ******     l1_data_cache::memRsp_pipe1_cycle      ******
@@ -295,6 +298,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     DataAccessMissRspSRAMWReq(i).data := memRsp_st1.d_data(i).asTypeOf(Vec(BytesOfWord, UInt(8.W)))
   }
 
+  //为了data SRAM的读出周期，这个寄存器搭配dirtyReplace_st2使用
   val dirtyReplace_st1 = Wire(new DCacheMemReq)
   dirtyReplace_st1.a_opcode := 0.U//PutFullData
   dirtyReplace_st1.a_param := 0.U//regular write
@@ -335,6 +339,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
   TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
+  TagAccess.io.allocateWriteTagSRAMWValid_st1 := RegNext(TagAccess.io.allocateWrite.valid) && tagAllocateWriteReady
 
 
   //only on subword miss
