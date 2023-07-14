@@ -40,7 +40,7 @@ class branch_join_stack(val depth:Int) extends Module{
   is_pop := stack_mem(rd_ptr).reconPC === io.PCexecute // when TOS reconvergence PC = executing PC, can pop the entry
   io.jump := is_pop && io.pop                          // else when they don't match, do nothing
 
-  wr_ptr_add1 := wr_ptr + 1
+  wr_ptr_add1 := wr_ptr + 1.U
   when(io.push){
     rd_ptr := wr_ptr + 1.U
     wr_ptr := wr_ptr + 2.U
@@ -62,10 +62,14 @@ class branch_join(val depth_stack: Int) extends Module{
   val io = IO(new Bundle() {
     val branch_ctl = Flipped(Decoupled(new simtExeData()))
     val if_mask = Flipped(Decoupled(new vec_alu_bus()))
+    val pc_reconv = Flipped(Decoupled(UInt(xLen.W)))
     val input_wid = Input(UInt(depth_warp.W))
     val out_mask = Output(UInt(num_thread.W))
     val complete = Valid(UInt(depth_warp.W))
     val fetch_ctl = Decoupled(new BranchCtrl())
+    val CurSig = Output(UInt(sig_length.W))
+    val PrevSig = Output(UInt(sig_length.W))
+    val missTableTrigger = Output(Bool())
   })
   val opcode = Wire(UInt(1.W))
   val warp_id = Wire(UInt(depth_warp.W))
@@ -75,11 +79,13 @@ class branch_join(val depth_stack: Int) extends Module{
 
   val branch_ctl_buf = Queue(io.branch_ctl, 1, flow = true)
   val if_mask_buf = Queue(io.if_mask, 0)
+  val PC_reconv_buf = Queue(io.pc_reconv, 0)
 
   val fetch_ctl_buf = Module(new Queue(new BranchCtrl, 1, flow = true))
 
   val thread_masks = RegInit(VecInit(Seq.fill(num_warp)(~0.U(num_thread.W))))
-  val if_mask = WireInit(~0.U(num_thread.W))
+  val if_mask = Wire(UInt(num_thread.W))
+  // val if_mask = WireInit(~0.U(num_thread.W))
   val else_mask = WireInit(0.U(num_thread.W))
   val ifOnly = Wire(Bool())
   val elseOnly = Wire(Bool())
@@ -103,10 +109,10 @@ class branch_join(val depth_stack: Int) extends Module{
   var x = 0
   opcode := branch_ctl_buf.bits.opcode
   PC_branch := branch_ctl_buf.bits.PC_branch
-  PC_reconv := branch_ctl_buf.bits.PC_reconv
   PC_execute := branch_ctl_buf.bits.PC_execute
-
+  warp_id  := branch_ctl_buf.bits.wid
   if_mask_buf.ready := fetch_ctl_buf.io.enq.ready //true.B//if_mask_buf.valid
+  PC_reconv_buf.ready := fetch_ctl_buf.io.enq.ready
   io.complete.valid := (if_mask_buf.fire() & opcode === 0.U & branch_ctl_buf.valid & takeif)
 
   io.complete.bits := branch_ctl_buf.bits.wid
@@ -123,6 +129,7 @@ class branch_join(val depth_stack: Int) extends Module{
     branch_ctl_buf.ready := false.B
   }
 
+  PC_reconv := PC_reconv_buf.bits
   if_mask := if_mask_buf.bits.if_mask & branch_ctl_buf.bits.mask_init
   else_mask := (~if_mask_buf.bits.if_mask).asUInt() & branch_ctl_buf.bits.mask_init
   ifCnt := PopCount(if_mask)
@@ -156,18 +163,11 @@ class branch_join(val depth_stack: Int) extends Module{
   popPC  := bjPC(warp_id)
   popMask := bjmask(warp_id)
 
-  if (SPIKE_OUTPUT) {
-    fetch_ctl.spike_info.get := branch_ctl_buf.bits.spike_info.get
-    when(io.complete.valid /*&&io.complete.bits===wid_to_check.U*/ && !io.branch_ctl.fire) {
-      printf(p"warp${Decimal(io.complete.bits)} 0x00000000${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
-      printf(p"  ")
-      if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
-      printf(p"\n")
-    }
-  }
+
   //******  output fetch control  ********
   //issue fetch request when: 1/ branch happen and take else path  2/ join happen and jump indeed happen
   val fetch_ctl = Wire(new BranchCtrl)
+
   val fetch_ctl_valid = Wire(Bool())
   fetch_ctl.wid := 0.U
   fetch_ctl.new_pc := 0.U
@@ -184,7 +184,15 @@ class branch_join(val depth_stack: Int) extends Module{
   fetch_ctl_buf.io.enq.bits := fetch_ctl
   fetch_ctl_buf.io.enq.valid := fetch_ctl_valid
   io.fetch_ctl <> fetch_ctl_buf.io.deq
-
+  if (SPIKE_OUTPUT) {
+    fetch_ctl.spike_info.get := branch_ctl_buf.bits.spike_info.get
+    when(io.complete.valid /*&&io.complete.bits===wid_to_check.U*/ && !io.branch_ctl.fire) {
+      printf(p"warp${Decimal(io.complete.bits)} 0x00000000${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p"  ")
+      if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
+      printf(p"\n")
+    }
+  }
   //***** thread mask register control******
   //when branch indeed happened, put executing mask into corresponding register
   //when join indeed happened, put new mask into corresponding register
@@ -200,4 +208,8 @@ class branch_join(val depth_stack: Int) extends Module{
     thread_masks(warp_id) := popMask
   }
   io.out_mask := thread_masks(io.input_wid)
+  // prefetch invalidate
+  io.CurSig := 0.U
+  io.PrevSig := 0.U
+  io.missTableTrigger := false.B
 }

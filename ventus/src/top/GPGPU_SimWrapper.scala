@@ -46,9 +46,10 @@ class GPGPU_SimWrapper() extends Module{
       l2cache_NSets,
       l2cache_NWays,
       blockBytes = (l2cache_BlockWords << 2),
-      beatBytes = (l2cache_BlockWords << 2)
+      beatBytes = (l2cache_BlockWords << 2),
+      l2cs = num_l2cache
     ),
-    InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm),
+    InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm,num_sm_in_cluster,num_cluster),
     false
   )
 

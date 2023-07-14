@@ -39,6 +39,7 @@ class CtrlSigs extends Bundle {
   val mul = Bool()
   val tc = Bool()
   val disable_mask = Bool()
+  val custom_signal_0 = Bool()
   val mem_cmd = UInt(2.W)
   val mop = UInt(2.W)
   val reg_idx1 = UInt((regidx_width + regext_width).W) // 8.W

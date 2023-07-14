@@ -65,6 +65,8 @@ class Issue extends Module{
   io.out_LSU.bits:=inputBuf.bits
   io.out_TC.bits:=inputBuf.bits
   io.out_SIMT.bits.PC_branch:=inputBuf.bits.in3(0)
+  io.out_SIMT.bits.PC_execute := inputBuf.bits.ctrl.pc
+  //io.out_SIMT.bits.PC_reconv := inputBuf.bits.in1(0)
   io.out_SIMT.bits.wid:=inputBuf.bits.ctrl.wid
   io.out_SIMT.bits.opcode:=inputBuf.bits.ctrl.simt_stack_op
   io.out_SIMT.bits.mask_init:=inputBuf.bits.mask.asUInt

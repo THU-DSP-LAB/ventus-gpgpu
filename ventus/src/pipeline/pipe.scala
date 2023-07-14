@@ -74,12 +74,17 @@ class pipe extends Module{
     })
     io.deq <> io.enq
   })
-  val simt_stack=Module(new SIMT_STACK(num_thread))
+  val simt_stack=Module(new branch_join(num_thread))
   val branch_back=Module(new Branch_back)
   val csrfile=Module(new CSRexe())
 
   io.externalFlushPipe.valid:=warp_sche.io.flush.valid|warp_sche.io.flushCache.valid
   io.externalFlushPipe.bits:=Mux(warp_sche.io.flush.valid,warp_sche.io.flush.bits,warp_sche.io.flushCache.bits)
+
+  csrfile.io.lsu_wid:=lsu.io.csr_wid
+  lsu.io.csr_pds:=csrfile.io.lsu_pds
+  lsu.io.csr_tid:=csrfile.io.lsu_tid
+  lsu.io.csr_numw:=csrfile.io.lsu_numw
 
   warp_sche.io.pc_reset:=io.pc_reset
   warp_sche.io.branch<>branch_back.io.out
@@ -189,6 +194,7 @@ class pipe extends Module{
   operand_collector.io.writeScalarCtrl<>wb.io.out_x
 
   simt_stack.io.input_wid:=operand_collector.io.out.bits.control.wid//ibuffer2issue.io.out.bits.wid
+  csrfile.io.simt_wid := operand_collector.io.out.bits.control.wid // todo check this
 
   when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
@@ -260,6 +266,8 @@ class pipe extends Module{
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
+ // simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
+  simt_stack.io.pc_reconv.valid := true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 

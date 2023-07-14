@@ -103,7 +103,7 @@ class simtExeData extends Bundle{
   val opcode  = UInt(1.W)
   val wid     = UInt(depth_warp.W)
   val PC_branch = UInt(32.W)
-  val PC_reconv = UInt(32.W)
+  //val PC_reconv = UInt(32.W)
   val PC_execute = UInt(32.W)
   val mask_init = UInt(num_thread.W)
   val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
