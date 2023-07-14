@@ -204,7 +204,9 @@ val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
 for(i<- 0 until params.cache.sets){
   replacer_array(i):=Mux(ren1&& i.asUInt===set ,1.U+replacer_array(i),replacer_array(i))
 }
-  val victimWay = replacer_array(set)
+  val victim_LFSR =LFSR64(ren1)
+
+  val victimWay = victim_LFSR(params.wayBits-1,0)//replacer_array(set)
 
   val setQuash_1 = wen && io.write.bits.set === io.read.bits.set //表示write到上次读出来的set
   val setQuash=wen1 && io.write.bits.set === set
