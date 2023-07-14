@@ -309,7 +309,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(true.B))
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
 
-  when(memRsp_Q.io.deq.fire){
+  when(memRsp_Q.io.deq.valid){
     memRsp_st1 := memRsp_Q_st0
   }
   //val memRspData_st1 = Wire(Vec(BlockWords,UInt(WordLength.W)))
