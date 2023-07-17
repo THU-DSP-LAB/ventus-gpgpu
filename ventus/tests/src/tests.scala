@@ -77,10 +77,10 @@ class test_tb extends AnyFreeSpec with ChiselScalatestTester{
 }
 
 class DCache_RRRRmiss_same extends AnyFreeSpec with ChiselScalatestTester{
-  //implicit val p = (new MyConfig).toInstance
-  "DCache_RRRRmiss_same" in {
+  val className: String = this.getClass.getSimpleName
+  className in {
     test(new DCacheWraper).withAnnotations(Seq(WriteVcdAnnotation)){ DUT =>
-      println("****** L1Cache.DCache RRRRmiss_same ******")
+      println(s"****** L1Cache.DCache $className ******")
       //println("wordOffsetBits = ",DUT.DCache.WordOffsetBits)
       println("blockOffsetBits = "+DUT.DCache.BlockOffsetBits)
       println("SetIdxBits = "+DUT.DCache.SetIdxBits)
@@ -98,7 +98,10 @@ class DCache_RRRRmiss_same extends AnyFreeSpec with ChiselScalatestTester{
       DUT.reset.poke(false.B)
       DUT.clock.step(5)
 
-      val filename = "ventus/txt/DCache/RRRRmiss_same.txt"
+      val fieldsOfClassName = className.indexOf('_')
+      //移除tb类名中的DCache_前缀
+      val testName = if(fieldsOfClassName >= 0) className.substring(fieldsOfClassName + 1) else className
+      val filename = s"ventus/txt/DCache/$testName.txt"
       val file = Source.fromFile(filename)
       val fileLines = file.getLines()
 
