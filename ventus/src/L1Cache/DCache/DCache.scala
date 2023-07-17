@@ -284,13 +284,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
 
   val missRspSetIdx_st1 = memRsp_st1.d_source(SetIdxBits-1,0)
-  val dataReplaceReadValid = TagAccess.io.allocateWrite.valid &&
+  val dataReplaceReadValid = RegNext(TagAccess.io.allocateWrite.valid) &&
     tagReplaceStatus === false.B &&
     TagAccess.io.needReplace.get
   val DataAccessReplaceReadSRAMRReq = Wire(Vec(BlockWords, new SRAMBundleA(NSets * NWays)))
   DataAccessReplaceReadSRAMRReq.foreach(_.setIdx := Cat(missRspSetIdx_st1,TagAccess.io.waymaskReplacement_st1))
 
-  val dataFillVaild = TagAccess.io.allocateWrite.valid &&
+  val dataFillVaild = RegNext(TagAccess.io.allocateWrite.valid) &&
     tagReplaceStatus === false.B &&
     !TagAccess.io.needReplace.get//This place diff from dataReplaceReadValid
   val DataAccessMissRspSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets * NWays, BytesOfWord)))
