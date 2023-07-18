@@ -205,18 +205,19 @@ class pipe extends Module{
 
   //输出所有write mem的操作
   //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
-  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
-    when(exe_data.io.deq.bits.ctrl.isvec){
-      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} inst 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} writedata v ")
-      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
-      printf(p"mask ")
-      exe_data.io.deq.bits.mask.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
-    }.otherwise{
-      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} inst 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} writedata x ")
-      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0).asUInt)} ")
-    }
-    printf(p"at ${Hexadecimal(exe_data.io.deq.bits.in1(0))} ${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
-  }
+//  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
+//    when(exe_data.io.deq.bits.ctrl.isvec){
+//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
+//      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
+//      printf(p"mask ${Binary(exe_data.io.deq.bits.mask.asUInt)} @")
+//      (exe_data.io.deq.bits.in1 zip exe_data.io.deq.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
+//      printf("\n")
+//    }.otherwise{
+//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w x${exe_data.io.deq.bits.ctrl.reg_idxw} ")
+//      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0))} ")
+//      printf(p"@ ${Hexadecimal(exe_data.io.deq.bits.in1(0))}+${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
+//    }
+//  }
   //输出所有发射的指令
   //when( exe_data.io.deq.fire()){
   //  printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
