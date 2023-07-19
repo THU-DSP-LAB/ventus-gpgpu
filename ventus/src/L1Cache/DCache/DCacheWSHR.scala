@@ -22,7 +22,7 @@ class DCacheWSHR(Depth:Int) extends Module{
   assert(!(io.pushReq.valid && io.popReq.valid),"WSHR cant pop and push in same cycle")
 
   val blockAddrEntries = RegInit(VecInit(Seq.fill(Depth)(0.U((dcache_SetIdxBits+dcache_TagBits).W))))
-  val valid = RegInit(VecInit(Seq.fill(Depth)(false.B)))
+  val valid: Vec[Bool] = RegInit(VecInit(Seq.fill(Depth)(false.B)))
   io.empty := !valid.reduceTree(_|_)
 
   //following circuit are same to L1TagAccess.scala tagChecker
@@ -35,7 +35,7 @@ class DCacheWSHR(Depth:Int) extends Module{
   //pushReq.ready := !full
   io.pushReq.ready := !valid.reduceTree(_ & _)
 
-  val nextEntryIdx = valid.indexWhere(_ === false.B)
+  val nextEntryIdx = valid.indexWhere((x: Bool) => x === false.B)
   io.pushedIdx := nextEntryIdx
   when(io.pushReq.fire){
     blockAddrEntries(nextEntryIdx) := io.pushReq.bits.blockAddr
