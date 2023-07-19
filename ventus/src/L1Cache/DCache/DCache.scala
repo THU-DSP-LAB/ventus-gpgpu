@@ -183,7 +183,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val readMissReq = Wire(new WshrMemReq)
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
-  writeMissReq.a_source := Cat("d0".U, coreReq_st1.instrId)
+  writeMissReq.a_source := DontCare//wait for WSHR
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   writeMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   writeMissReq.a_data := coreReq_st1.data
@@ -262,7 +262,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     tagReqReadyCtrl := false.B
   }
 
-  memRsp_Q.io.deq.ready := tagAllocateWriteReady_mod && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready
+  val memRspIsWrite = memRsp_Q.io.deq.bits.d_opcode === 0.U//AccessAck
+  val memRspIsRead = memRsp_Q.io.deq.bits.d_opcode === 1.U//AccessAckData
+  memRsp_Q.io.deq.ready := memRspIsWrite ||
+    (memRspIsRead && tagAllocateWriteReady_mod && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready)
+
+  WshrAccess.io.popReq.valid := memRsp_Q.io.deq.valid && memRspIsWrite
+  WshrAccess.io.popReq.bits := memRsp_Q.io.deq.bits.d_source(SetIdxBits+log2Up(NWshrEntry)-1,SetIdxBits)
 
   // ******     l1_data_cache::memRsp_pipe1_cycle      ******
   val memRsp_st1 = Reg(new DCacheMemRsp)
@@ -317,7 +323,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
   dirtyReplace_st1.hasCoreRsp := false.B
 
-  when(memRsp_Q.io.deq.valid){
+  when(memRsp_Q.io.deq.valid && memRspIsRead){
     memRsp_st1 := memRsp_Q_st0
   }
   //val memRspData_st1 = Wire(Vec(BlockWords,UInt(WordLength.W)))
@@ -330,11 +336,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //memRspData_st2 := RegEnable(memRspData_st1,memRsp_Q.io.deq.fire() || (memRsp_Q.io.deq.valid && BankConfArb.io.bankConflict))
 
   // ******     missRspIn      ******
-  MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid && coreRsp_Q.io.enq.ready// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
+  MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid && memRspIsRead && coreRsp_Q.io.enq.ready// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
   MshrAccess.io.missRspIn.bits.instrId := memRsp_Q.io.deq.bits.d_source(SetIdxBits+log2Up(NMshrEntry)-1,SetIdxBits)
 
   // ******      tag write      ******
-  TagAccess.io.allocateWrite.valid := Mux(tagReqValidCtrl,memRsp_Q.io.deq.valid,false.B)
+  TagAccess.io.allocateWrite.valid := Mux(tagReqValidCtrl,memRsp_Q.io.deq.valid && memRspIsRead,false.B)
   TagAccess.io.allocateWrite.bits.setIdx := memRsp_Q.io.deq.bits.d_source(SetIdxBits-1,0)
   //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
 
@@ -387,7 +393,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       0.U(1.W)
     }*/
     //DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCrsCore2Mem.io.DataOut)
-    DataAccess.io.w.req.bits := Mux(memRsp_Q.io.deq.valid,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))
+    DataAccess.io.w.req.bits := Mux(memRsp_Q.io.deq.valid && memRspIsRead,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))
     /*DataAccess.io.w.req.bits.data := Mux(missRspFromMshr_st1,
       memRsp_st1.d_data(i),//READ miss resp
       coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)))
@@ -457,7 +463,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreRsp_st2_valid
-  coreRsp_Q.io.enq.bits := Mux(coreRsp_st2_valid_from_memRsp,coreRspFromMemReq,coreRsp_st2)
+  coreRsp_Q.io.enq.bits := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq,coreRsp_st2)
   when(readHit_st2){
     coreRsp_Q.io.enq.bits.data := DataAccessReadSRAMRRsp
   }
@@ -492,6 +498,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   when(wshrPass && memReq_Q.io.deq.valid) {
     memReq_st3 := memReq_Q.io.deq.bits
+  }
+
+  assert(NMshrEntry >= NWshrEntry,"MshrEntry should be more than NWshrEntry")
+  val memReqSetIdx_st2 = memReq_Q.io.deq.bits.a_addr(WordLength - TagBits -1,WordLength - TagBits - SetIdxBits)
+  when(memReqIsWrite_st3){
+      memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
+      //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
   }
 
   coreRspFromMemReq.data := DontCare
