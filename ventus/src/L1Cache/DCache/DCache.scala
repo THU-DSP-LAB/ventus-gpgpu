@@ -76,6 +76,10 @@ class genControl extends Module{
   }
 }
 
+class WshrMemReq extends DCacheMemReq{
+  val hasCoreRsp = Bool()
+}
+
 class DataCache(implicit p: Parameters) extends DCacheModule{
   val io = IO(new Bundle{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
@@ -90,6 +94,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
   //val DataCrsCore2Mem = Module(new DataCrossbar(num_thread,BlockWords))
   //val DataCrsMem2Core = Module(new DataCrossbar(BlockWords,num_thread))
+  val WshrAccess = Module(new DCacheWSHR(Depth = NWshrEntry))
 
   // ******     queues     ******
   val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 1,flow=false,pipe=true))
@@ -102,8 +107,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //flow will make predecessor read hit conflict with successor memRsp
   val memRsp_Q_st0 = memRsp_Q.io.deq.bits
 
-  val memReq_Q = Module(new Queue(new DCacheMemReq,entries = 8,flow=false,pipe=false))
-  val MemReqArb = Module(new Arbiter(new DCacheMemReq, 2))
+  val memReq_Q = Module(new Queue(new WshrMemReq,entries = 8,flow=false,pipe=false))
+  val MemReqArb = Module(new Arbiter(new WshrMemReq, 2))
 
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid
@@ -173,15 +178,16 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missReq.bits.targetInfo := mshrMissReqTI.asUInt
 
   // ******      memReq_Q enq      ******
-  val missMemReq = Wire(new DCacheMemReq) //writeMiss_st1 || readMiss_st1
-  val writeMissReq = Wire(new DCacheMemReq)
-  val readMissReq = Wire(new DCacheMemReq)
+  val missMemReq = Wire(new WshrMemReq) //writeMiss_st1 || readMiss_st1
+  val writeMissReq = Wire(new WshrMemReq)
+  val readMissReq = Wire(new WshrMemReq)
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
   writeMissReq.a_source := Cat("d0".U, coreReq_st1.instrId)
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   writeMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   writeMissReq.a_data := coreReq_st1.data
+  writeMissReq.hasCoreRsp := true.B
 
   readMissReq.a_opcode := 4.U //Get
   readMissReq.a_param := 0.U //regular read
@@ -189,6 +195,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
+  readMissReq.hasCoreRsp := false.B
 
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
 
@@ -301,13 +308,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
 
   //为了data SRAM的读出周期，这个寄存器搭配dirtyReplace_st2使用
-  val dirtyReplace_st1 = Wire(new DCacheMemReq)
+  val dirtyReplace_st1 = Wire(new WshrMemReq)
   dirtyReplace_st1.a_opcode := 0.U//PutFullData
   dirtyReplace_st1.a_param := 0.U//regular write
   dirtyReplace_st1.a_source := DontCare//wait for WSHR in next next cycle
   dirtyReplace_st1.a_addr := TagAccess.io.a_addrReplacement_st1.get
   dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(true.B))
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
+  dirtyReplace_st1.hasCoreRsp := false.B
 
   when(memRsp_Q.io.deq.valid){
     memRsp_st1 := memRsp_Q_st0
@@ -423,7 +431,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
     coreRsp_st2.isWrite := false.B
 
-  }//TODO add memReq st2
+  }
   when((cacheHit_st1 && RegNext(io.coreReq.fire)) || (secondaryFullReturn && MshrAccess.io.missRspOut.valid)){
     coreRsp_st2.instrId := coreReq_st1.instrId
     coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
@@ -435,16 +443,21 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //assert(!(coreReq_st1_valid && missRspFromMshr_st1),s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
   val coreRsp_st2_valid_from_coreReq = Wire(Bool())
   val coreRsp_st2_valid_from_memRsp = Wire(Bool())
+  val coreRsp_st2_valid_from_memReq = Wire(Bool())
+
+  val coreRspFromMemReq = Wire(new DCacheCoreRsp)
 
   coreRsp_st2_valid_from_coreReq := RegNext(coreReq_st1_valid &&
     (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
   coreRsp_st2_valid_from_memRsp := RegNext(MshrAccess.io.missRspOut.valid)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
-  coreRsp_st2_valid := coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memRsp
+  assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memReq), "cRsp from cReq and mReq conflict")
+  assert (!(coreRsp_st2_valid_from_memReq && coreRsp_st2_valid_from_memRsp), "cRsp from mRsp and mReq conflict")
+  coreRsp_st2_valid := coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_memReq
 
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreRsp_st2_valid
-  coreRsp_Q.io.enq.bits := coreRsp_st2
+  coreRsp_Q.io.enq.bits := Mux(coreRsp_st2_valid_from_memRsp,coreRspFromMemReq,coreRsp_st2)
   when(readHit_st2){
     coreRsp_Q.io.enq.bits.data := DataAccessReadSRAMRRsp
   }
@@ -461,7 +474,39 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MemReqArb.io.in(1).valid := coreReq_st1_valid && (writeMiss_st1 || (readMiss_st1 && mshrProbeStatus === 0.U))
   MemReqArb.io.in(1).bits := missMemReq
 
-  io.memReq <> memReq_Q.io.deq
+  // ******      l1_data_cache::memReq_pipe2_cycle      ******
+  val memReq_st3 = Reg(new DCacheMemReq)
+  val a_op_st3 = memReq_Q.io.deq.bits.a_opcode
+  val memReqIsWrite_st3 = (a_op_st3 === TLAOp_PutFull) || ((a_op_st3 === TLAOp_PutPart) && memReq_Q.io.deq.bits.a_param === 0.U)
+  val memReqIsRead_st3 = (a_op_st3 === TLAOp_Get) && memReq_Q.io.deq.bits.a_param === 0.U
+
+  WshrAccess.io.pushReq.bits.blockAddr := memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
+  val wshrProtect = WshrAccess.io.conflict && (memReqIsWrite_st3 || memReqIsRead_st3)
+  val cRspBlockedOrWshrFull = ((!coreRsp_Q.io.enq.ready || memReq_Q.io.deq.bits.hasCoreRsp)
+    || !WshrAccess.io.pushReq.ready) && memReqIsWrite_st3
+  val wshrPass = !wshrProtect && !cRspBlockedOrWshrFull
+  WshrAccess.io.pushReq.valid := wshrPass && memReq_Q.io.deq.valid && memReqIsWrite_st3
+  coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp
+
+  memReq_Q.io.deq.ready := wshrPass && io.memReq.ready
+
+  when(wshrPass && memReq_Q.io.deq.valid) {
+    memReq_st3 := memReq_Q.io.deq.bits
+  }
+
+  coreRspFromMemReq.data := DontCare
+  coreRspFromMemReq.isWrite := true.B
+  //st指令的regIdx对SM流水线提交级无意义，且memReq_Q没有传输该数据的通道
+  coreRspFromMemReq.instrId := 99.U
+  coreRspFromMemReq.activeMask := VecInit(Seq.fill(NLanes)(true.B))
+  // memReq(st3)
+  io.memReq.bits := memReq_st3
+
+  val memReq_valid = RegInit(false.B)
+  when(memReq_Q.io.deq.fire ^ io.memReq.fire){
+    memReq_valid := memReq_Q.io.deq.fire
+  }
+  io.memReq.valid := memReq_valid
 }
 
 /** coreReq hit场景中DataAccess以word为粒度的SRAM bank使能信号
