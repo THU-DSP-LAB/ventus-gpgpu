@@ -17,7 +17,7 @@ class DCacheWSHR(Depth:Int) extends Module{
     //for invOrFlu
     val empty = Output(Bool())
     //pop
-    val popReq = ValidIO(UInt(log2Up(Depth).W))
+    val popReq = Flipped(ValidIO(UInt(log2Up(Depth).W)))
   })
   assert(!(io.pushReq.valid && io.popReq.valid),"WSHR cant pop and push in same cycle")
 
