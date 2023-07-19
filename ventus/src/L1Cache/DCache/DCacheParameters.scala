@@ -24,8 +24,7 @@ case class DCacheParameters
   //BlockWords: Int = dcache_BlockWords,
   NMshrEntry: Int = dcache_MshrEntry,
   NMshrSubEntry: Int = dcache_MshrSubEntry,
-  //NBanks: Int = 2,
-  WdbDepth: Int = 4,
+  NWshrEntry: Int = dcache_wshr_entry,
 )
 
 trait HasDCacheParameter extends HasL1CacheParameters {
@@ -38,18 +37,11 @@ trait HasDCacheParameter extends HasL1CacheParameters {
   //override def BlockWords: Int = BlockWords
   override def NMshrEntry: Int = dcacheParams.NMshrEntry
   override def NMshrSubEntry: Int = dcacheParams.NMshrSubEntry
-  def NBanks = NLanes//TODO after support, decouple 2 params
-  def WdbDepth: Int = dcacheParams.WdbDepth
+  def NWshrEntry: Int = dcacheParams.NWshrEntry
+  def NBanks = NLanes
   //                                       |   blockOffset  |
   //                                     bankOffset       wordOffset
   // |32      tag       22|21   setIdx   11|10 9|8 bankIdx 2|1 0|
-  require(BlockWords>=NBanks,"# of Banks can't be smaller than # of words in a block")
-  //thus BankOffsetBits is smaller than or equal to WordOffsetBits
-  def BankIdxBits = log2Up(NBanks)
-  def get_bankIdx(addr: UInt)= addr(BankIdxBits + WordOffsetBits-1,WordOffsetBits)
-
-  def BankOffsetBits = BlockOffsetBits - BankIdxBits
-  def BankWords = BlockWords/NBanks
 
   //TL params
   def TLAOp_Get: UInt = 4.U(3.W)
