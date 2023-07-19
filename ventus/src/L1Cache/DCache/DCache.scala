@@ -463,7 +463,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
 
   // ******      m_memReq_Q.m_Q.push_back      ******
-  val dirtyReplace_st2 = Reg(new DCacheMemReq)
+  val dirtyReplace_st2 = Reg(new WshrMemReq)
   dirtyReplace_st2 := dirtyReplace_st1
   dirtyReplace_st1.a_data := DataAccessReadSRAMRRsp
 
