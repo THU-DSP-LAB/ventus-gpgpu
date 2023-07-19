@@ -262,8 +262,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     tagReqReadyCtrl := false.B
   }
 
-  val memRspIsWrite = memRsp_Q.io.deq.bits.d_opcode === 0.U//AccessAck
-  val memRspIsRead = memRsp_Q.io.deq.bits.d_opcode === 1.U//AccessAckData
+  val memRspIsWrite: Bool = memRsp_Q.io.deq.bits.d_opcode === 0.U//AccessAck
+  val memRspIsRead: Bool = memRsp_Q.io.deq.bits.d_opcode === 1.U//AccessAckData
   memRsp_Q.io.deq.ready := memRspIsWrite ||
     (memRspIsRead && tagAllocateWriteReady_mod && MshrAccess.io.missRspIn.ready && coreRsp_Q.io.enq.ready)
 
