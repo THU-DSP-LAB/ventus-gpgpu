@@ -26,6 +26,8 @@ class MetaData{
   var num_buffer: BigInt = 1
   var buffer_base = new Array[BigInt](0)
   var buffer_size = new Array[BigInt](0)
+  var lds_mem_base = new Array[BigInt](0)
+  var lds_mem_size = new Array[BigInt](0)
 
   def generateHostReq(i: BigInt, j: BigInt, k: BigInt) = {
     val blockID = (i * kernel_size(1) + j) * kernel_size(2) + k
@@ -72,13 +74,31 @@ object MetaData{
       pdsBaseAddr = parseHex(buf, 64)
       num_buffer = parseHex(buf, 64)
       for( i <- 0 until num_buffer.toInt){
-        buffer_base = buffer_base :+ parseHex(buf, 64)
+        val parsed = parseHex(buf, 64)
+        if(parsed < BigInt("80000000", 16) && parsed >= BigInt("70000000", 16))
+          lds_mem_base = lds_mem_base :+ parsed
+        else
+          buffer_base = buffer_base :+ parsed
       }
       for (i <- 0 until num_buffer.toInt) {
-        buffer_size = buffer_size :+ parseHex(buf, 64)
+        val parsed = parseHex(buf, 64)
+        if(i < lds_mem_base.length)
+          lds_mem_size = lds_mem_size :+ parsed
+        else
+          buffer_size = buffer_size :+ parsed
       }
     }
   }
+}
+
+class DynamicMem(baseAddr: BigInt){
+  val stepSize = 4096;
+  class Page(startAddr: BigInt) {
+    val dat = Array[Byte](4096)
+  }
+  var pages = Array[Page](0)
+
+
 }
 
 class MemBox(metafile: String, datafile: String){
@@ -91,6 +111,11 @@ class MemBox(metafile: String, datafile: String){
   }
   val mem_size = metaData.buffer_size
   val mem_base = mem_size.indices.toArray.map(mem_size.slice(0, _).sum)
+
+  var lds_memory = new Array[Byte](0)
+  for( i <- metaData.lds_mem_base.indices){
+
+  }
   /*
   Word Map:
   0x00    0x04030201
