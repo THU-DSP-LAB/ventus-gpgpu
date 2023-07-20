@@ -33,7 +33,7 @@ object CSR{
   val knl_base = 0x803.U(12.W)
   val wg_id = 0x804.U(12.W)
   val wf_tag_dispatch =    0x805.U(12.W) //warp id(
-  val lds_base_dispatch =  0x806.U(12.W) //lds_baseaddr
+  val lds_base_dispatch =  0x806.U(12.W) //todo lds_baseaddr
   val pds_baseaddr = 0x807.U(12.W) //pds_baseaddr
   val wg_id_x = 0x808.U(12.W)
   val wg_id_y = 0x809.U(12.W)
@@ -294,6 +294,7 @@ class CSRFile extends Module {
     sgpr_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_sgpr_base_dispatch
     vgpr_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_vgpr_base_dispatch
     wf_tag_dispatch :=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch
+    //todo fix lds_base_dispatch to a certain param
     lds_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_lds_base_dispatch
     pds_baseaddr:=io.CTA2csr.bits.CTAdata.dispatch2cu_pds_base_dispatch
     knl_base:=io.CTA2csr.bits.CTAdata.dispatch2cu_csr_knl_dispatch

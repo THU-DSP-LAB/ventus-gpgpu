@@ -148,6 +148,7 @@ case class InclusiveCacheParameters_lite(
 
   // If we are the first level cache, we do not need to support inner-BCE
   val op_bits = 3
+  val param_bits = 3
   val source_bits=log2Up(micro.num_warp)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
@@ -213,7 +214,7 @@ case class InclusiveCacheParameters_lite(
     val set = offset >> offsetBits
     val l2c = set >> setBits
     val tag = l2c >> l2cBits
-    (tag(tagBits-1, 0), l2c(l2cBits-1,0),set(setBits-1, 0), offset(offsetBits-1, 0))
+    (tag(tagBits-1, 0), if(l2cBits !=0) l2c(l2cBits-1,0) else 0.U,set(setBits-1, 0), offset(offsetBits-1, 0))
   }
 
   def widen(x: UInt, width: Int): UInt = {
@@ -223,7 +224,8 @@ case class InclusiveCacheParameters_lite(
   }
 
   def expandAddress(tag: UInt, l2c:UInt, set: UInt, offset: UInt): UInt = {
-    val base = Cat(widen(tag, tagBits), widen(l2c,l2cBits), widen(set, setBits), widen(offset, offsetBits))
+    val base = if(l2cBits != 0) Cat(widen(tag, tagBits), widen(l2c,l2cBits), widen(set, setBits), widen(offset, offsetBits))
+    else Cat(widen(tag, tagBits), widen(set, setBits), widen(offset, offsetBits))
     var bits = Array.fill(addressBits) { UInt(0, width=1) }
  //   addressMapping.zipWithIndex.foreach { case (a, i) => bits(a) = base(i,i) }
     base

@@ -64,7 +64,7 @@ class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
 
 class DCacheMemReq(implicit p: Parameters)extends DCacheBundle{
   val a_opcode = UInt(3.W)
-  //val a_param
+  val a_param = UInt(3.W)
   //val a_size
   val a_source = UInt(WIdBits.W)
   val a_addr = UInt(WordLength.W)

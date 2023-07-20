@@ -48,6 +48,9 @@ trait HasRVGParameters {
   def NSmInCluster = RVGParams.NSmInCluster
   def NCluster = RVGParams.NCluster
   def NL2Cache = RVGParams.NL2Cache
+
+  def NResTabEntry = 16
+  def NInfWriteEntry = 16
 }
 
 abstract class RVGBundle(implicit val p: Parameters) extends Bundle with HasRVGParameters

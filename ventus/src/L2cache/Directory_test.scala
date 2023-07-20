@@ -272,4 +272,6 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.last_flush :=Mux(flush_issue,RegNext(flushDone),false.B)
   io.result.bits.flush  := RegNext(flush_issue)
   io.result.bits.victim_tag:= ways(io.result.bits.way).tag
+  //todo what's the function of flush
+  io.result.bits.l2cidx := Mux(flush_issue,0.U,RegNext(io.read.bits.l2cidx))
 }
