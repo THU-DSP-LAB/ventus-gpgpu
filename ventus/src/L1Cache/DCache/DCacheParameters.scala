@@ -55,6 +55,19 @@ trait HasDCacheParameter extends HasL1CacheParameters {
   def TLAOp_Get: UInt = 4.U(3.W)
   def TLAOp_PutFull: UInt = 0.U(3.W)
   def TLAOp_PutPart: UInt = 1.U(3.W)
+  def TLAOp_Arith: UInt = 2.U(3.W)
+  def TLAOp_Logic: UInt = 3.U(3.W)
+
+  def TLAParam_ArithMin : UInt = 0.U(3.W)
+  def TLAParam_ArithMax : UInt = 1.U(3.W)
+  def TLAParam_ArithMinu : UInt = 2.U(3.W)
+  def TLAParam_ArithMaxu : UInt = 3.U(3.W)
+  def TLAParam_ArithAdd : UInt = 4.U(3.W)
+  def TLAParam_LogicXor : UInt = 0.U(3.W)
+  def TLAParam_LogicOr : UInt = 1.U(3.W)
+  def TLAParam_LogicAnd : UInt = 2.U(3.W)
+  def TLAParam_LogicSwap : UInt = 3.U(3.W)
+  def TLAParam_LRSC : UInt = 1.U(3.W)
 }
 abstract class DCacheBundle(implicit val p: Parameters) extends Bundle with HasDCacheParameter
 abstract class DCacheModule(implicit val p: Parameters) extends Module with HasDCacheParameter

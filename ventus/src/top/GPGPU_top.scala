@@ -209,6 +209,12 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
     cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
     l2cache(i).in_d.ready := cluster2l2Arb(i).memRspIn.ready
 
+    // todo: currently do not use flush and invalidate
+    l2cache(i).flush.bits := false.B
+    l2cache(i).invalidate.bits := false.B
+    l2cache(i).flush.valid := false.B
+    l2cache(i).invalidate.valid := false.B
+
     /*l2cache(i).in_a <> cluster2l2Arb(i).memReqOut
     l2cache(i).out_a <> io.out_a(i)
     l2cache(i).out_d <> io.out_d(i)
