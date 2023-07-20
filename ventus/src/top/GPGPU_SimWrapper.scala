@@ -46,9 +46,10 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
       l2cache_NSets,
       l2cache_NWays,
       blockBytes = (l2cache_BlockWords << 2),
-      beatBytes = (l2cache_BlockWords << 2)
+      beatBytes = (l2cache_BlockWords << 2),
+      l2cs = num_l2cache
     ),
-    InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm),
+    InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm,num_sm_in_cluster,num_cluster),
     false
   )
 
@@ -72,8 +73,8 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))
   val pipe_d = Module(new DecoupledPipe(new TLBundleD_lite(l2cache_params), 2))
   io.out_a <> pipe_a.io.deq
-  pipe_a.io.enq <> GPU.io.out_a
-  GPU.io.out_d <> pipe_d.io.deq
+  pipe_a.io.enq <> GPU.io.out_a(0)
+  GPU.io.out_d(0) <> pipe_d.io.deq
   pipe_d.io.enq <> io.out_d
 
   GPU.io.host_req <> io.host_req

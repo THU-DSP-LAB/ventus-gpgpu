@@ -14,3 +14,8 @@ out/
 
 # MacOS
 *.DS_Store
+
+# verilog generate
+GPGPU_top.v
+GPGPU_top.fir
+GPGPU_top.anno.json

@@ -39,6 +39,7 @@ class CtrlSigs extends Bundle {
   val mul = Bool()
   val tc = Bool()
   val disable_mask = Bool()
+  val custom_signal_0 = Bool()
   val mem_cmd = UInt(2.W)
   val mop = UInt(2.W)
   val reg_idx1 = UInt((regidx_width + regext_width).W) // 8.W
@@ -72,8 +73,8 @@ class scoreboardIO extends Bundle{
 }
 class ScoreboardUtil(n: Int,zero:Boolean=false)
 {
-  def set(en: Bool, addr: UInt): Unit = update(en, _next.asUInt | mask(en, addr))
-  def clear(en: Bool, addr: UInt): Unit = update(en, _next.asUInt & (~mask(en, addr)).asUInt)
+  def set(en: Bool, addr: UInt): Unit = update(en, _next.asUInt | mask(en, addr)) // set r(addr) = 1
+  def clear(en: Bool, addr: UInt): Unit = update(en, _next.asUInt & (~mask(en, addr)).asUInt) //clear r(addr) = 0
   def read(addr: UInt): Bool = r(addr)
   def readBypassed(addr: UInt): Bool = _next(addr)
   private val _r = RegInit(0.U(n.W))

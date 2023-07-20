@@ -70,6 +70,7 @@ class collectorUnit extends Module{
   val regIdx = Reg(Vec(4, UInt((regidx_width + regext_width).W)))
   val rsReg = RegInit(VecInit(Seq.fill(3)(VecInit(Seq.fill(num_thread)(0.U(xLen.W)))))) //op1, op2 and op3
   val mask = Reg(Vec(num_thread, Bool()))
+  val rsRead = Wire(Vec(num_thread,UInt(xLen.W)))
 
   val rsTypeWire = Wire(Vec(4, UInt(2.W)))
   val readyWire = Wire(Vec(4, Bool()))
@@ -267,14 +268,25 @@ class collectorUnit extends Module{
       ready.foreach(_ := false.B)
     }
   }
+  rsRead.foreach(_ := 0.U)
   for (i <- 0 until 4) {
     when(io.bankIn(i).fire) {
       when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
-        rsReg(0) := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsRead := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
           Array(
             A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
             A1_VRS1 -> io.bankIn(i).bits.data)
         )
+        when(io.control.bits.custom_signal_0){
+          rsReg(0).foreach( _:= rsRead(0) + imm.io.out)
+        }.otherwise{
+          rsReg(0) := rsRead
+        }
+        /*rsReg(0) := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
+          Array(
+            A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+            A1_VRS1 -> io.bankIn(i).bits.data)
+        )*/
         ready(0) := 1.U
       }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
         rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)),
