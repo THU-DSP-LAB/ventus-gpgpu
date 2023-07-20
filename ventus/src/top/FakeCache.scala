@@ -153,7 +153,7 @@ class FakeL2Cache(params: InclusiveCacheParameters_lite) extends L2cache.L2Cache
     when(io.out_d.fire){
       state := s_reply
       memRsp_save.viewAsSupertype(new TLBundleD_lite(params)) := io.out_d.bits
-      memRsp_save.address := io.in_a.bits.address
+      memRsp_save.address := memReq_save.address // io.in_a.bits.address
     }
   }.elsewhen(state === s_reply){
     when(io.in_d.fire){
