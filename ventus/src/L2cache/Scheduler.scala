@@ -146,7 +146,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
 
   val mshr_free = (~mshr_validOH).asUInt.orR()
   val mshr_empty = (~mshr_validOH).asUInt.andR.asBool
-  
+
   val request = Wire(Decoupled(new FullRequest(params)))
   request.valid :=(sinkA.io.req.valid)
   request.bits := sinkA.io.req.bits  
@@ -173,7 +173,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
 
 
 
-  
+
   val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   requests.io.valid(i)&&(m.io.status.tag === directory.io.result.bits.tag)&&(m.io.status.set ===directory.io.result.bits.set)&& (!directory.io.result.bits.hit)}.reverse)
   val alloc = !tagMatches.orR() 
 
@@ -201,6 +201,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
       m.io.allocate.bits.offset := directory.io.result.bits.offset
       m.io.allocate.bits.source:= directory.io.result.bits.source
       m.io.allocate.bits.flush := directory.io.result.bits.flush
+      m.io.allocate.bits.l2cidx := directory.io.result.bits.l2cidx
     }}
   }
 
@@ -235,6 +236,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
   sourceD.io.req.bits.from_mem:=Mux(!schedule.d.valid ,false.B,true.B)
   sourceD.io.req.bits.hit:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.hit,schedule.d.bits.hit)
   sourceD.io.req.bits.set:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.set,schedule.d.bits.set)
+  sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   sourceD.io.req.bits.tag:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,dir_result_buffer.io.deq.bits.victim_tag,dir_result_buffer.io.deq.bits.tag),schedule.d.bits.tag)
   sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,schedule.d.bits.mask)
   sourceD.io.req.bits.offset:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,0.U,dir_result_buffer.io.deq.bits.offset),schedule.d.bits.offset)

@@ -226,7 +226,7 @@ val mshr_wait_reg =RegInit(false.B)
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,AccessAck)
   io.d.bits.size    := s_final_req.size
   io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, io.bs_rdat.data,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况不需要
-  io.d.bits.address      := params.expandAddress(s_final_req.tag, s_final_req.set,s_final_req.offset)
+  io.d.bits.address      := params.expandAddress(s_final_req.tag,s_final_req.l2cidx, s_final_req.set,s_final_req.offset)
 ////将读出的数据返回给sourceA
 
 

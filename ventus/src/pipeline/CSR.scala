@@ -33,12 +33,13 @@ object CSR{
   val knl_base = 0x803.U(12.W)
   val wg_id = 0x804.U(12.W)
   val wf_tag_dispatch =    0x805.U(12.W) //warp id(
-  val lds_base_dispatch =  0x806.U(12.W) //lds_baseaddr
+  val lds_base_dispatch =  0x806.U(12.W) //todo lds_baseaddr
   val pds_baseaddr = 0x807.U(12.W) //pds_baseaddr
   val wg_id_x = 0x808.U(12.W)
   val wg_id_y = 0x809.U(12.W)
   val wg_id_z = 0x80a.U(12.W)
   val csr_print = 0x80b.U(12.W)
+  val rpc = 0x80c.U(12.W)
 
   // Vector csr address
   val vstart = 0x008.U(12.W)
@@ -93,6 +94,10 @@ class CSRFile extends Module {
     val CTA2csr = Flipped(ValidIO(new warpReqData))
     val sgpr_base = Output(UInt((SGPR_ID_WIDTH + 1).W))
     val vgpr_base = Output(UInt((VGPR_ID_WIDTH + 1).W))
+    val simt_rpc = Output(UInt(xLen.W))
+    val lsu_tid = Output(UInt(xLen.W))
+    val lsu_pds = Output(UInt(xLen.W))
+    val lsu_numw= Output(UInt(xLen.W))
   })
 
   // Machine Trap-Vector Base-Address Register (mtvec)
@@ -164,6 +169,7 @@ class CSRFile extends Module {
   val wg_id_y = RegInit(0.U(WG_SIZE_Y_WIDTH.W))
   val wg_id_z = RegInit(0.U(WG_SIZE_Z_WIDTH.W))
   val csr_print = RegInit(0.U(32.W))
+  val rpc=RegInit(0.U(32.W))
 
   val sgpr_base_dispatch = Reg(UInt((SGPR_ID_WIDTH + 1).W))
   val vgpr_base_dispatch = Reg(UInt((VGPR_ID_WIDTH + 1).W))
@@ -205,6 +211,8 @@ class CSRFile extends Module {
   wdata:=csr_rdata
   io.wb_wxd_rd:=wdata
 
+  io.simt_rpc:=rpc
+
   val wen=io.ctrl.csr.orR()&io.write
   val csr_wdata = MuxLookup(io.ctrl.csr, 0.U, Seq( CSR.W -> csr_input, CSR.S -> (csr_rdata | csr_input),  CSR.C -> (csr_rdata & (~csr_input).asUInt)))
 
@@ -233,14 +241,19 @@ class CSRFile extends Module {
     BitPat(CSR.wg_id_x)-> wg_id_x,
     BitPat(CSR.wg_id_y)-> wg_id_y,
     BitPat(CSR.wg_id_z)-> wg_id_z,
-    BitPat(CSR.csr_print)-> csr_print
+    BitPat(CSR.csr_print)-> csr_print,
+    BitPat(CSR.rpc)->rpc
   )
 
   csr_rdata := Lookup(csr_addr, 0.U(xLen.W), csrFile).asUInt
   val AVL=csr_input
 
     when(wen){
-      when(io.ctrl.isvec){
+      when(io.ctrl.custom_signal_0){
+        wdata:=csr_input
+        rpc:=csr_input
+      }
+      .elsewhen(io.ctrl.isvec){
         wdata:=Mux(AVL<VLMAX,AVL,VLMAX)
 //               Mux(AVL>(VLMAX<<1.U).asUInt(),VLMAX,AVL>>1.U))
       } .elsewhen (csr_addr === CSR.csr_print){
@@ -281,6 +294,7 @@ class CSRFile extends Module {
     sgpr_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_sgpr_base_dispatch
     vgpr_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_vgpr_base_dispatch
     wf_tag_dispatch :=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch
+    //todo fix lds_base_dispatch to a certain param
     lds_base_dispatch:=Cat("h70000000".U(31, LDS_ID_WIDTH + 1), io.CTA2csr.bits.CTAdata.dispatch2cu_lds_base_dispatch)
     pds_baseaddr:=io.CTA2csr.bits.CTAdata.dispatch2cu_pds_base_dispatch
     knl_base:=io.CTA2csr.bits.CTAdata.dispatch2cu_csr_knl_dispatch
@@ -291,6 +305,10 @@ class CSRFile extends Module {
 
     threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
   }
+  //todo check function of this signals
+  io.lsu_tid := 0.U
+  io.lsu_pds := 0.U
+  io.lsu_numw := 0.U
 }
 
 class CSRexe extends Module {
@@ -303,6 +321,12 @@ class CSRexe extends Module {
     val sgpr_base = Output(Vec(num_warp,UInt((SGPR_ID_WIDTH+1).W)))
     val vgpr_base = Output(Vec(num_warp,UInt((VGPR_ID_WIDTH+1).W)))
     //val warpsetting = Input()
+    val lsu_wid = Input(UInt(depth_warp.W))
+    val simt_wid = Input(UInt(depth_warp.W))
+    val lsu_tid = Output(UInt(xLen.W))
+    val lsu_pds = Output(UInt(xLen.W))
+    val lsu_numw= Output(UInt(xLen.W))
+    val simt_rpc = Output(UInt(depth_warp.W))
   })
   val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
   vCSR.foreach(x=>{
@@ -316,6 +340,11 @@ class CSRexe extends Module {
     io.sgpr_base(i):=vCSR(i).sgpr_base
     io.vgpr_base(i):=vCSR(i).vgpr_base
   }
+  io.lsu_tid:=vCSR(io.lsu_wid).lsu_tid
+  io.lsu_pds:=vCSR(io.lsu_wid).lsu_pds
+  io.lsu_numw:=vCSR(io.lsu_wid).lsu_numw
+  io.simt_rpc:=vCSR(io.simt_wid).simt_rpc
+
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire()
   vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
