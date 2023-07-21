@@ -158,7 +158,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   //  ******    handle miss to lower mem    ******
   val has_send2mem = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(1.W))))
   val hasSendStatus = Module(new getEntryStatus(NMshrEntry))
-  hasSendStatus.io.valid_list := Reverse(Cat(has_send2mem))
+  hasSendStatus.io.valid_list := ~(~Reverse(Cat(has_send2mem)) & entry_valid)
   io.miss2mem.valid := !has_send2mem(hasSendStatus.io.next) && entry_valid(hasSendStatus.io.next)
   val miss2mem_fire = io.miss2mem.valid && io.miss2mem.ready
 

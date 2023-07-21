@@ -77,6 +77,8 @@ class collectorUnit extends Module{
   val regIdxWire = Wire(Vec(4, UInt(8.W)))
   val validWire = Wire(Vec(4, Bool()))
 
+  val customCtrlReg = RegInit(false.B)
+  val customCtrlWire = Wire(Bool())
 
   val imm = Module(new ImmGen)
 
@@ -174,6 +176,8 @@ class collectorUnit extends Module{
   rsTypeWire := 0.U.asTypeOf(rsTypeWire)
   readyWire := 0.U.asTypeOf(readyWire)
 
+  customCtrlWire := false.B
+
   imm.io.inst := MuxLookup(state, 0.U,
     Array(s_idle->io.control.bits.inst,
       s_add->controlReg.inst
@@ -221,10 +225,12 @@ class collectorUnit extends Module{
             A3_FRS3 -> 1.U
           ))
         rsTypeWire(3) := 0.U(2.W) //mask
+        customCtrlWire := io.control.bits.custom_signal_0
         rsType(0) := rsTypeWire(0)
         rsType(1) := rsTypeWire(1)
         rsType(2) := rsTypeWire(2)
         rsType(3) := rsTypeWire(3)
+        customCtrlReg := customCtrlWire
         //if the operand1 or operand2 is an immediate, elaborate it and enable the ready bit
         //op1 is immediate or don't care
         when(io.control.bits.sel_alu1 === A1_IMM) {
@@ -277,7 +283,7 @@ class collectorUnit extends Module{
             A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
             A1_VRS1 -> io.bankIn(i).bits.data)
         )
-        when(io.control.bits.custom_signal_0){
+        when(Mux(io.control.fire,customCtrlWire,customCtrlReg)){
           rsReg(0).foreach( _:= rsRead(0) + imm.io.out)
         }.otherwise{
           rsReg(0) := rsRead

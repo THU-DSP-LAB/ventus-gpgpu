@@ -97,13 +97,13 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
   import top.helper._
   "adv_test" in {
     val caseName = "vecadd"
-    val metaFileDir = "./ventus/txt/test.metadata" // TODO: rename
-    val dataFileDir = "./ventus/txt/test.data"
+    val metaFileDir = "./ventus/txt/vecadd4x4.metadata" // TODO: rename
+    val dataFileDir = "./ventus/txt/vecadd4x4.data"
     val maxCycle = 700
     val mem = new MemBox(metaFileDir, dataFileDir)
     val size3d = mem.metaData.kernel_size.map(_.toInt)
     var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
-    test(new GPGPU_SimWrapper).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
