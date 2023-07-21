@@ -146,7 +146,6 @@ class AtomicCtrl (params : InclusiveCacheParameters_lite)(implicit p: Parameters
   memReqBuf.io.enq.bits := io.L12ATUmemReq.bits
   io.L12ATUmemReq.ready := state === idle
   memReqBuf.io.deq.ready := state === issueAAD && io.ATU2L1memRsp.fire()
-
   takePipeOp.io.din := memReqBuf.io.deq.bits.data
   takePipeOp.io.mask := memReqBuf.io.deq.bits.mask
   oprandA := takePipeOp.io.dout
