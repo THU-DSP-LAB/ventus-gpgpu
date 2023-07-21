@@ -488,7 +488,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   WshrAccess.io.pushReq.bits.blockAddr := memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
   val wshrProtect = WshrAccess.io.conflict && (memReqIsWrite_st3 || memReqIsRead_st3)
-  val cRspBlockedOrWshrFull = ((!coreRsp_Q.io.enq.ready || memReq_Q.io.deq.bits.hasCoreRsp)
+  val cRspBlockedOrWshrFull = ((!coreRsp_Q.io.enq.ready && memReq_Q.io.deq.bits.hasCoreRsp)
     || !WshrAccess.io.pushReq.ready) && memReqIsWrite_st3
   val wshrPass = !wshrProtect && !cRspBlockedOrWshrFull
   WshrAccess.io.pushReq.valid := wshrPass && memReq_Q.io.deq.valid && memReqIsWrite_st3
