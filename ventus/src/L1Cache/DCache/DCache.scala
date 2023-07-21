@@ -78,6 +78,7 @@ class genControl extends Module{
 
 class WshrMemReq extends DCacheMemReq{
   val hasCoreRsp = Bool()
+  val coreRspInstrId = UInt(32.W)
 }
 
 class DataCache(implicit p: Parameters) extends DCacheModule{
@@ -188,6 +189,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   writeMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   writeMissReq.a_data := coreReq_st1.data
   writeMissReq.hasCoreRsp := true.B
+  writeMissReq.coreRspInstrId := coreReq_st1.instrId
 
   readMissReq.a_opcode := 4.U //Get
   readMissReq.a_param := 0.U //regular read
@@ -196,6 +198,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B
+  readMissReq.coreRspInstrId := DontCare
 
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
 
@@ -322,6 +325,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(true.B))
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
   dirtyReplace_st1.hasCoreRsp := false.B
+  dirtyReplace_st1.coreRspInstrId := DontCare
 
   when(memRsp_Q.io.deq.valid && memRspIsRead){
     memRsp_st1 := memRsp_Q_st0
@@ -510,7 +514,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRspFromMemReq.data := DontCare
   coreRspFromMemReq.isWrite := true.B
   //st指令的regIdx对SM流水线提交级无意义，且memReq_Q没有传输该数据的通道
-  coreRspFromMemReq.instrId := 99.U
+  coreRspFromMemReq.instrId := memReq_Q.io.deq.bits.coreRspInstrId
   coreRspFromMemReq.activeMask := VecInit(Seq.fill(NLanes)(true.B))
   // memReq(st3)
   io.memReq.bits := memReq_st3
