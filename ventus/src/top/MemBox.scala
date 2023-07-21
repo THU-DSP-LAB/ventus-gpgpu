@@ -1,10 +1,12 @@
 package top
 import chisel3._
-import scala.io.Source
 
+import scala.io.Source
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals._
 import parameters._
+
+import scala.collection.mutable.ArrayBuffer
 
 object helper{
   def BigInt2ByteArray(n: BigInt, len: Int): Array[Byte] = n.toByteArray.takeRight(len).reverse.padTo(len, 0.toByte)
@@ -91,30 +93,74 @@ object MetaData{
   }
 }
 
-class DynamicMem(baseAddr: BigInt){
-  val stepSize = 4096;
-  class Page(startAddr: BigInt) {
-    val dat = Array[Byte](4096)
+class DynamicMem(val stepSize: Int = 4096){
+  class Page(val startAddr: BigInt) {
+    val dat = Array.fill(stepSize)(0.toByte)
   }
-  var pages = Array[Page](0)
+  var pages = new scala.collection.mutable.ArrayBuffer[Page](0)
+  def insertPage(startAddr: BigInt): Unit = {
+    if(pages.isEmpty) {
+      pages = pages :+ new Page(startAddr)
+      return
+    }
+    else if(pages.exists(_.startAddr == startAddr)) return
 
+    val i = pages.lastIndexWhere(_.startAddr < startAddr) + 1
+    pages.insert(i, new Page(startAddr))
+  }
 
+  def readMem(addr: BigInt, len: Int): Array[Byte] = {
+    val lower = addr - addr % stepSize
+    val upper = (addr + len) - (addr + len) % stepSize
+    var res = new Array[Byte](0)
+    for(currentPageBase <- lower to upper by stepSize){
+      if(!pages.exists(_.startAddr == currentPageBase))
+        insertPage(currentPageBase)
+      val slice = pages.filter(_.startAddr == currentPageBase)(0).dat.slice(
+        if(addr < currentPageBase) 0 else (addr - currentPageBase).toInt,
+        if(addr + len > currentPageBase + stepSize) stepSize else (addr + len - currentPageBase).toInt
+      )
+      res = res ++ slice
+    }
+    res
+  }
+
+  def writeMem(addr: BigInt, len: Int, data: Array[Byte], mask: IndexedSeq[Boolean]): Unit = {
+    val lower = addr - addr % stepSize
+    val upper = (addr + len) - (addr + len) % stepSize
+    for(currentPageBase <- lower to upper by stepSize){
+      if (!pages.exists(_.startAddr == currentPageBase))
+        insertPage(currentPageBase)
+      val idx = pages.lastIndexWhere(_.startAddr == currentPageBase)
+      val offset_L = if(addr > currentPageBase) (addr % stepSize).toInt else 0
+      val offset_R = if(addr + len < currentPageBase + stepSize) ((addr + len) % stepSize).toInt else stepSize
+      for(i <- offset_L until offset_R)
+        if(mask(i - offset_L))
+          pages(idx).dat(i) = data(i - offset_L)
+    }
+  }
 }
 
 class MemBox(metafile: String, datafile: String){
   import helper._
   val bytesPerLine = 4
   val metaData = MetaData(metafile)
-  val memory = { // 32bit per line file -> byte array memory
+  var memory = { // 32bit per line file -> byte array memory
     val file = Source.fromFile(datafile)
     file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
   }
   val mem_size = metaData.buffer_size
   val mem_base = mem_size.indices.toArray.map(mem_size.slice(0, _).sum)
 
-  var lds_memory = new Array[Byte](0)
-  for( i <- metaData.lds_mem_base.indices){
+  val lds_memory = new DynamicMem
+  lds_memory.insertPage(BigInt("70000000", 16))
 
+  // move lds data from datafile to dynamic ram
+  for (i <- metaData.lds_mem_base.indices) {
+    val cut = memory.splitAt(metaData.lds_mem_size(i).toInt)
+    lds_memory.writeMem(metaData.lds_mem_base(i), metaData.lds_mem_size(i).toInt,
+      cut._1, IndexedSeq.fill(metaData.lds_mem_size(i).toInt)(true))
+    memory = cut._2
   }
   /*
   Word Map:
@@ -127,6 +173,8 @@ class MemBox(metafile: String, datafile: String){
 
   */
   def readMem(addr: BigInt, len: Int): Array[Byte] = {
+    if(addr < BigInt("80000000", 16) && addr >= BigInt("70000000", 16))
+      return lds_memory.readMem(addr, len)
     val findBuf = (0 until metaData.num_buffer.toInt).filter(i =>
       addr >= metaData.buffer_base(i) && addr < metaData.buffer_base(i) + metaData.buffer_size(i)
     )
@@ -142,6 +190,10 @@ class MemBox(metafile: String, datafile: String){
     }
   }
   def writeMem(addr: BigInt, len: Int, data: Array[Byte], mask: IndexedSeq[Boolean]): Unit = { // 1-bit mask <-> 1 byte data
+    if (addr < BigInt("80000000", 16)) {
+      lds_memory.writeMem(addr, len, data, mask)
+      return
+    }
     val findBuf = (0 until metaData.num_buffer.toInt).filter(i =>
       addr >= metaData.buffer_base(i) && addr + len <= metaData.buffer_base(i) + metaData.buffer_size(i)
     )
