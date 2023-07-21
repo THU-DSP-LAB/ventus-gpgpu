@@ -48,7 +48,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def num_warp_in_a_block = num_warp
 
-  def num_lane = num_thread / 2
+  def num_lane = num_thread // 2
 
   def num_icachebuf = 1 //blocking for each warp
 

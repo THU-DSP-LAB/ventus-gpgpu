@@ -15,7 +15,7 @@ import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
 import parameters._
 import L1Cache.ICache._
-import L1Cache.{RVGModule, _}
+import L1Cache._
 import L1Cache.DCache._
 import L1Cache.ShareMem._
 import config.config._
@@ -115,7 +115,7 @@ class GPGPU_axi_top extends Module{
   })
   val l1param = (new MyConfig).toInstance
 
-  val gpgpu_top=Module(new GPGPU_top()(l1param))
+  val gpgpu_top=Module(new GPGPU_top()(l1param,true))
   val axi_lite_adapter=Module(new AXI4Lite2CTA(32,32))
   val axi_adapter=Module(new AXI4Adapter(l2_axi_params))
   axi_lite_adapter.io.ctl<>io.s

@@ -326,7 +326,7 @@ class CSRexe extends Module {
     val lsu_tid = Output(UInt(xLen.W))
     val lsu_pds = Output(UInt(xLen.W))
     val lsu_numw= Output(UInt(xLen.W))
-    val simt_rpc = Output(UInt(depth_warp.W))
+    val simt_rpc = Output(UInt(xLen.W))
   })
   val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
   vCSR.foreach(x=>{

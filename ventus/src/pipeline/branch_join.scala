@@ -134,7 +134,7 @@ class branch_join(val depth_stack: Int) extends Module{
   else_mask := (~if_mask_buf.bits.if_mask).asUInt() & branch_ctl_buf.bits.mask_init
   ifCnt := PopCount(if_mask)
   elseCnt := PopCount(else_mask)
-  takeif := (ifCnt <= elseCnt) && divOccur  // take if first if thread take if path is less than thread take else
+  takeif := ((ifCnt <= elseCnt) && divOccur) || ifOnly  // take if first if thread take if path is less than thread take else
   ifOnly :=   else_mask === 0.U
   elseOnly := if_mask.asUInt() === 0.U
   divOccur := ~(ifOnly | elseOnly)
@@ -172,14 +172,16 @@ class branch_join(val depth_stack: Int) extends Module{
   fetch_ctl.wid := 0.U
   fetch_ctl.new_pc := 0.U
   fetch_ctl.jump := false.B
-  fetch_ctl_valid := branch_ctl_buf.valid
+  fetch_ctl_valid := false.B
   fetch_ctl.wid := warp_id
   when(opcode === 1.U && branch_ctl_buf.valid && popjump){
     fetch_ctl.new_pc := popPC
     fetch_ctl.jump := true.B
-  }.elsewhen(opcode === 0.U && branch_ctl_buf.valid && ((!takeif) || elseOnly) ){
+    fetch_ctl_valid := true.B
+  }.elsewhen(opcode === 0.U && branch_ctl_buf.valid && if_mask_buf.valid && ((!takeif) || elseOnly) ){
     fetch_ctl.new_pc := PC_branch
     fetch_ctl.jump := true.B
+    fetch_ctl_valid := true.B
   }
   fetch_ctl_buf.io.enq.bits := fetch_ctl
   fetch_ctl_buf.io.enq.valid := fetch_ctl_valid
