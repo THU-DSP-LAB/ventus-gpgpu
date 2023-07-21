@@ -34,7 +34,6 @@ class FakeL1DCache(implicit p: Parameters) extends DataCacheIO {
   io.memReq.bits.a_opcode := Mux(coreReq_save.isWrite,
                                 Mux(coreReq_save.perLaneAddr.map(_.activeMask).reduce(_ && _), TLAOp_PutFull, TLAOp_PutPart),
                                 TLAOp_Get)
-  io.memReq.bits.a_mask := VecInit(coreReq_save.perLaneAddr.map(_.activeMask))
 // wire: coreRsp connection
   io.coreRsp.bits.instrId := memRsp_save.d_source
   io.coreRsp.bits.data.foreach{ _ := 0.U }
