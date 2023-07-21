@@ -314,12 +314,12 @@ class LSU2WB extends Module{
   }.elsewhen(io.lsu_rsp.bits.tag.wfd){
     io.out_v.valid:=io.lsu_rsp.valid
     io.out_x.valid:=false.B
-    io.lsu_rsp.ready:=io.out_v.ready}
-    .otherwise({
-      io.out_v.valid:=false.B
-      io.out_x.valid:=false.B
-      io.lsu_rsp.ready:=io.lsu_rsp.bits.tag.isWrite//true.B // CONNECTION OF io.lsu_rsp.bits.tag.isWrite
-    })
+    io.lsu_rsp.ready:=io.out_v.ready
+  }.otherwise({
+    io.out_v.valid:=false.B
+    io.out_x.valid:=false.B
+    io.lsu_rsp.ready:=io.lsu_rsp.bits.tag.isWrite//true.B // CONNECTION OF io.lsu_rsp.bits.tag.isWrite
+  })
 }
 class LSUexe() extends Module{
 // default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte

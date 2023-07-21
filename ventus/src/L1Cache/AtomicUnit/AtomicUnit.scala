@@ -153,7 +153,7 @@ class AtomicCtrl (params : InclusiveCacheParameters_lite)(implicit p: Parameters
   takeMemOp.io.mask := memReqBuf.io.deq.bits.mask
   oprandB := takeMemOp.io.dout
 
-  opcode := Cat(memReqBuf.io.deq.bits.opcode === 2.U,memReqBuf.io.deq.bits.param)
+  //opcode := Cat(memReqBuf.io.deq.bits.opcode === 2.U,memReqBuf.io.deq.bits.param)
 
   /*
   idle state - wait for the control unit decode and issue atomic ctrl module

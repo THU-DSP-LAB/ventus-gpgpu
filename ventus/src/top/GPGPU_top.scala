@@ -15,7 +15,7 @@ import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
 import parameters._
 import L1Cache.ICache._
-import L1Cache.{RVGModule, _}
+import L1Cache._
 import L1Cache.DCache._
 import L1Cache.ShareMem._
 import config.config._
@@ -115,7 +115,7 @@ class GPGPU_axi_top extends Module{
   })
   val l1param = (new MyConfig).toInstance
 
-  val gpgpu_top=Module(new GPGPU_top()(l1param))
+  val gpgpu_top=Module(new GPGPU_top()(l1param,true))
   val axi_lite_adapter=Module(new AXI4Lite2CTA(32,32))
   val axi_adapter=Module(new AXI4Adapter(l2_axi_params))
   axi_lite_adapter.io.ctl<>io.s
@@ -137,7 +137,7 @@ class GPGPU_axi_adapter_top extends Module{
   io.m<>gpgpu_axi_top.io.m
 }
 
-class GPGPU_top(implicit p: Parameters) extends RVGModule{
+class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGModule{
     val io = IO(new Bundle{
     val host_req=Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp=DecoupledIO(new CTA2host_data)
@@ -145,8 +145,8 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
     val out_d=Flipped(Vec(NL2Cache,Decoupled(new TLBundleD_lite(l2cache_params))))
   })
   val cta = Module(new CTAinterface)
-  val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper).io))
-  val l2cache=VecInit(Seq.fill(NL2Cache)(Module(new Scheduler(l2cache_params)).io))
+  val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache)).io))
+  val l2cache=VecInit(Seq.fill(NL2Cache)(if(FakeCache) Module(new FakeL2Cache(l2cache_params)).io else Module(new Scheduler(l2cache_params)).io))
   val sm2clusterArb = VecInit(Seq.fill(NCluster)(Module(new SM2clusterArbiter(l2cache_params_l)).io))
   val l2distribute = VecInit(Seq.fill(NCluster)(Module(new l2Distribute(l2cache_params_l)).io))
   val cluster2l2Arb = VecInit(Seq.fill(NL2Cache)(Module(new cluster2L2Arbiter(l2cache_params_l,l2cache_params)).io))
@@ -224,7 +224,7 @@ class GPGPU_top(implicit p: Parameters) extends RVGModule{
   io.host_req<>cta.io.host2CTA
 }
 
-class SM_wrapper extends Module{
+class SM_wrapper(FakeCache: Boolean = false) extends Module{
   val param = (new MyConfig).toInstance
   val io = IO(new Bundle{
     val CTAreq=Flipped(Decoupled(new CTAreqData))
@@ -286,7 +286,7 @@ class SM_wrapper extends Module{
   icache.io.externalFlushPipe.bits.warpid :=pipe.io.externalFlushPipe.bits
   icache.io.externalFlushPipe.valid :=pipe.io.externalFlushPipe.valid
 
-  val dcache = Module(new DataCache()(param))
+  val dcache = if(FakeCache) Module(new FakeL1DCache()(param)) else Module(new DataCache()(param))
   // **** dcache memRsp ****
   dcache.io.memRsp.valid := l1Cache2L2Arb.io.memRspVecOut(1).valid
   dcache.io.memRsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_source

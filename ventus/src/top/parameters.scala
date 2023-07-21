@@ -25,7 +25,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = log2Ceil(num_warp)
 
-  def num_thread = 8
+  def num_thread = 4
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -48,7 +48,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def num_warp_in_a_block = num_warp
 
-  def num_lane = num_thread / 2
+  def num_lane = num_thread // 2
 
   def num_icachebuf = 1 //blocking for each warp
 
