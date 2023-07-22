@@ -470,8 +470,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRsp_Q.io.enq.bits := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq,coreRsp_st2)
 
   // ******      data crossbar(Mem order to Core order)     ******
-  val coreRsp_st2_dataMemOrder = Vec(BlockWords, UInt(WordLength.W))
-  val coreRsp_st2_dataCoreOrder = Vec(NLanes, UInt(WordLength.W))
+  val coreRsp_st2_dataMemOrder = Wire(Vec(BlockWords, UInt(WordLength.W)))
+  val coreRsp_st2_dataCoreOrder = Wire(Vec(NLanes, UInt(WordLength.W)))
 
   coreRsp_st2_dataMemOrder := Mux(readHit_st2,DataAccessReadSRAMRRsp,coreRsp_st2.data)//memRsp for latter
   for (i <- 0 until NLanes) {
