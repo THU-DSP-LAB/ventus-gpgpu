@@ -138,6 +138,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   val coreRsp_st2 =Reg(new DCacheCoreRsp)
   val coreRsp_st2_valid =Wire(Bool())
+  val coreRsp_st2_perLaneAddr = Reg(Vec(NLanes, new DCachePerLaneAddr))
 
   /*val cacheHit_st2 = RegInit(false.B)
   cacheHit_st2 := cacheHit_st1 || (cacheHit_st2 && RegNext(BankConfArb.io.bankConflict))*/
@@ -429,8 +430,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
   val DataAccessReadSRAMRRsp: Vec[UInt] = VecInit(DataAccessesRRsp)
 
-  // ******      data crossbar     ******
-
   // ******      core rsp
   when(cacheHit_st1 && RegNext(io.coreReq.fire)) {//TODO coreReq fire or coreReq_Q deq?
     //coreRsp_st2_valid := true.B
@@ -438,16 +437,17 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
   }.elsewhen(MshrAccess.io.missRspOut.valid){
     //coreRsp_st2_valid := true.B
-    coreRsp_st2.data := memRsp_st1.d_data//TODO data crossbar
+    coreRsp_st2.data := memRsp_st1.d_data
     coreRsp_st2.isWrite := false.B
-
   }
   when((cacheHit_st1 && RegNext(io.coreReq.fire)) || (secondaryFullReturn && MshrAccess.io.missRspOut.valid)){
     coreRsp_st2.instrId := coreReq_st1.instrId
     coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
+    coreRsp_st2_perLaneAddr := coreReq_st1.perLaneAddr
   }.elsewhen(MshrAccess.io.missRspOut.valid){
     coreRsp_st2.instrId := missRspTI_st1.instrId
     coreRsp_st2.activeMask := missRspTI_st1.perLaneAddr.map(_.activeMask)
+    coreRsp_st2_perLaneAddr := missRspTI_st1.perLaneAddr
   }
 
   //assert(!(coreReq_st1_valid && missRspFromMshr_st1),s"when coreReq_st1 valid, hit/miss cant invalid in same cycle")
@@ -468,9 +468,17 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreRsp_st2_valid
   coreRsp_Q.io.enq.bits := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq,coreRsp_st2)
-  when(readHit_st2){
-    coreRsp_Q.io.enq.bits.data := DataAccessReadSRAMRRsp
+
+  // ******      data crossbar(Mem order to Core order)     ******
+  val coreRsp_st2_dataMemOrder = Vec(BlockWords, UInt(WordLength.W))
+  val coreRsp_st2_dataCoreOrder = Vec(NLanes, UInt(WordLength.W))
+
+  coreRsp_st2_dataMemOrder := Mux(readHit_st2,DataAccessReadSRAMRRsp,coreRsp_st2.data)//memRsp for latter
+  for (i <- 0 until NLanes) {
+    coreRsp_st2_dataCoreOrder(i) := coreRsp_st2_dataMemOrder(coreRsp_st2_perLaneAddr(i).blockOffset)
   }
+
+  coreRsp_Q.io.enq.bits.data := coreRsp_st2_dataCoreOrder
 
   // ******      m_memReq_Q.m_Q.push_back      ******
   val dirtyReplace_st2 = Reg(new WshrMemReq)
