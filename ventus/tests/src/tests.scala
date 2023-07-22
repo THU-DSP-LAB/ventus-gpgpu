@@ -168,7 +168,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                   }
                   else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
                     data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
-                    val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).padTo(c.io.out_a.bits.mask.getWidth, '0').map {
+                    val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
                       case '1' => true
                       case _ => false
                     }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
