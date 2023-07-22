@@ -331,14 +331,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   when(memRsp_Q.io.deq.valid && memRspIsRead){
     memRsp_st1 := memRsp_Q_st0
   }
-  //val memRspData_st1 = Wire(Vec(BlockWords,UInt(WordLength.W)))
-  //val memRspData_st2 = Wire(Vec(BankWords,Vec(NBanks,UInt(WordLength.W))))
-  /*(0 until BankWords).foreach{ iinB =>
-    (0 until NBanks).foreach{iofB =>
-      memRspData_st1(iinB)(iofB) := memRsp_Q_st1.d_data((iinB*NBanks+iofB).asUInt)
-    }
-  }*/
-  //memRspData_st2 := RegEnable(memRspData_st1,memRsp_Q.io.deq.fire() || (memRsp_Q.io.deq.valid && BankConfArb.io.bankConflict))
 
   // ******     missRspIn      ******
   MshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid && memRspIsRead && coreRsp_Q.io.enq.ready// && !cacheHit_st2 && !ShiftRegister(io.coreReq.bits.isWrite&&io.coreReq.fire(),2)
@@ -353,30 +345,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
   missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
   val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
-  //val missRspTILaneMask_st2 = RegNext(BankConfArb.io.activeLane)
-  //val memRspInstrId_st1 = MshrAccess.io.missRspOut.bits.instrId
-  //val readMissRsp_st2 = missRspFromMshr_st2 & !missRspTI.isWrite
-  //val readMissRspCnter = if(BankOffsetBits!=0) RegInit(0.U((BankOffsetBits+1).W)) else Reg(UInt())
-  //MshrAccess.io.missRspOut.ready := coreRsp_Q.io.enq.ready//TODO check
 
   TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
   TagAccess.io.allocateWriteTagSRAMWValid_st1 := RegNext(TagAccess.io.allocateWrite.valid) && tagAllocateWriteReady
-
-
-  //only on subword miss
-  //val readMissRsp_st2 = RegNext(readMissRsp_st1)
-  //val writeMissRsp_st2 = RegNext(writeMissRsp_st1)
-  /*when(readMissRspCnter === (BankWords-1).asUInt &&
-    (((!RegNext(missRspFromMshr_st1) && missRspFromMshr_st1) ||
-    (RegNext(missRspBA_st1) =/= missRspBA_st1)) && missRspFromMshr_st1)){
-    readMissRspCnter := 0.U
-  }.elsewhen(missRspFromMshr_st1 && readMissRspCnter =/= BankWords.asUInt){
-    readMissRspCnter := readMissRspCnter+1.U
-  }
-  missRspWriteEnable := (((!RegNext(missRspFromMshr_st1) && missRspFromMshr_st1) ||
-    (RegNext(missRspBA_st1) =/= missRspBA_st1)) && missRspFromMshr_st1) ||
-    readMissRspCnter=/=BankWords.asUInt*/
-  //以NLane=16，BlockSize=32为例，Cnter需要两个不同的状态来表示两个Enable的周期，又需要一个额外的状态来表示不Enable的，所以Cnter的位宽，至少要2
 
   // ******     DataAccess      ******
   //val DataFromCrsbarOrMemRspQ = Wire(Vec(BlockWords, UInt(WordLength.W)))
@@ -392,39 +363,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     DataAccess.io.w.req.valid := Mux(dataFillVaild,
       true.B,  //READ miss resp
       writeHit_st1 & getBankEn.io.perBankValid(i))       //WRITE hit
-    /*val readMissRspCnter_if = if(BlockOffsetBits-BankIdxBits>0){
-      readMissRspCnter(BankOffsetBits-1,0)
-    } else{
-      0.U(1.W)
-    }*/
-    //DataFromCrsbarOrMemRspQ := Mux(missRspWriteEnable,memRspData_st1(readMissRspCnter_if),DataCrsCore2Mem.io.DataOut)
     DataAccess.io.w.req.bits := Mux(memRsp_Q.io.deq.valid && memRspIsRead,DataAccessMissRspSRAMWReq(i),DataAccessWriteHitSRAMWReq(i))
-    /*DataAccess.io.w.req.bits.data := Mux(missRspFromMshr_st1,
-      memRsp_st1.d_data(i),//READ miss resp
-      coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)))
-    //DataFromCrsbarOrMemRspQ(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
-    //this setIdx = setIdx + wayIdx
-    val DAWtSetIdxMissRspCase_st1 = Cat(get_setIdx(memRsp_Q_st0.d_addr),//setIdx
-        TagAccess.io.waymaskReplacement_st1)//wayIdx
-    val DAWtSetIdxWtHitCase_st2 = Cat(coreReq_st1.setIdx,//setIdx
-        TagAccess.io.waymaskHit_st1)//wayIdx
-    DataAccess.io.w.req.bits.setIdx := Mux(missRspFromMshr_st1,
-      DAWtSetIdxMissRspCase_st1,//missRsp case
-      //write hit case
-      DAWtSetIdxWtHitCase_st2)
-    DataAccess.io.w.req.bits.waymask.foreach(_ := Mux(missRspWriteEnable,
-      //missRsp case
-      Fill(BytesOfWord,true.B),
-      //write hit case
-      coreReq_st1.perLaneAddr(getBankEn.io.perBankBlockIdx(i)).wordOffset1H))*/
-
     DataAccess.io.r.req.valid := readHit_st1 || dataReplaceReadValid
-    //& BankConfArb.io.dataArrayEn(i)) |(writeHitSubWord_st1 & writeSubWordBank_st1(i))
-    /*val DARdSetIdx_st1 = if(BlockOffsetBits-BankIdxBits>0){
-      Cat(coreReq_st1.setIdx,//setIdx
-        wayIdxAtHit_st1,//wayIdx
-        BankConfArb.io.addrCrsbarOut(i).bankOffset.getOrElse(false.B))//bankOffset
-    } else{*/
     DataAccess.io.r.req.bits := Mux(dataReplaceReadValid,DataAccessReplaceReadSRAMRReq(i),DataAccessReadHitSRAMRReq(i))
     Cat(DataAccess.io.r.resp.data.reverse)
   }
