@@ -51,7 +51,7 @@ object L1MSHRGen extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(new MSHR(bABits=20,tIWidth=50,WIdBits=5,NMshrEntry = 4, NMshrSubEntry = 4))
 }
 object L1TagAccessGen extends App {
-  (new chisel3.stage.ChiselStage).emitVerilog(new L1TagAccess(set=32,way=2,tagBits=20,true))
+  (new chisel3.stage.ChiselStage).emitVerilog(new L1TagAccess(set=32,way=2,tagBits=20,false))
 }
 class test_tb extends AnyFreeSpec with ChiselScalatestTester{
   "tag_test" in {
