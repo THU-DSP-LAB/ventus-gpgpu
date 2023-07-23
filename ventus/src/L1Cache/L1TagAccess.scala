@@ -40,18 +40,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
       Some(Output(UInt(tagBits.W)))
     } else None
     //For InvOrFlu
-    val hasDirty = if (!readOnly) {
-      Some(Output(Bool()))
-    } else None
-    val dirtySetIdx = if (!readOnly) {
-      Some(Output(UInt(log2Up(set).W)))
-    } else None
-    val dirtyWayMask = if (!readOnly) {
-      Some(Output(UInt(way.W)))
-    } else None
-    val dirtyTag = if (!readOnly) {
-      Some(Output(UInt(tagBits.W)))
-    } else None
+    val hasDirty_st0 = if (!readOnly) {Some(Output(Bool()))} else None
+    val dirtySetIdx_st0 = if (!readOnly) {Some(Output(UInt(log2Up(set).W)))} else None
+    val dirtyWayMask_st0 = if (!readOnly) {Some(Output(UInt(way.W)))} else None
+    val dirtyTag_st1 = if (!readOnly) {Some(Output(UInt(tagBits.W)))} else None
+    //For InvOrFlu and LRSC
+    val flushChoosen = if (!readOnly) {Some(ValidIO(UInt((log2Up(set)+way).W)))} else None
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
@@ -138,9 +132,14 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
   io.hit_st1 := iTagChecker.io.cache_hit
   if(!readOnly){//tag_array::write_hit_mark_dirty
-    when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){
+    assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
+    when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
       way_dirty(RegNext(io.probeRead.bits.setIdx))(iTagChecker.io.waymask) := true.B
-    }//meta_entry_t::write_dirty
+    }.elsewhen(io.flushChoosen.get.valid){//tag_array::flush_one
+      way_dirty
+      (io.flushChoosen.get.bits((log2Up(set)+way)-1,way))
+      (io.flushChoosen.get.bits(way-1,0)) := false.B
+    }
   }
 
   // allocateWrite_st1
@@ -187,12 +186,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     choosenDirtySetValid := way_dirtyAfterValid(choosenDirtySetIdx_st0)
     choosenDirtyWayMask_st0 := VecInit(PriorityEncoderOH(choosenDirtySetValid)).asUInt
     choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(choosenDirtyWayMask_st0)
-    val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
-    val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
-    io.dirtyTag.get := choosenDirtyTag_st1
-    io.dirtySetIdx.get := choosenDirtySetIdx_st1
-    io.dirtyWayMask.get := choosenDirtyWayMask_st1
-    io.hasDirty.get := RegNext(hasDirty_st0)
+    //val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
+    //val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
+    io.dirtyTag_st1.get := choosenDirtyTag_st1
+    io.dirtySetIdx_st0.get := choosenDirtySetIdx_st0
+    io.dirtyWayMask_st0.get := choosenDirtyWayMask_st0
+    io.hasDirty_st0.get := hasDirty_st0//RegNext(hasDirty_st0)
   }
 }
 
