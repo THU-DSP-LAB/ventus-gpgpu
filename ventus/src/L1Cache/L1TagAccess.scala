@@ -45,7 +45,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val dirtyWayMask_st0 = if (!readOnly) {Some(Output(UInt(way.W)))} else None
     val dirtyTag_st1 = if (!readOnly) {Some(Output(UInt(tagBits.W)))} else None
     //For InvOrFlu and LRSC
-    val flushChoosen = if (!readOnly) {Some(ValidIO(UInt((log2Up(set)+way).W)))} else None
+    val flushChoosen = if (!readOnly) {Some(Flipped(ValidIO(UInt((log2Up(set)+way).W))))} else None
     //For Inv
     val invalidateAll = Input(Bool())
   })
@@ -138,9 +138,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
       way_dirty(RegNext(io.probeRead.bits.setIdx))(iTagChecker.io.waymask) := true.B
     }.elsewhen(io.flushChoosen.get.valid){//tag_array::flush_one
-      way_dirty
-      (io.flushChoosen.get.bits((log2Up(set)+way)-1,way))
-      (io.flushChoosen.get.bits(way-1,0)) := false.B
+      way_dirty(io.flushChoosen.get.bits((log2Up(set)+way)-1,way))(io.flushChoosen.get.bits(way-1,0)) := false.B
     }
   }
 
@@ -183,8 +181,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //评估后，每set配priority mux的成本约为所有set普通mux后共用priority mux的5-6倍，
     //代价是普通 mux 7个2in1 mux的延迟。
     for (i <- 0 until set) {
-      way_dirtyAfterValid := VecInit(way_dirty(i).zip(way_valid(i)).map { case (v, d) => v & d })
-      setDirty(i) := way_dirtyAfterValid.asUInt.orR
+      way_dirtyAfterValid(i) := VecInit(way_dirty(i).zip(way_valid(i)).map { case (v, d) => v & d })
+      setDirty(i) := way_dirtyAfterValid(i).asUInt.orR
     }
     hasDirty_st0 := setDirty.asUInt.orR
     choosenDirtySetIdx_st0 := PriorityEncoder(setDirty)

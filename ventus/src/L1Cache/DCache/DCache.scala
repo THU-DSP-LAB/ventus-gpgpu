@@ -125,9 +125,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val memRsp_st1_valid = RegInit(false.B)//early definition
   //secondaryFullReturn时cReq_st1可以valid，也可以fire。是missRspOut期间唯一例外
   val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U)
-  coreReq_st1_valid := coreReq_Q.io.deq.valid && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)
-  coreReq_Q.io.deq.ready:= coreReq_st1_ready &&
-    !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid)//InvOrFlu希望在st0读Data SRAM，检查资源冲突
   val coreReqControl_st0 = Wire(new DCacheControl)
   val coreReqControl_st1: DCacheControl = RegEnable(coreReqControl_st0, io.coreReq.fire)
   val cacheHit_st1 = Wire(Bool())
@@ -145,6 +142,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   val readHit_st2 = RegNext(readHit_st1)
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
+  coreReq_Q.io.deq.ready := coreReq_st1_ready &&
+    !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
   // ******      tag probe      ******
   //val missRspWriteEnable = Wire(Bool())
   TagAccess.io.probeRead.valid := io.coreReq.fire
@@ -180,6 +179,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     TagAccess.io.dirtyWayMask_st0.get))
 
   // ******      l1_data_cache::coreReq_pipe1_cycle      ******
+  coreReq_st1_valid := coreReq_Q.io.deq.valid && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)
   TagAccess.io.probeIsWrite_st1.get := writeHit_st1
 
   // ******      mshr missReq      ******
