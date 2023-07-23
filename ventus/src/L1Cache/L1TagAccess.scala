@@ -46,6 +46,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val dirtyTag_st1 = if (!readOnly) {Some(Output(UInt(tagBits.W)))} else None
     //For InvOrFlu and LRSC
     val flushChoosen = if (!readOnly) {Some(ValidIO(UInt((log2Up(set)+way).W)))} else None
+    //For Inv
+    val invalidateAll = Input(Bool())
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
@@ -163,7 +165,10 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
+  }.elsewhen(io.invalidateAll){//tag_array::invalidate_all()
+    way_valid := VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(false.B))))
   }
+  assert(!(io.allocateWrite.valid && io.invalidateAll))
 
   // ***** tag_array::has_dirty *****
   //val hasDirty_st0 = Wire(Bool())
