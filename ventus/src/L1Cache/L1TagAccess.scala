@@ -39,6 +39,19 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val a_addrReplacement_st1 = if (!readOnly) {
       Some(Output(UInt(tagBits.W)))
     } else None
+    //For InvOrFlu
+    val hasDirty = if (!readOnly) {
+      Some(Output(Bool()))
+    } else None
+    val dirtySetIdx = if (!readOnly) {
+      Some(Output(UInt(log2Up(set).W)))
+    } else None
+    val dirtyWayMask = if (!readOnly) {
+      Some(Output(UInt(way.W)))
+    } else None
+    val dirtyTag = if (!readOnly) {
+      Some(Output(UInt(tagBits.W)))
+    } else None
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
@@ -47,6 +60,10 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   //access time counter
   val accessFire = io.probeRead.fire || io.allocateWrite.fire
   val (accessCount,accessCounterFull) = Counter(accessFire,1000)
+
+  //For InvOrFlu
+  val hasDirty_st0 = Wire(Bool())
+  val choosenDirtySetIdx_st0 = Wire(UInt(log2Up(set).W))
 
   //SRAM to store tag
   val tagBodyAccess = Module(new SRAMTemplate(
@@ -61,14 +78,18 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   if(readOnly){
     tagBodyAccess.io.r.req <> io.probeRead
   }else{
-    val tagAccessRArb = Module(new Arbiter (new SRAMBundleA(set),2))
+    val tagAccessRArb = Module(new Arbiter (new SRAMBundleA(set),3))
     tagBodyAccess.io.r.req <> tagAccessRArb.io.out
+    //For probe
     tagAccessRArb.io.in(1) <> io.probeRead
+    //For allocate
     tagAccessRArb.io.in(0).valid := io.allocateWrite.valid
     tagAccessRArb.io.in(0).bits.setIdx := io.allocateWrite.bits.setIdx
+    //For hasDirty
+    tagAccessRArb.io.in(2).valid := !io.probeRead.valid && !io.allocateWrite.valid
+    tagAccessRArb.io.in(2).bits.setIdx := choosenDirtySetIdx_st0
     //io.allocateWrite.ready := tagAccessRArb.io.in(0).ready
   }
-
 
   //SRAM for replacement policy
   //store last_access_time for LRU, or last_fill_time for FIFO
@@ -143,6 +164,35 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
+  }
+
+  // ***** tag_array::has_dirty *****
+  //val hasDirty_st0 = Wire(Bool())
+  if(!readOnly) {
+    val setDirty = Wire(Vec(set, Bool()))
+    val way_dirtyAfterValid = Wire(Vec(set, Vec(way, Bool())))
+    //val choosenDirtySetIdx_st0 = Wire(UInt(log2Up(set).W))
+    val choosenDirtySetValid = Wire(Vec(way, Bool()))
+    val choosenDirtyWayMask_st0 = Wire(UInt(way.W))//OH
+    val choosenDirtyTag_st1 = Wire(UInt(tagBits.W))
+    //set一般值为128。
+    //评估后，每set配priority mux的成本约为所有set普通mux后共用priority mux的5-6倍，
+    //代价是普通 mux 7个2in1 mux的延迟。
+    for (i <- 0 until set) {
+      way_dirtyAfterValid := VecInit(way_dirty(i).zip(way_valid(i)).map { case (v, d) => v & d })
+      setDirty(i) := way_dirtyAfterValid.asUInt.orR
+    }
+    hasDirty_st0 := setDirty.asUInt.orR
+    choosenDirtySetIdx_st0 := PriorityEncoder(setDirty)
+    choosenDirtySetValid := way_dirtyAfterValid(choosenDirtySetIdx_st0)
+    choosenDirtyWayMask_st0 := VecInit(PriorityEncoderOH(choosenDirtySetValid)).asUInt
+    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(choosenDirtyWayMask_st0)
+    val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
+    val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
+    io.dirtyTag.get := choosenDirtyTag_st1
+    io.dirtySetIdx.get := choosenDirtySetIdx_st1
+    io.dirtyWayMask.get := choosenDirtyWayMask_st1
+    io.hasDirty.get := RegNext(hasDirty_st0)
   }
 }
 
