@@ -74,7 +74,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
     val missRspOut = ValidIO(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
-    //val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
+    //For InOrFlu
+    val empty = Output(Bool())
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
@@ -83,6 +84,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
 
   val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(false.B)))))
   val entry_valid = Reverse(Cat(subentry_valid.map(Cat(_).orR)))
+  io.empty := !entry_valid.orR
   /*Structure Diagram
   * bA  : blockAddr
   * tI  : targetInfo
