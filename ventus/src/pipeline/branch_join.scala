@@ -174,10 +174,17 @@ class branch_join(val depth_stack: Int) extends Module{
   fetch_ctl.jump := false.B
   fetch_ctl_valid := false.B
   fetch_ctl.wid := warp_id
-  when(opcode === 1.U && branch_ctl_buf.valid && popjump){
-    fetch_ctl.new_pc := popPC
-    fetch_ctl.jump := true.B
-    fetch_ctl_valid := true.B
+  when(opcode === 1.U && branch_ctl_buf.valid ){
+    when(popjump){
+      fetch_ctl.new_pc := popPC
+      fetch_ctl.jump := true.B
+      fetch_ctl_valid := true.B
+    }.otherwise{
+      fetch_ctl.new_pc := 0.U
+      fetch_ctl.jump := false.B
+      fetch_ctl_valid := true.B
+    }
+
   }.elsewhen(opcode === 0.U && branch_ctl_buf.valid && if_mask_buf.valid && ((!takeif) || elseOnly) ){
     fetch_ctl.new_pc := PC_branch
     fetch_ctl.jump := true.B
