@@ -424,7 +424,12 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
   //memReqArb.io.in <> io.memReqVecIn
   for(i <- 0 until NCluster) {
     memReqArb.io.in(i).bits.opcode := io.memReqVecIn(i).bits.opcode
-    memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.source)
+    if(NCluster == 1){
+      memReqArb.io.in(i).bits.source := io.memReqVecIn(i).bits.source
+    }
+    else {
+      memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.source)
+    }
     memReqArb.io.in(i).bits.address := io.memReqVecIn(i).bits.address
     memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.mask).asUInt
     memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.data.asUInt
@@ -442,11 +447,19 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
     io.memRspVecOut(i).bits.data :=io.memRspIn.bits.data//.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
     io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,0)
     io.memRspVecOut(i).bits.address:= io.memRspIn.bits.address
-    io.memRspVecOut(i).valid :=
-      io.memRspIn.bits.source(log2Ceil(NCluster)+log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,log2Ceil(NSmInCluster)+WIdBits+log2Up(NCacheInSM))===i.asUInt && io.memRspIn.valid
+    if(NCluster == 1){
+      io.memRspVecOut(i).valid := io.memRspIn.valid
+    } else {
+       io.memRspVecOut(i).valid :=
+         io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, log2Ceil(NSmInCluster) + WIdBits + log2Up(NCacheInSM)) === i.asUInt && io.memRspIn.valid
+    }
   }
-  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Ceil(NCluster)+log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,log2Ceil(NSmInCluster)+WIdBits+log2Up(NCacheInSM))),
-    Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
+  if(NCluster == 1){
+    io.memRspIn.ready := io.memRspVecOut(0).ready
+  } else {
+    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, log2Ceil(NSmInCluster) + WIdBits + log2Up(NCacheInSM))),
+      Reverse(Cat(io.memRspVecOut.map(_.ready)))) //TODO check order in test
+  }
   // ****************
 }
 class TestCase(val name: String, inst: String, data: String, warp: Int, thread: Int, start_pc: Int, cycles: Int){
