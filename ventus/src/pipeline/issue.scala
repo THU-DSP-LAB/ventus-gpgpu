@@ -83,14 +83,17 @@ class Issue extends Module{
       when(!io.out_LSU.bits.ctrl.isvec){
         printf(p"x${io.out_LSU.bits.ctrl.reg_idxw} op ${io.out_LSU.bits.ctrl.mop} ")
         when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR){
-          printf(p"${Hexadecimal(io.out_LSU.bits.in3(0))} @")
+          printf(p"${Hexadecimal(io.out_LSU.bits.in3(0))} ")
         }
-        printf(p" ${Hexadecimal(io.out_LSU.bits.in1(0))}+${Hexadecimal(io.out_LSU.bits.in2(0))}\n")
+        printf(p"@ ${Hexadecimal(io.out_LSU.bits.in1(0))}+${Hexadecimal(io.out_LSU.bits.in2(0))}\n")
       }.otherwise{
         printf(p"v${io.out_LSU.bits.ctrl.reg_idx3} op ${io.out_LSU.bits.ctrl.mop} ")
-        when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR) {
-          io.out_LSU.bits.in3.reverse.foreach{x => printf(p"${Hexadecimal(x)} ")}
-          printf(p"mask ${Binary(io.out_LSU.bits.mask.asUInt)} @")
+        when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR || io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XRD) {
+          printf(p"mask ${Binary(io.out_LSU.bits.mask.asUInt)} ")
+          when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR) {
+            io.out_LSU.bits.in3.reverse.foreach { x => printf(p"${Hexadecimal(x)} ") }
+          }
+          printf(p"@ ")
         }
         (io.out_LSU.bits.in1 zip io.out_LSU.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
         printf(p"\n")
