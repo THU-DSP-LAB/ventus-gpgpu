@@ -145,7 +145,7 @@ class collectorUnit extends Module{
     io.outArbiterIO(i).valid :=
       MuxLookup(state, false.B,
         Array(s_idle->(io.control.fire && (readyWire(i)===0.U)),
-          s_add->((validWire(i) === true.B) && (ready(i)===false.B))
+          s_add->((valid(i) === true.B) && (ready(i)===false.B))
         ))
   }
   //  io.issue.valid := (valid.asUInt === ready.asUInt) && ready.asUInt.andR
