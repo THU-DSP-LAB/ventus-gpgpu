@@ -76,7 +76,7 @@ class test_tb extends AnyFreeSpec with ChiselScalatestTester{
   }
 }
 
-class DCache_WWmiss_same extends AnyFreeSpec with ChiselScalatestTester{
+class DCache_RRmiss_Whit_Flu_Rhit_Wmiss extends AnyFreeSpec with ChiselScalatestTester{
   val className: String = this.getClass.getSimpleName
   className in {
     test(new DCacheWraper).withAnnotations(Seq(WriteVcdAnnotation)){ DUT =>
