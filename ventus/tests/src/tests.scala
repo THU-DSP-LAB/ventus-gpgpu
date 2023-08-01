@@ -19,7 +19,7 @@ import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
-import chiseltest.simulator.WriteVcdAnnotation
+import chiseltest.simulator.WriteFstAnnotation
 //import chiseltest.simulator.
 import pipeline.pipe
 import top._
@@ -93,16 +93,35 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
   }
 }
 
+object AdvancedTestList{
+  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
+
+  val gaussian = new AdvTest(
+    "adv_gaussian",
+    Seq(
+      "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata"//, "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
+    ),
+    Seq(
+      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data"//, "Fan2_1.metadata", "Fan1_2.data", "Fan2_2.data"
+    ),
+    4, 4, 3800
+  )
+
+  val matadd = new AdvTest(
+    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 2000
+  )
+}
+
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
   "adv_test" in {
-    val caseName = "matadd"
-    val metaFileDir = "./ventus/txt/matadd.metadata" // TODO: rename
-    val dataFileDir = "./ventus/txt/matadd.data"
-    val maxCycle = 1500
-    val mem = new MemBox(metaFileDir, dataFileDir)
-    val size3d = mem.metaData.kernel_size.map(_.toInt)
-    var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+    // TODO: rename
+    val testbench = AdvancedTestList.gaussian
+    val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
+    val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
+    val maxCycle = testbench.cycles
+    val mem = new MemBox
+
     test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
@@ -124,13 +143,18 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.out_a.setSinkClock(c.clock)
       c.clock.setTimeout(300)
       c.clock.step(5)
+
+      var meta = new MetaData
+      var size3d = Array.fill(3)(0)
+      var wg_list = Array.fill(1)(false)
+
       fork{ // HOST <-> GPU
         def enq = fork{
           for (i <- 0 until size3d(0);
                j <- 0 until size3d(1);
                k <- 0 until size3d(2)
                ) {
-            c.io.host_req.enqueue(mem.metaData.generateHostReq(i, j, k))
+            c.io.host_req.enqueue(meta.generateHostReq(i, j, k))
           }
         }
         def deq = fork {
@@ -144,11 +168,17 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
             c.clock.step(1)
           }
         }
-        enq.join()
-        while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
-          deq.join()
+        metaFileDir.indices.foreach { i =>
+          meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
+          size3d = meta.kernel_size.map(_.toInt)
+          wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+          print(s"kernel $i \n")
+          enq.join()
+          while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
+            deq.join()
+          }
+          c.clock.step(2)
         }
-        c.clock.step(20)
       }.fork{ // GPU <-> MEM
         val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
         while(!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
@@ -167,6 +197,10 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                     opcode_rsp = 1
                   }
                   else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
+                    val dbg = c.io.cnt.peek().litValue
+//                    if(dbg > 0x4dc){
+//                      dbg;
+//                    }
                     data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
                     val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
                       case '1' => true
