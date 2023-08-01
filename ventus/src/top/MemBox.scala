@@ -64,6 +64,7 @@ object MetaData{
       file.getLines()
     }
     new MetaData{
+      parseHex(buf, 64) // skip start_pc = 0x80000000
       kernel_id = parseHex(buf, 64)
       kernel_size = kernel_size.map{ _ => parseHex(buf, 64) }
       wf_size = parseHex(buf, 64)
@@ -95,7 +96,7 @@ object MetaData{
 
 class DynamicMem(val stepSize: Int = 4096){
   class Page(val startAddr: BigInt) {
-    val dat = Array.fill(stepSize)(0.toByte)
+    val data = Array.fill(stepSize)(0.toByte)
   }
   var pages = new scala.collection.mutable.ArrayBuffer[Page](0)
   def insertPage(startAddr: BigInt): Unit = {
@@ -116,7 +117,7 @@ class DynamicMem(val stepSize: Int = 4096){
     for(currentPageBase <- lower to upper by stepSize){
       if(!pages.exists(_.startAddr == currentPageBase))
         insertPage(currentPageBase)
-      val slice = pages.filter(_.startAddr == currentPageBase)(0).dat.slice(
+      val slice = pages.filter(_.startAddr == currentPageBase)(0).data.slice(
         if(addr < currentPageBase) 0 else (addr - currentPageBase).toInt,
         if(addr + len > currentPageBase + stepSize) stepSize else (addr + len - currentPageBase).toInt
       )
@@ -136,32 +137,49 @@ class DynamicMem(val stepSize: Int = 4096){
       val offset_R = if(addr + len < currentPageBase + stepSize) ((addr + len) % stepSize).toInt else stepSize
       for(i <- offset_L until offset_R)
         if(mask(i - offset_L))
-          pages(idx).dat(i) = data(i - offset_L)
+          pages(idx).data(i) = data(i - offset_L)
     }
   }
 }
 
-class MemBox(metafile: String, datafile: String){
+class MemBuffer(val base: BigInt, val size: BigInt){
+  var data = Array.fill(0)(0.toByte)
+}
+
+class MemBox{
   import helper._
   val bytesPerLine = 4
-  val metaData = MetaData(metafile)
-  var memory = { // 32bit per line file -> byte array memory
-    val file = Source.fromFile(datafile)
-    file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
-  }
-  val mem_size = metaData.buffer_size
-  val mem_base = mem_size.indices.toArray.map(mem_size.slice(0, _).sum)
+
+  var memory: Seq[MemBuffer] = Nil
 
   val lds_memory = new DynamicMem
   lds_memory.insertPage(BigInt("70000000", 16))
+  def loadfile(metafile: String, datafile: String): MetaData = {
+    val metaData = MetaData(metafile)
 
-  // move lds data from datafile to dynamic ram
-  for (i <- metaData.lds_mem_base.indices) {
-    val cut = memory.splitAt(metaData.lds_mem_size(i).toInt)
-    lds_memory.writeMem(metaData.lds_mem_base(i), metaData.lds_mem_size(i).toInt,
-      cut._1, IndexedSeq.fill(metaData.lds_mem_size(i).toInt)(true))
-    memory = cut._2
+    memory = (memory ++ {
+      var mem: Seq[MemBuffer] = Nil
+      val file = Source.fromFile(datafile)
+      var fileBytes = file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
+
+      for (i <- metaData.buffer_base.indices) { // load data
+        mem = mem :+ new MemBuffer(metaData.buffer_base(i), metaData.buffer_size(i))
+        mem.last.data = fileBytes.take(metaData.buffer_size(i).toInt)
+        fileBytes = fileBytes.drop(metaData.buffer_size(i).toInt)
+      }
+      // move lds data from datafile to dynamic ram
+      for (i <- metaData.lds_mem_base.indices) {
+        val cut = memory.head
+        lds_memory.writeMem(metaData.lds_mem_base(i), metaData.lds_mem_size(i).toInt,
+          cut.data, IndexedSeq.fill(metaData.lds_mem_size(i).toInt)(true))
+        mem = mem.drop(1)
+      }
+      mem
+    }).sortWith(_.base < _.base)
+
+    metaData
   }
+
   /*
   Word Map:
   0x00    0x04030201
@@ -175,18 +193,18 @@ class MemBox(metafile: String, datafile: String){
   def readMem(addr: BigInt, len: Int): Array[Byte] = {
     if(addr < BigInt("80000000", 16) && addr >= BigInt("70000000", 16))
       return lds_memory.readMem(addr, len)
-    val findBuf = (0 until metaData.num_buffer.toInt).filter(i =>
-      addr >= metaData.buffer_base(i) && addr < metaData.buffer_base(i) + metaData.buffer_size(i)
+    val findBuf = memory.indices.filter(i =>
+      addr >= memory(i).base && addr < memory(i).base + memory(i).size
     )
     if(findBuf.isEmpty){
       Array.fill(len)(0.toByte)
     }
     else{
-      val paddr = mem_base(findBuf.head) + addr - metaData.buffer_base(findBuf.head)
+      val paddr = addr - memory(findBuf.head).base
       val paddr_tail = paddr + len
-      val buffer_tail = mem_base(findBuf.head) + metaData.buffer_size(findBuf.head)
+      val buffer_tail = memory(findBuf.head).base + memory(findBuf.head).size
       val true_tail: BigInt = if(paddr_tail <= buffer_tail) paddr_tail else buffer_tail
-      memory.slice(paddr.toInt, true_tail.toInt).padTo(len, 0.toByte)
+      memory(findBuf.head).data.slice(paddr.toInt, true_tail.toInt).padTo(len, 0.toByte)
     }
   }
   def writeMem(addr: BigInt, len: Int, data: Array[Byte], mask: IndexedSeq[Boolean]): Unit = { // 1-bit mask <-> 1 byte data
@@ -194,14 +212,14 @@ class MemBox(metafile: String, datafile: String){
       lds_memory.writeMem(addr, len, data, mask)
       return
     }
-    val findBuf = (0 until metaData.num_buffer.toInt).filter(i =>
-      addr >= metaData.buffer_base(i) && addr + len <= metaData.buffer_base(i) + metaData.buffer_size(i)
+    val findBuf = memory.indices.filter(i =>
+      addr >= memory(i).base && addr < memory(i).base + memory(i).size
     )
     if(findBuf.nonEmpty){
-      val paddr = mem_base(findBuf.head) + addr - metaData.buffer_base(findBuf.head)
+      val paddr = addr - memory(findBuf.head).base
       for (i <- 0 until len){
         if(mask(i))
-          memory(paddr.toInt + i) = data(i)
+          memory(findBuf.head).data(paddr.toInt + i) = data(i)
       }
     }
   }
