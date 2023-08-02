@@ -28,7 +28,7 @@ class TLBundleD_lite(params: InclusiveCacheParameters_lite) extends Bundle
   val size=UInt(params.size_bits.W)
   val source=UInt(params.source_bits.W)
   val data  = UInt(params.data_bits.W)
-
+  val param =UInt(3.W)
 }
 class TLBundleD_lite_plus(params: InclusiveCacheParameters_lite)extends TLBundleD_lite(params)
 {
@@ -221,12 +221,13 @@ val mshr_wait_reg =RegInit(false.B)
   io.bs_wadr.bits.mask:=   pb_beat.mask
   val s_final_req=RegNext(s1_req)  ///
   ///将读取数据输出d
-  io.d.valid        :=RegNext(stateReg===stage_4 && s1_req.opcode===Get)//数据读出来之后准备输出
+  io.d.valid        :=RegNext(stateReg===stage_4&& !(s1_req.opcode===Hint && !s1_req.last_flush)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
   io.d.bits.source  :=s_final_req.source
-  io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,AccessAck)
+  io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,Mux(s_final_req.last_flush,HintAck,AccessAck))
   io.d.bits.size    := s_final_req.size
   io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, io.bs_rdat.data,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况不需要
-  io.d.bits.address      := params.expandAddress(s_final_req.tag, s_final_req.set,s_final_req.offset)
+  io.d.bits.address := params.expandAddress(s_final_req.tag, s_final_req.set,s_final_req.offset)
+  io.d.bits.param   :=0.U
 ////将读出的数据返回给sourceA
 
 
