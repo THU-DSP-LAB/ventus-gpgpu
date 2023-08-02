@@ -51,7 +51,7 @@ class DCacheCoreRsp_np extends Bundle{
 //    val mop = UInt(2.W)
 //  }
   val activeMask = Vec(num_thread, Bool())
-  val isWrite = Bool()
+ // val isWrite = Bool()
 }
 
 class ShareMemPerLaneAddr_np extends Bundle{
