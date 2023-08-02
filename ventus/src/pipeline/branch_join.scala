@@ -79,7 +79,7 @@ class branch_join(val depth_stack: Int) extends Module{
 
   val branch_ctl_buf = Queue(io.branch_ctl, 1, flow = true)
   val if_mask_buf = Queue(io.if_mask, 0)
-  val PC_reconv_buf = Queue(io.pc_reconv, 0)
+  val PC_reconv_buf = Queue(io.pc_reconv, 1, flow = true)
 
   val fetch_ctl_buf = Module(new Queue(new BranchCtrl, 1, flow = true))
 
@@ -120,13 +120,17 @@ class branch_join(val depth_stack: Int) extends Module{
   when(fetch_ctl_buf.io.enq.ready) {
     when(branch_ctl_buf.valid & (opcode === 0.U) & (branch_ctl_buf.bits.wid === if_mask_buf.bits.wid)) {
       branch_ctl_buf.ready := if_mask_buf.fire()
+      PC_reconv_buf.ready := if_mask_buf.fire()
     }.elsewhen(branch_ctl_buf.valid & (opcode === 1.U)) {
       branch_ctl_buf.ready := true.B
+      PC_reconv_buf.ready := true.B
     }.otherwise {
       branch_ctl_buf.ready := false.B
+      PC_reconv_buf.ready := false.B
     }
   }.otherwise {
     branch_ctl_buf.ready := false.B
+    PC_reconv_buf.ready := false.B
   }
 
   PC_reconv := PC_reconv_buf.bits
