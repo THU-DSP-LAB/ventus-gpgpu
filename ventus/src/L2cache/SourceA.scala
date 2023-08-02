@@ -22,7 +22,7 @@ class TLBundleA_lite(params: InclusiveCacheParameters_lite) extends Bundle
   val address= UInt(params.addressBits.W)
   val mask =UInt((params.cache.beatBytes/params.micro.writeBytes).W)
   val data=UInt(params.data_bits.W)
-
+  val param =UInt(3.W)
 }
 
 
@@ -46,4 +46,5 @@ class SourceA(params: InclusiveCacheParameters_lite) extends Module
   io.a.bits.mask    :=io.req.bits.mask
   io.a.bits.data    := io.req.bits.data
   io.a.bits.size    :=io.req.bits.size
+  io.a.bits.param :=0.U
 }
