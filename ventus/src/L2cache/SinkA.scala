@@ -69,7 +69,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   val set_block = hasData && !free
 
 
-  a.ready := !req_block && !buf_block && !set_block
+  a.ready := Mux(a.bits.opcode===Hint,!req_block && !buf_block && !set_block && lists,!req_block && !buf_block && !set_block)
   io.req.valid := a.valid && !buf_block && !set_block
   putbuffer.io.push.valid := a.valid && hasData && !req_block && !set_block
   when (a.valid && hasData && !req_block && !buf_block) { lists_set := freeOH }
