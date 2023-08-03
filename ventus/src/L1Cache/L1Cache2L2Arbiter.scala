@@ -16,7 +16,7 @@ import SRAMTemplate.SRAMTemplate
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import pipeline.parameters._
+import top.parameters._
 
 class L1Cache2L2ArbiterIO(implicit p: Parameters) extends DCacheBundle{
   val memReqVecIn = Flipped(Vec(NCacheInSM, Decoupled(new DCacheMemReq())))

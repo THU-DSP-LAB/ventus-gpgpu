@@ -55,6 +55,9 @@ class CtrlSigs extends Bundle {
   val pc=UInt(32.W)
   val imm_ext = UInt(6.W) // new! immext
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
+  val atomic= Bool()
+  val aq = Bool()
+  val rl = Bool()
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
 }
 class scoreboardIO extends Bundle{

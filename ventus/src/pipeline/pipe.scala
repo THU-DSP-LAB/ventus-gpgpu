@@ -205,9 +205,7 @@ class pipe extends Module{
   when(exe_data.io.deq.fire&(exe_data.io.deq.bits.ctrl.wid===2.U)){
     //printf(p"wid=${exe_data.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)}\n")
   }
-  when(io.dcache_req.fire&io.dcache_req.bits.isWrite){
-    //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
-  }
+
 
   //输出所有write mem的操作
   //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&

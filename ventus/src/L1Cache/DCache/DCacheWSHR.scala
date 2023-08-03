@@ -3,7 +3,7 @@ package L1Cache.DCache
 import L1Cache._
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 
 class WSHRreq extends Bundle{
   val blockAddr = UInt((dcache_SetIdxBits+dcache_TagBits).W)

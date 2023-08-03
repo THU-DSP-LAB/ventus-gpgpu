@@ -87,6 +87,8 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.req.bits.put    := put
   io.req.bits.mask   := a.bits.mask
   io.req.bits.data   :=a.bits.data
+  io.req.bits.param :=a.bits.param
+
   putbuffer.io.push.bits.index := put
   putbuffer.io.push.bits.data.data := a.bits.data
   putbuffer.io.push.bits.data.mask := a.bits.mask
