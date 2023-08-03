@@ -274,7 +274,7 @@ class pipe extends Module{
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
   simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
-  simt_stack.io.pc_reconv.valid := true.B //todo check this
+  simt_stack.io.pc_reconv.valid := issue.io.out_SIMT.valid//true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 
