@@ -70,6 +70,18 @@ class DCacheMemReq extends L1CacheMemReq{
   override val a_source = UInt((3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
 }
 
+class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
+  val a_opcode = UInt(3.W)
+  val a_param = UInt(3.W)
+  //val a_size
+  val a_source = UInt((log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
+  val a_addr = UInt(xLen.W)
+  //val isWrite = Bool()//Merged into a_opcode
+  val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
+  //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
+  val a_mask = Vec(dcache_BlockWords, Bool())
+}
+
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
-  override val d_source = UInt((log2Up(NCacheInSM)+WIdBits).W)
+  override val d_source = UInt((log2Up(NCacheInSM)+WIdBits+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
 }
