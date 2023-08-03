@@ -39,6 +39,12 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
   })
   val a_opcode = io.memReq.bits.a_opcode
   val d_opcode = (a_opcode === 0.U) || (a_opcode === 1.U && io.memReq.bits.a_param === 0.U)
+  val d_opcode_1 = Wire(UInt(3.W))
+  when(a_opcode === 5.U){
+    d_opcode_1 := 2.U
+  }.otherwise{
+    d_opcode_1 := !d_opcode
+  }
 
   val memory = Mem(64*BlockWords,UInt(WordLength.W))
   loadMemoryFromFile(memory,"./L2Image.txt")
@@ -61,7 +67,7 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
   val data_out = Wire(Vec(BlockWords,UInt(WordLength.W)))
   data_out := raw_vec
 
-  val opcode_out1 = RegEnable(!d_opcode,io.memReq.fire())
+  val opcode_out1 = RegEnable(d_opcode_1,io.memReq.fire())
   val instrIdx_out1 = RegEnable(io.memReq.bits.a_source,io.memReq.fire())
   val data_out1 = RegEnable(data_out,io.memReq.fire())
   val addr_out1 = RegEnable(Cat(get_blockAddr(io.memReq.bits.a_addr),
