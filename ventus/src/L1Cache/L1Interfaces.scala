@@ -4,7 +4,7 @@ import L1Cache.DCache.DCacheBundle
 import chisel3._
 import chisel3.util.log2Up
 import config.config.Parameters
-import pipeline.parameters._
+import top.parameters._
 /*Version Note
 * DCacheCoreReq spec changed, shift some work to LSU
 * //byteEn

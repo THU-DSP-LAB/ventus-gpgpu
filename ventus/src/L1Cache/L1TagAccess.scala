@@ -13,7 +13,7 @@ package L1Cache
 import SRAMTemplate._
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
 class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Module{
@@ -272,4 +272,65 @@ class minIdxTree(width: Int, numInput: Int) extends Module{
   }
 
   io.idxOfMin := candVec.reduceTree(minWithIdx(_,_)).index
+}
+class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int)extends Module{
+  //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
+  val io = IO(new Bundle {
+    val r = Flipped(new SRAMReadBus(UInt(tagBits.W), set, way))
+    val tagFromCore_st1 = Input(UInt(tagBits.W))
+    val coreReqReady = Input(Bool())
+
+    val w = Flipped(new SRAMWriteBus(UInt(tagBits.W), set, way))
+
+    val waymaskReplacement = Output(UInt(way.W))//one hot, for SRAMTemplate
+    val waymaskHit_st1 = Output(UInt(way.W))
+
+    val hit_st1 = Output(Bool())
+  })
+  val tagBodyAccess = Module(new SRAMTemplate(
+    UInt(tagBits.W),
+    set = set,
+    way = way,
+    shouldReset = false,
+    holdRead = true,
+    singlePort = false,
+    bypassWrite = false
+  ))
+  tagBodyAccess.io.r <> io.r
+
+  val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
+  //val way_valid = Mem(set, UInt(way.W))
+
+  // ******      TagChecker    ******
+  val iTagChecker = Module(new tagChecker(way = way, tagIdxBits = tagBits))
+  iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data //st1
+  iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
+  iTagChecker.io.way_valid := way_valid(RegEnable(io.r.req.bits.setIdx, io.coreReqReady)) //st1
+  io.waymaskHit_st1 := iTagChecker.io.waymask //st1
+  io.hit_st1 := iTagChecker.io.cache_hit
+
+  // ******      Replacement    ******
+  val Replacement = Module(new ReplacementUnit_ICache(way))
+  Replacement.io.validbits_of_set := Cat(way_valid(io.w.req.bits.setIdx))
+  io.waymaskReplacement := Replacement.io.waymask
+  tagBodyAccess.io.w.req.valid := io.w.req.valid
+  io.w.req.ready := tagBodyAccess.io.w.req.ready
+  tagBodyAccess.io.w.req.bits.apply(data = io.w.req.bits.data, setIdx = io.w.req.bits.setIdx, waymask = Replacement.io.waymask)
+  when(io.w.req.valid && !Replacement.io.Set_is_full) {
+    way_valid(io.w.req.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
+  }
+
+}
+class ReplacementUnit_ICache(way: Int) extends Module{
+  val io = IO(new Bundle {
+    val validbits_of_set = Input(UInt(way.W))
+    val waymask = Output(UInt(way.W))//one hot
+    val Set_is_full = Output(Bool())
+  })
+  val victim_1Hidx = if (way>1) RegInit(1.U(way.W)) else RegInit(0.U(1.W))
+  io.Set_is_full := io.validbits_of_set === Fill(way,1.U)
+  io.waymask := Mux(io.Set_is_full, victim_1Hidx, UIntToOH(VecInit(io.validbits_of_set.asBools).indexWhere(_===false.B)))
+  // First case, set not full
+  //Second case, full set, replacement happens
+  if (way>1) victim_1Hidx := RegEnable(Cat(victim_1Hidx(way-2,0),victim_1Hidx(way-1)),io.Set_is_full)
 }

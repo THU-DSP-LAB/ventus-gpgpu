@@ -11,7 +11,7 @@
 package L1Cache.ICache
 
 import config.config.Parameters
-import L1Cache.{L1TagAccess, RVGParameters}
+import L1Cache.{L1TagAccess, L1TagAccess_ICache, RVGParameters}
 import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
 import chisel3._
 import chisel3.util._
@@ -61,7 +61,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val io = IO(new ICacheExtInf)
 
   // ****** submodules ******
-  val tagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=true))
+  val tagAccess = Module(new L1TagAccess_ICache(set=NSets, way=NWays, tagBits=TagBits))
   val dataAccess = Module(new SRAMTemplate(
     gen=UInt(BlockBits.W),
     set=NSets,
@@ -95,7 +95,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   val wayidx_hit_st1 = Wire(UInt(WayIdxBits.W))
   wayidx_hit_st1 := OHToUInt(tagAccess.io.waymaskHit_st1)
-  val waymask_replace_st0 = tagAccess.io.waymaskReplacement_st1
+  val waymask_replace_st0 = tagAccess.io.waymaskReplacement
   val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.ready)
   val mask_st1 = RegEnable(io.coreReq.bits.mask, io.coreReq.ready)
   val warpid_st2 = RegNext(warpid_st1)
@@ -110,16 +110,15 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
-  tagAccess.io.probeRead.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
-  tagAccess.io.probeRead.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
+  tagAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
+  tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
-  //tagAccess.io.coreReqReady := io.coreReq.ready
+  tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
-  tagAccess.io.allocateWrite.valid := memRsp_Q.io.deq.fire()//TODO new tagAccess adaption
-  tagAccess.io.allocateWrite.bits.setIdx := get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr)
-  tagAccess.io.allocateWriteData_st1 := get_tag(mshrAccess.io.missRspOut.bits.blockAddr)
+  tagAccess.io.w.req.valid := memRsp_Q.io.deq.fire()
+  tagAccess.io.w.req.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
 
-    // ******     missReq Queue enqueue     ******
+  // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp
   val memRsp_QData = Wire(UInt((WordLength*BlockWords).W))
   memRsp_QData := memRsp_Q.io.deq.bits.d_data.asUInt()

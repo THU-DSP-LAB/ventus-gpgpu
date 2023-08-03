@@ -24,6 +24,7 @@ class QueuedRequest(params: InclusiveCacheParameters_lite) extends Bundle
   val put    = UInt(params.putBits.W)
   val data   = UInt(params.data_bits.W)
   val mask   = UInt(params.mask_bits.W)
+  val param  =UInt(3.W)
 }
 
 class ListBufferRequest(params: InclusiveCacheParameters_lite)extends Bundle

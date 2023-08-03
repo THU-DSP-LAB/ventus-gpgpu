@@ -23,18 +23,19 @@ class TLBundle_AD (params: InclusiveCacheParameters_lite)extends Bundle{
   val d = new  TLBundleD_lite(params)
 
 }
-abstract class L2CacheIO(params: InclusiveCacheParameters_lite) extends Module{
-  val io = IO(new Bundle {
-    val in_a = Flipped(Decoupled(new TLBundleA_lite(params)))
-    val in_d = Decoupled(new TLBundleD_lite_plus(params))
-    val out_a = Decoupled(new TLBundleA_lite(params))
-    val out_d = Flipped(Decoupled(new TLBundleD_lite(params)))
-    val flush = Flipped(Decoupled(Bool()))
-    val invalidate = Flipped(Decoupled(Bool()))
-  })
-}
-class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
+
+class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 {
+  val io = IO(new Bundle {
+
+    val in_a =Flipped(Decoupled( new TLBundleA_lite(params))) 
+    val in_d =Decoupled(new TLBundleD_lite_plus(params))
+    val out_a =Decoupled(new TLBundleA_lite(params))
+    val out_d=Flipped(Decoupled(new TLBundleD_lite(params)))
+  })
+
+
+ 
   val sourceA = Module(new SourceA(params))
 
   val sourceD = Module(new SourceD(params))
@@ -55,17 +56,15 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
   sinkD.io.d.valid:=io.out_d.valid
   io.out_d.ready:=sinkD.io.d.ready
 
-
+  val request = Wire(Decoupled(new FullRequest(params)))
 
   val issue_flush_invalidate= RegInit(false.B)
-  when(io.flush.fire || io.invalidate.fire){
+  when(request.fire && request.bits.opcode===Hint){
     issue_flush_invalidate :=true.B
   }.elsewhen(sourceD.io.finish_issue){
     issue_flush_invalidate :=false.B
-  }
+  }// sourceD will decide when will finish flush/invalidate
 
-  io.flush.ready := !issue_flush_invalidate
-  io.invalidate.ready  := !issue_flush_invalidate
 
   sinkA.io.a.bits:= io.in_a.bits
   sinkA.io.a.valid:=io.in_a.valid
@@ -146,34 +145,35 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
 
   val mshr_free = (~mshr_validOH).asUInt.orR()
   val mshr_empty = (~mshr_validOH).asUInt.andR.asBool
+  val putbuffer_empty= sinkA.io.empty
+  val flush_ready = !issue_flush_invalidate &&  putbuffer_empty
+  val invalidate_ready  = !issue_flush_invalidate &&  mshr_empty &&  putbuffer_empty
 
-  val request = Wire(Decoupled(new FullRequest(params)))
   request.valid :=(sinkA.io.req.valid)
   request.bits := sinkA.io.req.bits  
  
   sinkA.io.req.ready := request.ready   //if mshr still have entries and if dir ready
 
 
-  val putbuffer_empty= sinkA.io.empty
-  directory.io.read.valid:=request.valid
+
+  directory.io.read.valid:=request.valid && !(request.bits.opcode===Hint)
   directory.io.read.bits:=request.bits
-  directory.io.flush.valid:= mshr_empty && putbuffer_empty
+
   directory.io.write.valid:=schedule.dir.valid
   directory.io.write.bits.is_writemiss:= schedule.dir.bits.is_writemiss
   directory.io.write.bits.way:=schedule.dir.bits.way
   directory.io.write.bits.set:=schedule.dir.bits.set
   directory.io.write.bits.data.tag:=schedule.dir.bits.data.tag
-  directory.io.invalidate.valid:= io.invalidate.valid
-  directory.io.invalidate.bits:= io.invalidate.bits
-  directory.io.flush.valid :=io.flush.valid
-  directory.io.flush.bits :=io.flush.bits
+  directory.io.invalidate := request.fire()&& (request.bits.opcode===Hint) && (request.bits.param===1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
+  directory.io.flush :=request.fire() && (request.bits.opcode===Hint) && (request.bits.param===0.U)
+
 
   //directory.io.write.bits.data.valid:=schedule.dir.bits.data.valid
 
 
 
 
-
+  
   val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   requests.io.valid(i)&&(m.io.status.tag === directory.io.result.bits.tag)&&(m.io.status.set ===directory.io.result.bits.set)&& (!directory.io.result.bits.hit)}.reverse)
   val alloc = !tagMatches.orR() 
 
@@ -201,7 +201,6 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
       m.io.allocate.bits.offset := directory.io.result.bits.offset
       m.io.allocate.bits.source:= directory.io.result.bits.source
       m.io.allocate.bits.flush := directory.io.result.bits.flush
-      m.io.allocate.bits.l2cidx := directory.io.result.bits.l2cidx
     }}
   }
 
@@ -216,7 +215,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
   requests.io.pop.bits  := mshr_select
 
 
-  request.ready := mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready)) && directory.io.ready && !issue_flush_invalidate
+  request.ready := Mux(request.bits.opcode===Hint,invalidate_ready,mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready)) && directory.io.ready && !(issue_flush_invalidate))
 
 
 
@@ -236,7 +235,6 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
   sourceD.io.req.bits.from_mem:=Mux(!schedule.d.valid ,false.B,true.B)
   sourceD.io.req.bits.hit:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.hit,schedule.d.bits.hit)
   sourceD.io.req.bits.set:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.set,schedule.d.bits.set)
-  sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   sourceD.io.req.bits.tag:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,dir_result_buffer.io.deq.bits.victim_tag,dir_result_buffer.io.deq.bits.tag),schedule.d.bits.tag)
   sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,schedule.d.bits.mask)
   sourceD.io.req.bits.offset:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,0.U,dir_result_buffer.io.deq.bits.offset),schedule.d.bits.offset)
@@ -248,7 +246,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends L2CacheIO(params)
   sourceD.io.req.bits.last_flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.last_flush,schedule.d.bits.last_flush)
   sourceD.io.req.bits.flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.flush,schedule.d.bits.flush)
   sourceD.io.req.bits.dirty :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.dirty,schedule.d.bits.dirty)
-
+  sourceD.io.req.bits.param :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
+  sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   bankedStore.io.sinkD_adr <> sinkD.io.bs_adr         
 
   bankedStore.io.sinkD_dat :=sinkD.io.bs_dat

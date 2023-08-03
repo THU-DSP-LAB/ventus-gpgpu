@@ -16,7 +16,7 @@ import L1Cache.ShareMem.{ShareMemParameters, ShareMemParamsKey}
 import chisel3._
 import chisel3.util._
 import config.config.Config
-import pipeline.parameters._
+import top.parameters._
 
 class MyConfig extends Config((site, here, up) =>
 {

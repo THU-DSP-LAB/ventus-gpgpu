@@ -69,6 +69,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.a.bits.opcode:=Get
   io.schedule.a.bits.tag:=request.tag
   io.schedule.a.bits.l2cidx := request.l2cidx
+  io.schedule.a.bits.param := request.param
   io.schedule.a.bits.put:=request.put
   io.schedule.a.bits.offset:=request.offset
   io.schedule.a.bits.source:=request.source

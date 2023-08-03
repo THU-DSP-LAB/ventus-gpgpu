@@ -7,7 +7,7 @@ import L2cache._
 import chisel3.experimental.dataview.BundleUpcastable
 import config.config.Parameters
 
-class FakeL1DCache(implicit p: Parameters) extends DataCacheIO {
+/*class FakeL1DCache(implicit p: Parameters) extends DataCacheIO {
   assert(NLanes == BlockWords)
   // request
   val coreReq_save = Reg(new DCacheCoreReq)
@@ -163,4 +163,4 @@ class FakeL2Cache(params: InclusiveCacheParameters_lite) extends L2cache.L2Cache
   }.otherwise{}
   io.flush.ready := false.B
   io.invalidate.ready := false.B
-}
+}*/

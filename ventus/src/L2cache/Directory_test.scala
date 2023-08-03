@@ -35,6 +35,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.ReplacementPolicy
 import TLMessages._
 import MetaData._
+import freechips.rocketchip.regmapper.LFSR16Seed
 
 class DirectoryEntry_lite (params: InclusiveCacheParameters_lite)extends Bundle
 {
@@ -85,8 +86,8 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     val read   = Flipped(Decoupled(new FullRequest(params))) // sees same-cycle write
     val result = Decoupled(new DirectoryResult_lite_victim(params))
     val ready  = Output(Bool() ) // reset complete; can enable access
-    val flush  = Flipped(Valid(Bool()))
-    val invalidate =Flipped(Valid(Bool()))
+    val flush  = Input(Bool())
+    val invalidate =Input(Bool())
  //   val finish_issue =Output(Bool())
   })
 
@@ -122,25 +123,25 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
 
   val flush_issue_reg =RegInit(false.B)
-  val flush_issue =Mux(io.flush.fire || io.invalidate.fire, true.B,flush_issue_reg)
+  val flush_issue =Mux(io.flush || io.invalidate, true.B,flush_issue_reg)
   val is_invalidate_reg =RegInit(false.B)
-  val is_invalidate =Mux(io.invalidate.fire, io.invalidate.bits,is_invalidate_reg)
+  val is_invalidate =Mux(io.invalidate, io.invalidate,is_invalidate_reg)
 
 
 
   val flushCount =RegInit(0.U((params.setBits+params.wayBits+1).W))
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
-  when((io.flush.fire&& io.flush.bits) || (io.invalidate.bits && io.invalidate.fire) || (flush_issue)){
+  when((io.flush&& io.flush) || (io.invalidate && io.invalidate) || (flush_issue)){
     flushCount := flushCount +1.U
   }.elsewhen(flushDone){
     flushCount :=0.U
   }
   //todo not sure
 
-  when(io.flush.fire || io.invalidate.fire){
+  when(io.flush || io.invalidate){
     flush_issue_reg:= true.B
-    is_invalidate_reg:= io.invalidate.bits && io.invalidate.fire
+    is_invalidate_reg:=  io.invalidate
   }.elsewhen(flushDone){
     flush_issue_reg:= false.B
     is_invalidate_reg :=false.B
@@ -152,6 +153,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
 
   val ren = io.read.fire() || flush_issue
+
   val wen_new = (!wipeDone && !wipeOff) || io.write.fire()
   val wen =io.write.fire()
   require (codeBits <= 256)
@@ -204,9 +206,18 @@ val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
 for(i<- 0 until params.cache.sets){
   replacer_array(i):=Mux(ren1&& i.asUInt===set ,1.U+replacer_array(i),replacer_array(i))
 }
-  val victimWay = replacer_array(set)
+  val lfsr=RegInit(0.U(16.W)) //todo need to be configurable
+  val xor = lfsr(0) ^ lfsr(1) ^ lfsr(3) ^ lfsr(4)
+  when (ren1) {
+    lfsr := Mux(lfsr === 0.U, 1.U, Cat(lfsr(16-2,0),xor))
+  }
+  val victim_LFSR = lfsr
+
+
+  val victimWay = victim_LFSR(params.wayBits-1,0)//replacer_array(set)
 
   val setQuash_1 = wen && io.write.bits.set === io.read.bits.set //表示write到上次读出来的set
+
   val setQuash=wen1 && io.write.bits.set === set
   val tagMatch_1= io.write.bits.data.tag===io.read.bits.tag
   val tagMatch = io.write.bits.data.tag === tag //这是之前打算read的tag
@@ -251,10 +262,10 @@ for(i<- 0 until params.cache.sets){
     waymask=UIntToOH(io.write.bits.way, params.cache.ways) | Fill(params.cache.ways, !wipeDone))//就是写对应的way，如果reset全写
 
 
-  io.ready:=wipeDone && !flush_issue
-  io.write.ready:=wipeDone && !flush_issue
+  io.ready:=wipeDone && !flush_issue_reg
+  io.write.ready:=wipeDone && !flush_issue_reg
 
-  io.read.ready:= ((wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) )&& !flush_issue     //also fire when bypass
+  io.read.ready:= ((wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) )&& !flush_issue_reg    //also fire when bypass
   io.result.valid := Mux(flush_issue,RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),ren1)
   io.result.bits.hit  := Mux(flush_issue,false.B, hit ||(setQuash && tagMatch))
   io.result.bits.way  := Mux(flush_issue, RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
@@ -266,7 +277,7 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.source :=Mux(flush_issue,0.U,RegNext(io.read.bits.source))
   io.result.bits.tag    :=Mux(flush_issue,RegNext(flush_tag),RegNext(io.read.bits.tag))
   //victim tag should be transfered when miss dirty
-  io.result.bits.opcode :=Mux(flush_issue,PutFullData,RegNext(io.read.bits.opcode))
+  io.result.bits.opcode :=Mux(flush_issue,Hint,RegNext(io.read.bits.opcode))
   io.result.bits.mask   :=Mux(flush_issue,Fill(params.mask_bits,1.U),RegNext(io.read.bits.mask))
   io.result.bits.dirty  :=Mux(flush_issue,RegNext(status_reg(flush_set).dirty(flush_way)), (status_reg(set).dirty(io.result.bits.way)).asBool)
   io.result.bits.last_flush :=Mux(flush_issue,RegNext(flushDone),false.B)
@@ -274,4 +285,5 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.victim_tag:= ways(io.result.bits.way).tag
   //todo what's the function of flush
   io.result.bits.l2cidx := Mux(flush_issue,0.U,RegNext(io.read.bits.l2cidx))
+  io.result.bits.param := Mux(flush_issue,0.U,RegNext(io.read.bits.param))
 }
