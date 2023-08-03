@@ -215,7 +215,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.pop.bits  := mshr_select
 
 
-  request.ready :=invalidate_ready,mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready)) && directory.io.ready && !(issue_flush_invalidate)
+  request.ready :=mshr_free && requests.io.push.ready &&(Mux(request.bits.opcode===Get,directory.io.read.ready , directory.io.write.ready)) && directory.io.ready && !(issue_flush_invalidate)
 
 
 
