@@ -230,7 +230,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
     val CTAreq=Flipped(Decoupled(new CTAreqData))
     val CTArsp=(Decoupled(new CTArspData))
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
-    val memReq = DecoupledIO(new L1CacheMemReq()(param))
+    val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
   })
   val cta2warp=Module(new CTA2warp)
@@ -263,7 +263,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   //TODO changed to TLAOp_Get when L1param system established
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_addr := icache.io.memReq.bits.a_addr
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_source := icache.io.memReq.bits.a_source
-  l1Cache2L2Arb.io.memReqVecIn(0).bits.a_data := 0.U.asTypeOf(new L1CacheMemReq()(param).a_data)
+  l1Cache2L2Arb.io.memReqVecIn(0).bits.a_data := 0.U.asTypeOf(Vec(dcache_BlockWords, UInt(xLen.W)))
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_mask.foreach{_ := true.B}
   icache.io.memReq.ready := l1Cache2L2Arb.io.memReqVecIn(0).ready
   // ***********************
@@ -302,7 +302,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   dcache.io.coreReq.bits.data:=pipe.io.dcache_req.bits.data
   dcache.io.coreReq.bits.instrId:=pipe.io.dcache_req.bits.instrId
   dcache.io.coreReq.bits.setIdx:=pipe.io.dcache_req.bits.setIdx
-  dcache.io.coreReq.bits.isWrite:=pipe.io.dcache_req.bits.isWrite
+  dcache.io.coreReq.bits.opcode:=pipe.io.dcache_req.bits.isWrite//TODO jcf new cache
   dcache.io.coreReq.bits.perLaneAddr:=pipe.io.dcache_req.bits.perLaneAddr
   dcache.io.coreReq.bits.tag:=pipe.io.dcache_req.bits.tag
   // **** dcache coreRsp ****
