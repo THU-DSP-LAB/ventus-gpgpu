@@ -10,18 +10,13 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache
 
-import L1Cache.DCache.{DCacheBundle, DCacheMemReq, DCacheMemRsp, DCacheModule}
+import L1Cache.DCache.{DCacheBundle, DCacheModule}
+import L1Cache.{DCacheMemReq, DCacheMemRsp}
 import SRAMTemplate.SRAMTemplate
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-
-class L1CacheMemReq(implicit p: Parameters) extends DCacheMemReq{
-  override val a_source = UInt((log2Up(NCacheInSM)+WIdBits).W)
-}
-class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
-  override val d_source = UInt((log2Up(NCacheInSM)+WIdBits).W)
-}
+import pipeline.parameters._
 
 class L1Cache2L2ArbiterIO(implicit p: Parameters) extends DCacheBundle{
   val memReqVecIn = Flipped(Vec(NCacheInSM, Decoupled(new DCacheMemReq())))
