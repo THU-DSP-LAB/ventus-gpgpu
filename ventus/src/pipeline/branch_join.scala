@@ -138,7 +138,7 @@ class branch_join(val depth_stack: Int) extends Module{
   else_mask := (~if_mask_buf.bits.if_mask).asUInt() & branch_ctl_buf.bits.mask_init
   ifCnt := PopCount(if_mask)
   elseCnt := PopCount(else_mask)
-  takeif := ((ifCnt <= elseCnt) && divOccur) || ifOnly  // take if first if thread take if path is less than thread take else
+  takeif := ((ifCnt < elseCnt) && divOccur) || ifOnly  // take if first if thread take if path is less than thread take else
   ifOnly :=   else_mask === 0.U
   elseOnly := if_mask.asUInt() === 0.U
   divOccur := ~(ifOnly | elseOnly)
