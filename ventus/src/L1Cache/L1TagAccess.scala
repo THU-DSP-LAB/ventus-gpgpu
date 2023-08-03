@@ -136,7 +136,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
-      way_dirty(RegNext(io.probeRead.bits.setIdx))(iTagChecker.io.waymask) := true.B
+      way_dirty(RegNext(io.probeRead.bits.setIdx))(OHToUInt(iTagChecker.io.waymask)) := true.B
     }.elsewhen(io.flushChoosen.get.valid){//tag_array::flush_one
       way_dirty(io.flushChoosen.get.bits((log2Up(set)+way)-1,way))(OHToUInt(io.flushChoosen.get.bits(way-1,0))) := false.B
     }
@@ -151,7 +151,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool
   }
   // ******      tag_array::allocate    ******
-  Replacement.io.validOfSet := Cat(way_valid(io.allocateWrite.bits.setIdx))
+  Replacement.io.validOfSet := Reverse(Cat(way_valid(allocateWrite_st1.setIdx)))//Reverse(Cat(way_valid(io.allocateWrite.bits.setIdx)))
   Replacement.io.timeOfSet_st1 := timeAccess.io.r.resp.data//meta_entry_t::get_access_time
   io.waymaskReplacement_st1 := Replacement.io.waymask_st1//tag_array::replace_choice
   if (!readOnly) {
@@ -245,9 +245,9 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
     val cache_hit = Output(Bool())
   })
 
-  io.waymask := Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid})
+  //io.waymask := Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid})
 
-  //io.waymask := Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
+  io.waymask := Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
   //io.waymask := Reverse(Cat(io.tag_of_set.map{ tag => (tag(tagIdxBits-1,0) === io.tag_from_pipe) && tag(tagIdxBits)}))
   assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
   io.cache_hit := io.waymask.orR
