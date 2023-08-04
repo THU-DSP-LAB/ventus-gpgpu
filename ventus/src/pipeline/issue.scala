@@ -73,7 +73,7 @@ class Issue extends Module{
   if(SPIKE_OUTPUT) {
     io.out_SIMT.bits.spike_info.get:=inputBuf.bits.ctrl.spike_info.get
     when(io.out_LSU.fire&&io.out_LSU.bits.ctrl.mem/*&&io.out_LSU.bits.ctrl.wid===wid_to_check.U*/){
-      printf(p"warp${Decimal(io.out_LSU.bits.ctrl.wid)} ")
+      printf(p"warp ${Decimal(io.out_LSU.bits.ctrl.wid)} ")
       printf(p"0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
       when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XRD){
         printf(p" lsu.r ")
@@ -81,26 +81,33 @@ class Issue extends Module{
         printf(p" lsu.w ")
       }
       when(!io.out_LSU.bits.ctrl.isvec){
-        printf(p"x${io.out_LSU.bits.ctrl.reg_idxw} op ${io.out_LSU.bits.ctrl.mop} ")
         when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR){
+          printf(p"x ${io.out_LSU.bits.ctrl.reg_idx2} op ${io.out_LSU.bits.ctrl.mop} ")
           printf(p"${Hexadecimal(io.out_LSU.bits.in3(0))} ")
+        }.elsewhen(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XRD){
+          printf(p"x ${io.out_LSU.bits.ctrl.reg_idxw} op ${io.out_LSU.bits.ctrl.mop} ")
         }
         printf(p"@ ${Hexadecimal(io.out_LSU.bits.in1(0))}+${Hexadecimal(io.out_LSU.bits.in2(0))}\n")
       }.otherwise{
-        printf(p"v${io.out_LSU.bits.ctrl.reg_idx3} op ${io.out_LSU.bits.ctrl.mop} ")
-        when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR || io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XRD) {
-          printf(p"mask ${Binary(io.out_LSU.bits.mask.asUInt)} ")
-          when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR) {
-            io.out_LSU.bits.in3.reverse.foreach { x => printf(p"${Hexadecimal(x)} ") }
+        when(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XWR) {
+          // vsw12 uses inst[24:20] as src
+          when(io.out_LSU.bits.ctrl.disable_mask){
+            printf(p"v${io.out_LSU.bits.ctrl.reg_idx2} op ${io.out_LSU.bits.ctrl.mop} ")
+          }.otherwise{
+            printf(p"v${io.out_LSU.bits.ctrl.reg_idxw} op ${io.out_LSU.bits.ctrl.mop} ")
           }
-          printf(p"@ ")
+          printf(p"mask ${Binary(io.out_LSU.bits.mask.asUInt)} ")
+          io.out_LSU.bits.in3.reverse.foreach { x => printf(p"${Hexadecimal(x)} ") }
+        }.elsewhen(io.out_LSU.bits.ctrl.mem_cmd === IDecode.M_XRD){
+          printf(p"v${io.out_LSU.bits.ctrl.reg_idx3} op ${io.out_LSU.bits.ctrl.mop} ")
         }
+        printf(p"@")
         (io.out_LSU.bits.in1 zip io.out_LSU.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
         printf(p"\n")
       }
     }
     when(io.out_warpscheduler.fire/*&&io.out_LSU.bits.ctrl.wid===wid_to_check.U*/){
-      printf(p"warp${Decimal(io.out_LSU.bits.ctrl.wid)} ")
+      printf(p"warp ${Decimal(io.out_LSU.bits.ctrl.wid)} ")
       printf(p"0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
       when(io.out_warpscheduler.bits.ctrl.barrier & !io.out_warpscheduler.bits.ctrl.simt_stack_op){printf(p" barrier\n")}
       when(io.out_warpscheduler.bits.ctrl.simt_stack_op){printf(p" endprg\n")}
