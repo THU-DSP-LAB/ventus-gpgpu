@@ -99,12 +99,12 @@ object AdvancedTestList{
   val gaussian = new AdvTest(
     "adv_gaussian",
     Seq(
-      "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata"//, "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
+      "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
     ),
     Seq(
-      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data"//, "Fan2_1.metadata", "Fan1_2.data", "Fan2_2.data"
+      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.metadata", "Fan1_2.data", "Fan2_2.data"
     ),
-    4, 4, 3800
+    4, 4, 4500
   )
 
   val matadd = new AdvTest(
@@ -122,7 +122,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val maxCycle = testbench.cycles
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
@@ -172,10 +172,12 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
           size3d = meta.kernel_size.map(_.toInt)
           wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
-          print(s"kernel $i \n")
-          enq.join()
-          while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
-            deq.join()
+          if(c.io.cnt.peek().litValue <= maxCycle){
+            print(s"kernel $i \n")
+            enq.join()
+            while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
+              deq.join()
+            }
           }
           c.clock.step(2)
         }

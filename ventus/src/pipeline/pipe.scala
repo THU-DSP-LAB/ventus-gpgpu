@@ -126,7 +126,8 @@ class pipe extends Module{
 
   (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
     when(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask) {
-      printf(p"undefined instructions at 0x${Hexadecimal(ctrl.pc)} with 0x${Hexadecimal(ctrl.inst)}\n")
+      printf(p"warp ${Decimal(ctrl.wid)} ")
+      printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
   }
 
@@ -274,7 +275,7 @@ class pipe extends Module{
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
   simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
-  simt_stack.io.pc_reconv.valid := true.B //todo check this
+  simt_stack.io.pc_reconv.valid := issue.io.out_SIMT.valid//true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 
