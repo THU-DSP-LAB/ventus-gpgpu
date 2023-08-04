@@ -80,10 +80,6 @@ class genControl extends Module{
     }
   }
 }
-/*class DCacheMshrBlockAddr(implicit p: Parameters)extends DCacheBundle{
-  val instrId = UInt(WIdBits.W)
-  val blockAddr = UInt(bABits.W)
-}*/
 
 class WshrMemReq extends DCacheMemReq{
   val hasCoreRsp = Bool()
@@ -118,9 +114,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val memReq_Q = Module(new Queue(new WshrMemReq,entries = 8,flow=false,pipe=false))
   val MemReqArb = Module(new Arbiter(new WshrMemReq, 3))
   val waitforL2flush = RegInit(false.B)
+  val probereadAllocateWriteConflict = Wire(Bool())
   // ******     pipeline regs      ******
-  coreReq_Q.io.enq.valid := io.coreReq.valid
-  io.coreReq.ready := coreReq_Q.io.enq.ready
+  coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
@@ -429,7 +426,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.allocateWrite.valid := Mux(tagReqValidCtrl,memRsp_Q.io.deq.valid && memRspIsRead,false.B)
   TagAccess.io.allocateWrite.bits.setIdx := memRsp_Q.io.deq.bits.d_source(SetIdxBits-1,0)
   //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
-
+  probereadAllocateWriteConflict := io.coreReq.valid && RegNext(TagAccess.io.allocateWrite.valid)
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
   //missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
   missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
@@ -565,8 +562,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   assert(NMshrEntry >= NWshrEntry,"MshrEntry should be more than NWshrEntry")
   val memReqSetIdx_st2 = memReq_Q.io.deq.bits.a_addr(WordLength - TagBits -1,WordLength - TagBits - SetIdxBits)
   when(memReqIsWrite_st3){
-      memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
-      //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
+    memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
+    //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
   }
 
   coreRspFromMemReq.data := DontCare
@@ -585,7 +582,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 }
 
 /** coreReq hit场景中DataAccess以word为粒度的SRAM bank使能信号
-  */
+ */
 class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
   val io = IO(new Bundle{
     val perLaneBlockIdx = Input(Vec(NLane,UInt(log2Up(NBank).W)))
