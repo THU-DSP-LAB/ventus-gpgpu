@@ -85,7 +85,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val ShouldFlushCoreRsp_st0 = Wire(Bool())
   val coreReqFire_st1 = RegNext(io.coreReq.fire() && !ShouldFlushCoreRsp_st0)
   val coreReqFire_st2 = RegNext(coreReqFire_st1 && !ShouldFlushCoreRsp_st1)
-  //ljz: need to know if cachemiss is sent
+ 
   val coreRespFire_st2 =io.coreRsp.fire
   val coreRespFire_st3 =RegNext(coreRespFire_st2)
 
@@ -194,11 +194,11 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   //val OrderViolation_st2 = RegNext(OrderViolation_st1)
   val OrderViolation_st3 = RegNext(OrderViolation_st2)
   val warpid_st3 = RegNext(warpid_st2)
-  val cacheMiss_st2 = RegEnable(cacheMiss_st1,!ShouldFlushCoreRsp_st1)
+  val cacheMiss_st2 = RegNext(Mux(ShouldFlushCoreRsp_st1,false.B,cacheMiss_st1))
   val cacheMiss_st3 = RegNext(cacheMiss_st2)
 
   val warpIdMatch2_st1 = warpid_st1 === warpid_st2
   val warpIdMatch3_st1 = warpid_st1 === warpid_st3
 
-  OrderViolation_st1 := (warpIdMatch2_st1 && cacheMiss_st2 &&coreRespFire_st2 && !OrderViolation_st2) || (warpIdMatch3_st1 && cacheMiss_st3 && !OrderViolation_st3)
+  OrderViolation_st1 := (warpIdMatch2_st1 && cacheMiss_st2  && !OrderViolation_st2) || (warpIdMatch3_st1 && cacheMiss_st3 && !OrderViolation_st3)
 }
