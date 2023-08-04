@@ -329,7 +329,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
 
 
 class SM2clusterArbiterIO(L2param: InclusiveCacheParameters_lite)(implicit p: Parameters) extends RVGBundle{
-  val memReqVecIn = (Vec(NSmInCluster, Flipped(DecoupledIO(new L1CacheMemReq()))))
+  val memReqVecIn = (Vec(NSmInCluster, Flipped(DecoupledIO(new L1CacheMemReqArb()))))
   val memReqOut = Decoupled(new TLBundleA_lite(L2param))
   val memRspIn = Flipped(Decoupled(new TLBundleD_lite_plus(L2param)))
   val memRspVecOut = Vec(NSmInCluster, DecoupledIO(new L1CacheMemRsp()))
@@ -446,13 +446,13 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
     io.memRspVecOut(i).bits.opcode := io.memRspIn.bits.opcode
     io.memRspVecOut(i).bits.param := io.memRspIn.bits.param
     io.memRspVecOut(i).bits.data :=io.memRspIn.bits.data//.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
-    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,0)
+    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)-1,0)
     io.memRspVecOut(i).bits.address:= io.memRspIn.bits.address
     if(NCluster == 1){
       io.memRspVecOut(i).valid := io.memRspIn.valid
     } else {
        io.memRspVecOut(i).valid :=
-         io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, log2Ceil(NSmInCluster) + WIdBits + log2Up(NCacheInSM)) === i.asUInt && io.memRspIn.valid
+         io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets) - 1, log2Ceil(NSmInCluster) + 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)+ log2Up(NCacheInSM)) === i.asUInt && io.memRspIn.valid
     }
   }
   if(NCluster == 1){
