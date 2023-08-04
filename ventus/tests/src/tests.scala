@@ -99,7 +99,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val caseName = "matadd"
     val metaFileDir = "./ventus/txt/matadd.metadata" // TODO: rename
     val dataFileDir = "./ventus/txt/matadd.data"
-    val maxCycle = 1500
+    val maxCycle = 250
     val mem = new MemBox(metaFileDir, dataFileDir)
     val size3d = mem.metaData.kernel_size.map(_.toInt)
     var wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
@@ -148,48 +148,47 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
           deq.join()
         }
-        c.clock.step(20)
+        c.clock.step(2)
       }.fork{ // GPU <-> MEM
         val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
         while(!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
-          fork {
-            timescope {
-              c.io.out_a.ready.poke(true.B)
-              c.clock.step(1)
-              if(!wg_list.reduce(_ && _)){
-                if(waitForValid(c.io.out_a, maxCycle)){
-                  val addr = c.io.out_a.bits.address.peek().litValue
-                  var opcode_rsp = 0
-                  val source = c.io.out_a.bits.source.peek().litValue
-                  var data = new Array[Byte](data_byte_count)
-                  if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
-                    data = mem.readMem(addr, data_byte_count) // read operation
-                    opcode_rsp = 1
-                  }
-                  else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
-                    data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
-                    val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
-                      case '1' => true
-                      case _ => false
-                    }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
-                    mem.writeMem(addr, data_byte_count, data, mask) // write operation
-                    data = Array.fill(data_byte_count)(0.toByte) // response = 0
-                    opcode_rsp = 0
-                  }
-                  else {
-                    data = Array.fill(data_byte_count)(0.toByte)
-                  }
-                  c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
-                    _.opcode -> opcode_rsp.U, // w:0 r:1
-                    _.data -> ByteArray2BigInt(data).U,
-                    _.source -> source.U,
-                    _.size -> 0.U, // TODO: Unused
-                    _.param -> 0.U
-                  ))
+          if(!wg_list.reduce(_ && _)){
+            c.io.out_a.ready.poke(true.B)
+            if(waitForValid(c.io.out_a, maxCycle)){
+              timescope {
+                val addr = c.io.out_a.bits.address.peek().litValue
+                var opcode_rsp = 0
+                val source = c.io.out_a.bits.source.peek().litValue
+                var data = new Array[Byte](data_byte_count)
+                if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
+                  data = mem.readMem(addr, data_byte_count) // read operation
+                  opcode_rsp = 1
                 }
+                else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
+                  data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
+                  val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
+                    case '1' => true
+                    case _ => false
+                  }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
+                  mem.writeMem(addr, data_byte_count, data, mask) // write operation
+                  data = Array.fill(data_byte_count)(0.toByte) // response = 0
+                  opcode_rsp = 0
+                }
+                else {
+                  data = Array.fill(data_byte_count)(0.toByte)
+                }
+                c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
+                  _.opcode -> opcode_rsp.U, // w:0 r:1
+                  _.data -> ByteArray2BigInt(data).U,
+                  _.source -> source.U,
+                  _.size -> 0.U, // TODO: Unused
+                  _.param -> 0.U
+                ))
+                c.io.out_a.ready.poke(false.B)
+                c.clock.step(1)
               }
             }
-          }.join
+          }
         }
       }.join
     }
