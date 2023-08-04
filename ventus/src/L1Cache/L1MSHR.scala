@@ -135,7 +135,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   // ******      mshr::probe_vec    ******
   entryMatchProbe := Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid
   assert(PopCount(entryMatchProbe) <= 1.U)
-  val secondaryMiss = RegEnable(entryMatchProbe.orR,io.probe.valid)
+  val secondaryMiss = RegNext(entryMatchProbe.orR)
   val primaryMiss = !secondaryMiss
   val mainEntryFull = entryStatus.io.full
   val mainEntryAlmFull = entryStatus.io.alm_full
