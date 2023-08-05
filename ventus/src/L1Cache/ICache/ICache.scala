@@ -194,11 +194,11 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   //val OrderViolation_st2 = RegNext(OrderViolation_st1)
   val OrderViolation_st3 = RegNext(OrderViolation_st2)
   val warpid_st3 = RegNext(warpid_st2)
-  val cacheMiss_st2 = RegEnable(cacheMiss_st1,!ShouldFlushCoreRsp_st1)
+  val cacheMiss_st2 = RegNext(Mux(ShouldFlushCoreRsp_st1,false.B,cacheMiss_st1))
   val cacheMiss_st3 = RegNext(cacheMiss_st2)
 
   val warpIdMatch2_st1 = warpid_st1 === warpid_st2
   val warpIdMatch3_st1 = warpid_st1 === warpid_st3
 
-  OrderViolation_st1 := (warpIdMatch2_st1 && cacheMiss_st2 &&coreRespFire_st2 && !OrderViolation_st2) || (warpIdMatch3_st1 && cacheMiss_st3 && !OrderViolation_st3)
+  OrderViolation_st1 := (warpIdMatch2_st1 && cacheMiss_st2  && !OrderViolation_st2) || (warpIdMatch3_st1 && cacheMiss_st3 && !OrderViolation_st3)
 }
