@@ -500,6 +500,7 @@ class InstrDecodeV2 extends Module {
     val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
     val control = Output(Vec(num_fetch, new CtrlSigs))
     val control_mask = Output(Vec(num_fetch, Bool()))
+    val ibuffer_ready = Input(Vec(num_warp, Bool()))
   })
   class regext extends Bundle{
     val isExt = Bool() // regext
@@ -534,11 +535,11 @@ class InstrDecodeV2 extends Module {
   val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
   when(io.flush_wid.valid){
     scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
-    when(io.flush_wid.bits =/= io.wid && io.inst_mask.last){
+    when(io.flush_wid.bits =/= io.wid && io.inst_mask.last && io.ibuffer_ready(io.wid)){
       scratchPads(io.wid) := regextInfo_pre.last
     }
   }.otherwise{
-    when(io.inst_mask.last){ scratchPads(io.wid) := regextInfo_pre.last }
+    when(io.inst_mask.last && io.ibuffer_ready(io.wid)){ scratchPads(io.wid) := regextInfo_pre.last }
   }
   // regextInfo: 0<>Scratchpad, 1<>decode_0, 2<>decode_1, 3<>decode_2
   val regextInfo = VecInit(Seq(scratchPads(io.wid)) ++ regextInfo_pre.take(num_fetch-1))
