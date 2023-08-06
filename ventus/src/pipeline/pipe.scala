@@ -119,6 +119,7 @@ class pipe extends Module{
   control.io.wid:=io.icache_rsp.bits.warpid
   control.io.inst_mask:=Mux(io.icache_rsp.valid& !io.icache_rsp.bits.status(0),io.icache_rsp.bits.mask.asTypeOf(control.io.inst_mask),0.U.asTypeOf(control.io.inst_mask))
   control.io.flush_wid := warp_sche.io.flush
+  control.io.ibuffer_ready := ibuffer.io.ibuffer_ready
   ibuffer.io.in.bits.control := control.io.control
   ibuffer.io.in.bits.control_mask := control.io.control_mask
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
