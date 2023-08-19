@@ -164,12 +164,19 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                   data = mem.readMem(addr, data_byte_count) // read operation
                   opcode_rsp = 1
                 }
-                else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write
+                else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write partial
                   data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
                   val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
                     case '1' => true
                     case _ => false
                   }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
+                  mem.writeMem(addr, data_byte_count, data, mask) // write operation
+                  data = Array.fill(data_byte_count)(0.toByte) // response = 0
+                  opcode_rsp = 0
+                }
+                else if (c.io.out_a.bits.opcode.peek().litValue == 0) { // write full
+                  data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
+                  val mask = IndexedSeq.fill(4 * c.io.out_a.bits.mask.getWidth)(true)
                   mem.writeMem(addr, data_byte_count, data, mask) // write operation
                   data = Array.fill(data_byte_count)(0.toByte) // response = 0
                   opcode_rsp = 0
