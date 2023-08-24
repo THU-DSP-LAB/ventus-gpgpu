@@ -204,11 +204,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val missMemReq = Wire(new WshrMemReq) //writeMiss_st1 || readMiss_st1
   val writeMissReq = Wire(new WshrMemReq)
   val readMissReq = Wire(new WshrMemReq)
+  val activeLaneAddr = coreReq_st1.perLaneAddr.map( a => Mux(a.activeMask,a.blockOffset,0.U))
+  val blockaddr_ = activeLaneAddr.reduce(_ | _)
+  val blockaddr_1H = UIntToOH(blockaddr_)
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
   writeMissReq.a_source := DontCare//wait for WSHR
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
-  writeMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
+  writeMissReq.a_mask := blockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   writeMissReq.a_data := coreReq_st1.data
   writeMissReq.hasCoreRsp := true.B
   writeMissReq.coreRspInstrId := coreReq_st1.instrId
@@ -217,7 +220,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_param := 0.U //regular read
   readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//setIdx for memRsp tag access in 1st stage
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
-  readMissReq.a_mask := coreReq_st1.perLaneAddr.map(_.activeMask)
+  readMissReq.a_mask := blockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B
   readMissReq.coreRspInstrId := DontCare
@@ -490,11 +493,17 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRsp_st2_valid_from_coreReq = Wire(Bool())
   val coreRsp_st2_valid_from_memRsp = Wire(Bool())
   val coreRsp_st2_valid_from_memReq = Wire(Bool())
+    val coreRsp_st2_valid_from_coreReq_Reg = RegNext(coreReq_st1_valid &&
+    (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
 
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
+  val coreReqmemRspConflict = coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memRsp
+  //val coreReq_Reg = RegNext(coreRsp_st2_valid_from_coreReq_Reg)
+  val coreReqmemRspConflict_Reg = RegEnable(coreReqmemRspConflict,coreRsp_st2_valid_from_coreReq_Reg)
+//if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
 
-  coreRsp_st2_valid_from_coreReq := RegNext(coreReq_st1_valid &&
-    (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
+  coreRsp_st2_valid_from_coreReq := Mux(coreReqmemRspConflict,false.B,Mux(coreReqmemRspConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
+
   coreRsp_st2_valid_from_memRsp := RegNext(MshrAccess.io.missRspOut.valid)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memReq), "cRsp from cReq and mReq conflict")
@@ -546,7 +555,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val memReqIsRead_st3 = (a_op_st3 === TLAOp_Get) && memReq_Q.io.deq.bits.a_param === 0.U
 
   WshrAccess.io.pushReq.bits.blockAddr := memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
-  val wshrProtect = WshrAccess.io.conflict && (memReqIsWrite_st3 || memReqIsRead_st3)
+  val wshrProtect = WshrAccess.io.conflict && (memReqIsWrite_st3 || memReqIsRead_st3) && memReq_Q.io.deq.valid
   val cRspBlockedOrWshrFull = ((!coreRsp_Q.io.enq.ready && memReq_Q.io.deq.bits.hasCoreRsp)
     || !WshrAccess.io.pushReq.ready) && memReqIsWrite_st3
   val wshrPass = !wshrProtect && !cRspBlockedOrWshrFull
