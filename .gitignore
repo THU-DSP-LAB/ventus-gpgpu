@@ -2,7 +2,9 @@ out/
 .bsp/
 .idea/
 .mill-bin/
-
+.metals/
+.vscode/
+.bloop/
 # vim misc
 *.orig
 *.swp
