@@ -108,7 +108,7 @@ object AdvancedTestList{
   )
 
   val matadd = new AdvTest(
-    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 2000
+    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
   )
   val vecadd = new AdvTest(
     "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000

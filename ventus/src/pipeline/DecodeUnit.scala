@@ -567,6 +567,7 @@ class InstrDecodeV2 extends Module {
     c.sel_imm := s(11)
     c.mem_whb := s(12)
     c.alu_fn := s(13)
+    c.is_vls12 := s(13) === pipeline.IDecode.FN_VLS12
     c.mul := s(14)
     c.mem := c.mem_cmd.orR
     c.mem_cmd := s(15)
