@@ -13,7 +13,7 @@ import chisel3._
 import L1Cache.ICache.ICacheParameters
 import chisel3.util.log2Up
 import config.config.{Field, Parameters}
-import pipeline.parameters._
+import top.parameters._
 
 
 case object RVGParamsKey extends Field [RVGParameters]
@@ -23,9 +23,12 @@ case class RVGParameters
   NSms: Int = num_sm,
   NLanes: Int = num_thread,
   NWarps: Int = num_warp,
+  NSmInCluster: Int = num_sm_in_cluster,
+  NCluster: Int = num_cluster,
   WordLength: Int = xLen,
   BlockWords: Int = dcache_BlockWords,
-  NCacheInSM: Int = num_cache_in_sm
+  NCacheInSM: Int = num_cache_in_sm,
+  NL2Cache: Int = num_l2cache
 )
 
 trait HasRVGParameters {
@@ -41,6 +44,13 @@ trait HasRVGParameters {
   def BlockWords = RVGParams.BlockWords
 
   def NCacheInSM = RVGParams.NCacheInSM
+
+  def NSmInCluster = RVGParams.NSmInCluster
+  def NCluster = RVGParams.NCluster
+  def NL2Cache = RVGParams.NL2Cache
+
+  def NResTabEntry = 16
+  def NInfWriteEntry = 16
 }
 
 abstract class RVGBundle(implicit val p: Parameters) extends Bundle with HasRVGParameters

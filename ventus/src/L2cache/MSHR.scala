@@ -35,7 +35,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
 
     val status    = Output( new DirectoryResult_lite(params)) 
     val valid     = Input(Bool())
- 
+    val mshr_wait = Input(Bool())
     val schedule  = new ScheduleRequest(params)
 
     val sinkd     = Flipped(Valid(new SinkDResponse(params))) 
@@ -60,13 +60,15 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.d.valid:= io.valid && sink_d_reg
   io.schedule.d.bits:=request 
   io.schedule.d.bits.hit:=false.B
+  io.schedule.d.bits.dirty:=false.B
   io.schedule.d.bits.data :=Mux(sink_d_reg, RegEnable(io.sinkd.bits.data,io.sinkd.valid), request.data)
 
 
-  io.schedule.a.valid:=sche_a_valid
+  io.schedule.a.valid:=sche_a_valid && !io.mshr_wait
   io.schedule.a.bits.set:=request.set
   io.schedule.a.bits.opcode:=Get
   io.schedule.a.bits.tag:=request.tag
+  io.schedule.a.bits.l2cidx := request.l2cidx
   io.schedule.a.bits.put:=request.put
   io.schedule.a.bits.offset:=request.offset
   io.schedule.a.bits.source:=request.source
@@ -85,9 +87,9 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.dir.valid:=sche_dir_valid
   io.schedule.dir.bits.set:=request.set
   io.schedule.dir.bits.data.tag:=request.tag
-  io.schedule.dir.bits.data.valid:=true.B
+  //io.schedule.dir.bits.data.valid:=true.B
   io.schedule.dir.bits.way:=request.way
-
+  io.schedule.dir.bits.is_writemiss:= (request.opcode===PutFullData) ||(request.opcode===PutPartialData)
 
 
 

@@ -3,7 +3,7 @@ package pipeline
 import chisel3._
 import chisel3.util.{Cat, MuxLookup, is, switch}
 import IDecode._
-import parameters._
+import top.parameters._
 
 class RegFileBankIO extends Bundle  {
   val rs     = Output(UInt(xLen.W))
@@ -16,8 +16,10 @@ class RegFileBankIO extends Bundle  {
 
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
-  val regs = SyncReadMem(32*num_warp/num_bank, UInt(xLen.W))
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd, regs.read(io.rsidx))
+  val regs = SyncReadMem(NUMBER_SGPR_SLOTS/num_bank, UInt(xLen.W))
+  val bypassSignal = Wire(Bool())
+  bypassSignal := RegNext((io.rsidx===io.rdidx)&io.rdwen)
+  io.rs := Mux(bypassSignal,RegNext(io.rd), regs.read(io.rsidx))
   //io.ready := true.B
   when (io.rdwen) {
     regs.write(io.rdidx, io.rd)
@@ -36,11 +38,12 @@ class FloatRegFileBankIO(val unified: Boolean) extends Bundle  {
 }
 class FloatRegFileBank extends Module  {
   val io = IO(new FloatRegFileBankIO(false))
-  val regs = SyncReadMem(32*num_warp/num_bank, Vec(num_thread,UInt(xLen.W)))  //Register files of all warps are divided to number of bank
+  val regs = SyncReadMem(NUMBER_VGPR_SLOTS/num_bank, Vec(num_thread,UInt(xLen.W)))  //Register files of all warps are divided to number of bank
   val internalMask = Wire(Vec(num_thread, Bool()))
 
-  //  io.rs := regs.read(io.rsidx)
-  io.rs := Mux(((io.rsidx===io.rdidx)&io.rdwen),io.rd,regs.read(io.rsidx))
+  val bypassSignal = Wire(Bool())
+  bypassSignal := RegNext((io.rsidx === io.rdidx) & io.rdwen)
+  io.rs := Mux(bypassSignal,RegNext(io.rd),regs.read(io.rsidx))
   io.v0 := regs.read(0.U)
   internalMask:=io.rdwmask
   when (io.rdwen) {
@@ -72,7 +75,8 @@ class unifiedBank extends Module  {
 
 class ImmGenIO extends Bundle {
   val inst = Input(UInt(32.W))
-  val sel  = Input(UInt(3.W))
+  val sel  = Input(UInt(4.W))
+  val imm_ext = Input(UInt(6.W))
   val out  = Output(UInt(32.W))
 }
 
@@ -86,10 +90,12 @@ class ImmGen extends Module {
   val Jimm = Cat(io.inst(31), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W)).asSInt // jal
   val Zimm = Cat(0.U(27.W),io.inst(19, 15)).asSInt // CSR I
   val Imm2 = io.inst(24,20).asSInt
-  val Vimm = io.inst(19,15).asSInt
+  val Vimm = Cat(io.imm_ext, io.inst(19,15)).asSInt
+  val Iimm11L = io.inst(30, 20).asSInt
+  val Iimm11S = Cat(io.inst(30, 25), io.inst(11, 7)).asSInt
 
   val out = WireInit(0.S(32.W))
 
-  out := MuxLookup(io.sel, Iimm & -2.S, Seq(IMM_I -> Iimm,IMM_J->Jimm, IMM_S -> Simm, IMM_B -> Bimm, IMM_U -> Uimm, IMM_2 -> Imm2,IMM_Z -> Zimm,IMM_V->Vimm))
+  out := MuxLookup(io.sel, Iimm & -2.S, Seq(IMM_I -> Iimm,IMM_J->Jimm, IMM_S -> Simm, IMM_B -> Bimm, IMM_U -> Uimm, IMM_2 -> Imm2,IMM_Z -> Zimm,IMM_V->Vimm,IMM_L11->Iimm11L,IMM_S11->Iimm11S))
   io.out:=out.asUInt
 }

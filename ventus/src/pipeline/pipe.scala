@@ -13,15 +13,17 @@ package pipeline
 import L1Cache.ICache._
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
 }
 class ICachePipeRsp_np extends Bundle{
   val addr = UInt(32.W)
-  val data = UInt(32.W)
+  val data = UInt((num_fetch*32).W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
   val status = UInt(2.W)
 }
@@ -48,7 +50,7 @@ class pipe extends Module{
 
   val warp_sche=Module(new warp_scheduler)
   //val pcfifo=Module(new PCfifo)
-  val control=Module(new Control)
+  val control=Module(new InstrDecodeV2)
   val operand_collector=Module(new operandCollector)
   val issue=Module(new Issue)
   val alu=Module(new ALUexe)
@@ -62,16 +64,27 @@ class pipe extends Module{
   val wb=Module(new Writeback(6,6))
 
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
-  val ibuffer=Module(new instbuffer)
+  val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
 //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
-  val exe_data=Module(new Queue(new vExeData,1,pipe=true))
-  val simt_stack=Module(new SIMT_STACK(num_thread))
+  val exe_data=Module(new Module{
+    val io = IO(new Bundle{
+      val enq = Flipped(DecoupledIO(new vExeData))
+      val deq = DecoupledIO(Output(new vExeData))
+    })
+    io.deq <> io.enq
+  })
+  val simt_stack=Module(new branch_join(num_thread))
   val branch_back=Module(new Branch_back)
   val csrfile=Module(new CSRexe())
 
   io.externalFlushPipe.valid:=warp_sche.io.flush.valid|warp_sche.io.flushCache.valid
   io.externalFlushPipe.bits:=Mux(warp_sche.io.flush.valid,warp_sche.io.flush.bits,warp_sche.io.flushCache.bits)
+
+  csrfile.io.lsu_wid:=lsu.io.csr_wid
+  lsu.io.csr_pds:=csrfile.io.lsu_pds
+  lsu.io.csr_tid:=csrfile.io.lsu_tid
+  lsu.io.csr_numw:=csrfile.io.lsu_numw
 
   warp_sche.io.pc_reset:=io.pc_reset
   warp_sche.io.branch<>branch_back.io.out
@@ -90,6 +103,8 @@ class pipe extends Module{
   warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt()
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
+  operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
+  operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
 
@@ -98,29 +113,39 @@ class pipe extends Module{
 
 
   control.io.pc:=io.icache_rsp.bits.addr
-  control.io.inst:=io.icache_rsp.bits.data
+  control.io.inst.zipWithIndex.foreach{ case (ins, i) =>
+    ins := (io.icache_rsp.bits.data >> (xLen * i))(xLen - 1, 0)
+  }
   control.io.wid:=io.icache_rsp.bits.warpid
-
-  ibuffer.io.in.bits:=control.io.control
+  control.io.inst_mask:=Mux(io.icache_rsp.valid& !io.icache_rsp.bits.status(0),io.icache_rsp.bits.mask.asTypeOf(control.io.inst_mask),0.U.asTypeOf(control.io.inst_mask))
+  control.io.flush_wid := warp_sche.io.flush
+  control.io.ibuffer_ready := ibuffer.io.ibuffer_ready
+  ibuffer.io.in.bits.control := control.io.control
+  ibuffer.io.in.bits.control_mask := control.io.control_mask
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
-  ibuffer.io.flush:=warp_sche.io.flush
+  ibuffer.io.flush_wid:=warp_sche.io.flush
 
-  when(control.io.control.alu_fn===63.U & ibuffer.io.in.valid) {
-    printf(p"undefined instructions at 0x${Hexadecimal(control.io.pc)} with 0x${Hexadecimal(control.io.inst)}\n")
+  (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
+    when(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask) {
+      printf(p"warp ${Decimal(ctrl.wid)} ")
+      printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
+    }
   }
 
+
   if(SINGLE_INST){
-    control.io.inst:=io.inst.get.bits
+    control.io.inst(0) := VecInit(io.inst.get.bits, 0.U(xLen.W))
+    control.io.inst_mask := VecInit(1.U(1.W), 0.U(1.W))
     control.io.wid:=0.U
     io.inst.map(_.ready:=ibuffer.io.in.ready)
     ibuffer.io.in.valid:=io.inst.get.valid
-    when(io.inst.get.fire) {printf(p"${Hexadecimal(control.io.inst)}\n")}
+    when(io.inst.get.fire) {printf(p"${Hexadecimal(control.io.inst(0))}\n")}
   }
 
   io.icache_rsp.ready:=ibuffer.io.in.ready
 
-  val ibuffer_ready=Wire(Vec(num_warp,Bool()))
-  warp_sche.io.exe_busy:= ~ibuffer_ready.asUInt()
+  //val ibuffer_ready=Wire(Vec(num_warp,Bool()))
+  warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt()
 
   for (i <- 0 until num_warp) {
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
@@ -129,14 +154,14 @@ class pipe extends Module{
     if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
     ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
     val ctrl=ibuffer.io.out(i).bits
-    ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
+    /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
         Mux(ctrl.csr.orR(),csrfile.io.in.ready,
           Mux(ctrl.mem,lsu.io.lsu_req.ready,
             Mux(ctrl.isvec&ctrl.simt_stack&ctrl.simt_stack_op===0.U,valu.io.in.ready&simt_stack.io.branch_ctl.ready,
               Mux(ctrl.isvec&ctrl.simt_stack,simt_stack.io.branch_ctl.ready,
                 Mux(ctrl.isvec,valu.io.in.ready,
-                  Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))
+                  Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))*/
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
     scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
     scoreb(i).if_ctrl:= (ibuffer2issue.io.out.bits)
@@ -171,6 +196,7 @@ class pipe extends Module{
   operand_collector.io.writeScalarCtrl<>wb.io.out_x
 
   simt_stack.io.input_wid:=operand_collector.io.out.bits.control.wid//ibuffer2issue.io.out.bits.wid
+  csrfile.io.simt_wid := operand_collector.io.out.bits.control.wid // todo check this
 
   when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
@@ -186,13 +212,20 @@ class pipe extends Module{
   }
 
   //输出所有write mem的操作
-  val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
-  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
-    printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} ,writedata=")
-    exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
-    printf(p"mask ${exe_data.io.deq.bits.mask} at${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
-    printf(p"\n")
-  }
+  //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
+//  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
+//    when(exe_data.io.deq.bits.ctrl.isvec){
+//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
+//      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
+//      printf(p"mask ${Binary(exe_data.io.deq.bits.mask.asUInt)} @")
+//      (exe_data.io.deq.bits.in1 zip exe_data.io.deq.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
+//      printf("\n")
+//    }.otherwise{
+//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w x${exe_data.io.deq.bits.ctrl.reg_idxw} ")
+//      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0))} ")
+//      printf(p"@ ${Hexadecimal(exe_data.io.deq.bits.in1(0))}+${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
+//    }
+//  }
   //输出所有发射的指令
   //when( exe_data.io.deq.fire()){
   //  printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
@@ -211,15 +244,15 @@ class pipe extends Module{
   //  printf(p"\n")
   //}
   //输出写入向量寄存器的
-  //when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
-  //  printf(p"write${wb.io.out_v.bits.reg_idxw})")
-  //  wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p" ${Hexadecimal(x.asUInt)} "))
-  //  printf(p"with ${wb.io.out_v.bits.wvd_mask}\n")
-  //}
-  ////输出写入标量寄存器的
-  //when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
-  //  printf(p"write${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
-  //}
+//  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
+//    printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
+//    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
+//    printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
+//  }
+//  ////输出写入标量寄存器的
+//  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
+//    printf(p"write x${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
+//  }
 
   {
     exe_data.io.enq.bits.ctrl := operand_collector.io.out.bits.control
@@ -242,6 +275,8 @@ class pipe extends Module{
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
+  simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
+  simt_stack.io.pc_reconv.valid := issue.io.out_SIMT.valid//true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 

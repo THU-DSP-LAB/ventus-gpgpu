@@ -14,7 +14,7 @@ import FPUv2.TensorCoreFP32
 import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 import IDecode._
 
 class BranchCtrl extends Bundle{
@@ -550,9 +550,11 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     result2simt.io.enq.bits.if_mask := ~(VecInit(alu.map({ x => x.cmp_out })).asUInt)
     result2simt.io.enq.valid := io.in.valid & io.in.bits.ctrl.simt_stack
 
+    if(SPIKE_OUTPUT){
+      result.io.enq.bits.spike_info.foreach{ _ := io.in.bits.ctrl.spike_info.get }
+    }
+
     io.in.ready := Mux(io.in.bits.ctrl.simt_stack, result2simt.io.enq.ready, result.io.enq.ready)
-    io.out <> result.io.deq
-    io.out2simt_stack <> result2simt.io.deq
   }
   //==========================================
   else{
@@ -671,10 +673,9 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
             resultReg.reg_idxw := inReg.ctrl.reg_idxw
             resultReg.wvd := inReg.ctrl.wvd
             resultReg.wvd_mask := inReg.mask
-            if (SPIKE_OUTPUT) {
-              resultReg.spike_info.get := inReg.ctrl.spike_info.get
+            if(SPIKE_OUTPUT){
+              resultReg.spike_info.foreach{ _ := inReg.ctrl.spike_info.get }
             }
-
             simtReg.wid := inReg.ctrl.wid
             recv_wvd := inReg.ctrl.wvd
             recv_simt_stack := inReg.ctrl.simt_stack
@@ -720,9 +721,9 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     result2simt.io.enq.bits := simtReg
 
     io.in.ready := sendCS === 0.U || (sendCS===maxIter.U && outFIFOReady)
-    result.io.deq <> io.out
-    result2simt.io.deq <> io.out2simt_stack
   }
+  result.io.deq <> io.out
+  result2simt.io.deq <> io.out2simt_stack
 }
 
 class ctrl_fpu extends Bundle{
