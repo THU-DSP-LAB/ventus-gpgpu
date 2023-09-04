@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 
 
@@ -56,4 +56,106 @@ class ibuffer2issue extends Module{
   io.out_sel:=rrarbit.io.chosen
   //input:ibuffer output: issue exe
 
+}
+
+// "num_fetch -> 1" slow down
+//
+class InstrBufferV2 extends Module{
+  val io = IO(new Bundle{
+    val in = Flipped(DecoupledIO(new Bundle{
+      val control = Vec(num_fetch, new CtrlSigs)
+      val control_mask = Vec(num_fetch, Bool())
+    }))
+    val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
+    val ibuffer_ready = Output(Vec(num_warp, Bool()))
+    val out = Vec(num_warp, DecoupledIO(Output(new CtrlSigs)))
+  })
+  val buffers = VecInit(Seq.fill(num_warp)(Module(new Queue(Vec(num_fetch, new CtrlSigs), size_ibuffer, hasFlush = true)).io))
+  val buffers_mask = VecInit(Seq.fill(num_warp)(Module(new Queue(Vec(num_fetch, Bool()), size_ibuffer, hasFlush = true)).io))
+  (0 until num_warp).foreach{ i =>
+    buffers(i).enq.valid := io.in.bits.control(0).wid === i.U && io.in.valid
+    buffers(i).enq.bits := io.in.bits.control
+    buffers(i).flush.foreach{ _ := io.flush_wid.valid && io.flush_wid.bits === i.U }
+    buffers_mask(i).enq.valid := io.in.bits.control(0).wid === i.U && io.in.valid
+    buffers_mask(i).enq.bits := io.in.bits.control_mask
+    buffers_mask(i).flush.foreach{ _ := io.flush_wid.valid && io.flush_wid.bits === i.U }
+    io.in.ready := buffers(io.in.bits.control(0).wid).enq.ready
+    io.ibuffer_ready(i) := buffers(i).enq.ready
+  }
+
+  io.in.ready := buffers(io.in.bits.control(0).wid).enq.ready
+  when(io.in.fire){
+    buffers(io.in.bits.control(0).wid).enq.bits := io.in.bits.control
+    buffers_mask(io.in.bits.control(0).wid).enq.bits := io.in.bits.control_mask
+    when(io.flush_wid.valid){
+      buffers(io.flush_wid.bits).enq.bits := 0.U.asTypeOf(Vec(num_fetch, new CtrlSigs))
+      buffers_mask(io.flush_wid.bits).enq.bits := 0.U.asTypeOf(Vec(num_fetch, Bool()))
+    }
+  }
+  class SlowDown extends Module{
+    val io = IO(new Bundle{
+      val in = Flipped(DecoupledIO(new Bundle{
+        val control = Vec(num_fetch, new CtrlSigs)
+        val control_mask = Vec(num_fetch, Bool())
+      }))
+      val flush = Input(Bool())
+      val out = DecoupledIO(new CtrlSigs)
+    })
+
+    val control_reg = RegInit(0.U.asTypeOf(io.in.bits.control))
+    val mask_reg = RegInit(0.U(num_fetch.W))
+    val ptr = PriorityEncoder(mask_reg)
+
+    val mask_next = mask_reg & (~(1.U << ptr)(num_fetch-1, 0)).asUInt
+    when(io.flush){
+      mask_reg := 0.U
+      control_reg := 0.U.asTypeOf(control_reg)
+    }.otherwise{
+      when(io.out.fire) {
+        mask_reg := mask_next
+      }
+      when(io.in.fire){
+          mask_reg := io.in.bits.control_mask.asUInt // cover io.out.fire
+          control_reg := io.in.bits.control
+      }
+    }
+    io.in.ready := mask_next === 0.U && io.out.ready
+    io.out.valid := mask_reg =/= 0.U
+    io.out.bits := control_reg(ptr)
+  }
+  val slowDownArray = Seq.fill(num_warp)(Module(new SlowDown))
+  (0 until num_warp).foreach{ i =>
+    slowDownArray(i).io.flush := io.flush_wid.bits === i.U && io.flush_wid.valid
+    slowDownArray(i).io.in.bits.control := buffers(i).deq.bits
+    slowDownArray(i).io.in.bits.control_mask := buffers_mask(i).deq.bits
+    slowDownArray(i).io.in.valid := buffers(i).deq.valid
+    buffers(i).deq.ready := slowDownArray(i).io.in.ready
+    buffers_mask(i).deq.ready := slowDownArray(i).io.in.ready
+
+    io.out(i) <> slowDownArray(i).io.out
+  }
+}
+
+class IBuffer2OpC extends Module{
+  val io = IO(new Bundle {
+    val in = Vec(num_warp, Flipped(DecoupledIO(Output(new CtrlSigs))))
+    val out = Vec(num_fetch, DecoupledIO(Output(new CtrlSigs)))
+  })
+  val in_split = (0 until num_fetch).map { i => (num_warp + i) / num_fetch }.reverse
+  val arbiters = in_split.reverse.dropWhile(_ <= 1).reverse.map { x =>
+    Module(new RRArbiter(new CtrlSigs, x))
+  }
+  (0 until num_fetch).foreach{ i =>
+    if(in_split(i) == 0){
+      io.out(i).valid := false.B
+      io.out(i).bits := 0.U.asTypeOf(new CtrlSigs)
+    }
+    else if(in_split(i) == 1){ io.out(i) <> io.in(i) }
+    else{
+      io.out(i) <> arbiters(i).io.out
+      arbiters(i).io.in.zipWithIndex.foreach{ case(in, j) =>
+        in <> io.in(j * num_fetch + i)
+      }
+    }
+  }
 }

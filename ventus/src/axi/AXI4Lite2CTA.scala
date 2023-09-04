@@ -13,7 +13,7 @@ package axi
 
 import chisel3._
 import chisel3.util._
-import pipeline.parameters._
+import top.parameters._
 import top.host2CTA_data
 import top.CTA2host_data
 
@@ -27,13 +27,13 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
 
 
 
-  val regs = RegInit(VecInit(Seq.fill(16)(0.U(busWidth.W))))
+  val regs = RegInit(VecInit(Seq.fill(18)(0.U(busWidth.W))))
 
   io.rsp.ready:=false.B
-  when(io.rsp.valid& !regs(15)(0)){
+  when(io.rsp.valid& !regs(17)(0)){
     io.rsp.ready:=true.B
-    regs(15):=1.U
-    regs(14):=io.rsp.bits.inflight_wg_buffer_host_wf_done_wg_id
+    regs(17):=1.U
+    regs(16):=io.rsp.bits.inflight_wg_buffer_host_wf_done_wg_id
   }
 
   val sIdle :: sReadAddr :: sReadData :: sWriteAddr :: sWriteData :: sWriteResp :: Nil = Enum(6)
@@ -74,7 +74,7 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
   val out_sIdle::out_sOutput::Nil=Enum(2)
   val out_state=RegInit(out_sIdle)
   val input_valid=regs(0)(0)
-  io.data.valid:=input_valid & out_state===out_sOutput
+  io.data.valid:=input_valid & out_state===out_sOutput // TODO: New AXI
   io.data.bits.host_wg_id:=regs(1)
   io.data.bits.host_num_wf:=regs(2)
   io.data.bits.host_wf_size:=regs(3)
@@ -82,11 +82,15 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
   io.data.bits.host_vgpr_size_total:=regs(5)
   io.data.bits.host_sgpr_size_total:=regs(6)
   io.data.bits.host_lds_size_total:=regs(7)
-  io.data.bits.host_gds_baseaddr:=regs(8)
-  io.data.bits.host_vgpr_size_per_wf:=regs(9)
-  io.data.bits.host_sgpr_size_per_wf:=regs(10)
-  //io.data.bits.host_pc_base_addr:=regs(11)
-  io.data.bits.host_gds_size_total:=regs(12)
+  io.data.bits.host_gds_size_total:=0.U
+  io.data.bits.host_vgpr_size_per_wf:=regs(8)
+  io.data.bits.host_sgpr_size_per_wf:=regs(9)
+  io.data.bits.host_gds_baseaddr:=regs(10)
+  io.data.bits.host_pds_baseaddr:=regs(11)
+  io.data.bits.host_csr_knl:=regs(12)
+  io.data.bits.host_kernel_size_3d(0):=regs(13)
+  io.data.bits.host_kernel_size_3d(1):=regs(14)
+  io.data.bits.host_kernel_size_3d(2):=regs(15)
 
   switch(out_state) {
     is(out_sIdle) {

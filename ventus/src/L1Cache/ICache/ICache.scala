@@ -15,9 +15,11 @@ import L1Cache.{L1TagAccess, RVGParameters}
 import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
 import chisel3._
 import chisel3.util._
+import top.parameters._
 
 class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
 }
 class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
@@ -25,7 +27,8 @@ class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
 }
 class ICachePipeRsp(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
-  val data = UInt(WordLength.W)
+  val data = UInt((num_fetch*WordLength).W)
+  val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
   val status = UInt(2.W)//目前只有LSB投入使用，1表示MISS，0表示HIT
 }
@@ -82,6 +85,11 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val ShouldFlushCoreRsp_st0 = Wire(Bool())
   val coreReqFire_st1 = RegNext(io.coreReq.fire() && !ShouldFlushCoreRsp_st0)
   val coreReqFire_st2 = RegNext(coreReqFire_st1 && !ShouldFlushCoreRsp_st1)
+  //ljz: need to know if cachemiss is sent
+  val coreRespFire_st2 =io.coreRsp.fire
+  val coreRespFire_st3 =RegNext(coreRespFire_st2)
+
+
   val cacheHit_st1 = tagAccess.io.hit_st1 && coreReqFire_st1
   val cacheMiss_st1 = !tagAccess.io.hit_st1 && coreReqFire_st1
 
@@ -89,7 +97,9 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   wayidx_hit_st1 := OHToUInt(tagAccess.io.waymaskHit_st1)
   val waymask_replace_st0 = tagAccess.io.waymaskReplacement
   val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.ready)
+  val mask_st1 = RegEnable(io.coreReq.bits.mask, io.coreReq.ready)
   val warpid_st2 = RegNext(warpid_st1)
+  val mask_st2 = RegNext(mask_st1)
   val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   val addr_st2 = RegNext(addr_st1)
 
@@ -136,8 +146,11 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val dataAccess_data = dataAccess.io.r.resp.asTypeOf(Vec(NWays,UInt(BlockBits.W)))
   val data_after_wayidx_st1 = dataAccess_data(wayidx_hit_st1)//dontTouch(dataAccess.io.r.resp.data(0.U(1.W)))
   val blockOffset_sel_st1 = get_blockOffset(pipeReqAddr_st1)
+  if(num_fetch>1){
+    assert(blockOffset_sel_st1(log2Ceil(num_fetch)-1,0).orR === false.B)
+  }
   val data_to_blockOffset_st1 = data_after_wayidx_st1
-  val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))(31,0)
+  val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))(num_fetch*xLen,0)
   //val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1*32))(31,0)
   val data_after_blockOffset_st2 = RegNext(data_after_blockOffset_st1)
 
@@ -147,6 +160,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   io.coreRsp.valid := coreReqFire_st2 && !OrderViolation_st2 //&& !ShouldFlushCoreRsp_st2// || missRsp_from_mshr
   io.coreRsp.bits.data := data_after_blockOffset_st2
   io.coreRsp.bits.warpid := warpid_st2
+  io.coreRsp.bits.mask := mask_st2
   /*Mux(missRsp_from_mshr,
     //miss Rsp
     mshrAccess.io.missRspOut.bits.targetInfo>>(BlockOffsetBits+WordOffsetBits),
@@ -180,11 +194,11 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   //val OrderViolation_st2 = RegNext(OrderViolation_st1)
   val OrderViolation_st3 = RegNext(OrderViolation_st2)
   val warpid_st3 = RegNext(warpid_st2)
-  val cacheMiss_st2 = RegEnable(cacheMiss_st1,!ShouldFlushCoreRsp_st1)
+  val cacheMiss_st2 = RegNext(Mux(ShouldFlushCoreRsp_st1,false.B,cacheMiss_st1))
   val cacheMiss_st3 = RegNext(cacheMiss_st2)
 
   val warpIdMatch2_st1 = warpid_st1 === warpid_st2
   val warpIdMatch3_st1 = warpid_st1 === warpid_st3
 
-  OrderViolation_st1 := (warpIdMatch2_st1 && cacheMiss_st2 && !OrderViolation_st2) || (warpIdMatch3_st1 && cacheMiss_st3 && !OrderViolation_st3)
+  OrderViolation_st1 := (warpIdMatch2_st1 && cacheMiss_st2  && !OrderViolation_st2) || (warpIdMatch3_st1 && cacheMiss_st3 && !OrderViolation_st3)
 }

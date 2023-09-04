@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 
 class warp_scheduler extends Module{
   val io = IO(new Bundle{
@@ -62,12 +62,13 @@ class warp_scheduler extends Module{
   //val warp_memory_idle=Reg(Vec(num_warp,Bool()))
   //val warp_barrier_array=RegInit(0.U(num_warp.W))
   //val block_warp_waiting=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W)))) // if meet barrier, switch and set 1. all 1 -> all 0.
-  val warp_init_addr=(VecInit(Seq.fill(num_thread)(0.U(32.W))))//,172.U,176.U) //初值怎么传进去，这是个问题？建议走CSR，并且是vec version的
+  val warp_init_addr=(VecInit(Seq.fill(num_warp)(0.U(32.W))))//,172.U,176.U) //初值怎么传进去，这是个问题？建议走CSR，并且是vec version的
   pcControl.foreach{
     x=>{
       x.New_PC:=io.branch.bits.new_pc
       x.PC_replay:=true.B
       x.PC_src:=0.U
+      x.mask_i:=0.U
     }
   }
   val pc_ready=Wire(Vec(num_warp,Bool()))
@@ -77,8 +78,9 @@ class warp_scheduler extends Module{
   current_warp:=next_warp
   pcControl(next_warp).PC_replay:= (!io.pc_req.ready)|(!pc_ready(next_warp))
   pcControl(next_warp).PC_src:=2.U
-  io.pc_req.bits.addr:=pcControl(next_warp).PC_next
-  io.pc_req.bits.warpid:=next_warp
+  io.pc_req.bits.addr := pcControl(next_warp).PC_next
+  io.pc_req.bits.warpid := next_warp
+  io.pc_req.bits.mask := pcControl(next_warp).mask_o
 
   io.wg_id_lookup:=Mux(io.warp_control.bits.ctrl.barrier,warp_end_id,0.U)
 
@@ -138,8 +140,9 @@ class warp_scheduler extends Module{
 
   when(io.pc_rsp.valid&io.pc_rsp.bits.status(0)){//miss acknowledgement
     pcControl(io.pc_rsp.bits.warpid).PC_replay:=false.B
-    pcControl(io.pc_rsp.bits.warpid).PC_src:=1.U
+    pcControl(io.pc_rsp.bits.warpid).PC_src:=3.U
     pcControl(io.pc_rsp.bits.warpid).New_PC:=io.pc_rsp.bits.addr//pcReplay(io.pc_rsp.bits.warpid)
+    pcControl(io.pc_rsp.bits.warpid).mask_i:=io.pc_rsp.bits.mask
   }
 
   when(io.branch.fire()&io.branch.bits.jump){
