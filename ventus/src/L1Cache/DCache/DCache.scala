@@ -497,12 +497,12 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
 
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
-  val coreReqmemRspConflict = coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memRsp
+  val coreReqmemConflict = coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memReq
   //val coreReq_Reg = RegNext(coreRsp_st2_valid_from_coreReq_Reg)
-  val coreReqmemRspConflict_Reg = RegEnable(coreReqmemRspConflict,coreRsp_st2_valid_from_coreReq_Reg)
+  val coreReqmemConflict_Reg = RegEnable(coreReqmemConflict,coreRsp_st2_valid_from_coreReq_Reg)
 //if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
 
-  coreRsp_st2_valid_from_coreReq := Mux(coreReqmemRspConflict,false.B,Mux(coreReqmemRspConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
+  coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
 
   coreRsp_st2_valid_from_memRsp := RegNext(MshrAccess.io.missRspOut.valid)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
@@ -555,22 +555,22 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val memReqIsRead_st3 = (a_op_st3 === TLAOp_Get) && memReq_Q.io.deq.bits.a_param === 0.U
 
   WshrAccess.io.pushReq.bits.blockAddr := memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
-  val wshrProtect = WshrAccess.io.conflict && (memReqIsWrite_st3 || memReqIsRead_st3) && memReq_Q.io.deq.valid
+  val wshrProtect = WshrAccess.io.conflict && (memReqIsWrite_st3 || memReqIsRead_st3) && memReq_Q.io.deq.valid// && io.memReq.ready
   val cRspBlockedOrWshrFull = ((!coreRsp_Q.io.enq.ready && memReq_Q.io.deq.bits.hasCoreRsp)
     || !WshrAccess.io.pushReq.ready) && memReqIsWrite_st3
   val wshrPass = !wshrProtect && !cRspBlockedOrWshrFull
-  WshrAccess.io.pushReq.valid := wshrPass && memReq_Q.io.deq.valid && memReqIsWrite_st3
+  WshrAccess.io.pushReq.valid := wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
   coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp
 
   memReq_Q.io.deq.ready := wshrPass && io.memReq.ready
 
-  when(wshrPass && memReq_Q.io.deq.valid) {
+  when(wshrPass && memReq_Q.io.deq.fire()) {
     memReq_st3 := memReq_Q.io.deq.bits
   }
 
   assert(NMshrEntry >= NWshrEntry,"MshrEntry should be more than NWshrEntry")
   val memReqSetIdx_st2 = memReq_Q.io.deq.bits.a_addr(WordLength - TagBits -1,WordLength - TagBits - SetIdxBits)
-  when(memReqIsWrite_st3){
+  when(memReqIsWrite_st3 && memReq_Q.io.deq.fire()){
     memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
     //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
   }
