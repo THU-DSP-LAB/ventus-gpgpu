@@ -7,11 +7,13 @@ We are calling for contributors. If you are interested in Ventus GPGPU, please c
 
 “承影”在RVV编译器工具链、验证环境开发和硬件设计方面还有很多不足，如果您有意愿参与到“承影”的开发中，欢迎在github上pull request，也欢迎联系 yangkx20@mails.tsinghua.edu.cn
 
-目前开发中的文档手册在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/承影GPGPU架构文档手册v1.8.pdf)，添加了对OpenCL支持所需的改动。2.0版本架构方案尚未确定，如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
+目前开发中的文档手册在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/承影GPGPU架构文档手册v1.95.pdf)，添加了对OpenCL支持所需的改动。2.0版本架构方案尚未确定，如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
 
 ## Architecture
 
-The micro-architecture overview of Ventus(承影) is shown below. Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/Ventus-GPGPU-doc.md). English version will come soon.
+The micro-architecture overview of Ventus(承影) is shown below. Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/Ventus-GPGPU-doc.md). 
+
+ISA and micro-architecture docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/ventus%20GPGPU%20architecture%20whitepaper%20v1.95.pdf).
 
 For ISA simulator and riscv-gnu-toolchain, see [ventus-gpgpu-isa-simulator](https://github.com/THU-DSP-LAB/ventus-gpgpu-isa-simulator) and [ventus-riscv-gnu-toolchain](https://github.com/THU-DSP-LAB/riscv-gnu-toolchain).
 
