@@ -103,14 +103,17 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   //io.allocateWrite.ready := true.B
   //although use arb, src0 and src1 should not come in same cycle
   val timeAccessWArb = Module(new Arbiter (new SRAMBundleAW(UInt(Length_Replace_time_SRAM.W),set,way),2))
+  val timeAccessWarbConflict = io.hit_st1 && RegNext(io.allocateWrite.fire)
+  val timeAccessWarbConflictReg = RegNext(timeAccessWarbConflict)
+
   assert(!(timeAccessWArb.io.in(0).valid && timeAccessWArb.io.in(1).valid), s"tag probe and allocate in same cycle")
   //LRU replacement policy
   //timeAccessWArb.io.in(0) for regular R/W hit update access time
-  timeAccessWArb.io.in(0).valid := io.hit_st1//hit already contain probe fire
+  timeAccessWArb.io.in(0).valid := Mux(timeAccessWarbConflictReg,RegNext(io.hit_st1),Mux(timeAccessWarbConflict,false.B,   io.hit_st1))//hit already contain probe fire
   timeAccessWArb.io.in(0).bits(
-    data = accessCount,
-    setIdx = RegNext(io.probeRead.bits.setIdx),
-    waymask = io.waymaskHit_st1
+    data = Mux(timeAccessWarbConflictReg,RegNext(accessCount),accessCount),
+    setIdx = Mux(timeAccessWarbConflictReg,RegNext(RegNext(io.probeRead.bits.setIdx)),RegNext(io.probeRead.bits.setIdx)),
+    waymask = Mux(timeAccessWarbConflictReg,RegNext(io.waymaskHit_st1),io.waymaskHit_st1)
   )
   //timeAccessWArb.io.in(1) for memRsp allocate
   timeAccessWArb.io.in(1).valid := RegNext(io.allocateWrite.fire)
