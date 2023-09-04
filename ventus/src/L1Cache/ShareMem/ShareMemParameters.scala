@@ -14,7 +14,7 @@ import chisel3._
 import chisel3.util._
 import config.config._
 import L1Cache.{HasL1CacheParameters, RVGParameters, RVGParamsKey}
-import pipeline.parameters._
+import top.parameters._
 case object ShareMemParamsKey extends Field [ShareMemParameters]
 
 case class ShareMemParameters

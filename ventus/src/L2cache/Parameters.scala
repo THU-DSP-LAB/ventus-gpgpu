@@ -24,12 +24,14 @@ case class CacheParameters(
   level:       Int,
   ways:        Int,
   sets:        Int,
+  l2cs:        Int,
   blockBytes:  Int,
   beatBytes:   Int, // inner
   replacement: String = "plru")
 {
   require (ways > 0)
   require (sets > 0)
+  require (l2cs > 0)
   require (blockBytes > 0 && isPow2(blockBytes))
   require (beatBytes > 0 && isPow2(beatBytes))
   require (blockBytes >= beatBytes)
@@ -112,7 +114,9 @@ case class InclusiveCacheMicroParameters(
   memCycles:  Int, //= 40, // # of L2 clock cycles for a memory round-trip (50ns @ 800MHz)
   portFactor: Int, //= 4,  // numSubBanks = (widest TL port * portFactor) / writeBytes
   num_warp: Int,
-  num_SM:Int,
+  num_sm: Int,
+  num_sm_in_cluster:Int,
+  num_cluster:Int,
   dirReg:     Boolean = false,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.none, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full)   // or flowAE
@@ -144,7 +148,8 @@ case class InclusiveCacheParameters_lite(
 
   // If we are the first level cache, we do not need to support inner-BCE
   val op_bits = 3
-  val source_bits=log2Up(micro.num_warp)+log2Up(micro.num_SM)+1
+  val param_bits = 3
+  val source_bits=log2Up(micro.num_warp)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
@@ -176,7 +181,8 @@ case class InclusiveCacheParameters_lite(
   val wayBits    = log2Ceil(cache.ways)
   val setBits    = log2Ceil(cache.sets)
   val offsetBits = log2Ceil(cache.blockBytes)
-  val tagBits    = addressBits - setBits - offsetBits
+  val l2cBits    = log2Ceil(cache.l2cs)
+  val tagBits    = addressBits - setBits - offsetBits - l2cBits
   val putBits    = log2Ceil(max(putLists, relLists))
 
   require (tagBits > 0)
@@ -203,11 +209,12 @@ case class InclusiveCacheParameters_lite(
 //    }
 //  }
 
-  def parseAddress(x: UInt): (UInt, UInt, UInt) = {
+  def parseAddress(x: UInt): (UInt, UInt, UInt, UInt) = {
     val offset = x
     val set = offset >> offsetBits
-    val tag = set >> setBits
-    (tag(tagBits-1, 0), set(setBits-1, 0), offset(offsetBits-1, 0))
+    val l2c = set >> setBits
+    val tag = l2c >> l2cBits
+    (tag(tagBits-1, 0), if(l2cBits !=0) l2c(l2cBits-1,0) else 0.U,set(setBits-1, 0), offset(offsetBits-1, 0))
   }
 
   def widen(x: UInt, width: Int): UInt = {
@@ -216,8 +223,9 @@ case class InclusiveCacheParameters_lite(
     y(width-1, 0)
   }
 
-  def expandAddress(tag: UInt, set: UInt, offset: UInt): UInt = {
-    val base = Cat(widen(tag, tagBits), widen(set, setBits), widen(offset, offsetBits))
+  def expandAddress(tag: UInt, l2c:UInt, set: UInt, offset: UInt): UInt = {
+    val base = if(l2cBits != 0) Cat(widen(tag, tagBits), widen(l2c,l2cBits), widen(set, setBits), widen(offset, offsetBits))
+    else Cat(widen(tag, tagBits), widen(set, setBits), widen(offset, offsetBits))
     var bits = Array.fill(addressBits) { UInt(0, width=1) }
  //   addressMapping.zipWithIndex.foreach { case (a, i) => bits(a) = base(i,i) }
     base

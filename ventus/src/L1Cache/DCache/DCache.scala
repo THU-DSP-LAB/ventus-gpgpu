@@ -64,7 +64,7 @@ class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
 
 class DCacheMemReq(implicit p: Parameters)extends DCacheBundle{
   val a_opcode = UInt(3.W)
-  //val a_param
+  //val a_param = UInt(3.W)
   //val a_size
   val a_source = UInt(WIdBits.W)
   val a_addr = UInt(WordLength.W)
@@ -84,13 +84,15 @@ class DCacheMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
 }
 
-class DataCache(implicit p: Parameters) extends DCacheModule{
-  val io = IO(new Bundle{
+abstract class DataCacheIO(implicit p: Parameters) extends DCacheModule{
+  val io = IO(new Bundle {
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
     val coreRsp = DecoupledIO(new DCacheCoreRsp)
     val memRsp = Flipped(DecoupledIO(new DCacheMemRsp))
-    val memReq = DecoupledIO(new DCacheMemReq)})
-
+    val memReq = DecoupledIO(new DCacheMemReq)
+  })
+}
+class DataCache(implicit p: Parameters) extends DataCacheIO{
   // ******     important submodules     ******
   val BankConfArb = Module(new BankConflictArbiter)
   //val bankConflict_reg = Reg(Bool())
