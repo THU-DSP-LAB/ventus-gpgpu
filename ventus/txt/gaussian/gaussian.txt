@@ -5,7 +5,7 @@ gaussian.o:     file format elf64-littleriscv
 Disassembly of section .text:
 
 0000000000000000 <Kernel1-0x48>:
-   0:	807024f3          	csrrs	x9,0x807,x0
+   0:	807024f3          	csrrs	x9,pds,x0
    4:	0004a283          	lw	x5,0(x9)
    8:	00100413          	addi	x8,x0,1
    c:	00541433          	sll	x8,x8,x5
@@ -15,7 +15,7 @@ Disassembly of section .text:
   1c:	00b48533          	add	x10,x9,x11
   20:	00b505b3          	add	x11,x10,x11
   24:	5208a3d7          	vid.v	v7
-  28:	800023f3          	csrrs	x7,0x800,x0
+  28:	800023f3          	csrrs	x7,tid,x0
   2c:	0273c157          	vadd.vx	v2,v7,x7
   30:	a222c1d7          	vsrl.vx	v3,v2,x5
   34:	fff40413          	addi	x8,x8,-1
@@ -28,8 +28,8 @@ Disassembly of section .text:
   48:	00138a13          	addi	x20,x7,1
   4c:	024a4a57          	vadd.vx	v20,v4,x20
   50:	5e044ad7          	vmv.v.x	v21,x8
-  54:	054ad40b          	vbge	v20,v21,9c <K1_A>
-  58:	043f900b          	vbne	v3,v31,98 <K1_END>
+  54:	054ad45b          	vbge	v20,v21,9c <K1_A>
+  58:	043f905b          	vbne	v3,v31,98 <K1_END>
   5c:	97446a57          	vmul.vx	v20,v20,x8
   60:	00239893          	slli	x17,x7,0x2
   64:	02888a33          	mul	x20,x17,x8
@@ -47,21 +47,21 @@ Disassembly of section .text:
   94:	0b07e527          	vsse32.v	v10,(x15),x16
 
 0000000000000098 <K1_END>:
-  98:	0000320b          	join	v0,v0,9c <K1_A>
+  98:	0000325b          	join	v0,v0,9c <K1_A>
 
 000000000000009c <K1_A>:
-  9c:	0000320b          	join	v0,v0,a0 <K1_B>
+  9c:	0000325b          	join	v0,v0,a0 <K1_B>
 
 00000000000000a0 <K1_B>:
-  a0:	0200200b          	barrier	x0,x0,x0
+  a0:	0400400b          	barrier	x0,x0,0
 
 00000000000000a4 <Kernel2>:
   a4:	00138a13          	addi	x20,x7,1
   a8:	023a4a57          	vadd.vx	v20,v3,x20
   ac:	0243cad7          	vadd.vx	v21,v4,x7
   b0:	5e044b57          	vmv.v.x	v22,x8
-  b4:	074b5a0b          	vbge	v20,v22,128 <K2_J2>
-  b8:	075b560b          	vbge	v21,v22,124 <K2_J1>
+  b4:	074b5a5b          	vbge	v20,v22,128 <K2_J2>
+  b8:	075b565b          	vbge	v21,v22,124 <K2_J1>
   bc:	97446957          	vmul.vx	v18,v20,x8
   c0:	0323c9d7          	vadd.vx	v19,v18,x7
   c4:	973139d7          	vsll.vi	v19,v19,2
@@ -75,10 +75,10 @@ Disassembly of section .text:
   e4:	0f656607          	vloxei32.v	v12,(x10),v22
   e8:	bec49557          	vfnmsac.vv	v10,v9,v12
   ec:	0207e527          	vse32.v	v10,(x15)
-  f0:	023f980b          	vbne	v3,v31,120 <K2_END>
+  f0:	023f985b          	vbne	v3,v31,120 <K2_END>
   f4:	0350bad7          	vadd.vi	v21,v21,1
   f8:	5e044b57          	vmv.v.x	v22,x8
-  fc:	035b500b          	vbge	v21,v22,11c <K2_J0>
+  fc:	035b505b          	vbge	v21,v22,11c <K2_J0>
  100:	00239313          	slli	x6,x7,0x2
  104:	00b30333          	add	x6,x6,x11
  108:	00032703          	lw	x14,0(x6)
@@ -88,20 +88,20 @@ Disassembly of section .text:
  118:	020365a7          	vse32.v	v11,(x6)
 
 000000000000011c <K2_J0>:
- 11c:	0000320b          	join	v0,v0,120 <K2_END>
+ 11c:	0000325b          	join	v0,v0,120 <K2_END>
 
 0000000000000120 <K2_END>:
- 120:	0000320b          	join	v0,v0,124 <K2_J1>
+ 120:	0000325b          	join	v0,v0,124 <K2_J1>
 
 0000000000000124 <K2_J1>:
- 124:	0000320b          	join	v0,v0,128 <K2_J2>
+ 124:	0000325b          	join	v0,v0,128 <K2_J2>
 
 0000000000000128 <K2_J2>:
- 128:	0000320b          	join	v0,v0,12c <K2_B>
+ 128:	0000325b          	join	v0,v0,12c <K2_B>
 
 000000000000012c <K2_B>:
- 12c:	0200200b          	barrier	x0,x0,x0
+ 12c:	0400400b          	barrier	x0,x0,0
  130:	00138393          	addi	x7,x7,1
  134:	f083cae3          	blt	x7,x8,48 <Kernel1>
- 138:	0000200b          	endprg	x0,x0,x0
+ 138:	0000400b          	endprg	x0,x0,x0
  13c:	00008067          	jalr	x0,0(x1)

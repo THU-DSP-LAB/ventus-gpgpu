@@ -12,7 +12,7 @@ package pipeline
 
 import chisel3._
 import chisel3.util._
-import parameters._
+import top.parameters._
 import java.io._
 
 class hash(val width:Int) extends Module{
@@ -103,9 +103,13 @@ class simtExeData extends Bundle{
   val opcode  = UInt(1.W)
   val wid     = UInt(depth_warp.W)
   val PC_branch = UInt(32.W)
+  //val PC_reconv = UInt(32.W)
+  val PC_execute = UInt(32.W)
   val mask_init = UInt(num_thread.W)
   val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
+//TODO: what's the difference between simtExeData and BranchCtrl
+//BranchCtrl is just for branch, doesn't need PC reconvergence
 
 class vec_alu_bus() extends Bundle{
   val if_mask =  UInt(num_thread.W)
@@ -285,7 +289,8 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
   if(SPIKE_OUTPUT){
     fetch_ctl.spike_info.get:=branch_ctl_buf.bits.spike_info.get
     when(io.complete.valid/*&&io.complete.bits===wid_to_check.U*/&& !io.branch_ctl.fire){
-      printf(p"warp${Decimal(io.complete.bits)} 0x00000000${Hexadecimal(io.branch_ctl.bits.spike_info.get.pc)} 0x${Hexadecimal(io.branch_ctl.bits.spike_info.get.inst)}")
+      printf(p"warp ${Decimal(io.complete.bits)} ${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p" simt ")
       if_mask.asTypeOf(Vec(num_thread,Bool())).reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
       printf(p"\n")
     }
