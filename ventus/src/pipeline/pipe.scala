@@ -127,7 +127,8 @@ class pipe extends Module{
 
   (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
     when(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask) {
-      printf(p"undefined instructions at 0x${Hexadecimal(ctrl.pc)} with 0x${Hexadecimal(ctrl.inst)}\n")
+      printf(p"warp ${Decimal(ctrl.wid)} ")
+      printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
   }
 

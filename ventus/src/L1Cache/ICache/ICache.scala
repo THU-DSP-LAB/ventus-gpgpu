@@ -85,7 +85,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val ShouldFlushCoreRsp_st0 = Wire(Bool())
   val coreReqFire_st1 = RegNext(io.coreReq.fire() && !ShouldFlushCoreRsp_st0)
   val coreReqFire_st2 = RegNext(coreReqFire_st1 && !ShouldFlushCoreRsp_st1)
- 
+  //ljz: need to know if cachemiss is sent
   val coreRespFire_st2 =io.coreRsp.fire
   val coreRespFire_st3 =RegNext(coreRespFire_st2)
 

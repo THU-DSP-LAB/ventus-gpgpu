@@ -137,13 +137,21 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
 
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
-    addr(x) := Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
-            Mux(reg_save.ctrl.custom_signal_0,reg_save.in1(x)+reg_save.in2(x),
-                   (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds  + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) ),
-       Mux(reg_save.ctrl.isvec,reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U, x.asUInt()<<2,
-        Mux(reg_save.ctrl.mop===3.U,reg_save.in2(x),x.asUInt*reg_save.in2(x))),
-      reg_save.in1(0) + reg_save.in2(0)
-    ))
+    addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
+                  Mux(reg_save.ctrl.is_vls12,
+                    reg_save.in1(x)+reg_save.in2(x),
+                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+                  ),
+                  Mux(reg_save.ctrl.isvec,
+                    reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
+                      x.asUInt()<<2,
+                      Mux(reg_save.ctrl.mop===3.U,
+                        reg_save.in2(x),
+                        x.asUInt*reg_save.in2(x))
+                    ),
+                    reg_save.in1(0) + reg_save.in2(0)
+                  )
+                )
     is_shared(x) := !reg_save.mask(x) || addr(x)<sharedmemory_addr_max
   })
   all_shared := Mux(reg_save.ctrl.isvec,
