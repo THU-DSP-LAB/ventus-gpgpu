@@ -130,7 +130,9 @@ class pipe extends Module{
       printf(p"warp ${Decimal(ctrl.wid)} ")
       printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
+    assert (!(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask), s"undefined instruction")
   }
+
 
 
   if(SINGLE_INST){
