@@ -120,17 +120,17 @@ class branch_join(val depth_stack: Int) extends Module{
   when(fetch_ctl_buf.io.enq.ready) {
     when(branch_ctl_buf.valid & (opcode === 0.U) & (branch_ctl_buf.bits.wid === if_mask_buf.bits.wid)) {
       branch_ctl_buf.ready := if_mask_buf.fire()
-      //PC_reconv_buf.ready := if_mask_buf.fire()
+     // PC_reconv_buf.ready := if_mask_buf.fire()
     }.elsewhen(branch_ctl_buf.valid & (opcode === 1.U)) {
       branch_ctl_buf.ready := true.B
-      //PC_reconv_buf.ready := true.B
+    //  PC_reconv_buf.ready := true.B
     }.otherwise {
       branch_ctl_buf.ready := false.B
-      //PC_reconv_buf.ready := false.B
+    //  PC_reconv_buf.ready := false.B
     }
   }.otherwise {
     branch_ctl_buf.ready := false.B
-    //PC_reconv_buf.ready := false.B
+  //  PC_reconv_buf.ready := false.B
   }
 
   PC_reconv := PC_reconv_buf.bits
@@ -200,7 +200,7 @@ class branch_join(val depth_stack: Int) extends Module{
   if (SPIKE_OUTPUT) {
     fetch_ctl.spike_info.get := branch_ctl_buf.bits.spike_info.get
     when(io.complete.valid /*&&io.complete.bits===wid_to_check.U*/ && !io.branch_ctl.fire) {
-      printf(p"warp${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p"warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
       printf(p" join ")
       if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
       printf(p"\n")
