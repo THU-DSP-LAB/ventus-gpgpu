@@ -92,11 +92,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  sinkD.io.way   := VecInit(mshrs.map(_.io.status.way))(sinkD.io.source)
-  sinkD.io.set   := VecInit(mshrs.map(_.io.status.set))(sinkD.io.source)
-  sinkD.io.opcode:= VecInit(mshrs.map(_.io.status.opcode))(sinkD.io.source)
-  sinkD.io.put   := VecInit(mshrs.map(_.io.status.put))(sinkD.io.source)
- 
+
+
   val mshr_request = Cat(mshrs.map {  m =>
     ((sourceA.io.req.ready  &&m.io.schedule.a.valid) ||
       (sourceD.io.req.ready &&m.io.schedule.d.valid) ||
@@ -111,8 +108,15 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val mshr_select = OHToUInt(mshr_selectOH)
 
  
-  val schedule    = Mux1H (mshr_selectOH, mshrs.map(_.io.schedule))  
+  val schedule    = Mux1H (mshr_selectOH, mshrs.map(_.io.schedule))
 
+
+  sinkD.io.way := VecInit(mshrs.map(_.io.status.way))(sinkD.io.source)
+  sinkD.io.set := VecInit(mshrs.map(_.io.status.set))(sinkD.io.source)
+  sinkD.io.opcode := VecInit(mshrs.map(_.io.status.opcode))(sinkD.io.source)
+  sinkD.io.put := VecInit(mshrs.map(_.io.status.put))(sinkD.io.source)
+  sinkD.io.sche_dir_fire.valid := schedule.dir.fire
+  sinkD.io.sche_dir_fire.bits :=mshr_select
 
 
   when (mshr_request.orR()) { robin_filter := ~rightOR(mshr_selectOH) }
