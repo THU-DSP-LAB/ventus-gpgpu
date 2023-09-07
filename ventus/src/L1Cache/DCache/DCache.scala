@@ -142,8 +142,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRsp_st2 =Reg(new DCacheCoreRsp)
   val coreRsp_st2_valid =Wire(Bool())
   val coreRsp_st2_perLaneAddr = Reg(Vec(NLanes, new DCachePerLaneAddr))
-
-  val readHit_st2 = RegNext(readHit_st1)
+  val readHit_st2 = RegInit(false.B)
+  readHit_st2 := readHit_st1 //|| (readHit_st2 && (!coreRsp_Q.io.enq.fire()))
+  //val readHit_st2 = RegNext(readHit_st1 )
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
     !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
@@ -466,7 +467,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val DataAccessReadSRAMRRsp: Vec[UInt] = VecInit(DataAccessesRRsp)
 
   // ******      core rsp
-  when(cacheHit_st1 && RegNext(io.coreReq.fire)) {//TODO coreReq fire or coreReq_Q deq?
+  when(cacheHit_st1 && RegNext(io.coreReq.fire)) {
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
@@ -476,6 +477,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.isWrite := false.B
   }.elsewhen(waitMSHRCoreRsp_st1 || fluCoreRsp_st1 || invCOreRsp_st1){
     coreRsp_st2.data := DontCare
+    coreRsp_st2.isWrite := false.B
+  }.elsewhen(readHit_st2 && !coreRsp_Q.io.enq.ready){
+    coreRsp_st2.data := DataAccessesRRsp
     coreRsp_st2.isWrite := false.B
   }
   when((cacheHit_st1 && RegNext(io.coreReq.fire)) || (secondaryFullReturn && MshrAccess.io.missRspOut.valid) ||
@@ -493,8 +497,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRsp_st2_valid_from_coreReq = Wire(Bool())
   val coreRsp_st2_valid_from_memRsp = Wire(Bool())
   val coreRsp_st2_valid_from_memReq = Wire(Bool())
-    val coreRsp_st2_valid_from_coreReq_Reg = RegNext(coreReq_st1_valid &&
-    (readHit_st1 || writeHit_st1))//(coreReqControl_st1.isFlush && )
+    val coreRsp_st2_valid_from_coreReq_Reg = RegEnable(coreReq_st1_valid &&
+    (readHit_st1 || writeHit_st1), coreRsp_Q.io.enq.ready)//, coreRsp_Q.io.enq.fire)//(coreReqControl_st1.isFlush && )
 
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
   val coreReqmemConflict = coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memReq
@@ -504,7 +508,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
 
-  coreRsp_st2_valid_from_memRsp := RegNext(MshrAccess.io.missRspOut.valid)
+  coreRsp_st2_valid_from_memRsp := RegEnable(MshrAccess.io.missRspOut.valid , coreRsp_Q.io.enq.ready)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memReq), "cRsp from cReq and mReq conflict")
   assert (!(coreRsp_st2_valid_from_memReq && coreRsp_st2_valid_from_memRsp), "cRsp from mRsp and mReq conflict")
