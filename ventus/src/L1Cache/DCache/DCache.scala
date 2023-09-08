@@ -221,7 +221,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_param := 0.U //regular read
   readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//setIdx for memRsp tag access in 1st stage
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
-  readMissReq.a_mask := blockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
+  readMissReq.a_mask := VecInit(Seq.fill(BlockWords)(true.B))//lockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B
   readMissReq.coreRspInstrId := DontCare
@@ -503,7 +503,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
   val coreReqmemConflict = coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memReq
   //val coreReq_Reg = RegNext(coreRsp_st2_valid_from_coreReq_Reg)
-  val coreReqmemConflict_Reg = RegEnable(coreReqmemConflict,coreRsp_st2_valid_from_coreReq_Reg)
+  val coreReqmemConflict_Reg = RegNext(coreReqmemConflict)
 //if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
 
   coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
@@ -547,7 +547,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0).valid := tagReplaceStatus
   MemReqArb.io.in(0).bits := dirtyReplace_st2
-  MemReqArb.io.in(1).valid := coreReq_st1_valid && (writeMiss_st1 || (readMiss_st1 && mshrProbeStatus === 0.U))
+  MemReqArb.io.in(1).valid := coreReq_st1_valid && coreReq_Q.io.deq.fire() && (writeMiss_st1 || (readMiss_st1 && mshrProbeStatus === 0.U))
   MemReqArb.io.in(1).bits := missMemReq
   MemReqArb.io.in(2).valid := Mux(waitforL2flush_st2,flushL2,RegNext(InvOrFluMemReqValid_st1))
   MemReqArb.io.in(2).bits := InvOrFluMemReq
