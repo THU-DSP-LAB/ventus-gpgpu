@@ -102,7 +102,7 @@ object AdvancedTestList{
       "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
     ),
     Seq(
-      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.metadata", "Fan1_2.data", "Fan2_2.data"
+      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.data", "Fan1_2.data", "Fan2_2.data"
     ),
     4, 4, 4500
   )
