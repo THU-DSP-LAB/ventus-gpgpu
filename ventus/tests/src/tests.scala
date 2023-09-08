@@ -111,7 +111,7 @@ object AdvancedTestList{
     "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
   )
   val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1000
+    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1500
   )
 }
 
@@ -119,7 +119,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
   import top.helper._
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.vecadd
+    val testbench = AdvancedTestList.matadd
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
