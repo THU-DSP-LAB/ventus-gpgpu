@@ -564,13 +564,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     || !WshrAccess.io.pushReq.ready) && memReqIsWrite_st3
   val wshrPass = !wshrProtect && !cRspBlockedOrWshrFull
   val PushWshrValid = wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
-  val WshrPushPopConflict = PushWshrValid && WshrAccess.io.popReq.valid
-  val wshrPushPopConflictReg = RegNext(WshrPushPopConflict)
+ // val WshrPushPopConflict = PushWshrValid && WshrAccess.io.popReq.valid
+ // val wshrPushPopConflictReg = RegNext(WshrPushPopConflict)
   val pushReqbA = memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
-  val pushReqbAReg = RegNext(pushReqbA)
-  WshrAccess.io.pushReq.bits.blockAddr := Mux(wshrPushPopConflictReg, pushReqbAReg, pushReqbA)
+ // val pushReqbAReg = RegNext(pushReqbA)
+  WshrAccess.io.pushReq.bits.blockAddr := pushReqbA//Mux(wshrPushPopConflictReg, pushReqbAReg, pushReqbA)
 
-  WshrAccess.io.pushReq.valid := Mux(wshrPushPopConflictReg,true.B,Mux(WshrPushPopConflict,false.B,PushWshrValid))//wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
+  WshrAccess.io.pushReq.valid := PushWshrValid//Mux(wshrPushPopConflictReg,true.B,Mux(WshrPushPopConflict,false.B,PushWshrValid))//wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
   coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp
 
   memReq_Q.io.deq.ready := wshrPass && io.memReq.ready
