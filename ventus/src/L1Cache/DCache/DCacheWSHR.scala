@@ -19,7 +19,7 @@ class DCacheWSHR(Depth:Int) extends Module{
     //pop
     val popReq = Flipped(ValidIO(UInt(log2Up(Depth).W)))
   })
-  assert(!(io.pushReq.valid && io.popReq.valid),"WSHR cant pop and push in same cycle")
+ // assert(!(io.pushReq.valid && io.popReq.valid),"WSHR cant pop and push in same cycle")
 
   val blockAddrEntries = RegInit(VecInit(Seq.fill(Depth)(0.U((dcache_SetIdxBits+dcache_TagBits).W))))
   val valid: Vec[Bool] = RegInit(VecInit(Seq.fill(Depth)(false.B)))
@@ -36,8 +36,12 @@ class DCacheWSHR(Depth:Int) extends Module{
   io.pushReq.ready := !valid.reduceTree(_ & _)
 
   val nextEntryIdx = valid.indexWhere((x: Bool) => x === false.B)
-  io.pushedIdx := nextEntryIdx
-  when(io.pushReq.fire){
+  val PopPushInSameCycle = io.pushReq.fire && io.popReq.fire
+  io.pushedIdx := Mux(PopPushInSameCycle,io.popReq.bits,nextEntryIdx)
+  when(io.pushReq.fire && io.popReq.fire){
+    blockAddrEntries(io.popReq.bits) := io.pushReq.bits.blockAddr
+    valid(io.popReq.bits) := true.B
+  }.elsewhen(io.pushReq.fire){
     blockAddrEntries(nextEntryIdx) := io.pushReq.bits.blockAddr
     valid(nextEntryIdx) := true.B
   }.elsewhen(io.popReq.valid){
