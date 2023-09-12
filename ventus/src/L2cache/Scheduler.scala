@@ -68,7 +68,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   sinkA.io.a.bits:= io.in_a.bits
   sinkA.io.a.valid:=io.in_a.valid
-
+  sinkA.io.index:= sinkD.io.index
 
 
   io.in_a.ready:=sinkA.io.a.ready

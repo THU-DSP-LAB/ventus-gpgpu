@@ -37,6 +37,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
     val a = Flipped(Decoupled(new TLBundleA_lite(params)))
     // for use by SourceD:
     //若顺利写回，pop掉sinka的buffer里面的数据
+    val index =Input(UInt(params.putBits.W))
     val pb_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val pb_beat =Output( new PutBufferAEntry(params))
     val pb_pop2  =Flipped( Decoupled(new PutBufferPop(params)))
@@ -101,6 +102,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
   io.pb_beat := putbuffer.io.data
   io.pb_beat2:=putbuffer.io.data2.get
+  putbuffer.io.index.get := io.index
   io.empty :=(lists | lists_set) & (~lists_clr).asUInt()
   when (io.pb_pop.fire()||io.pb_pop2.fire()) {
     when(io.pb_pop.fire()){

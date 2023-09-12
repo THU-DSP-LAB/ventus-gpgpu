@@ -45,6 +45,7 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
     val set    = Input(UInt(params.setBits.W))
     val opcode =Input(UInt(params.op_bits.W))
     val put =Input(UInt(params.putBits.W))
+    val index =Output(UInt(params.putBits.W))
     val sche_dir_fire =Flipped(Valid(UInt(params.source_bits.W)))
     // Banked Store port
     val bs_adr = Decoupled(new BankedStoreOuterAddress(params))
@@ -56,7 +57,7 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
 
   // No restrictions on buffer
   val d = io.d
-
+  io.index :=io.put
   io.source := Mux(d.valid, d.bits.source, RegEnable(d.bits.source, d.valid))
   val full_mask=FillInterleaved(params.micro.writeBytes*8,io.pb_beat.mask)
   val merge_data=( io.pb_beat.data & full_mask) |(d.bits.data & (~full_mask).asUInt())
