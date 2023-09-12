@@ -65,7 +65,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   val pb_beat_reg_init=WireInit(0.U.asTypeOf(new PutBufferAEntry(params)))
   val pb_beat_reg=RegInit(pb_beat_reg_init)
   //stage
-  val stage_1 :: stage_2 :: stage_3 ::stage_4 ::Nil =Enum(4)
+  val stage_1 :: stage_2 :: stage_3 ::stage_4::stage_5::stage_6::stage_7::stage_8::Nil =Enum(8)
   val stateReg= RegInit(stage_1)
   val s1_req_reg_init=WireInit(0.U.asTypeOf(new TLBundleD_lite_withid(params)))
   s1_req_reg_init.opcode:=5.U
@@ -137,6 +137,9 @@ val mshr_wait_reg =RegInit(false.B)
             stateReg := stage_4
             busy := true.B
             tobedone := false.B
+            when(s1_req.opcode===PutFullData && s1_req.opcode===PutPartialData){
+              mshr_wait_reg:=true.B
+            }
           }
         }
 //        when(!s1_req.hit && s1_req.opcode===Get ){
@@ -161,7 +164,7 @@ val mshr_wait_reg =RegInit(false.B)
             busy := true.B
             tobedone := false.B
           }.otherwise{
-            stateReg :=stage_2
+            stateReg :=stage_2 //need to wait to write
             busy := true.B
             tobedone:= false.B
           }
@@ -197,19 +200,54 @@ val mshr_wait_reg =RegInit(false.B)
       }
     }
     is(stage_3){
-      when(io.a.ready){
-        stateReg:=stage_1
-        busy := false.B
-        tobedone:=false.B
-        mshr_wait_reg:=false.B
-      }
+        stateReg:=stage_6 //需要打一拍，因为取数的延迟
     }
     is(stage_4){
-      when(io.d.ready) {
-        busy := false.B
+      stateReg:=stage_5//需要打一拍，因为取数的延迟
+    }
+    is(stage_5) { //ack for miss and hit
+      when(!s1_req.hit && (s1_req.opcode===PutFullData ||s1_req.opcode===PutPartialData)) {
+        when(io.d.fire && io.a.fire) {
+          busy := false.B
+          stateReg := stage_1
+          tobedone := false.B //todo may cause fault
+          mshr_wait_reg := false.B
+        }.elsewhen(io.d.fire) {
+          stateReg := stage_7
+        }.elsewhen(io.a.fire) {
+          stateReg := stage_8
+        }
+      }.otherwise{
+        when(io.d.fire) {
+          stateReg := stage_1
+          busy := false.B
+          tobedone := false.B
+          mshr_wait_reg := false.B
+        }
+      }
+    }
+    is(stage_6){ //writeback dirty cache line
+      when(io.a.fire) {
         stateReg := stage_1
-        tobedone:=false.B //todo may cause fault
-        mshr_wait_reg:=false.B
+        busy := false.B
+        tobedone := false.B
+        mshr_wait_reg := false.B
+      }
+    }
+    is(stage_7){
+      when(io.a.fire){
+        stateReg := stage_1
+        busy := false.B
+        tobedone := false.B
+        mshr_wait_reg := false.B
+      }
+    }
+    is(stage_8){ //wait for d ready
+      when(io.d.fire){
+        stateReg := stage_1
+        busy := false.B
+        tobedone := false.B
+        mshr_wait_reg := false.B
       }
     }
   }
@@ -221,20 +259,20 @@ val mshr_wait_reg =RegInit(false.B)
   io.bs_wadr.bits.mask:=   pb_beat.mask
   val s_final_req=RegNext(s1_req)  ///
   ///将读取数据输出d
-  io.d.valid        :=RegNext(stateReg===stage_4&& !(s1_req.opcode===Hint && !s1_req.last_flush)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
+  io.d.valid        :=(stateReg===stage_5 || stateReg===stage_8)&& !(s1_req.opcode===Hint && !s1_req.last_flush) //&& s1_req.opcode===Get)//数据读出来之后准备输出
   io.d.bits.source  :=s_final_req.source
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,Mux(s_final_req.last_flush,HintAck,AccessAck))
   io.d.bits.size    := s_final_req.size
-  io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, io.bs_rdat.data,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况不需要
+  io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, io.bs_rdat.data,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况直接返回0
   io.d.bits.address      := params.expandAddress(s_final_req.tag,s_final_req.l2cidx, s_final_req.set,s_final_req.offset)
 ////将读出的数据返回给sourceA
   io.d.bits.param := 0.U
 
 
-  io.a.valid      := RegNext(stateReg===stage_3 && !s1_req.hit && s1_req.dirty)// !s_final_req.hit && (!sourceA_sent) && s_final_req.dirty//(s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData)  &&(!sourceA_sent)  //todo for miss kickout dirty cacheline no writethrough , write/read miss kickout dirty ,write allocate
+  io.a.valid      :=(stateReg===stage_6 || stateReg===stage_7) && (!s1_req.hit && (s1_req.dirty || s1_req.opcode===PutFullData ||s1_req.opcode===PutPartialData))// !s_final_req.hit && (!sourceA_sent) && s_final_req.dirty//(s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData)  &&(!sourceA_sent)  //todo for miss kickout dirty cacheline no writethrough , write/read miss kickout dirty ,write allocate
   io.a.bits       := s_final_req
 
-  io.a.bits.data  := io.bs_rdat.data//Mux((s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData),s1_req.data,pb_beat.data) //todo should be victim data
+  io.a.bits.data  := Mux((s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData),s1_req.data,io.bs_rdat.data) //todo should be victim data 写miss的数据也经过这个地方转给sourceA
   io.a.bits.opcode:= PutFullData
 
   io.finish_issue := io.a.valid && s_final_req.last_flush

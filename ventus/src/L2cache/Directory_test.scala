@@ -278,8 +278,9 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.tag    :=Mux(flush_issue,RegNext(flush_tag),RegNext(io.read.bits.tag))
   //victim tag should be transfered when miss dirty
   io.result.bits.opcode :=Mux(flush_issue,Hint,RegNext(io.read.bits.opcode))
+  val not_replace= (io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) &&io.result.bits.hit //not replace victim when write miss
   io.result.bits.mask   :=Mux(flush_issue,Fill(params.mask_bits,1.U),Mux(hit,RegNext(io.read.bits.mask),RegNext(Fill(params.mask_bits,1.U))))
-  io.result.bits.dirty  :=Mux(flush_issue,RegNext(status_reg(flush_set).dirty(flush_way)), (status_reg(set).dirty(io.result.bits.way)).asBool)
+  io.result.bits.dirty  :=Mux(flush_issue,RegNext(status_reg(flush_set).dirty(flush_way)), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
   io.result.bits.last_flush :=Mux(flush_issue,RegNext(flushDone),false.B)
   io.result.bits.flush  := RegNext(flush_issue)
   io.result.bits.victim_tag:= ways(io.result.bits.way).tag
