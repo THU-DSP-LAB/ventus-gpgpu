@@ -163,7 +163,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   directory.io.read.valid:=request.valid && !(request.bits.opcode===Hint)
   directory.io.read.bits:=request.bits
 
-  directory.io.write.valid:=schedule.dir.valid
+  directory.io.write.valid:=schedule.dir.valid && !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
   directory.io.write.bits.is_writemiss:= schedule.dir.bits.is_writemiss
   directory.io.write.bits.way:=schedule.dir.bits.way
   directory.io.write.bits.set:=schedule.dir.bits.set

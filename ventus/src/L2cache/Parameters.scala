@@ -187,7 +187,7 @@ case class InclusiveCacheParameters_lite(
   val offsetBits = log2Ceil(cache.blockBytes)
   val l2cBits    = log2Ceil(cache.l2cs)
   val tagBits    = addressBits - setBits - offsetBits - l2cBits
-  val putBits    = log2Ceil(max(putLists, relLists))
+  val putBits    = log2Ceil(putLists)
 
   require (tagBits > 0)
   require (offsetBits > 0)
