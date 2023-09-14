@@ -154,7 +154,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
 
 
   if (!readOnly) {
-    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool
+    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool && RegNext(io.allocateWrite.fire())
   }
   // ******      tag_array::allocate    ******
   Replacement.io.validOfSet := Reverse(Cat(way_valid(allocateWrite_st1.setIdx)))//Reverse(Cat(way_valid(io.allocateWrite.bits.setIdx)))
@@ -172,8 +172,6 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
   }.elsewhen(io.invalidateAll){//tag_array::invalidate_all()
     way_valid := VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(false.B))))
-  }.elsewhen(io.needReplace.get){
-    way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := false.B
   }
   assert(!(io.allocateWrite.valid && io.invalidateAll))
 

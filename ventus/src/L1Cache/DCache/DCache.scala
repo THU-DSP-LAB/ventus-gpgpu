@@ -546,7 +546,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0).valid := tagReplaceStatus
-  MemReqArb.io.in(0).bits := dirtyReplace_st2
+  MemReqArb.io.in(0).bits := dirtyReplace_st1
   MemReqArb.io.in(1).valid := coreReq_st1_valid && coreReq_Q.io.deq.fire() && (writeMiss_st1 || (readMiss_st1 && mshrProbeStatus === 0.U))
   MemReqArb.io.in(1).bits := missMemReq
   MemReqArb.io.in(2).valid := Mux(waitforL2flush_st2,flushL2,RegNext(InvOrFluMemReqValid_st1))
