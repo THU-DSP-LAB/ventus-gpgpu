@@ -8,7 +8,7 @@
  * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
  * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
  * See the Mulan PSL v2 for more details. */
-package top
+package play
 
 import L1Cache.MyConfig
 import L2cache.TLBundleD_lite
@@ -108,7 +108,7 @@ object AdvancedTestList{
   )
 
   val matadd = new AdvTest(
-    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 1000
+    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
   )
   val vecadd = new AdvTest(
     "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1500
@@ -125,7 +125,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val maxCycle = testbench.cycles
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
