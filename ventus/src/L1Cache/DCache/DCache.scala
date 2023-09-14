@@ -278,7 +278,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }.otherwise{//isWrite
         //TODO before 7.30: add hit in-flight miss
-        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready){//memReq_Q.io.enq.ready
+        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)){//memReq_Q.io.enq.ready
           coreReq_st1_ready := true.B
         }
       }
