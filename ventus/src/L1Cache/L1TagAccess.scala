@@ -128,7 +128,10 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   //for Chisel coding convenience, dont set way_dirty to be optional
   val way_dirty = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
   //if(!readOnly){Some()} else None
+  // allocateWrite_st1
+  val Replacement = Module(new ReplacementUnit(Length_Replace_time_SRAM, way))
 
+  val allocateWrite_st1 = RegEnable(io.allocateWrite.bits, io.allocateWrite.fire)
   // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
@@ -147,10 +150,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     }
   }
 
-  // allocateWrite_st1
-  val Replacement = Module(new ReplacementUnit(Length_Replace_time_SRAM,way))
 
-  val allocateWrite_st1 = RegEnable(io.allocateWrite.bits, io.allocateWrite.fire)
+
 
   if (!readOnly) {
     io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool
