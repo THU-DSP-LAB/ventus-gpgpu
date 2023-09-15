@@ -327,6 +327,13 @@ class LSU2WB extends Module{
     io.out_v.valid:=false.B
     io.out_x.valid:=false.B
     io.lsu_rsp.ready:=io.lsu_rsp.bits.tag.isWrite//true.B // CONNECTION OF io.lsu_rsp.bits.tag.isWrite
+    if(SPIKE_OUTPUT) {
+      when(io.lsu_rsp.fire && io.lsu_rsp.bits.tag.isWrite){
+        printf(p"warp ${io.lsu_rsp.bits.tag.warp_id} ")
+        printf(p"0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.pc)} 0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.inst)}")
+        printf(p"lsu.w fin\n")
+      }
+    }
   })
 }
 class LSUexe() extends Module{
