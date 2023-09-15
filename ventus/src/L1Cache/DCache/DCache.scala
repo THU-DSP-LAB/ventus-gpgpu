@@ -395,7 +395,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     tagReplaceStatus === false.B &&
     TagAccess.io.needReplace.get
   val DataAccessReplaceReadSRAMRReq = Wire(Vec(BlockWords, new SRAMBundleA(NSets * NWays)))
-  DataAccessReplaceReadSRAMRReq.foreach(_.setIdx := Cat(missRspSetIdx_st1,TagAccess.io.waymaskReplacement_st1))
+  DataAccessReplaceReadSRAMRReq.foreach(_.setIdx := Cat(missRspSetIdx_st1,OHToUInt(TagAccess.io.waymaskReplacement_st1)))
 
   val dataFillVaild = RegNext(TagAccess.io.allocateWrite.valid) &&
     tagReplaceStatus === false.B &&
