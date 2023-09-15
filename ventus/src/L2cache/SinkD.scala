@@ -62,7 +62,7 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
   val full_mask=FillInterleaved(params.micro.writeBytes*8,io.pb_beat.mask)
   val merge_data=( io.pb_beat.data & full_mask) |(d.bits.data & (~full_mask).asUInt())
   val refill_buffer =Module(new ListBuffer(ListBufferParameters(new refill_data(params),params.mshrs,params.mshrs,false,true)))
-  refill_buffer.io.push.bits.data.data:=Mux(io.opcode ===PutPartialData, merge_data,d.bits.data)
+  refill_buffer.io.push.bits.data.data:=Mux((io.opcode ===PutPartialData || io.opcode===PutFullData), merge_data,d.bits.data)
   refill_buffer.io.push.bits.data.set:=io.set
   refill_buffer.io.push.bits.data.way:=io.way
   refill_buffer.io.push.bits.data.opcode:=io.opcode
@@ -78,7 +78,7 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
 
   io.resp.bits.opcode := RegNext(d.bits.opcode)
   io.resp.bits.source := RegNext(d.bits.source)
-  io.resp.bits.data   := RegNext(Mux(io.opcode ===PutPartialData, merge_data,d.bits.data))
+  io.resp.bits.data   := RegNext(Mux((io.opcode ===PutPartialData ||io.opcode===PutFullData), merge_data,d.bits.data))
 
   io.bs_adr.valid     :=  io.sche_dir_fire.valid && (refill_buffer.io.data.opcode===Get) //当成功写dir时候再写实际数据
   io.bs_adr.bits.way  := refill_buffer.io.data.way
