@@ -236,7 +236,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      dataAccess write hit      ******
   val DataAccessWriteHitSRAMWReq: Vec[SRAMBundleAW[UInt]] = Wire(Vec(BlockWords,new SRAMBundleAW(UInt(8.W), NSets*NWays, BytesOfWord)))
   //this setIdx = setIdx + wayIdx
-  DataAccessWriteHitSRAMWReq.foreach(_.setIdx := Cat(coreReq_st1.setIdx,TagAccess.io.waymaskHit_st1))
+  DataAccessWriteHitSRAMWReq.foreach(_.setIdx := Cat(coreReq_st1.setIdx,OHToUInt(TagAccess.io.waymaskHit_st1)))
   for (i <- 0 until BlockWords){
     DataAccessWriteHitSRAMWReq(i).waymask.get := coreReq_st1.perLaneAddr(getBankEn.io.perBankBlockIdx(i)).wordOffset1H
     DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)).asTypeOf(Vec(BytesOfWord,UInt(8.W)))//TODO check order
