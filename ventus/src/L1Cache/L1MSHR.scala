@@ -135,6 +135,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   // ******      mshr::probe_vec    ******
   entryMatchProbe := Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid
   assert(PopCount(entryMatchProbe) <= 1.U)
+  val entryMatchProbeid_reg = RegNext(OHToUInt(entryMatchProbe))
   val secondaryMiss = RegNext(entryMatchProbe.orR)
   val primaryMiss = !secondaryMiss
   val mainEntryFull = entryStatus.io.full
@@ -245,10 +246,10 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         when(iofSubEn.asUInt===subentry_next2cancel &&
           io.missRspIn.valid){
           subentry_valid(iofEn)(iofSubEn) := false.B
-        }.elsewhen(iofSubEn.asUInt===subentryStatus.io.next &&
-          io.missReq.fire && secondaryMiss){
-          subentry_valid(iofEn)(iofSubEn) := true.B
         }
+      }.elsewhen(iofSubEn.asUInt === subentryStatus.io.next &&
+        io.missReq.fire && secondaryMiss && iofEn.asUInt === entryMatchProbeid_reg) {
+        subentry_valid(iofEn)(iofSubEn) := true.B
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
     }
   }
