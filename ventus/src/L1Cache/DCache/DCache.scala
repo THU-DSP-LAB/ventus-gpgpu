@@ -99,7 +99,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
   val WshrAccess = Module(new DCacheWSHR(Depth = NWshrEntry))
-
+  val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
   // ******     queues     ******
   val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 1,flow=false,pipe=true))
   //comb ready exist, be careful the latency!
@@ -543,7 +543,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(coreReqInvOrFluValid_st0){
     InvOrFluAlreadyflush := false.B
   }
-  val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
+
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0).valid := tagReplaceStatus
   MemReqArb.io.in(0).bits := dirtyReplace_st1
