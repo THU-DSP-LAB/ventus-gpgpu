@@ -160,16 +160,9 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  directory.io.read.valid:=request.valid && !(request.bits.opcode===Hint)
-  directory.io.read.bits:=request.bits
 
-  directory.io.write.valid:=schedule.dir.valid && !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
-  directory.io.write.bits.is_writemiss:= schedule.dir.bits.is_writemiss
-  directory.io.write.bits.way:=schedule.dir.bits.way
-  directory.io.write.bits.set:=schedule.dir.bits.set
-  directory.io.write.bits.data.tag:=schedule.dir.bits.data.tag
-  directory.io.invalidate := request.fire()&& (request.bits.opcode===Hint) && (request.bits.param===1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
-  directory.io.flush :=request.fire() && (request.bits.opcode===Hint) && (request.bits.param===0.U)
+
+
 
 
   //directory.io.write.bits.data.valid:=schedule.dir.bits.data.valid
@@ -232,12 +225,19 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     }}
   }
 
-  requests.io.push.valid      := directory.io.result.valid && (!directory.io.result.bits.hit)  && merge_subentry
+  requests.io.push.valid      := directory.io.result.valid && (!directory.io.result.bits.hit)  && (merge_subentry||alloc)
   requests.io.push.bits.data  := directory.io.result.bits.source
   requests.io.push.bits.index := OHToUInt(Mux(alloc,mshr_insertOH,read_tagMatches))
 
-
-
+  directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && mshr_free && requests.io.push.ready && directory.io.ready && !(issue_flush_invalidate) && !(mshr_stalls)
+  directory.io.read.bits := request.bits
+  directory.io.write.valid := schedule.dir.valid && !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
+  directory.io.write.bits.is_writemiss := schedule.dir.bits.is_writemiss
+  directory.io.write.bits.way := schedule.dir.bits.way
+  directory.io.write.bits.set := schedule.dir.bits.set
+  directory.io.write.bits.data.tag := schedule.dir.bits.data.tag
+  directory.io.invalidate := request.fire() && (request.bits.opcode === Hint) && (request.bits.param === 1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
+  directory.io.flush := request.fire() && (request.bits.opcode === Hint) && (request.bits.param === 0.U)
 
   requests.io.pop.valid := requests.io.valid(mshr_select)&&schedule.d.valid&&sourceD.io.req.ready
   requests.io.pop.bits  := mshr_select

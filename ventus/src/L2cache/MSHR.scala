@@ -94,7 +94,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.a.bits.mask:= ~(0.U(params.mask_bits.W))
   when(io.schedule.a.fire()){sche_a_valid:=false.B}.elsewhen(io.allocate.valid && !io.allocate.bits.pending){
     sche_a_valid:=true.B
-  }.elsewhen(!pending_reg){
+  }.elsewhen(pending_reg && io.cancel_pending){
     sche_a_valid:=true.B
   }.otherwise{
     sche_a_valid:=sche_a_valid
