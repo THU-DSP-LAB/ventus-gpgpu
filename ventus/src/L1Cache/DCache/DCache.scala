@@ -272,13 +272,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
       }
     }.otherwise{//Miss
       when(coreReqControl_st1.isRead){
-        when(MshrAccess.io.missReq.ready && MemReqArb.io.in(1).fire()//即memReq_Q.io.enq.ready
+        when(MshrAccess.io.missReq.ready && MemReqArb.io.in(1).ready && (mshrProbeStatus === 0.U)//即memReq_Q.io.enq.ready
           && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
         //TODO before 7.30: add hit in-flight miss
-        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)){//memReq_Q.io.enq.ready
+        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& (mshrProbeStatus === 0.U)){//memReq_Q.io.enq.ready
           coreReq_st1_ready := true.B
         }
       }
