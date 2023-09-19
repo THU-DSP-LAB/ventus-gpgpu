@@ -27,13 +27,18 @@ class ScheduleRequest(params:InclusiveCacheParameters_lite) extends Bundle
   val dir = Decoupled(new DirectoryWrite_lite(params))
 
 }
+class  Status(params:InclusiveCacheParameters_lite)extends  DirectoryResult_lite(params)
+{
+  val pending =Bool()
+  val pending_index= UInt(log2Ceil(params.mshrs).W)
+}
 
 class MSHR (params:InclusiveCacheParameters_lite)extends Module
 {
   val io = IO(new Bundle {
-    val allocate  = Flipped(Valid(new DirectoryResult_lite(params)))
-
-    val status    = Output( new DirectoryResult_lite(params)) 
+    val allocate  = Flipped(Valid(new Status(params)))
+    val cancel_pending = Input(Bool())
+    val status    = Output( new Status(params))
     val valid     = Input(Bool())
     val mshr_wait = Input(Bool())
     val schedule  = new ScheduleRequest(params)
@@ -41,11 +46,14 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
     val sinkd     = Flipped(Valid(new SinkDResponse(params))) 
   })
 
-  val request = RegInit(0.U.asTypeOf(new DirectoryResult_lite(params)))
+  val request = RegInit(0.U.asTypeOf(new Status(params)))
 
-
+  val pending_reg=RegInit(false.B)
+  val pending_index_reg=RegInit(0.U(log2Ceil(params.mshrs).W))
 
   io.status    := request
+  io.status.pending_index:= pending_index_reg
+  io.status.pending:=pending_reg
 
   val sche_a_valid=RegInit(false.B)  
   val sche_dir_valid=RegInit(false.B)
@@ -54,6 +62,14 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   when (io.allocate.valid) {
     request := io.allocate.bits 
     sink_d_reg:=false.B
+
+  }
+  when(io.allocate.valid){
+    pending_reg := io.allocate.bits.pending
+    pending_index_reg := io.allocate.bits.pending_index
+  }.elsewhen(io.cancel_pending){
+    pending_reg :=false.B
+    pending_index_reg := 0.U
   }
 
 
@@ -76,7 +92,9 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
   io.schedule.a.bits.data:=request.data
   io.schedule.a.bits.size:=request.size
   io.schedule.a.bits.mask:= ~(0.U(params.mask_bits.W))
-  when(io.schedule.a.fire()){sche_a_valid:=false.B}.elsewhen(io.allocate.valid){
+  when(io.schedule.a.fire()){sche_a_valid:=false.B}.elsewhen(io.allocate.valid && !io.allocate.bits.pending){
+    sche_a_valid:=true.B
+  }.elsewhen(!pending_reg){
     sche_a_valid:=true.B
   }.otherwise{
     sche_a_valid:=sche_a_valid
