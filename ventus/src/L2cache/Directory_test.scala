@@ -132,7 +132,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val flushCount =RegInit(0.U((params.setBits+params.wayBits+1).W))
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
-  when((io.flush&& io.flush) || (io.invalidate && io.invalidate) || (flush_issue)){
+  when(io.flush || io.invalidate  || flush_issue_reg){
     flushCount := flushCount +1.U
   }.elsewhen(flushDone){
     flushCount :=0.U
@@ -266,25 +266,25 @@ for(i<- 0 until params.cache.sets){
   io.write.ready:=wipeDone && !flush_issue_reg
 
   io.read.ready:= ((wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) )&& !flush_issue_reg    //also fire when bypass
-  io.result.valid := Mux(flush_issue,RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),ren1)
-  io.result.bits.hit  := Mux(flush_issue,false.B, hit ||(setQuash && tagMatch))
-  io.result.bits.way  := Mux(flush_issue, RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
-  io.result.bits.put    :=Mux(flush_issue,0.U,RegNext(io.read.bits.put))
-  io.result.bits.data   :=Mux(flush_issue,0.U,RegNext(io.read.bits.data))
-  io.result.bits.offset :=Mux(flush_issue,0.U,RegNext(io.read.bits.offset))
-  io.result.bits.size   :=Mux(flush_issue,log2Up(params.cache.beatBytes).asUInt,RegNext(io.read.bits.size))
-  io.result.bits.set    :=Mux(flush_issue,RegNext(flush_set),RegNext(io.read.bits.set))
-  io.result.bits.source :=Mux(flush_issue,0.U,RegNext(io.read.bits.source))
-  io.result.bits.tag    :=Mux(flush_issue,RegNext(flush_tag),RegNext(io.read.bits.tag))
+  io.result.valid := Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),ren1)
+  io.result.bits.hit  := Mux(RegNext(flush_issue),false.B, hit ||(setQuash && tagMatch))
+  io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
+  io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.put))
+  io.result.bits.data   :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.data))
+  io.result.bits.offset :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.offset))
+  io.result.bits.size   :=Mux(RegNext(flush_issue),log2Up(params.cache.beatBytes).asUInt,RegNext(io.read.bits.size))
+  io.result.bits.set    :=Mux(RegNext(flush_issue),RegNext(flush_set),RegNext(io.read.bits.set))
+  io.result.bits.source :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.source))
+  io.result.bits.tag    :=Mux(RegNext(flush_issue),RegNext(flush_tag),RegNext(io.read.bits.tag))
   //victim tag should be transfered when miss dirty
-  io.result.bits.opcode :=Mux(flush_issue,Hint,RegNext(io.read.bits.opcode))
+  io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,RegNext(io.read.bits.opcode))
   val not_replace= (io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) &&io.result.bits.hit //not replace victim when write miss
-  io.result.bits.mask   :=Mux(flush_issue,Fill(params.mask_bits,1.U),Mux(hit,RegNext(io.read.bits.mask),RegNext(Fill(params.mask_bits,1.U))))
-  io.result.bits.dirty  :=Mux(flush_issue,RegNext(status_reg(flush_set).dirty(flush_way)), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
-  io.result.bits.last_flush :=Mux(flush_issue,RegNext(flushDone),false.B)
+  io.result.bits.mask   :=Mux(RegNext(flush_issue),Fill(params.mask_bits,1.U),Mux(hit,RegNext(io.read.bits.mask),RegNext(Fill(params.mask_bits,1.U))))
+  io.result.bits.dirty  :=Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way)), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
+  io.result.bits.last_flush :=Mux(RegNext(flush_issue),RegNext(flushDone),false.B)
   io.result.bits.flush  := RegNext(flush_issue)
   io.result.bits.victim_tag:= ways(io.result.bits.way).tag
   //todo what's the function of flush
-  io.result.bits.l2cidx := Mux(flush_issue,0.U,RegNext(io.read.bits.l2cidx))
-  io.result.bits.param := Mux(flush_issue,0.U,RegNext(io.read.bits.param))
+  io.result.bits.l2cidx := Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.l2cidx))
+  io.result.bits.param := Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.param))
 }
