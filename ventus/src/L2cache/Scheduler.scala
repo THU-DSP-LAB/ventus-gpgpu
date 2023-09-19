@@ -210,7 +210,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val mshr_insertOH =mshr_insertOH_init
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>{
     m.io.allocate.valid:=false.B
-    m.io.allocate.bits:=0.U
+    m.io.allocate.bits:=0.U.asTypeOf(new Status(params))
     when (directory.io.result.valid && alloc && s && !directory.io.result.bits.hit && !directory.io.result.bits.flush){
       m.io.allocate.valid := true.B
       m.io.allocate.bits.set := directory.io.result.bits.set
