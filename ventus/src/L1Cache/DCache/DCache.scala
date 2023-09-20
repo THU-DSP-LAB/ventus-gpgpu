@@ -117,7 +117,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val probereadAllocateWriteConflict = Wire(Bool())
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
+  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && (coreReqControl_st0.isWrite && mshrProbeStatus === 0.U)
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
@@ -155,7 +156,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
 
   // ******      mshr probe      ******
-  MshrAccess.io.probe.valid := io.coreReq.fire
+  MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready
   MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
 
   val genCtrl = Module(new genControl)
@@ -278,7 +279,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }.otherwise{//isWrite
         //TODO before 7.30: add hit in-flight miss
-        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& (mshrProbeStatus === 0.U|| mshrProbeStatus === 2.U)){//memReq_Q.io.enq.ready
+        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& (mshrProbeStatus === 0.U)){//memReq_Q.io.enq.ready
           coreReq_st1_ready := true.B
         }
       }
