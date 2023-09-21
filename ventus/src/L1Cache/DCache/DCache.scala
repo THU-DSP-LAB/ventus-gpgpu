@@ -147,7 +147,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val readHit_st2 = RegInit(false.B)
   readHit_st2 := readHit_st1 //|| (readHit_st2 && (!coreRsp_Q.io.enq.fire()))
   //val readHit_st2 = RegNext(readHit_st1 )
-  val injectTagProbe = inflightReadWriteMiss && (mshrProbeStatus === 0.U)
+  val injectTagProbe = inflightReadWriteMiss ^ RegNext(inflightReadWriteMiss)//RegInit(false.B)//inflightReadWriteMiss && (mshrProbeStatus === 0.U)
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
     !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
@@ -269,9 +269,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
   when(coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U){
     inflightReadWriteMiss := true.B
-  }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U){
+  }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U && TagAccess.io.allocateWrite.valid){
     inflightReadWriteMiss := false.B
   }
+
   coreReq_st1_ready := false.B
   when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
     when(TagAccess.io.hit_st1) {
