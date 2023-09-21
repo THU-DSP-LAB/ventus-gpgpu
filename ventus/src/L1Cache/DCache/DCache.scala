@@ -97,6 +97,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry))
   //val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
+  val readmiss_sameadd = Wire(Bool())
+  val coreReq_st1_ready = Wire(Bool())
+
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
   val WshrAccess = Module(new DCacheWSHR(Depth = NWshrEntry))
   val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
@@ -119,11 +122,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
   val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && (coreReq_st1_ready || !readmiss_sameadd)
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
-  val coreReq_st1_ready = Wire(Bool())
+
   //val coreReq_st1_valid_pre = RegInit(false.B)
   val coreReq_st1_valid = Wire(Bool())
   //val memRsp_st1_valid = RegInit(false.B)//early definition
@@ -148,6 +151,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readHit_st2 := readHit_st1 //|| (readHit_st2 && (!coreRsp_Q.io.enq.fire()))
   //val readHit_st2 = RegNext(readHit_st1 )
   val injectTagProbe = inflightReadWriteMiss ^ RegNext(inflightReadWriteMiss)//RegInit(false.B)//inflightReadWriteMiss && (mshrProbeStatus === 0.U)
+  readmiss_sameadd := readMiss_st1 && (io.coreReq.bits.setIdx === coreReq_Q.io.deq.bits.setIdx) && (io.coreReq.bits.tag === coreReq_Q.io.deq.bits.tag) &&
+                        io.coreReq.valid  && coreReq_Q.io.deq.valid
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
     !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
