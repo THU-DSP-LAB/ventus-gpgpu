@@ -269,7 +269,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }
   when(coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U){
     inflightReadWriteMiss := true.B
-  }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U && TagAccess.io.allocateWrite.valid){
+  }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U ){
     inflightReadWriteMiss := false.B
   }
 
