@@ -79,7 +79,9 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val tagAccessRArb = Module(new Arbiter (new SRAMBundleA(set),3))
     tagBodyAccess.io.r.req <> tagAccessRArb.io.out
     //For probe
-    tagAccessRArb.io.in(1) <> io.probeRead
+    tagAccessRArb.io.in(1).valid := io.fire_st1
+    tagAccessRArb.io.in(1).bits.setIdx := io.setFromCore_st1
+    //<> io.probeRead
     //For allocate
     tagAccessRArb.io.in(0).valid := io.allocateWrite.valid
     tagAccessRArb.io.in(0).bits.setIdx := io.allocateWrite.bits.setIdx

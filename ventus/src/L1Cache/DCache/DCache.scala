@@ -155,7 +155,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
   TagAccess.io.setFromCore_st1 := coreReq_st1.setIdx
-  TagAccess.io.fire_st1 := coreReq_st1_valid && coreReq_st1_ready
+  TagAccess.io.fire_st1 := coreReq_st1_valid
 
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready
