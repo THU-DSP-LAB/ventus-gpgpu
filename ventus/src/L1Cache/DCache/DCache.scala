@@ -118,7 +118,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
   val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && (coreReqControl_st0.isWrite && mshrProbeStatus === 0.U)
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
@@ -154,6 +154,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeRead.valid := io.coreReq.fire
   TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
+  TagAccess.io.setFromCore_st1 := coreReq_st1.setIdx
+  TagAccess.io.fire_st1 := coreReq_st1_valid && coreReq_st1_ready
 
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready

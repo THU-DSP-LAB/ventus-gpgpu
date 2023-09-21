@@ -21,10 +21,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //From coreReq_pipe0
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
+    val setFromCore_st1 = Input(UInt(dcache_SetIdxBits.W))
     val probeIsWrite_st1 = if(!readOnly){Some(Input(Bool()))} else None
     //val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
     //To coreReq_pipe1
     val hit_st1 = Output(Bool())
+    val fire_st1 = Input(Bool())
     val waymaskHit_st1 = Output(UInt(way.W))
     //From memRsp_pipe0
     val allocateWrite = Flipped(ValidIO(new SRAMBundleA(set)))//Allocate Channel
@@ -136,9 +138,9 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
-  iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
+  iTagChecker.io.way_valid := way_valid(io.setFromCore_st1) //way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
-  io.hit_st1 := iTagChecker.io.cache_hit && RegNext(io.probeRead.fire)
+  io.hit_st1 := iTagChecker.io.cache_hit && io.fire_st1//&& RegNext(io.probeRead.fire)
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
