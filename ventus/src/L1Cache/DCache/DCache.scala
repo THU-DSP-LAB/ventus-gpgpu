@@ -115,10 +115,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val MemReqArb = Module(new Arbiter(new WshrMemReq, 3))
   val waitforL2flush = RegInit(false.B)
   val probereadAllocateWriteConflict = Wire(Bool())
+  val inflightReadWriteMiss = RegInit(false.B)
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
   val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
@@ -146,16 +147,16 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val readHit_st2 = RegInit(false.B)
   readHit_st2 := readHit_st1 //|| (readHit_st2 && (!coreRsp_Q.io.enq.fire()))
   //val readHit_st2 = RegNext(readHit_st1 )
+  val injectTagProbe = inflightReadWriteMiss && (mshrProbeStatus === 0.U)
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
     !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
   // ******      tag probe      ******
   //val missRspWriteEnable = Wire(Bool())
-  TagAccess.io.probeRead.valid := io.coreReq.fire
-  TagAccess.io.probeRead.bits.setIdx := io.coreReq.bits.setIdx
+  TagAccess.io.probeRead.valid := io.coreReq.fire || injectTagProbe
+  TagAccess.io.probeRead.bits.setIdx := Mux(injectTagProbe,coreReq_st1.setIdx,io.coreReq.bits.setIdx)
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
-  TagAccess.io.setFromCore_st1 := coreReq_st1.setIdx
-  TagAccess.io.fire_st1 := coreReq_st1_valid
+
 
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready
@@ -266,7 +267,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(invalidatenodirty && waitforL2flush) {
     waitforL2flush_st2 := true.B
   }
-
+  when(coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U){
+    inflightReadWriteMiss := true.B
+  }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U){
+    inflightReadWriteMiss := false.B
+  }
   coreReq_st1_ready := false.B
   when(coreReqControl_st1.isRead || coreReqControl_st1.isWrite){
     when(TagAccess.io.hit_st1) {
@@ -281,7 +286,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }.otherwise{//isWrite
         //TODO before 7.30: add hit in-flight miss
-        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& (mshrProbeStatus === 0.U)){//memReq_Q.io.enq.ready
+        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& !inflightReadWriteMiss){//memReq_Q.io.enq.ready
           coreReq_st1_ready := true.B
         }
       }
