@@ -272,6 +272,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(invalidatenodirty && waitforL2flush) {
     waitforL2flush_st2 := true.B
   }
+  val inflightreadwritemiss_w = (coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U) || inflightReadWriteMiss
   when(coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U){
     inflightReadWriteMiss := true.B
   }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U ){
@@ -292,7 +293,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
         }
       }.otherwise{//isWrite
         //TODO before 7.30: add hit in-flight miss
-        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& !inflightReadWriteMiss){//memReq_Q.io.enq.ready
+        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& !inflightreadwritemiss_w){//memReq_Q.io.enq.ready
           coreReq_st1_ready := true.B
         }
       }
@@ -481,7 +482,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val DataAccessReadSRAMRRsp: Vec[UInt] = VecInit(DataAccessesRRsp)
 
   // ******      core rsp
-  when(cacheHit_st1 && RegNext(io.coreReq.fire)) {
+  when(cacheHit_st1 && (RegNext(io.coreReq.fire) || injectTagProbe)) {
     //coreRsp_st2_valid := true.B
     coreRsp_st2.data := DontCare
     coreRsp_st2.isWrite := coreReqControl_st1.isWrite
