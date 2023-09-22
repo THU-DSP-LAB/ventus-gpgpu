@@ -121,8 +121,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val inflightReadWriteMiss = RegInit(false.B)
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
-  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && (coreReq_st1_ready || !readmiss_sameadd)
+  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
