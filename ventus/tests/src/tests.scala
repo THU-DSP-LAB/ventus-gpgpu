@@ -223,8 +223,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                   _.opcode -> opcode_rsp.U, // w:0 r:1
                   _.data -> ByteArray2BigInt(data).U,
                   _.source -> source.U,
-                  _.size -> 0.U, // TODO: Unused
-                  _.param -> 0.U
+                  _.size -> 0.U // TODO: Unused
                 ))
                 c.io.out_a.ready.poke(false.B)
                 c.clock.step(1)
