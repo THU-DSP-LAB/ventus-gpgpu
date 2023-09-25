@@ -76,6 +76,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val missRspOut = ValidIO(new MSHRmissRspOut(bABits,tIWidth,WIdBits))
     //For InOrFlu
     val empty = Output(Bool())
+    val probestatus = Output(Bool())
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
@@ -86,6 +87,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val entry_valid = Reverse(Cat(subentry_valid.map(Cat(_).orR)))
   val probestatus = RegInit(false.B)
   io.empty := !entry_valid.orR
+  io.probestatus := probestatus
   /*Structure Diagram
   * bA  : blockAddr
   * tI  : targetInfo
@@ -194,10 +196,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   when(io.probe.valid && !probestatus){
     probestatus := true.B
   }.elsewhen(probestatus){
-    when(io.missReq.valid && !io.probe.valid){
+    when(io.missReq.valid ){
       probestatus := false.B
-    }.otherwise{
-      probestatus := true.B
     }
   }
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
