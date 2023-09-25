@@ -121,7 +121,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val inflightReadWriteMiss = RegInit(false.B)
   // ******     pipeline regs      ******
   coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
-  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd
+  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && !readmiss_sameadd
   io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
@@ -151,7 +151,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readHit_st2 := readHit_st1 //|| (readHit_st2 && (!coreRsp_Q.io.enq.fire()))
   //val readHit_st2 = RegNext(readHit_st1 )
   val injectTagProbe = inflightReadWriteMiss ^ RegNext(inflightReadWriteMiss)//RegInit(false.B)//inflightReadWriteMiss && (mshrProbeStatus === 0.U)
-  readmiss_sameadd := readMiss_st1 && (io.coreReq.bits.setIdx === coreReq_Q.io.deq.bits.setIdx) && (io.coreReq.bits.tag === coreReq_Q.io.deq.bits.tag) &&
+  readmiss_sameadd := MshrAccess.io.missReq.valid (io.coreReq.bits.setIdx === coreReq_Q.io.deq.bits.setIdx) && (io.coreReq.bits.tag === coreReq_Q.io.deq.bits.tag) &&
                         io.coreReq.valid  && coreReq_Q.io.deq.valid
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
