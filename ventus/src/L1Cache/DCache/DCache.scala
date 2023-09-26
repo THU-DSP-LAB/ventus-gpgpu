@@ -272,8 +272,8 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(invalidatenodirty && waitforL2flush) {
     waitforL2flush_st2 := true.B
   }
-  val inflightreadwritemiss_w = (coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U) || inflightReadWriteMiss
-  when(coreReqControl_st1.isWrite && mshrProbeStatus =/= 0.U){
+  val inflightreadwritemiss_w = (coreReqControl_st0.isWrite && mshrProbeStatus =/= 0.U) || inflightReadWriteMiss
+  when(coreReqControl_st0.isWrite && mshrProbeStatus =/= 0.U){
     inflightReadWriteMiss := true.B
   }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U ){
     inflightReadWriteMiss := false.B
