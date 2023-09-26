@@ -251,9 +251,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       when(iofEn.asUInt===entryStatus.io.next &&
         iofSubEn.asUInt===0.U && io.missReq.fire && primaryMiss && probestatus){
         subentry_valid(iofEn)(iofSubEn) := true.B
-      }.elsewhen(iofEn.asUInt===entryMatchMissRsp){
-        when(iofSubEn.asUInt===subentry_next2cancel &&
-          io.missRspIn.valid){
+      }.elsewhen(iofEn.asUInt===entryMatchMissRsp && iofSubEn.asUInt === subentry_next2cancel &&
+        io.missRspIn.valid){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }
       }.elsewhen(iofSubEn.asUInt === subentryStatus.io.next &&
@@ -261,5 +260,4 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         subentry_valid(iofEn)(iofSubEn) := true.B
       }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
     }
-  }
 }
