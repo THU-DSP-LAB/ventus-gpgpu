@@ -224,6 +224,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
       m.io.allocate.bits.flush := directory.io.result.bits.flush
       m.io.allocate.bits.pending := is_pending
       m.io.allocate.bits.pending_index:= pending_index
+      m.io.allocate.bits.l2cidx:= directory.io.result.bits.l2cidx
     }}
   }
 
