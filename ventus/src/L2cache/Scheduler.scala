@@ -258,7 +258,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
 
 
-  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free&& write_read_conflict.orR)
+  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free&& !write_read_conflict.orR)
 
   sourceD.io.req.bits.way:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
   sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,schedule.d.bits.data)
