@@ -264,9 +264,16 @@ for(i<- 0 until params.cache.sets){
 
   io.ready:=wipeDone && !flush_issue_reg
   io.write.ready:=wipeDone && !flush_issue_reg
+  val valid_reg =RegInit(false.B)
+  when(ren1 && !io.result.ready){
+    valid_reg:=true.B
+  }.elsewhen(io.result.fire){
+    valid_reg:=false.B
+  }.otherwise()
+  val valid_signal =Mux(ren1,ren1,valid_reg)
 
   io.read.ready:= ((wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) )&& !flush_issue_reg    //also fire when bypass
-  io.result.valid := Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),ren1)
+  io.result.valid := Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),valid_signal)
   io.result.bits.hit  := Mux(RegNext(flush_issue),false.B, hit ||(setQuash && tagMatch))
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
   io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.put))
