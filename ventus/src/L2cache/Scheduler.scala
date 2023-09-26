@@ -179,7 +179,9 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val WWs = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
     (!directory.io.result.bits.hit) && ((directory.io.result.bits.opcode =/=Get)  && (m.io.status.opcode=/=Get))}.reverse)
   val WW=WWs.orR
-
+  val write_read_conflict = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
+    (!directory.io.result.bits.hit) && (directory.io.result.bits.opcode =/= m.io.status.opcode)
+  }.reverse)
   val WRWs = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
     (!directory.io.result.bits.hit) && ((directory.io.result.bits.opcode ===PutFullData||directory.io.result.bits.opcode===PutPartialData)  &&
     m.io.status.opcode === Get && m.io.status.pending)}.reverse)
@@ -192,7 +194,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val RWR =RWRs.orR
 
 
-  val mshr_stalls = (two_alloc_already && (WRW || RWR )) || WW
+  val mshr_stalls = (two_alloc_already && (WRW || RWR )) || WW || write_read_conflict.orR
   val merge_subentry = !mshr_stalls && (read_tagMatches.orR)
   val alloc = !(tagMatches.orR() || mshr_stalls)//write miss after write miss is not allowed to alloc, WRW, RWR also not,
   val is_pending = tagMatches.orR && alloc// write miss can alloc but need to wait read miss finish and vice versa.
@@ -256,7 +258,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
 
 
-  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free)
+  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free&& write_read_conflict.orR)
 
   sourceD.io.req.bits.way:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
   sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,schedule.d.bits.data)
