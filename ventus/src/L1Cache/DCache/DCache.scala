@@ -201,7 +201,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******      mshr missReq      ******
   //val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U) early definition
-  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && coreReq_st1_ready && !RegNext(secondaryFullReturn)
+  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && coreReq_st1_ready && !RegNext(secondaryFullReturn) && MshrAccess.io.probestatus
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
@@ -518,7 +518,15 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
   val coreReqmemConflict = coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_coreReq_Reg && coreRsp_st2_valid_from_memReq
   //val coreReq_Reg = RegNext(coreRsp_st2_valid_from_coreReq_Reg)
-  val coreReqmemConflict_Reg = RegNext(coreReqmemConflict)
+  val coreReqmemConflict_Reg = RegInit(false.B)
+
+  when(coreReqmemConflict){
+    coreReqmemConflict_Reg  := true.B
+  }.elsewhen(coreReqmemConflict_Reg && (coreRsp_st2_valid_from_memReq || coreRsp_st2_valid_from_memRsp)){
+    coreReqmemConflict_Reg := true.B
+  }.otherwise(){
+    coreReqmemConflict_Reg := coreReqmemConflict
+  }
 //if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
 
   coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
