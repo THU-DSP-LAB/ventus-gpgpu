@@ -208,7 +208,7 @@ for(i<- 0 until params.cache.sets){
 }
   val lfsr=RegInit(0.U(16.W)) //todo need to be configurable
   val xor = lfsr(0) ^ lfsr(1) ^ lfsr(3) ^ lfsr(4)
-  when (ren1) {
+  when (io.result.fire) {
     lfsr := Mux(lfsr === 0.U, 1.U, Cat(lfsr(16-2,0),xor))
   }
   val victim_LFSR = lfsr
@@ -264,27 +264,39 @@ for(i<- 0 until params.cache.sets){
 
   io.ready:=wipeDone && !flush_issue_reg
   io.write.ready:=wipeDone && !flush_issue_reg
+  val valid_reg =RegInit(false.B)
+  when(ren1 && !io.result.ready){
+    valid_reg:=true.B
+  }.elsewhen(io.result.fire){
+    valid_reg:=false.B
+  }
+  val valid_signal =Mux(ren1,ren1,valid_reg)
+  val read_bits_reg =RegInit(0.U.asTypeOf(new FullRequest(params)))
+  when(io.read.fire){
+    read_bits_reg:= io.read.bits
+  }
+
 
   io.read.ready:= ((wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) )&& !flush_issue_reg    //also fire when bypass
-  io.result.valid := Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),ren1)
-  io.result.bits.hit  := Mux(RegNext(flush_issue),false.B, hit ||(setQuash && tagMatch))
+  io.result.valid := Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),valid_signal)
+  io.result.bits.hit  := Mux(RegNext(flush_issue),true.B, hit ||(setQuash && tagMatch))
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
-  io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.put))
-  io.result.bits.data   :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.data))
-  io.result.bits.offset :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.offset))
-  io.result.bits.size   :=Mux(RegNext(flush_issue),log2Up(params.cache.beatBytes).asUInt,RegNext(io.read.bits.size))
-  io.result.bits.set    :=Mux(RegNext(flush_issue),RegNext(flush_set),RegNext(io.read.bits.set))
-  io.result.bits.source :=Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.source))
-  io.result.bits.tag    :=Mux(RegNext(flush_issue),RegNext(flush_tag),RegNext(io.read.bits.tag))
+  io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,read_bits_reg.put)
+  io.result.bits.data   :=Mux(RegNext(flush_issue),0.U,read_bits_reg.data)
+  io.result.bits.offset :=Mux(RegNext(flush_issue),0.U,read_bits_reg.offset)
+  io.result.bits.size   :=Mux(RegNext(flush_issue),log2Up(params.cache.beatBytes).asUInt,read_bits_reg.size)
+  io.result.bits.set    :=Mux(RegNext(flush_issue),RegNext(flush_set),read_bits_reg.set)
+  io.result.bits.source :=Mux(RegNext(flush_issue),0.U,read_bits_reg.source)
+  io.result.bits.tag    :=Mux(RegNext(flush_issue),RegNext(flush_tag),read_bits_reg.tag)
   //victim tag should be transfered when miss dirty
-  io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,RegNext(io.read.bits.opcode))
+  io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,read_bits_reg.opcode)
   val not_replace= (io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) &&io.result.bits.hit //not replace victim when write miss
-  io.result.bits.mask   :=Mux(RegNext(flush_issue),Fill(params.mask_bits,1.U),Mux(hit,RegNext(io.read.bits.mask),RegNext(Fill(params.mask_bits,1.U))))
+  io.result.bits.mask   :=Mux(RegNext(flush_issue),Fill(params.mask_bits,1.U),Mux(hit,read_bits_reg.mask,RegNext(Fill(params.mask_bits,1.U))))
   io.result.bits.dirty  :=Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way)), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
   io.result.bits.last_flush :=Mux(RegNext(flush_issue),RegNext(flushDone),false.B)
   io.result.bits.flush  := RegNext(flush_issue)
   io.result.bits.victim_tag:= ways(io.result.bits.way).tag
   //todo what's the function of flush
-  io.result.bits.l2cidx := Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.l2cidx))
-  io.result.bits.param := Mux(RegNext(flush_issue),0.U,RegNext(io.read.bits.param))
+  io.result.bits.l2cidx := Mux(RegNext(flush_issue),0.U,read_bits_reg.l2cidx)
+  io.result.bits.param := Mux(RegNext(flush_issue),0.U,read_bits_reg.param)
 }
