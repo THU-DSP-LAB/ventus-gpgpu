@@ -524,12 +524,12 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreReqmemConflict_Reg  := true.B
   }.elsewhen(coreReqmemConflict_Reg && (coreRsp_st2_valid_from_memReq || coreRsp_st2_valid_from_memRsp)){
     coreReqmemConflict_Reg := true.B
-  }.otherwise(){
+  }.otherwise{
     coreReqmemConflict_Reg := coreReqmemConflict
   }
 //if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
 
-  coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,true.B,coreRsp_st2_valid_from_coreReq_Reg))
+  coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,!(coreRsp_st2_valid_from_memReq || coreRsp_st2_valid_from_memRsp),coreRsp_st2_valid_from_coreReq_Reg))
 
   coreRsp_st2_valid_from_memRsp := RegEnable(MshrAccess.io.missRspOut.valid , coreRsp_Q.io.enq.ready)
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
