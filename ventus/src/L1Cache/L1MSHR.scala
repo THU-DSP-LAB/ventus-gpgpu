@@ -196,8 +196,10 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   when(io.probe.fire() && !probestatus){
     probestatus := true.B
   }.elsewhen(probestatus){
-    when(io.missReq.fire()){
+    when(io.probe.bits.blockAddr =/= io.missReq.bits.blockAddr && io.missReq.fire()){
       probestatus := io.probe.fire()
+    }.elsewhen(io.missReq.fire()){
+      probestatus := false.B
     }
   }
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
