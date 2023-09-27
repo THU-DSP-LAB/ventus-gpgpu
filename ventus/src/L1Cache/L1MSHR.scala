@@ -193,11 +193,11 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     mshrStatus_st1_w := mshrStatus_st1_r
   }
   io.probeOut_st1.probeStatus := mshrStatus_st1_w
-  when(io.probe.valid && !probestatus){
+  when(io.probe.fire() && !probestatus){
     probestatus := true.B
   }.elsewhen(probestatus){
-    when(io.missReq.valid ){
-      probestatus := false.B
+    when(io.missReq.fire()){
+      probestatus := io.probe.fire()
     }
   }
   //  ******     mshr::allocate_vec_sub/allocate_vec_main     ******
@@ -210,7 +210,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     targetInfo_Accesss(real_SRAMAddrUp)(real_SRAMAddrDown) := io.missReq.bits.targetInfo
   }
 
-  when(io.missReq.fire && mshrStatus_st1_w === 0.U && probestatus) {//PRIMARY_AVAIL
+  when(io.missReq.fire && mshrStatus_st1_w === 0.U ) {//PRIMARY_AVAIL
     blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
     instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
   }
@@ -249,7 +249,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   for (iofEn <- 0 until NMshrEntry){
     for (iofSubEn <- 0 until NMshrSubEntry){
       when(iofEn.asUInt===entryStatus.io.next &&
-        iofSubEn.asUInt===0.U && io.missReq.fire && primaryMiss && probestatus){
+        iofSubEn.asUInt===0.U && io.missReq.fire && primaryMiss){
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt===entryMatchMissRsp && iofSubEn.asUInt === subentry_next2cancel &&
         io.missRspIn.valid){
