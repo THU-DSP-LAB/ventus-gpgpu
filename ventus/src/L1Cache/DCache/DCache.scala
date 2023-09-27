@@ -152,7 +152,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val readHit_st2 = RegNext(readHit_st1 )
   val injectTagProbe = inflightReadWriteMiss ^ RegNext(inflightReadWriteMiss)//RegInit(false.B)//inflightReadWriteMiss && (mshrProbeStatus === 0.U)
   readmiss_sameadd := MshrAccess.io.missReq.valid && (MshrAccess.io.probe.bits.blockAddr === MshrAccess.io.missReq.bits.blockAddr) &&
-                        io.coreReq.valid  && coreReq_Q.io.deq.valid && MshrAccess.io.probestatus
+                        io.coreReq.valid  && coreReq_Q.io.deq.valid
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
     !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
@@ -272,7 +272,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(invalidatenodirty && waitforL2flush) {
     waitforL2flush_st2 := true.B
   }
-  val inflightreadwritemiss_w = (coreReqControl_st0.isWrite && mshrProbeStatus =/= 0.U) || inflightReadWriteMiss
+  val inflightreadwritemiss_w = (coreReqControl_st0_noen.isWrite && mshrProbeStatus =/= 0.U) || inflightReadWriteMiss
   when(coreReqControl_st0.isWrite && mshrProbeStatus =/= 0.U){
     inflightReadWriteMiss := true.B
   }.elsewhen(inflightReadWriteMiss && mshrProbeStatus === 0.U ){
