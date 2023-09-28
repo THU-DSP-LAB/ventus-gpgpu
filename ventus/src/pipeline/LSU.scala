@@ -330,7 +330,7 @@ class LSU2WB extends Module{
     if(SPIKE_OUTPUT) {
       when(io.lsu_rsp.fire && io.lsu_rsp.bits.tag.isWrite){
         printf(p"warp ${io.lsu_rsp.bits.tag.warp_id} ")
-        printf(p"0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.pc)} 0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.inst)}")
+        printf(p"0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.pc)} 0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.inst)} ")
         printf(p"lsu.w fin\n")
       }
     }
