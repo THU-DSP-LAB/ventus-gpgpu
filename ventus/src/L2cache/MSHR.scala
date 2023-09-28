@@ -113,7 +113,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module
 
 
 
-  when (io.sinkd.valid) {
+  when (io.sinkd.valid ) {
     sche_dir_valid:=true.B
     sink_d_reg :=true.B
 
