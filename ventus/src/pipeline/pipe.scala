@@ -87,7 +87,7 @@ class pipe extends Module{
   lsu.io.csr_numw:=csrfile.io.lsu_numw
   when(csrfile.io.in.valid && csrfile.io.in.bits.ctrl.custom_signal_0){
     printf(p"warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
-    printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)}  setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
+    printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)} setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
   }
 
   warp_sche.io.pc_reset:=io.pc_reset
