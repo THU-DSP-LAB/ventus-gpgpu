@@ -158,7 +158,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val wen =io.write.fire()
   require (codeBits <= 256)
 
-
+  val not_replace= (io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) && !io.result.bits.hit //not replace victim when write miss
 
 
 val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
@@ -175,7 +175,7 @@ val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
 
       }.elsewhen(io.result.valid && io.result.bits.hit && (io.result.bits.opcode === PutPartialData || io.result.bits.opcode === PutFullData) && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt) {
         status_reg(i).dirty(j) := true.B
-      }.elsewhen(io.result.valid && !io.result.bits.hit && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt) {
+      }.elsewhen(io.result.valid && !io.result.bits.hit && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt && !not_replace) {
         status_reg(i).valid(j) := false.B
         status_reg(i).dirty(j) := false.B
       }.elsewhen(io.write.valid && io.write.bits.set===i.asUInt && io.write.bits.way===j.asUInt) {
@@ -290,7 +290,7 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.tag    :=Mux(RegNext(flush_issue),RegNext(flush_tag),read_bits_reg.tag)
   //victim tag should be transfered when miss dirty
   io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,read_bits_reg.opcode)
-  val not_replace= (io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) &&io.result.bits.hit //not replace victim when write miss
+
   io.result.bits.mask   :=Mux(RegNext(flush_issue),Fill(params.mask_bits,1.U),Mux(hit,read_bits_reg.mask,RegNext(Fill(params.mask_bits,1.U))))
   io.result.bits.dirty  :=Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way)), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
   io.result.bits.last_flush :=Mux(RegNext(flush_issue),RegNext(flushDone),false.B)

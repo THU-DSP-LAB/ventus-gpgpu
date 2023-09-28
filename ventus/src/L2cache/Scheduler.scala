@@ -97,7 +97,6 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val mshr_request = Cat(mshrs.map {  m =>
     ((sourceA.io.req.ready  &&m.io.schedule.a.valid) ||
       (sourceD.io.req.ready &&m.io.schedule.d.valid) ||
-
       (m.io.schedule.dir.valid&&directory.io.write.ready)) 
   }.reverse)
 
@@ -192,6 +191,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.status.opcode === Get && m.io.status.pending)
   }.reverse)
   val RWR =RWRs.orR
+  assert(!write_read_conflict)
 
 
   val mshr_stalls = (two_alloc_already && (WRW || RWR )) || WW || write_read_conflict.orR
