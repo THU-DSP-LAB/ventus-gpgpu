@@ -201,24 +201,28 @@ class branch_join(val depth_stack: Int) extends Module{
     fetch_ctl.spike_info.get := branch_ctl_buf.bits.spike_info.get
     when(io.complete.valid /*&&io.complete.bits===wid_to_check.U*/ && !io.branch_ctl.fire) {
       printf(p"warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
-      when(branch_ctl_buf.bits.opcode === 0.U){
+      when(branch_ctl_buf.bits.opcode === 0.U) {
         printf(p" vbranch     current mask and npc:   ")
-        when(takeif){
+        when(takeif) {
           if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
           printf(p"    0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc + 4.U)}")
-        }.otherwise{
+        }.otherwise {
           else_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
           printf(p"    0x${Hexadecimal(PC_branch)}")
         }
-      }.otherwise{
-        printf(p" join    mask and npc:    ")
-        popMask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
-        printf(p" 0x${Hexadecimal(popPC)}")
       }
-
-      //if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
       printf(p"\n")
     }
+    when(branch_ctl_buf.bits.opcode === 1.U && branch_ctl_buf.valid) {
+      printf(p"warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p" join    mask and npc:    ")
+      popMask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
+      printf(p" 0x${Hexadecimal(popPC)}")
+      printf(p" pop stack ? ${Decimal(popjump)}")
+      printf(p"\n")
+    }
+
+    //if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
   }
   //***** thread mask register control******
   //when branch indeed happened, put executing mask into corresponding register
