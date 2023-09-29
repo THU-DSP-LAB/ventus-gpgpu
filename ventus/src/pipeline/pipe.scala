@@ -183,8 +183,8 @@ class pipe extends Module{
       elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
  }
-  val op_col_in_wid = Wire(Bool())
-  val op_col_out_wid = Wire(Bool())
+  val op_col_in_wid = Wire(UInt(depth_warp.W))
+  val op_col_out_wid = Wire(UInt(depth_warp.W))
   op_col_in_wid := operand_collector.io.control.bits.wid
   op_col_out_wid := operand_collector.io.out.bits.control.wid
   scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
