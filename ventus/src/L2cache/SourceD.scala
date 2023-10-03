@@ -102,7 +102,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
   val about_to_not_busy = ((stateReg === stage_3) && io.a.fire) || ((stateReg === stage_4) && Mux((!s_final_req.hit && (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)), io.a.fire && io.d.fire, io.d.fire)) || ((stateReg === stage_8) && io.d.fire) ||
     ((stateReg === stage_7) && io.a.fire)
-  io.req.ready  := !busy//        || about_to_not_busy
+  io.req.ready  := !busy// || about_to_not_busy
 
   val s1_w_valid=s1_need_w
   val sourceA_sent_reg=RegInit(false.B)
