@@ -48,43 +48,32 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
     val index =Output(UInt(params.putBits.W))
     val sche_dir_fire =Flipped(Valid(UInt(params.source_bits.W)))
     // Banked Store port
-    val bs_adr = Decoupled(new BankedStoreOuterAddress(params))
-    val bs_dat = Output(new BankedStoreOuterPoison(params))
+//    val bs_adr = Decoupled(new BankedStoreOuterAddress(params))
+//    val bs_dat = Output(new BankedStoreOuterPoison(params))
     //merge with sinkA data
-    val pb_pop = Decoupled(new PutBufferPop(params))
-    val pb_beat = Input(new PutBufferAEntry(params))
+//    val pb_pop = Decoupled(new PutBufferPop(params))
+//    val pb_beat = Input(new PutBufferAEntry(params))
   })
 
   // No restrictions on buffer
   val d = io.d
   io.index :=io.put //choose correct data to merge
   io.source := Mux(d.valid, d.bits.source, RegEnable(d.bits.source, d.valid))
-  val full_mask=FillInterleaved(params.micro.writeBytes*8,io.pb_beat.mask)
-  val merge_data=( io.pb_beat.data & full_mask) |(d.bits.data & (~full_mask).asUInt())
-  val refill_buffer =Module(new ListBuffer(ListBufferParameters(new refill_data(params),params.mshrs,params.mshrs,false,true)))
-  refill_buffer.io.push.bits.data.data:=Mux((io.opcode ===PutPartialData || io.opcode===PutFullData), merge_data,d.bits.data)
-  refill_buffer.io.push.bits.data.set:=io.set
-  refill_buffer.io.push.bits.data.way:=io.way
-  refill_buffer.io.push.bits.data.opcode:=io.opcode
-  refill_buffer.io.push.bits.data.put:=io.put
-  refill_buffer.io.push.valid:=d.fire && (d.bits.opcode===AccessAckData)
-  refill_buffer.io.push.bits.index:= io.source
-  refill_buffer.io.pop.valid:=io.sche_dir_fire.valid
-  refill_buffer.io.pop.bits:= io.sche_dir_fire.bits //具体pop哪个mshr
+
 
 
   io.resp.valid       := RegNext(d.fire())
-  d.ready             := !(refill_buffer.io.valid.andR) //可以把数据存进来了
+  d.ready             := true.B//!(refill_buffer.io.valid.andR) //可以把数据存进来了
 
   io.resp.bits.opcode := RegNext(d.bits.opcode)
   io.resp.bits.source := RegNext(d.bits.source)
-  io.resp.bits.data   := RegNext(Mux((io.opcode ===PutPartialData ||io.opcode===PutFullData), merge_data,d.bits.data))
+  io.resp.bits.data   := RegNext(d.bits.data)
 
-  io.bs_adr.valid     :=  io.sche_dir_fire.valid && (refill_buffer.io.data.opcode===Get) //当成功写dir时候再写实际数据
-  io.bs_adr.bits.way  := refill_buffer.io.data.way
-  io.bs_adr.bits.set  := refill_buffer.io.data.set
-  io.bs_dat.data      := refill_buffer.io.data.data
-  io.bs_adr.bits.mask := ~(0.U(params.mask_bits.W))
-  io.pb_pop.valid     :=  (refill_buffer.io.data.opcode===PutPartialData  || refill_buffer.io.data.opcode ===PutFullData) && io.sche_dir_fire.valid
-  io.pb_pop.bits.index:=  refill_buffer.io.data.put
+//  io.bs_adr.valid     :=  io.sche_dir_fire.valid && (refill_buffer.io.data.opcode===Get) //当成功写dir时候再写实际数据
+//  io.bs_adr.bits.way  := refill_buffer.io.data.way
+//  io.bs_adr.bits.set  := refill_buffer.io.data.set
+//  io.bs_dat.data      := refill_buffer.io.data.data
+//  io.bs_adr.bits.mask := ~(0.U(params.mask_bits.W))
+//  io.pb_pop.valid     :=  (refill_buffer.io.data.opcode===PutPartialData  || refill_buffer.io.data.opcode ===PutFullData) && io.sche_dir_fire.valid
+//  io.pb_pop.bits.index:=  refill_buffer.io.data.put
 }

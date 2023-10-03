@@ -47,8 +47,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceA.io.a.ready:=io.out_a.ready
 
 
-  sinkA.io.pb_pop2<>sinkD.io.pb_pop
-  sinkD.io.pb_beat<>sinkA.io.pb_beat2
+//  sinkA.io.pb_pop2<>sinkD.io.pb_pop
+//  sinkD.io.pb_beat<>sinkA.io.pb_beat2
   sourceD.io.pb_pop<>sinkA.io.pb_pop
   sourceD.io.pb_beat<>sinkA.io.pb_beat
 
@@ -68,7 +68,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   sinkA.io.a.bits:= io.in_a.bits
   sinkA.io.a.valid:=io.in_a.valid
-  sinkA.io.index:= sinkD.io.index
+//  sinkA.io.index:= sinkD.io.index
 
 
   io.in_a.ready:=sinkA.io.a.ready
@@ -86,7 +86,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val bankedStore = Module(new BankedStore(params))
 
 
-  val requests = Module(new ListBuffer(ListBufferParameters(UInt(params.source_bits.W), params.mshrs, params.secondary, false,true)))
+  val requests = Module(new ListBuffer(ListBufferParameters(new Merge_meta(params), params.mshrs, params.secondary, false,true)))
 
   val mshrs = Seq.fill(params.mshrs) { Module(new MSHR(params)) }
 
@@ -131,7 +131,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt())
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
-    m.io.cancel_pending:= sinkD.io.resp.valid && (sinkD.io.resp.bits.source=== m.io.status.pending_index) && m.io.status.pending
+    m.io.merge.valid:= m.io.schedule.d.valid && ((m.io.schedule.d.bits.opcode===PutFullData) ||(m.io.schedule.d.bits.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
+    m.io.merge.bits := requests.io.data
   }
 
  
@@ -172,31 +173,11 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   
   val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   requests.io.valid(i)&&(m.io.status.tag === directory.io.result.bits.tag)&&(m.io.status.set ===directory.io.result.bits.set)&&
     (!directory.io.result.bits.hit) }.reverse)
-  val read_tagMatches = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
-    (!directory.io.result.bits.hit) && ((directory.io.result.bits.opcode===Get) && m.io.status.opcode===Get)}.reverse)
-  val two_alloc_already = PopCount(tagMatches) ===2.U
-  val WWs = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
-    (!directory.io.result.bits.hit) && ((directory.io.result.bits.opcode =/=Get)  && (m.io.status.opcode=/=Get))}.reverse)
-  val WW=WWs.orR
-  val write_read_conflict = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
-    (!directory.io.result.bits.hit) && (directory.io.result.bits.opcode =/= m.io.status.opcode)
-  }.reverse)
-  val WRWs = Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
-    (!directory.io.result.bits.hit) && ((directory.io.result.bits.opcode ===PutFullData||directory.io.result.bits.opcode===PutPartialData)  &&
-    m.io.status.opcode === Get && m.io.status.pending)}.reverse)
-  val WRW =WRWs.orR
-
-  val RWRs= Cat(mshrs.zipWithIndex.map { case (m, i) => requests.io.valid(i) && (m.io.status.tag === directory.io.result.bits.tag) && (m.io.status.set === directory.io.result.bits.set) &&
-    (!directory.io.result.bits.hit) && ((directory.io.result.bits.opcode === PutFullData || directory.io.result.bits.opcode === PutPartialData) &&
-    m.io.status.opcode === Get && m.io.status.pending)
-  }.reverse)
-  val RWR =RWRs.orR
-  assert(!write_read_conflict)
 
 
-  val mshr_stalls = (two_alloc_already && (WRW || RWR )) || WW || write_read_conflict.orR
-  val merge_subentry = !mshr_stalls && (read_tagMatches.orR)
-  val alloc = !(tagMatches.orR() || mshr_stalls)//write miss after write miss is not allowed to alloc, WRW, RWR also not,
+
+
+  val alloc = !(tagMatches.orR() )//write miss after write miss is not allowed to alloc, WRW, RWR also not,
   val is_pending = tagMatches.orR && alloc// write miss can alloc but need to wait read miss finish and vice versa.
   val pending_index = OHToUInt(Mux(is_pending,tagMatches,0.U))
 
@@ -222,20 +203,27 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
       m.io.allocate.bits.offset := directory.io.result.bits.offset
       m.io.allocate.bits.source:= directory.io.result.bits.source
       m.io.allocate.bits.flush := directory.io.result.bits.flush
-      m.io.allocate.bits.pending := is_pending
-      m.io.allocate.bits.pending_index:= pending_index
+
       m.io.allocate.bits.l2cidx:= directory.io.result.bits.l2cidx
     }}
   }
 
-  requests.io.push.valid      := directory.io.result.valid && (!directory.io.result.bits.hit)  && (merge_subentry||alloc)
-  requests.io.push.bits.data  := directory.io.result.bits.source
-  requests.io.push.bits.index := OHToUInt(Mux(alloc,mshr_insertOH,read_tagMatches))
+  mshrs.zipWithIndex.foreach { case (m, i) =>
+    m.io.mixed:= directory.io.result.valid&& (OHToUInt(tagMatches)===i.asUInt) && (directory.io.result.bits.opcode=/= m.io.status.opcode)
+  }
 
-  directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && mshr_free && requests.io.push.ready && directory.io.ready && !(issue_flush_invalidate) && !(mshr_stalls)
+  requests.io.push.valid      := directory.io.result.valid && (!directory.io.result.bits.hit)
+  requests.io.push.bits.data.data  := directory.io.result.bits.data
+  requests.io.push.bits.data.mask  := directory.io.result.bits.mask
+  requests.io.push.bits.data.put   := directory.io.result.bits.put
+  requests.io.push.bits.data.opcode:= directory.io.result.bits.opcode
+  requests.io.push.bits.data.source:= directory.io.result.bits.source
+  requests.io.push.bits.index := OHToUInt(Mux(alloc,mshr_insertOH,tagMatches))
+
+  directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && mshr_free && requests.io.push.ready && directory.io.ready && !(issue_flush_invalidate)
   directory.io.read.bits := request.bits
-  directory.io.write.valid := schedule.dir.valid && !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
-  directory.io.write.bits.is_writemiss := schedule.dir.bits.is_writemiss
+  directory.io.write.valid := schedule.dir.valid //&& !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
+  directory.io.tag_match :=tagMatches.orR
   directory.io.write.bits.way := schedule.dir.bits.way
   directory.io.write.bits.set := schedule.dir.bits.set
   directory.io.write.bits.data.tag := schedule.dir.bits.data.tag
@@ -246,7 +234,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.pop.bits  := mshr_select
 
 
-  request.ready :=mshr_free && requests.io.push.ready && directory.io.read.ready && directory.io.ready && !(issue_flush_invalidate) && !(mshr_stalls)
+  request.ready :=mshr_free && requests.io.push.ready && directory.io.read.ready && directory.io.ready && !(issue_flush_invalidate)
 
 
 
@@ -259,7 +247,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
 
 
-  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free&& !write_read_conflict.orR)
+  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free)
 
   sourceD.io.req.bits.way:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
   sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,schedule.d.bits.data)
@@ -267,21 +255,24 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceD.io.req.bits.hit:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.hit,schedule.d.bits.hit)
   sourceD.io.req.bits.set:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.set,schedule.d.bits.set)
   sourceD.io.req.bits.tag:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,dir_result_buffer.io.deq.bits.victim_tag,dir_result_buffer.io.deq.bits.tag),schedule.d.bits.tag)
-  sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,schedule.d.bits.mask)
+  sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,requests.io.data.asTypeOf(new Merge_meta(params)).mask)
   sourceD.io.req.bits.offset:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,0.U,dir_result_buffer.io.deq.bits.offset),schedule.d.bits.offset)
-  sourceD.io.req.bits.opcode:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.opcode,schedule.d.bits.opcode)
-  sourceD.io.req.bits.put:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.put,schedule.d.bits.put)
+  sourceD.io.req.bits.opcode:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.opcode,requests.io.data.asTypeOf(new Merge_meta(params)).opcode)
+  sourceD.io.req.bits.put:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.put,requests.io.data.asTypeOf(new Merge_meta(params)).put)
   sourceD.io.req.bits.size:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.size,schedule.d.bits.size)
   sourceD.io.req.valid:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.valid,schedule.d.valid)
-  sourceD.io.req.bits.source:=Mux(!schedule.d.valid,dir_result_buffer.io.deq.bits.source,requests.io.data) //pop the source of subentry
+  sourceD.io.req.bits.source:=Mux(!schedule.d.valid,dir_result_buffer.io.deq.bits.source,requests.io.data.asTypeOf(new Merge_meta(params)).source) //pop the source of subentry
   sourceD.io.req.bits.last_flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.last_flush,schedule.d.bits.last_flush)
   sourceD.io.req.bits.flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.flush,schedule.d.bits.flush)
   sourceD.io.req.bits.dirty :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.dirty,schedule.d.bits.dirty)
   sourceD.io.req.bits.param :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
   sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
-  bankedStore.io.sinkD_adr <> sinkD.io.bs_adr         
+  bankedStore.io.sinkD_adr.valid := schedule.dir.valid     //now managed by MSHR
+  bankedStore.io.sinkD_adr.bits.set := schedule.dir.bits.set
+  bankedStore.io.sinkD_adr.bits.way := schedule.dir.bits.way
+  bankedStore.io.sinkD_adr.bits.mask:= ~(0.U(params.mask_bits.W))
 
-  bankedStore.io.sinkD_dat :=sinkD.io.bs_dat
+  bankedStore.io.sinkD_dat.data :=schedule.data
   bankedStore.io.sourceD_radr <> sourceD.io.bs_radr   
   bankedStore.io.sourceD_wadr <> sourceD.io.bs_wadr
   bankedStore.io.sourceD_wdat := sourceD.io.bs_wdat   

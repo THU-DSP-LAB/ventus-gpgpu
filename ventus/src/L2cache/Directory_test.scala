@@ -53,7 +53,7 @@ class DirectoryWrite_lite(params: InclusiveCacheParameters_lite) extends Bundle 
   val way  = UInt(width = params.wayBits.W)
   val data = new DirectoryEntry_lite(params)
   val set =UInt(width=params.setBits.W)
-  val is_writemiss= Bool()
+//  val is_writemiss= Bool()
   //override def cloneType: DirectoryWrite_lite.this.type = new DirectoryWrite_lite(params).asInstanceOf[this.type]
 }
 
@@ -88,6 +88,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     val ready  = Output(Bool() ) // reset complete; can enable access
     val flush  = Input(Bool())
     val invalidate =Input(Bool())
+    val tag_match = Input(Bool())
  //   val finish_issue =Output(Bool())
   })
 
@@ -158,7 +159,8 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val wen =io.write.fire()
   require (codeBits <= 256)
 
-  val not_replace= (io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) && !io.result.bits.hit //not replace victim when write miss
+  val not_replace= ((io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) && !io.result.bits.hit) ||io.tag_match
+  //not replace victim when write miss or when multi mergeable miss
 
 
 val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
@@ -180,7 +182,7 @@ val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
         status_reg(i).dirty(j) := false.B
       }.elsewhen(io.write.valid && io.write.bits.set===i.asUInt && io.write.bits.way===j.asUInt) {
         status_reg(i).valid(j) := true.B//(status_reg(i).valid.asUInt | (1.U << io.write.bits.way).asUInt).asBools
-        status_reg(i).dirty(j) := io.write.bits.is_writemiss //(status_reg(i).dirty.asUInt | (0.U << io.write.bits.way).asUInt).asBools
+        status_reg(i).dirty(j) := false.B //io.write.bits.is_writemiss //(status_reg(i).dirty.asUInt | (0.U << io.write.bits.way).asUInt).asBools
       }
     }
   }
