@@ -37,17 +37,17 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
     val a = Flipped(Decoupled(new TLBundleA_lite(params)))
     // for use by SourceD:
     //若顺利写回，pop掉sinka的buffer里面的数据
-    val index =Input(UInt(params.putBits.W))
+//    val index =Input(UInt(params.putBits.W))
     val pb_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val pb_beat =Output( new PutBufferAEntry(params))
-    val pb_pop2  =Flipped( Decoupled(new PutBufferPop(params)))
-    val pb_beat2 =Output( new PutBufferAEntry(params))
+//    val pb_pop2  =Flipped( Decoupled(new PutBufferPop(params)))
+//    val pb_beat2 =Output( new PutBufferAEntry(params))
     val empty =Output(Bool())
   })
   // No restrictions on the type of buffer
   val a = params.micro.innerBuf.a(io.a)
 
-  val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferAEntry(params), params.putLists, params.putBeats, false,false)))
+  val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferAEntry(params), params.putLists, params.putBeats, false,true)))
   val lists = RegInit(0.U(params.putLists.W)) //和putbuffer里面的valid功能一样
 
   val lists_set = WireInit(0.U(params.putLists.W))
@@ -96,22 +96,18 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   // Grant access to pop the data
   putbuffer.io.pop.bits := io.pb_pop.bits.index
   putbuffer.io.pop.valid := io.pb_pop.fire()
-  putbuffer.io.pop2.get.bits:=io.pb_pop2.bits.index
-  putbuffer.io.pop2.get.valid:=io.pb_pop2.fire()
+//  putbuffer.io.pop2.get.bits:=io.pb_pop2.bits.index
+//  putbuffer.io.pop2.get.valid:=io.pb_pop2.fire()
   io.pb_pop.ready := putbuffer.io.valid(io.pb_pop.bits.index)
-  io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
+//  io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
   io.pb_beat := putbuffer.io.data
-  io.pb_beat2:=putbuffer.io.data2.get
-  putbuffer.io.index.get := io.index
+//  io.pb_beat2:=putbuffer.io.data2.get
+//  putbuffer.io.index.get := io.index
   io.empty :=(lists | lists_set) & (~lists_clr).asUInt()
-  when (io.pb_pop.fire()||io.pb_pop2.fire()) {
-    when(io.pb_pop.fire()){
-      when(io.pb_pop2.fire()){
-        lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists) |UIntToOH(io.pb_pop2.bits.index, params.putLists)}.otherwise{
+  when (io.pb_pop.fire()) {
+
         lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists)
-      }}.otherwise{
-      lists_clr:= UIntToOH(io.pb_pop2.bits.index, params.putLists)
-    }
+
 
   }
 }
