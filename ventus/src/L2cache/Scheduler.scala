@@ -131,7 +131,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt())
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
-    m.io.merge.valid:= m.io.schedule.d.valid && ((m.io.schedule.d.bits.opcode===PutFullData) ||(m.io.schedule.d.bits.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
+    m.io.merge.valid:= m.io.schedule.d.valid && ((requests.io.data.opcode===PutFullData) ||(requests.io.data.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
     m.io.merge.bits := requests.io.data
   }
 
@@ -249,19 +249,22 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,mshr_free)
 
+
+  val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)
+  val merge_data = (requests.io.data.data & full_mask) | (schedule.d.bits.data & (~full_mask).asUInt())
   sourceD.io.req.bits.way:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
-  sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,schedule.d.bits.data)
+  sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,Mux((requests.io.data.opcode===PutPartialData)||(requests.io.data.opcode===PutFullData),merge_data,schedule.d.bits.data))
   sourceD.io.req.bits.from_mem:=Mux(!schedule.d.valid ,false.B,true.B)
   sourceD.io.req.bits.hit:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.hit,schedule.d.bits.hit)
   sourceD.io.req.bits.set:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.set,schedule.d.bits.set)
   sourceD.io.req.bits.tag:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,dir_result_buffer.io.deq.bits.victim_tag,dir_result_buffer.io.deq.bits.tag),schedule.d.bits.tag)
-  sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,requests.io.data.asTypeOf(new Merge_meta(params)).mask)
+  sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,requests.io.data.mask)
   sourceD.io.req.bits.offset:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,0.U,dir_result_buffer.io.deq.bits.offset),schedule.d.bits.offset)
-  sourceD.io.req.bits.opcode:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.opcode,requests.io.data.asTypeOf(new Merge_meta(params)).opcode)
-  sourceD.io.req.bits.put:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.put,requests.io.data.asTypeOf(new Merge_meta(params)).put)
+  sourceD.io.req.bits.opcode:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.opcode,requests.io.data.opcode)
+  sourceD.io.req.bits.put:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.put,requests.io.data.put)
   sourceD.io.req.bits.size:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.size,schedule.d.bits.size)
   sourceD.io.req.valid:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.valid,schedule.d.valid)
-  sourceD.io.req.bits.source:=Mux(!schedule.d.valid,dir_result_buffer.io.deq.bits.source,requests.io.data.asTypeOf(new Merge_meta(params)).source) //pop the source of subentry
+  sourceD.io.req.bits.source:=Mux(!schedule.d.valid,dir_result_buffer.io.deq.bits.source,requests.io.data.source) //pop the source of subentry
   sourceD.io.req.bits.last_flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.last_flush,schedule.d.bits.last_flush)
   sourceD.io.req.bits.flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.flush,schedule.d.bits.flush)
   sourceD.io.req.bits.dirty :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.dirty,schedule.d.bits.dirty)

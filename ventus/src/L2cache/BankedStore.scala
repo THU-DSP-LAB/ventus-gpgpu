@@ -105,7 +105,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
   cc_banks.io.r.req.valid:= io.sourceD_radr.valid
   cc_banks.io.r.req.bits.apply(setIdx = set_index)
   cc_banks.io.w.req.valid:= io.sourceD_wadr.valid||io.sinkD_adr.valid
-  cc_banks.io.w.req.bits.apply(data_sel,set_idx_sel,mask_sel)
+  cc_banks.io.w.req.bits.apply(data_sel.asTypeOf(Vec(numBanks,UInt(codeBits.W))),set_idx_sel,mask_sel)
   io.sourceD_wadr.ready:= !io.sinkD_adr.valid
   io.sinkD_adr.ready:= true.B
   io.sourceD_radr.ready:=true.B
