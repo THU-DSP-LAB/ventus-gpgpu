@@ -293,7 +293,7 @@ for(i<- 0 until params.cache.sets){
   //victim tag should be transfered when miss dirty
   io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,read_bits_reg.opcode)
 
-  io.result.bits.mask   :=Mux(RegNext(flush_issue),Fill(params.mask_bits,1.U),Mux(hit,read_bits_reg.mask,RegNext(Fill(params.mask_bits,1.U))))
+  io.result.bits.mask   :=Mux(RegNext(flush_issue),Fill(params.mask_bits,1.U),read_bits_reg.mask)
   io.result.bits.dirty  :=Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way)), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
   io.result.bits.last_flush :=Mux(RegNext(flush_issue),RegNext(flushDone),false.B)
   io.result.bits.flush  := RegNext(flush_issue)
