@@ -104,7 +104,7 @@ object AdvancedTestList{
     Seq(
       "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.data", "Fan1_2.data", "Fan2_2.data"
     ),
-    4, 4, 4500
+    4, 4, 10500
   )
 
   val matadd = new AdvTest(
@@ -114,7 +114,7 @@ object AdvancedTestList{
     "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000
   )
   val nn = new AdvTest(
-    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 3000
+    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
   )
 }
 
