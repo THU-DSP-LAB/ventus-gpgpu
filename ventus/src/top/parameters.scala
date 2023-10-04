@@ -18,14 +18,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def regext_width = 3
 
-  def num_warp = 8
+  var num_warp = 8
 
   def num_cluster = 1
 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = log2Ceil(num_warp)
 
-  def num_thread = 4
+  var num_thread = 4
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -98,11 +98,11 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_portFactor: Int = 2
 
-  val l2cache_cache = CacheParameters(2, l2cache_NWays, l2cache_NSets, num_l2cache, l2cache_BlockWords << 2, l2cache_BlockWords << 2)
-  val l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster)
-  val l2cache_micro_l = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, 1)
-  val l2cache_params = InclusiveCacheParameters_lite(l2cache_cache, l2cache_micro, false)
-  val l2cache_params_l = InclusiveCacheParameters_lite(l2cache_cache, l2cache_micro_l, false)
+  def l2cache_cache = CacheParameters(2, l2cache_NWays, l2cache_NSets, num_l2cache, l2cache_BlockWords << 2, l2cache_BlockWords << 2)
+  def l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster)
+  def l2cache_micro_l = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, 1)
+  def l2cache_params = InclusiveCacheParameters_lite(l2cache_cache, l2cache_micro, false)
+  def l2cache_params_l = InclusiveCacheParameters_lite(l2cache_cache, l2cache_micro_l, false)
 
   def tc_dim: Seq[Int] = {
     var x: Seq[Int] = Seq(2, 2, 2)
