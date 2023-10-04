@@ -113,8 +113,9 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
   }.otherwise {
     sche_a_valid := sche_a_valid
   }
-
-  when(io.schedule.dir.fire()) {
+  when(io.allocate.valid){
+    sche_dir_valid :=false.B
+  }.elsewhen(io.schedule.dir.fire()) {
     sche_dir_valid := false.B
   }.elsewhen(io.mixed){
     sche_dir_valid:=false.B
@@ -129,7 +130,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
     mixed_reg:=true.B
   } //this MSHR has read miss and write miss
 
-  io.schedule.dir.valid:=sche_dir_valid
+  io.schedule.dir.valid:=sche_dir_valid && (request.opcode===Get)// one write miss should not write directory
   io.schedule.dir.bits.set:=request.set
   io.schedule.dir.bits.data.tag:=request.tag
   io.schedule.dir.bits.way:=request.way
