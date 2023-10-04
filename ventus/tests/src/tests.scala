@@ -116,6 +116,15 @@ object AdvancedTestList{
   val nn = new AdvTest(
     "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
   )
+  val bfs4x32 = {
+    var tmp: Seq[String] = Nil
+    for(i <- 0 until 8){
+      tmp = tmp ++ Seq(s"BFS_1_${i}", s"BFS_2_${i}")
+    }
+    new AdvTest(
+      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 3000
+    )
+  }
 }
 
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
