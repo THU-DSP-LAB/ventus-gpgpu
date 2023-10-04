@@ -113,19 +113,26 @@ object AdvancedTestList{
   val vecadd = new AdvTest(
     "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000
   )
+  val nn = new AdvTest(
+    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 3000
+  )
 }
 
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.gaussian
+    val testbench = AdvancedTestList.nn
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
+
+    if(parameters.num_warp < testbench.warp) parameters.num_warp = testbench.warp
+    parameters.num_thread = testbench.thread
+
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {

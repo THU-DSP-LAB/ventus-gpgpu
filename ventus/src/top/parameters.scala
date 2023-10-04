@@ -18,14 +18,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def regext_width = 3
 
-  def num_warp = 8
+  var num_warp = 8
 
   def num_cluster = 1
 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = log2Ceil(num_warp)
 
-  def num_thread = 4
+  var num_thread = 4
 
   def depth_thread = log2Ceil(num_thread)
 
