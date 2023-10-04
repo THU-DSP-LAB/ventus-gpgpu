@@ -82,7 +82,7 @@ class warp_scheduler extends Module{
   io.pc_req.bits.warpid := next_warp
   io.pc_req.bits.mask := pcControl(next_warp).mask_o
 
-  io.wg_id_lookup:=Mux(io.warp_control.bits.ctrl.barrier,warp_end_id,0.U)
+  io.wg_id_lookup:=Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
 
   val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_exp=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
@@ -105,14 +105,14 @@ class warp_scheduler extends Module{
     }
   }
   when(io.warpRsp.fire){
-    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<end_wf_id)).asUInt
-    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpReq.bits.wid)).asUInt
+    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
   warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){
-    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
+    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
-    when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt())===warp_bar_exp(end_wg_id)){
+    when((warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt())===warp_bar_exp(end_wg_id)){
       warp_bar_cur(end_wg_id):=0.U
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
     }
