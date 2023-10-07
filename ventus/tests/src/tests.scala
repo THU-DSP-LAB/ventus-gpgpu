@@ -111,7 +111,7 @@ object AdvancedTestList{
     "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 5000
   )
   val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1800
+    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 500
   )
 }
 
@@ -125,7 +125,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val maxCycle = testbench.cycles
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
