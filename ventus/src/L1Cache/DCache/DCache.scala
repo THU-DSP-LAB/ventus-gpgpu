@@ -120,9 +120,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val probereadAllocateWriteConflict = Wire(Bool())
   val inflightReadWriteMiss = RegInit(false.B)
   // ******     pipeline regs      ******
-  coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict
-  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && !readmiss_sameadd
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd
+  coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict && TagAccess.io.probeRead.ready
+  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && !readmiss_sameadd && TagAccess.io.probeRead.ready
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd && TagAccess.io.probeRead.ready
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
