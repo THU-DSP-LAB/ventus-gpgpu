@@ -176,7 +176,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     }.elsewhen(mshrStatus_st1_r === 3.U && subentryStatusForRsp.io.used === 1.U){
       mshrStatus_st1_r := 4.U //SECONDARY_FULL_RETURN
     }.elsewhen(mshrStatus_st1_r === 4.U && subentryStatusForRsp.io.used === 0.U) {
-      mshrStatus_st1_r := 2.U //SECONDARY_AVAIL
+      mshrStatus_st1_r := 0.U //SECONDARY_AVAIL
     }
   }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
@@ -188,6 +188,14 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       mshrStatus_st1_w := 3.U //SECONDARY_FULL
     }.otherwise {
       mshrStatus_st1_w := 2.U //SECONDARY_AVAIL
+    }
+  }.elsewhen(primaryMiss){
+    when(mainEntryFull) {
+      mshrStatus_st1_w := 1.U //PRIMARY_FULL
+      //}.elsewhen(mainEntryAlmFull) {
+      //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
+    }.otherwise {
+      mshrStatus_st1_w := 0.U //PRIMARY_AVAIL
     }
   }.otherwise{
     mshrStatus_st1_w := mshrStatus_st1_r
