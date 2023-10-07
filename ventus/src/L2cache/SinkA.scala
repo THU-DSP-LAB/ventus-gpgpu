@@ -37,16 +37,17 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
     val a = Flipped(Decoupled(new TLBundleA_lite(params)))
     // for use by SourceD:
     //若顺利写回，pop掉sinka的buffer里面的数据
+//    val index =Input(UInt(params.putBits.W))
     val pb_pop  = Flipped(Decoupled(new PutBufferPop(params)))
     val pb_beat =Output( new PutBufferAEntry(params))
-    val pb_pop2  =Flipped( Decoupled(new PutBufferPop(params)))
-    val pb_beat2 =Output( new PutBufferAEntry(params))
+//    val pb_pop2  =Flipped( Decoupled(new PutBufferPop(params)))
+//    val pb_beat2 =Output( new PutBufferAEntry(params))
     val empty =Output(Bool())
   })
   // No restrictions on the type of buffer
   val a = params.micro.innerBuf.a(io.a)
 
-  val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferAEntry(params), params.putLists, params.putBeats, false,false)))
+  val putbuffer = Module(new ListBuffer(ListBufferParameters(new PutBufferAEntry(params), params.putLists, params.putBeats, false,true)))
   val lists = RegInit(0.U(params.putLists.W)) //和putbuffer里面的valid功能一样
 
   val lists_set = WireInit(0.U(params.putLists.W))
@@ -69,7 +70,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   val set_block = hasData && !free
 
 
-  a.ready := !req_block && !buf_block && !set_block
+  a.ready := Mux(a.bits.opcode===5.U,!req_block && !buf_block && !set_block && io.empty,!req_block && !buf_block && !set_block)
   io.req.valid := a.valid && !buf_block && !set_block
   putbuffer.io.push.valid := a.valid && hasData && !req_block && !set_block
   when (a.valid && hasData && !req_block && !buf_block) { lists_set := freeOH }
@@ -87,27 +88,26 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.req.bits.put    := put
   io.req.bits.mask   := a.bits.mask
   io.req.bits.data   :=a.bits.data
+  io.req.bits.param :=a.bits.param
+
   putbuffer.io.push.bits.index := put
   putbuffer.io.push.bits.data.data := a.bits.data
   putbuffer.io.push.bits.data.mask := a.bits.mask
   // Grant access to pop the data
   putbuffer.io.pop.bits := io.pb_pop.bits.index
   putbuffer.io.pop.valid := io.pb_pop.fire()
-  putbuffer.io.pop2.get.bits:=io.pb_pop2.bits.index
-  putbuffer.io.pop2.get.valid:=io.pb_pop2.fire()
+//  putbuffer.io.pop2.get.bits:=io.pb_pop2.bits.index
+//  putbuffer.io.pop2.get.valid:=io.pb_pop2.fire()
   io.pb_pop.ready := putbuffer.io.valid(io.pb_pop.bits.index)
-  io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
+//  io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
   io.pb_beat := putbuffer.io.data
-  io.pb_beat2:=putbuffer.io.data2.get
+//  io.pb_beat2:=putbuffer.io.data2.get
+//  putbuffer.io.index.get := io.index
   io.empty :=(lists | lists_set) & (~lists_clr).asUInt()
-  when (io.pb_pop.fire()||io.pb_pop2.fire()) {
-    when(io.pb_pop.fire()){
-      when(io.pb_pop2.fire()){
-        lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists) |UIntToOH(io.pb_pop2.bits.index, params.putLists)}.otherwise{
+  when (io.pb_pop.fire()) {
+
         lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists)
-      }}.otherwise{
-      lists_clr:= UIntToOH(io.pb_pop2.bits.index, params.putLists)
-    }
+
 
   }
 }

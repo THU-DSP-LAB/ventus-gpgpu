@@ -102,46 +102,30 @@ object AdvancedTestList{
       "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
     ),
     Seq(
-      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.data", "Fan1_2.data", "Fan2_2.data"
+      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.metadata", "Fan1_2.data", "Fan2_2.data"
     ),
-    4, 4, 10500
+    4, 4, 4500
   )
 
   val matadd = new AdvTest(
-    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
+    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 5000
   )
   val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000
+    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 500
   )
-  val nn = new AdvTest(
-    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
-  )
-  val bfs4x32 = {
-    var tmp: Seq[String] = Nil
-    for(i <- 0 until 8){
-      tmp = tmp ++ Seq(s"BFS_1_${i}", s"BFS_2_${i}")
-    }
-    new AdvTest(
-      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 3000
-    )
-  }
 }
 
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.nn
+    val testbench = AdvancedTestList.vecadd
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
-
-    if(parameters.num_warp < testbench.warp) parameters.num_warp = testbench.warp
-    parameters.num_thread = testbench.thread
-
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = true)).withAnnotations(Seq(WriteVcdAnnotation,VerilatorBackendAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
@@ -239,7 +223,8 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                   _.opcode -> opcode_rsp.U, // w:0 r:1
                   _.data -> ByteArray2BigInt(data).U,
                   _.source -> source.U,
-                  _.size -> 0.U // TODO: Unused
+                  _.size -> 0.U, // TODO: Unused
+                  _.param -> 0.U
                 ))
                 c.io.out_a.ready.poke(false.B)
                 c.clock.step(1)

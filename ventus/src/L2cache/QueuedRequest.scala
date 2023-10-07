@@ -24,6 +24,7 @@ class QueuedRequest(params: InclusiveCacheParameters_lite) extends Bundle
   val put    = UInt(params.putBits.W)
   val data   = UInt(params.data_bits.W)
   val mask   = UInt(params.mask_bits.W)
+  val param  =UInt(3.W)
 }
 
 class ListBufferRequest(params: InclusiveCacheParameters_lite)extends Bundle
@@ -50,4 +51,12 @@ class AllocateRequest(params: InclusiveCacheParameters_lite) extends Bundle
   val set    = UInt(params.setBits.W)
   val tag    = UInt(params.tagBits.W)
   //override def cloneType: AllocateRequest.this.type = new AllocateRequest(params).asInstanceOf[this.type]
+}
+
+class SubentryRequest(params:InclusiveCacheParameters_lite)extends Bundle
+{
+  val source =UInt(params.source_bits.W)
+  val data =UInt(params.data_bits.W)
+  val mask =UInt(params.mask_bits.W)
+  val opcode =UInt(params.op_bits.W)
 }

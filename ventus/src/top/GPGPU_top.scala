@@ -146,7 +146,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
   })
   val cta = Module(new CTAinterface)
   val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache)).io))
-  val l2cache=VecInit(Seq.fill(NL2Cache)(if(FakeCache) Module(new FakeL2Cache(l2cache_params)).io else Module(new Scheduler(l2cache_params)).io))
+  val l2cache=VecInit(Seq.fill(NL2Cache)( Module(new Scheduler(l2cache_params)).io))
   val sm2clusterArb = VecInit(Seq.fill(NCluster)(Module(new SM2clusterArbiter(l2cache_params_l)).io))
   val l2distribute = VecInit(Seq.fill(NCluster)(Module(new l2Distribute(l2cache_params_l)).io))
   val cluster2l2Arb = VecInit(Seq.fill(NL2Cache)(Module(new cluster2L2Arbiter(l2cache_params_l,l2cache_params)).io))
@@ -209,12 +209,6 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
     cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
     l2cache(i).in_d.ready := cluster2l2Arb(i).memRspIn.ready
 
-    // todo: currently do not use flush and invalidate
-    l2cache(i).flush.bits := false.B
-    l2cache(i).invalidate.bits := false.B
-    l2cache(i).flush.valid := false.B
-    l2cache(i).invalidate.valid := false.B
-
     /*l2cache(i).in_a <> cluster2l2Arb(i).memReqOut
     l2cache(i).out_a <> io.out_a(i)
     l2cache(i).out_d <> io.out_d(i)
@@ -230,7 +224,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
     val CTAreq=Flipped(Decoupled(new CTAreqData))
     val CTArsp=(Decoupled(new CTArspData))
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
-    val memReq = DecoupledIO(new L1CacheMemReq()(param))
+    val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
   })
   val cta2warp=Module(new CTA2warp)
@@ -263,8 +257,9 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   //TODO changed to TLAOp_Get when L1param system established
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_addr := icache.io.memReq.bits.a_addr
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_source := icache.io.memReq.bits.a_source
-  l1Cache2L2Arb.io.memReqVecIn(0).bits.a_data := 0.U.asTypeOf(new L1CacheMemReq()(param).a_data)
+  l1Cache2L2Arb.io.memReqVecIn(0).bits.a_data := 0.U.asTypeOf(Vec(dcache_BlockWords, UInt(xLen.W)))
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_mask.foreach{_ := true.B}
+  l1Cache2L2Arb.io.memReqVecIn(0).bits.a_param := DontCare
   icache.io.memReq.ready := l1Cache2L2Arb.io.memReqVecIn(0).ready
   // ***********************
   // **** icache coreReq ****
@@ -286,12 +281,13 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   icache.io.externalFlushPipe.bits.warpid :=pipe.io.externalFlushPipe.bits
   icache.io.externalFlushPipe.valid :=pipe.io.externalFlushPipe.valid
 
-  val dcache = if(FakeCache) Module(new FakeL1DCache()(param)) else Module(new DataCache()(param))
+  val dcache = Module(new DataCache()(param))
   // **** dcache memRsp ****
   dcache.io.memRsp.valid := l1Cache2L2Arb.io.memRspVecOut(1).valid
   dcache.io.memRsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_source
   dcache.io.memRsp.bits.d_addr := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_addr
   dcache.io.memRsp.bits.d_data := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_data
+  dcache.io.memRsp.bits.d_opcode := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_opcode
   l1Cache2L2Arb.io.memRspVecOut(1).ready := dcache.io.memRsp.ready
   // ***********************
   // **** dcache memReq ****
@@ -302,15 +298,16 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   dcache.io.coreReq.bits.data:=pipe.io.dcache_req.bits.data
   dcache.io.coreReq.bits.instrId:=pipe.io.dcache_req.bits.instrId
   dcache.io.coreReq.bits.setIdx:=pipe.io.dcache_req.bits.setIdx
-  dcache.io.coreReq.bits.isWrite:=pipe.io.dcache_req.bits.isWrite
+  dcache.io.coreReq.bits.opcode:=pipe.io.dcache_req.bits.opcode//TODO jcf new cache
   dcache.io.coreReq.bits.perLaneAddr:=pipe.io.dcache_req.bits.perLaneAddr
   dcache.io.coreReq.bits.tag:=pipe.io.dcache_req.bits.tag
+  dcache.io.coreReq.bits.param := pipe.io.dcache_req.bits.param
   // **** dcache coreRsp ****
   pipe.io.dcache_rsp.valid:=dcache.io.coreRsp.valid
   pipe.io.dcache_rsp.bits.instrId:=dcache.io.coreRsp.bits.instrId
   pipe.io.dcache_rsp.bits.data:=dcache.io.coreRsp.bits.data
   pipe.io.dcache_rsp.bits.activeMask:=dcache.io.coreRsp.bits.activeMask
-  pipe.io.dcache_rsp.bits.isWrite:=dcache.io.coreRsp.bits.isWrite
+  //pipe.io.dcache_rsp.bits.isWrite:=dcache.io.coreRsp.bits.isWrite
   dcache.io.coreRsp.ready:=pipe.io.dcache_rsp.ready
 
   val sharedmem = Module(new SharedMemory()(param))
@@ -327,12 +324,12 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   pipe.io.shared_rsp.bits.data:=sharedmem.io.coreRsp.bits.data
   pipe.io.shared_rsp.bits.instrId:=sharedmem.io.coreRsp.bits.instrId
   pipe.io.shared_rsp.bits.activeMask:=sharedmem.io.coreRsp.bits.activeMask
-  pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
+ // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
 }
 
 
 class SM2clusterArbiterIO(L2param: InclusiveCacheParameters_lite)(implicit p: Parameters) extends RVGBundle{
-  val memReqVecIn = (Vec(NSmInCluster, Flipped(DecoupledIO(new L1CacheMemReq()))))
+  val memReqVecIn = (Vec(NSmInCluster, Flipped(DecoupledIO(new L1CacheMemReqArb()))))
   val memReqOut = Decoupled(new TLBundleA_lite(L2param))
   val memRspIn = Flipped(Decoupled(new TLBundleD_lite_plus(L2param)))
   val memRspVecOut = Vec(NSmInCluster, DecoupledIO(new L1CacheMemRsp()))
@@ -359,6 +356,7 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
     memReqArb.io.in(i).bits.size := 0.U//log2Up(BlockWords*BytesOfWord).U
     memReqArb.io.in(i).valid := io.memReqVecIn(i).valid
     io.memReqVecIn(i).ready:=memReqArb.io.in(i).ready
+    memReqArb.io.in(i).bits.param := io.memReqVecIn(i).bits.a_param
   }
   memReqBuf.io.enq <> memReqArb.io.out
   io.memReqOut <> memReqBuf.io.deq
@@ -369,6 +367,7 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
     io.memRspVecOut(i).bits.d_data:=io.memRspIn.bits.data.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
     io.memRspVecOut(i).bits.d_source:=io.memRspIn.bits.source
     io.memRspVecOut(i).bits.d_addr:=io.memRspIn.bits.address
+    io.memRspVecOut(i).bits.d_opcode:= io.memRspIn.bits.opcode
     if(NSmInCluster == 1){
       io.memRspVecOut(i).valid := io.memRspIn.valid
     } else if(NSmInCluster == 2){
@@ -431,6 +430,7 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
       memReqArb.io.in(i).bits.source := Cat(i.asUInt,io.memReqVecIn(i).bits.source)
     }
     memReqArb.io.in(i).bits.address := io.memReqVecIn(i).bits.address
+    memReqArb.io.in(i).bits.param := io.memReqVecIn(i).bits.param
     memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.mask).asUInt
     memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.data.asUInt
     memReqArb.io.in(i).bits.size := 0.U//log2Up(BlockWords*BytesOfWord).U
@@ -444,14 +444,15 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
   for(i <- 0 until NCluster) {
     io.memRspVecOut(i).bits.size := io.memRspIn.bits.size
     io.memRspVecOut(i).bits.opcode := io.memRspIn.bits.opcode
+    io.memRspVecOut(i).bits.param := io.memRspIn.bits.param
     io.memRspVecOut(i).bits.data :=io.memRspIn.bits.data//.asTypeOf(Vec(dcache_BlockWords,UInt(32.W)))
-    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1,0)
+    io.memRspVecOut(i).bits.source:=io.memRspIn.bits.source(log2Ceil(NSmInCluster)+log2Ceil(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)-1,0)
     io.memRspVecOut(i).bits.address:= io.memRspIn.bits.address
     if(NCluster == 1){
       io.memRspVecOut(i).valid := io.memRspIn.valid
     } else {
        io.memRspVecOut(i).valid :=
-         io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, log2Ceil(NSmInCluster) + WIdBits + log2Up(NCacheInSM)) === i.asUInt && io.memRspIn.valid
+         io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets) - 1, log2Ceil(NSmInCluster) + 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)+ log2Up(NCacheInSM)) === i.asUInt && io.memRspIn.valid
     }
   }
   if(NCluster == 1){

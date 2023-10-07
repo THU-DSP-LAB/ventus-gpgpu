@@ -11,7 +11,7 @@
 package L1Cache.AtomicUnit
 
 import L1Cache.DCache.{DCacheModule, DCacheParamsKey}
-import L1Cache.{HasL1CacheParameters, L1CacheModule, RVGModule, getEntryStatus}
+import L1Cache.{HasL1CacheParameters, L1CacheModule, RVGModule}
 import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite_plus}
 import chisel3._
 import chisel3.util._

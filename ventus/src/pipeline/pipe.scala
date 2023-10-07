@@ -87,7 +87,7 @@ class pipe extends Module{
   lsu.io.csr_numw:=csrfile.io.lsu_numw
   when(csrfile.io.in.valid && csrfile.io.in.bits.ctrl.custom_signal_0){
     printf(p"warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
-    printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)} setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
+    printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)}  setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
   }
 
   warp_sche.io.pc_reset:=io.pc_reset
@@ -134,7 +134,9 @@ class pipe extends Module{
       printf(p"warp ${Decimal(ctrl.wid)} ")
       printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
+    assert (!(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask), s"undefined instruction")
   }
+
 
 
   if(SINGLE_INST){
@@ -183,8 +185,8 @@ class pipe extends Module{
       elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
  }
-  val op_col_in_wid = Wire(UInt(depth_warp.W))
-  val op_col_out_wid = Wire(UInt(depth_warp.W))
+  val op_col_in_wid = Wire(Bool())
+  val op_col_out_wid = Wire(Bool())
   op_col_in_wid := operand_collector.io.control.bits.wid
   op_col_out_wid := operand_collector.io.out.bits.control.wid
   scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
@@ -211,9 +213,7 @@ class pipe extends Module{
   when(exe_data.io.deq.fire&(exe_data.io.deq.bits.ctrl.wid===2.U)){
     //printf(p"wid=${exe_data.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)}\n")
   }
-  when(io.dcache_req.fire&io.dcache_req.bits.isWrite){
-    //printf(p"${io.dcache_req.bits.instrId},writedata=0x${io.dcache_req.bits.data}\n")
-  }
+
 
   //输出所有write mem的操作
   //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&

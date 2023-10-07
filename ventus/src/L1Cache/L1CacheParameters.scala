@@ -16,6 +16,7 @@ import L1Cache.ShareMem.{ShareMemParameters, ShareMemParamsKey}
 import chisel3._
 import chisel3.util._
 import config.config.Config
+import top.parameters._
 
 class MyConfig extends Config((site, here, up) =>
 {
@@ -29,8 +30,8 @@ class MyConfig extends Config((site, here, up) =>
 trait HasL1CacheParameters extends HasRVGParameters{
   //val cacheParams: L1CacheParameters
 
-  def NSets: Int = 32// replace
-  def NWays: Int = 2// replace
+  def NSets: Int = dcache_NSets// replace
+  def NWays: Int = dcache_NWays// replace
   //def BlockWords: Int = 32// replace
   def BlockBytes = BlockWords * 4
   def BlockBits = BlockBytes * 8
@@ -47,7 +48,7 @@ trait HasL1CacheParameters extends HasRVGParameters{
   def NMshrEntry: Int = 4// replace
   def NMshrSubEntry: Int = 4// replace
   def bABits = TagBits+SetIdxBits
-  def tIBits = WIdBits+BlockOffsetBits+WordOffsetBits
+  def tIBits = WIdBits+NLanes*(BlockOffsetBits+1+BytesOfWord)
 
   //for addr with full width or just block addr
   def get_tag(addr: UInt) = (addr >> (addr.getWidth-TagBits)).asUInt()

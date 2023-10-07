@@ -13,12 +13,14 @@ package L2cache
 
 import Chisel._
 import chisel3.internal.sourceinfo.SourceInfo
+import chisel3.util.log2Up
 import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property.cover
-import scala.math.{min,max}
+
+import scala.math.{max, min}
 
 case class CacheParameters(
   level:       Int,
@@ -117,6 +119,8 @@ case class InclusiveCacheMicroParameters(
   num_sm: Int,
   num_sm_in_cluster:Int,
   num_cluster:Int,
+  NMshrEntry:Int,
+  NSets:Int,
   dirReg:     Boolean = false,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.none, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full)   // or flowAE
@@ -149,7 +153,7 @@ case class InclusiveCacheParameters_lite(
   // If we are the first level cache, we do not need to support inner-BCE
   val op_bits = 3
   val param_bits = 3
-  val source_bits=log2Up(micro.num_warp)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
+  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
@@ -183,7 +187,7 @@ case class InclusiveCacheParameters_lite(
   val offsetBits = log2Ceil(cache.blockBytes)
   val l2cBits    = log2Ceil(cache.l2cs)
   val tagBits    = addressBits - setBits - offsetBits - l2cBits
-  val putBits    = log2Ceil(max(putLists, relLists))
+  val putBits    = log2Ceil(putLists)
 
   require (tagBits > 0)
   require (offsetBits > 0)
