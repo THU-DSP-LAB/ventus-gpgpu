@@ -34,11 +34,13 @@ class DCachePerLaneAddr extends Bundle{
 
 class DCacheCoreReq_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-  val isWrite = Bool()
+//  val isWrite = Bool()
   val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(dcache_SetIdxBits.W)
   val perLaneAddr = Vec(num_thread, new DCachePerLaneAddr)
   val data = Vec(num_thread, UInt(xLen.W))
+  val opcode = UInt(3.W)
+  val param= UInt(4.W)
 }
 
 class DCacheCoreRsp_np extends Bundle{
@@ -49,7 +51,7 @@ class DCacheCoreRsp_np extends Bundle{
 //    val mop = UInt(2.W)
 //  }
   val activeMask = Vec(num_thread, Bool())
-  val isWrite = Bool()
+ // val isWrite = Bool()
 }
 
 class ShareMemPerLaneAddr_np extends Bundle{
@@ -118,7 +120,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     val to_dcache = DecoupledIO(new DCacheCoreReq_np)
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
-  val s_idle :: s_save :: s_shared :: s_dcache :: Nil = Enum(4)
+  val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2:: Nil = Enum(6)
   val cnt = new Counter(n = num_thread)
   val state = RegInit(init = s_idle)
 
@@ -160,6 +162,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
   val tag = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
   val setIdx = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
+
   val same_tag = Wire(Vec(num_thread, Bool()))
     (0 until num_thread).foreach( x =>
       same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
@@ -218,18 +221,52 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
   io.to_dcache.bits.tag := tag
   io.to_dcache.bits.setIdx := setIdx
+  val opcode_wire =Wire(UInt(3.W))
+  val param_wire_alt =Wire(UInt(4.W))
+param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
+  Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
+    Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
+val param_wire=Wire(UInt(4.W))
+  when(reg_save.ctrl.atomic){
+    when(reg_save.ctrl.aq &&reg_save.ctrl.rl){
+      opcode_wire :=Mux(state===s_dcache_2,3.U,Mux(state===s_dcache_1,2.U,3.U))
+      param_wire :=Mux(state===s_dcache_2,0.U,Mux(state===s_dcache_1,param_wire_alt,0.U))
+    }.elsewhen(reg_save.ctrl.aq){
+      opcode_wire :=Mux(state===s_dcache_1,2.U,3.U)
+      param_wire :=Mux(state===s_dcache_1,param_wire_alt,0.U)
+    }.elsewhen(reg_save.ctrl.rl){
+      opcode_wire :=Mux(state===s_dcache_1,3.U,2.U)
+      param_wire :=Mux(state===s_dcache_1,0.U,param_wire_alt)
+    }.otherwise{
+      opcode_wire := Mux(reg_save.ctrl.alu_fn===FN_ADD,reg_save.ctrl.mem_cmd(1),2.U) //todo should consider lr/sc
+      param_wire :=param_wire_alt
+    }
+  }.elsewhen(reg_save.ctrl.fence){
+    opcode_wire :=3.U
+    param_wire :=0.U
+  }.otherwise{
+    opcode_wire :=reg_save.ctrl.mem_cmd(1)
+    param_wire :=0.U
+  }
+  io.to_dcache.bits.opcode :=opcode_wire// fence=invalidate, atomic will split to maximum 3 instructions
+  io.to_dcache.bits.param :=param_wire
+
   (0 until num_thread).foreach(x => {
     io.to_dcache.bits.perLaneAddr(x).blockOffset := blockOffset(x)
     io.to_dcache.bits.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
-    io.to_dcache.bits.perLaneAddr(x).activeMask := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
+    io.to_dcache.bits.perLaneAddr(x).activeMask := Mux(reg_save.ctrl.atomic,reg_save.mask(x)&& (x.asUInt===PriorityEncoder(reg_save.mask.asUInt)),
+      reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
+    )
+
   })
   io.to_dcache.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool(), VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
-  io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
-  io.to_dcache.valid := state===s_dcache
+ // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
+  io.to_dcache.valid := (state===s_dcache) ||(state===s_dcache_1) ||(state===s_dcache_2)
   val mask_next = Wire(Vec(num_thread, Bool()))
+
   (0 until num_thread).foreach( x => {                          // update mask
-    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
-  })
+    mask_next(x) := Mux(reg_save.ctrl.atomic ,reg_save.mask(x)&& !(x.asUInt===PriorityEncoder(reg_save.mask.asUInt)),reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
+    )})
   // End of Addr Logic
 
   // FSM State Transfer
@@ -258,12 +295,37 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     }
     is (s_dcache){
       when(io.to_dcache.fire()){
-        when(cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
+        when((reg_save.ctrl.atomic && reg_save.ctrl.aq )||(reg_save.ctrl.atomic &&reg_save.ctrl.rl)){
+          state :=s_dcache_1
+        }.elsewhen (cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
           cnt.reset(); state := s_idle
         }.otherwise{
           cnt.inc(); state := s_dcache
         }
       }.otherwise{state := s_dcache}
+    }
+    is(s_dcache_1){
+      when(io.to_dcache.fire()){
+
+          when(reg_save.ctrl.aq && reg_save.ctrl.rl) {
+            state := s_dcache_2
+          }.elsewhen(cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
+            cnt.reset(); state := s_idle
+        }.otherwise{
+            cnt.inc(); state :=s_dcache
+        }
+      }.otherwise{
+        state :=s_dcache_1
+      }
+    }
+    is(s_dcache_2){
+      when(io.to_dcache.fire()){
+        when(cnt.value>=num_thread.U ||mask_next.asUInt===0.U){
+          cnt.reset();state:=s_idle
+        }.otherwise{
+          cnt.inc(); state := s_dcache
+        }
+      }.otherwise{state := s_dcache_2}
     }
   }
   // FSM Operation

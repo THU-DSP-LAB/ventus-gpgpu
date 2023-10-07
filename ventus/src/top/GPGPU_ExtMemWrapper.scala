@@ -23,7 +23,7 @@ import parameters.num_warp
 
 class GPGPU_ExtMemWrapper(C: TestCase#Props) extends Module{
   val L1param = (new MyConfig).toInstance
-  val L2param =InclusiveCacheParameters_lite(CacheParameters(2,l2cache_NSets,l2cache_NWays,num_l2cache,blockBytes=(l2cache_BlockWords<<2),beatBytes=(l2cache_BlockWords<<2)),InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,num_cluster),false)
+  val L2param =InclusiveCacheParameters_lite(CacheParameters(2,l2cache_NSets,l2cache_NWays,num_l2cache,blockBytes=(l2cache_BlockWords<<2),beatBytes=(l2cache_BlockWords<<2)),InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets),false)
 
   val io = IO(new Bundle{})
 

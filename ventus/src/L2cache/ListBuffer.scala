@@ -38,6 +38,7 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
     val valid = Output(UInt(params.queues.W))
     val pop   = Flipped(Valid(UInt(params.queueBits.W)))
     val data  = Output(params.gen)
+    val index =if(!params.singleport) Some(Input(UInt(params.queueBits.W))) else None
     val pop2  =if(!params.singleport) Some(Flipped(Valid(UInt(params.queueBits.W))))else None
     val data2 =if(!params.singleport) Some(Output(params.gen))else None
   })
@@ -83,7 +84,7 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
   if (!params.singleport) {
     pop_head2 := head.read(io.pop2.get.bits)
     pop_valid2 :=valid(io.pop2.get.bits)
-    io.data2.get := (if (!params.bypass) data.read(pop_head2).asTypeOf(params.gen) else Mux(!pop_valid2, io.push.bits.data.asTypeOf(params.gen), data.read(pop_head2).asTypeOf(params.gen)))
+    io.data2.get := data.read(io.index.get).asTypeOf(params.gen)
   }
 
   // Bypass push data to the peek port

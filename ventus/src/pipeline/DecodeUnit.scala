@@ -145,6 +145,9 @@ object IDecode //extends DecodeConstants
   def FN_TTH = 2.U(6.W)
   def FN_TTB = 3.U(6.W)
 
+  //for atomic swap
+  def FN_SWAP = 28.U(6.W)
+  def FN_AMOADD = 29.U(6.W)
   val default = List(N,X,X,B_N,X,X,X,X,A3_X,A2_X,   A1_X,   IMM_X, MEM_X,  FN_X,     N,M_X,        X,X,X,X,X,X,X,X,X,X,X)
 
   //val table=Array(//: Array[(BitPat, List[BitPat])] = Array(
@@ -445,7 +448,22 @@ object IDecodeLUT_VL{
     VSB12_V-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_SD,A2_IMM,A1_VRS1,IMM_S,MEM_B,FN_VLS12,N,M_XWR,N,N,N,N,Y,N,N,N,Y,N,N)
   )
 }
-
+object IDecodeLUT_A{ //The last element of the list indicates whether the instruction is atomic.
+  import IDecode._
+  val table= Array(
+    LR_W -> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XRD,N,N,N,N,N,N,Y,N,N,N,Y),
+    SC_W ->     List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_ADD,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOSWAP_W-> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_SWAP,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOADD_W -> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_AMOADD,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOXOR_W-> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_XOR,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOAND_W-> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_AND,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOOR_W -> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_OR,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOMIN_W -> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_MIN,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOMAX_W ->List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_MAX,N,M_XWR,N,N,N,N,N,N,Y,N,N,N,Y),
+    AMOMINU_W -> List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_MINU,N,M_XWR,Y,N,N,N,N,N,Y,N,N,N,Y),
+    AMOMAXU_W ->List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_RS2,A1_RS1,IMM_X,MEM_W,FN_MAXU,N,M_XWR,Y,N,N,N,N,N,Y,N,N,N,Y)
+  )
+}
 object IDecodeLUT_VC{
   import IDecode._
   // with code 1011011, 0001011
@@ -590,6 +608,9 @@ class InstrDecodeV2 extends Module {
       c.spike_info.get.inst := io.inst(i)
       c.spike_info.get.pc := io.pc+ (i.U << 2.U)
     }
+    c.atomic :=s(26)
+    c.aq :=s(26) & io.inst(i)(26)
+    c.rl:=s(26) & io.inst(i)(25)
   }
   io.control_mask := maskAfterExt
 }
