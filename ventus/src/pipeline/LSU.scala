@@ -169,6 +169,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   val wordOffset1H = Wire(Vec(num_thread, UInt(BytesOfWord.W)))
     (0 until num_thread).foreach( x => {
   //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
+      wordOffset1H(x) := 15.U(4.W)
       switch(reg_save.ctrl.mem_whb){
         is(MEM_W) { wordOffset1H(x) := 15.U }
         is(MEM_H) { wordOffset1H(x) :=
@@ -179,7 +180,6 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
         }
         is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
       }
-      wordOffset1H(x) := 15.U(4.W)
     })
   //val reg_toMSHR = Reg(new MshrTag)
   //val vld_toMSHR = Reg(Bool())
