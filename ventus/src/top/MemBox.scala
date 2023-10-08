@@ -84,7 +84,7 @@ object MetaData{
           buffer_base = buffer_base :+ parsed
       }
       for (i <- 0 until num_buffer.toInt) {
-        val parsed = parseHex(buf, 64)
+        val parsed = (parseHex(buf, 64) + 3) / 4 * 4 // padding buffer size to 4byte alignment
         if(i < lds_mem_base.length)
           lds_mem_size = lds_mem_size :+ parsed
         else

@@ -85,6 +85,10 @@ class pipe extends Module{
   lsu.io.csr_pds:=csrfile.io.lsu_pds
   lsu.io.csr_tid:=csrfile.io.lsu_tid
   lsu.io.csr_numw:=csrfile.io.lsu_numw
+  when(csrfile.io.in.valid && csrfile.io.in.bits.ctrl.custom_signal_0){
+    printf(p"warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
+    printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)} setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
+  }
 
   warp_sche.io.pc_reset:=io.pc_reset
   warp_sche.io.branch<>branch_back.io.out
@@ -179,8 +183,8 @@ class pipe extends Module{
       elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
  }
-  val op_col_in_wid = Wire(Bool())
-  val op_col_out_wid = Wire(Bool())
+  val op_col_in_wid = Wire(UInt(depth_warp.W))
+  val op_col_out_wid = Wire(UInt(depth_warp.W))
   op_col_in_wid := operand_collector.io.control.bits.wid
   op_col_out_wid := operand_collector.io.out.bits.control.wid
   scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
