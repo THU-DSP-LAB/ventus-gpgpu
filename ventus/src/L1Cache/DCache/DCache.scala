@@ -594,9 +594,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   WshrAccess.io.pushReq.bits.blockAddr := pushReqbA//Mux(wshrPushPopConflictReg, pushReqbAReg, pushReqbA)
 
   WshrAccess.io.pushReq.valid := PushWshrValid//Mux(wshrPushPopConflictReg,true.B,Mux(WshrPushPopConflict,false.B,PushWshrValid))//wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
-  coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp
+  coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp && !coreRsp_st2_valid_from_memRsp
 
-  memReq_Q.io.deq.ready := wshrPass && io.memReq.ready
+  memReq_Q.io.deq.ready := wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp
 
   when(wshrPass && memReq_Q.io.deq.fire()) {
     memReq_st3 := memReq_Q.io.deq.bits
