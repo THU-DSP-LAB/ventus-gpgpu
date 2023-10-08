@@ -77,6 +77,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     //For InOrFlu
     val empty = Output(Bool())
     val probestatus = Output(Bool())
+    val mshrStatus_st0 = Output(UInt(3.W))
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
@@ -126,6 +127,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   // ******     enum vec_mshr_status     ******
   val mshrStatus_st1_r = RegInit(0.U(3.W))
   val mshrStatus_st1_w = Wire(UInt(3.W))
+  val mshrStatus_st0 = Wire(UInt(3.W))
+  io.mshrStatus_st0 := mshrStatus_st0
   /*PRIMARY_AVAIL         000
   * PRIMARY_FULL          001
   * SECONDARY_AVAIL       010
@@ -179,6 +182,42 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       mshrStatus_st1_r := 0.U //SECONDARY_AVAIL
     }
   }
+  when(io.missReq.fire) {
+    when(primaryMiss && mainEntryAlmFull) {
+      mshrStatus_st0 := 1.U //PRIMARY_FULL
+    }.elsewhen(secondaryMiss && subEntryAlmFull) {
+      mshrStatus_st0 := 3.U //SECONDARY_FULL
+    }
+  }.elsewhen(io.probe.valid) {
+    when(primaryMiss) {
+      when(mainEntryFull) {
+        mshrStatus_st0 := 1.U //PRIMARY_FULL
+        //}.elsewhen(mainEntryAlmFull) {
+        //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
+      }.otherwise {
+        mshrStatus_st0 := 0.U //PRIMARY_AVAIL
+      }
+    }.otherwise {
+      when(subEntryFull) {
+        mshrStatus_st0 := 3.U //SECONDARY_FULL
+        //}.elsewhen(subEntryAlmFull) {
+        //  mshrStatus_st1 := 7.U //SECONDARY_ALM_FULL
+      }.otherwise {
+        mshrStatus_st0 := 2.U //SECONDARY_AVAIL
+      }
+    }
+  }.elsewhen(io.missRspIn.valid) {
+    //assert(!(mshrStatus_st1_r === 4.U),"mshr set SECONDARY_FULL_RETURN incorrectly")
+    when(mshrStatus_st1_r === 1.U || mshrStatus_st1_r === 2.U) {
+      mshrStatus_st0 := 0.U //PRIMARY_AVAIL
+    }.elsewhen(mshrStatus_st1_r === 3.U && subentryStatusForRsp.io.used === 1.U) {
+      mshrStatus_st0 := 4.U //SECONDARY_FULL_RETURN
+    }.elsewhen(mshrStatus_st1_r === 4.U && subentryStatusForRsp.io.used === 0.U) {
+      mshrStatus_st0 := 0.U //SECONDARY_AVAIL
+    }
+  }.otherwise{
+    mshrStatus_st0 := mshrStatus_st1_r
+  }
   val entryMatchProbe_st1 = RegEnable(entryMatchProbe,io.probe.valid)
   //mshrStatus依赖primaryMiss和SecondaryMiss，它们依赖entryValid。
   //mshrStatus必须是寄存器，需要在probe valid的下个周期正确显示。entryValid更新的下一个周期已经来不及。
@@ -188,14 +227,6 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       mshrStatus_st1_w := 3.U //SECONDARY_FULL
     }.otherwise {
       mshrStatus_st1_w := 2.U //SECONDARY_AVAIL
-    }
-  }.elsewhen(primaryMiss){
-    when(mainEntryFull) {
-      mshrStatus_st1_w := 1.U //PRIMARY_FULL
-      //}.elsewhen(mainEntryAlmFull) {
-      //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
-    }.otherwise {
-      mshrStatus_st1_w := 0.U //PRIMARY_AVAIL
     }
   }.otherwise{
     mshrStatus_st1_w := mshrStatus_st1_r
