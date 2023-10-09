@@ -161,7 +161,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   io.l2cache_outd.bits.opcode:=Mux(io.AXI_master_bundle.b.valid,AccessAck,AccessAckData)
   io.l2cache_outd.bits.data:=Mux(io.AXI_master_bundle.b.valid,0.U,buffer_read.map(_.asTypeOf(new BufferBundle_read(params)).data).asUInt())
   io.l2cache_outd.bits.size:= 0.U //todo undefined unused
-
+  io.l2cache_outd.bits.param:= DontCare
   //sourceA
   io.l2cache_outa.ready:= !buffer_write_busy && io.AXI_master_bundle.aw.ready && !buffer_read_busy &&io.AXI_master_bundle.ar.ready//Mux(io.l2cache_outa.bits.opcode===PutFullData,!buffer_write_busy && io.AXI_master_bundle.aw.ready, !buffer_read_busy &&io.AXI_master_bundle.ar.ready)
 
