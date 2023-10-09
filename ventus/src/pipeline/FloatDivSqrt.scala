@@ -142,7 +142,7 @@ class FloatDivSqrt extends FPUSubModule{
   val (aSign, aExp, aFrac) = decode(a, aIsSubnormalOrZero)
   val (bSign, bExp, bFrac) = decode(b, bIsSubnormalOrZero)
 
-  val resSign = aSign ^ bSign;
+  val resSign = Mux(isDiv, aSign ^ bSign, false.B);
   val resSignReg = RegEnable(resSign, io.in.fire)
   val aExpReg = Reg(SInt(F_EXP_WIDTH.W))
   val aFracReg = Reg(UInt(F_FRAC_WIDTH.W))
