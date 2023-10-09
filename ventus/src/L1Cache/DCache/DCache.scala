@@ -120,9 +120,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val probereadAllocateWriteConflict = Wire(Bool())
   val inflightReadWriteMiss = RegInit(false.B)
   // ******     pipeline regs      ******
-  coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict && TagAccess.io.probeRead.ready
-  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && !readmiss_sameadd && TagAccess.io.probeRead.ready
-  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd && TagAccess.io.probeRead.ready
+  coreReq_Q.io.enq.valid := io.coreReq.valid && !probereadAllocateWriteConflict && TagAccess.io.probeRead.ready  && (MshrAccess.io.mshrStatus_st0 =/= 3.U)
+  val coreReq_st0_ready =  coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss && !readmiss_sameadd && TagAccess.io.probeRead.ready && (MshrAccess.io.mshrStatus_st0 =/= 3.U)
+  io.coreReq.ready := coreReq_Q.io.enq.ready && !probereadAllocateWriteConflict && !inflightReadWriteMiss &&  !readmiss_sameadd && TagAccess.io.probeRead.ready && (MshrAccess.io.mshrStatus_st0 =/= 3.U)
   coreReq_Q.io.enq.bits := io.coreReq.bits
 
   val coreReq_st1 = coreReq_Q.io.deq.bits
@@ -152,7 +152,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //val readHit_st2 = RegNext(readHit_st1 )
   val injectTagProbe = inflightReadWriteMiss ^ RegNext(inflightReadWriteMiss)//RegInit(false.B)//inflightReadWriteMiss && (mshrProbeStatus === 0.U)
   readmiss_sameadd := MshrAccess.io.missReq.valid && (MshrAccess.io.probe.bits.blockAddr === MshrAccess.io.missReq.bits.blockAddr) &&
-                        io.coreReq.valid  && coreReq_Q.io.deq.valid
+    io.coreReq.valid  && coreReq_Q.io.deq.valid
   // ******      l1_data_cache::coreReq_pipe0_cycle      ******
   coreReq_Q.io.deq.ready := coreReq_st1_ready &&
     !(coreReq_Q.io.deq.bits.opcode === 3.U && readHit_st1 && coreReq_st1_valid) //InvOrFlu希望在st0读Data SRAM，检查资源冲突
@@ -497,7 +497,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.data := DataAccessesRRsp
     coreRsp_st2.isWrite := false.B
   }
-  when((cacheHit_st1 && RegNext(io.coreReq.fire)) || (secondaryFullReturn && MshrAccess.io.missRspOut.valid) ||
+  when((cacheHit_st1 && RegNext(io.coreReq.fire)) ||
     waitMSHRCoreRsp_st1 || fluCoreRsp_st1 || invCOreRsp_st1){
     coreRsp_st2.instrId := coreReq_st1.instrId
     coreRsp_st2.activeMask := coreReq_st1.perLaneAddr.map(_.activeMask)
@@ -512,7 +512,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRsp_st2_valid_from_coreReq = Wire(Bool())
   val coreRsp_st2_valid_from_memRsp = Wire(Bool())
   val coreRsp_st2_valid_from_memReq = Wire(Bool())
-    val coreRsp_st2_valid_from_coreReq_Reg = RegEnable(coreReq_st1_valid &&
+  val coreRsp_st2_valid_from_coreReq_Reg = RegEnable(coreReq_st1_valid &&
     (readHit_st1 || writeHit_st1), coreRsp_Q.io.enq.ready)//, coreRsp_Q.io.enq.fire)//(coreReqControl_st1.isFlush && )
 
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
@@ -527,7 +527,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.otherwise{
     coreReqmemConflict_Reg := coreReqmemConflict
   }
-//if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
+  //if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle
 
   coreRsp_st2_valid_from_coreReq := Mux(coreReqmemConflict,false.B,Mux(coreReqmemConflict_Reg,!(coreRsp_st2_valid_from_memReq || coreRsp_st2_valid_from_memRsp),coreRsp_st2_valid_from_coreReq_Reg))
 
@@ -587,10 +587,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     || !WshrAccess.io.pushReq.ready) && memReqIsWrite_st3
   val wshrPass = !wshrProtect && !cRspBlockedOrWshrFull
   val PushWshrValid = wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
- // val WshrPushPopConflict = PushWshrValid && WshrAccess.io.popReq.valid
- // val wshrPushPopConflictReg = RegNext(WshrPushPopConflict)
+  // val WshrPushPopConflict = PushWshrValid && WshrAccess.io.popReq.valid
+  // val wshrPushPopConflictReg = RegNext(WshrPushPopConflict)
   val pushReqbA = memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
- // val pushReqbAReg = RegNext(pushReqbA)
+  // val pushReqbAReg = RegNext(pushReqbA)
   WshrAccess.io.pushReq.bits.blockAddr := pushReqbA//Mux(wshrPushPopConflictReg, pushReqbAReg, pushReqbA)
 
   WshrAccess.io.pushReq.valid := PushWshrValid//Mux(wshrPushPopConflictReg,true.B,Mux(WshrPushPopConflict,false.B,PushWshrValid))//wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
