@@ -139,7 +139,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   write_buffer.io.enq.valid:=sourceD.io.a.valid
   write_buffer.io.enq.bits:=sourceD.io.a.bits
-  write_buffer.io.deq.ready:= sourceA.io.req.ready&&(!schedule.a.valid)
+  write_buffer.io.deq.ready:= sourceA.io.req.ready
   sourceA.io.req.bits:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.bits,schedule.a.bits)
 
   sourceA.io.req.valid:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.valid,schedule.a.valid)
