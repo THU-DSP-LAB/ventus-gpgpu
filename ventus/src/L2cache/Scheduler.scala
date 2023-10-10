@@ -126,7 +126,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt())&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
-    m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt())
+    m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt()) && !write_buffer.io.deq.valid
     m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt())&& requests.io.valid(i)
     m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt())
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
@@ -140,9 +140,9 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   write_buffer.io.enq.valid:=sourceD.io.a.valid
   write_buffer.io.enq.bits:=sourceD.io.a.bits
   write_buffer.io.deq.ready:= sourceA.io.req.ready&&(!schedule.a.valid)
-  sourceA.io.req.bits:=Mux(schedule.a.valid,schedule.a.bits,write_buffer.io.deq.bits)
+  sourceA.io.req.bits:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.bits,schedule.a.bits)
 
-  sourceA.io.req.valid:=Mux(schedule.a.valid,schedule.a.valid,write_buffer.io.deq.valid)
+  sourceA.io.req.valid:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.valid,schedule.a.valid)
   sourceD.io.a.ready:= write_buffer.io.enq.ready
 
   val mshr_validOH = requests.io.valid
