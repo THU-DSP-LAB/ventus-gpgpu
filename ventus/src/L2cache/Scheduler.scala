@@ -136,7 +136,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   }
 
  
-  val write_buffer =Module(new Queue(new FullRequest(params),4,false,false))
+  val write_buffer =Module(new Queue(new FullRequest(params),8,false,true))
   write_buffer.io.enq.valid:=sourceD.io.a.valid
   write_buffer.io.enq.bits:=sourceD.io.a.bits
   write_buffer.io.deq.ready:= sourceA.io.req.ready&&(!schedule.a.valid)
