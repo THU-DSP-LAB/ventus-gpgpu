@@ -121,8 +121,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   when (mshr_request.orR()) { robin_filter := ~rightOR(mshr_selectOH) }
 
   
-  schedule.a.bits.source := mshr_select      
-
+  schedule.a.bits.source := mshr_select
+  val write_buffer =Module(new Queue(new FullRequest(params),8,false,true))
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt())&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
@@ -136,7 +136,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   }
 
  
-  val write_buffer =Module(new Queue(new FullRequest(params),8,false,true))
+
   write_buffer.io.enq.valid:=sourceD.io.a.valid
   write_buffer.io.enq.bits:=sourceD.io.a.bits
   write_buffer.io.deq.ready:= sourceA.io.req.ready&&(!schedule.a.valid)
