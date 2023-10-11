@@ -16,7 +16,7 @@ import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import top.parameters.{dcache_MshrEntry, dcache_NSets}
+import top.parameters.{dcache_BlockWords, dcache_MshrEntry, dcache_NSets, num_thread}
 //import pipeline.parameters._
 
 class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
@@ -215,6 +215,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val writeMissReq = Wire(new WshrMemReq)
   val readMissReq = Wire(new WshrMemReq)
   val activeLaneAddr = coreReq_st1.perLaneAddr.map( a => Mux(a.activeMask,a.blockOffset,0.U))
+  //val activeLaneMask = coreReq_st1.perLaneAddr.map( a => Mux(a.activeMask,1.U,0.U))
+  val activeLaneMask = Wire(Vec(num_thread,UInt(1.W)))
+  activeLaneMask := coreReq_st1.perLaneAddr.map( a => Mux(a.activeMask,1.U,0.U))
+  val activeLaneMaskPress = activeLaneMask.asTypeOf(UInt(num_thread.W))
   val blockaddr_ = activeLaneAddr.reduce(_ | _)
   val blockaddr_1H = UIntToOH(blockaddr_)
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
@@ -222,7 +226,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   writeMissReq.a_source := DontCare//wait for WSHR
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   writeMissReq.a_mask := blockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
-  writeMissReq.a_data := coreReq_st1.data
+  for(i<-0 until dcache_BlockWords){
+    writeMissReq.a_data(i) := Mux1H(activeLaneMaskPress,coreReq_st1.data)
+  }
+  //writeMissReq.a_data := Mux1H(activeLaneMaskPress,coreReq_st1.data)//coreReq_st1.data
   writeMissReq.hasCoreRsp := true.B
   writeMissReq.coreRspInstrId := coreReq_st1.instrId
 
