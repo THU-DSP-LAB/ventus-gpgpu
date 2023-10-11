@@ -184,7 +184,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   }
 
   when(primaryMiss) {
-    when(mainEntryFull) {
+    when(mainEntryFull || io.missReq.valid && mainEntryAlmFull) {
       mshrStatus_st0 := 1.U //PRIMARY_FULL
       //}.elsewhen(mainEntryAlmFull) {
       //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
@@ -192,7 +192,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       mshrStatus_st0 := 0.U //PRIMARY_AVAIL
     }
   }.otherwise {
-    when(subEntryFull) {
+    when(subEntryFull || io.missReq.valid && subEntryAlmFull) {
       mshrStatus_st0 := 3.U //SECONDARY_FULL
       //}.elsewhen(subEntryAlmFull) {
       //  mshrStatus_st1 := 7.U //SECONDARY_ALM_FULL
