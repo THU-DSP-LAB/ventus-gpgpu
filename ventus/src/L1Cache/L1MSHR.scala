@@ -156,7 +156,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     }
   }.elsewhen(io.probe.valid) {
     when(primaryMiss) {
-      when(mainEntryFull) {
+      when(mainEntryFull || (mainEntryAlmFull && io.missReq.fire)) {
         mshrStatus_st1_r := 1.U //PRIMARY_FULL
         //}.elsewhen(mainEntryAlmFull) {
         //  mshrStatus_st1 := 5.U //PRIMARY_ALM_FULL
