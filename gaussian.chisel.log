@@ -17,16 +17,23 @@
 [1A[2K[9999D[197/315] foreign-modules.dependencies.fpuv2.fpuv2.sources 
 [1A[2K[9999D[203/315] foreign-modules.dependencies.fpuv2.fpuv2.resources 
 [1A[2K[9999D[226/315] ventus.sources 
+[1A[2K[9999D[228/315] ventus.allSources 
+[1A[2K[9999D[229/315] ventus.allSourceFiles 
 [1A[2K[9999D[233/315] ventus.resources 
-[1A[2K[9999D[258/315] foreign-modules.dependencies.fpuv2.fpuv2.test.sources 
-[1A[2K[9999D[263/315] foreign-modules.dependencies.fpuv2.fpuv2.test.resources 
-[1A[2K[9999D[282/315] ventus.tests.sources 
-[1A[2K[9999D[284/315] ventus.tests.allSources 
-[1A[2K[9999D[285/315] ventus.tests.allSourceFiles 
-[1A[2K[9999D[305/315] ventus.tests.compile 
-[info] compiling 1 Scala source to /home/ventus/ventus-gpgpu/out/ventus/tests/compile.dest/classes ...
+[1A[2K[9999D[255/315] ventus.compile 
+[info] compiling 1 Scala source to /home/ventus/ventus-gpgpu/out/ventus/compile.dest/classes ...
+[warn] 9 deprecations (since Chisel 3.5); re-run with -deprecation for details
+[warn] one warning found
 [info] done compiling
-[306/315] ventus.tests.localClasspath 
+[258/315] foreign-modules.dependencies.fpuv2.fpuv2.test.sources 
+[1A[2K[9999D[263/315] foreign-modules.dependencies.fpuv2.fpuv2.test.resources 
+[1A[2K[9999D[281/315] ventus.tests.upstreamCompileOutput 
+[1A[2K[9999D[282/315] ventus.tests.sources 
+[1A[2K[9999D[286/315] ventus.localClasspath 
+[1A[2K[9999D[288/315] ventus.tests.transitiveLocalClasspath 
+[1A[2K[9999D[301/315] ventus.tests.compileClasspath 
+[1A[2K[9999D[305/315] ventus.tests.compile 
+[1A[2K[9999D[309/315] ventus.tests.upstreamAssemblyClasspath 
 [1A[2K[9999D[310/315] ventus.tests.runClasspath 
 [1A[2K[9999D[312/315] ventus.tests.forkEnv.overridden.mill.scalalib.JavaModule.forkEnv 
 [1A[2K[9999D[315/315] ventus.tests.testOnly 
@@ -2349,14 +2356,14 @@ warp 3 0x80000280 0x0000a0fb lsu.r v  1 op 3 @ 00000000+00000000 00000000+000000
 warp 3 0x80000284 0x96213157 v  2 0011 00000000 00000000 0000000c 00000008 
 warp 3 0x80000270 0x0001a1fb v  3 0011 00000000 00000000 3e1d89d9 3e834836 
 warp 3 0x80000288 0x02010057 v  0 0011 00000000 00000000 9000100c 90001008 
-warp 3 0x80000280 0x0000a0fb v  1 0011 00000000 00000000 be828f5c be828f5c 
+warp 3 0x80000280 0x0000a0fb v  1 0011 00000000 00000000 bfcfaffd bfcfaffd 
 warp 3 0x8000028c 0x0000217b lsu.r v  2 op 3 @ 00000000+00000000 00000000+00000000 9000100c+00000000 90001008+00000000
 warp 3 0x80000290 0x2e32c1d7 v  3 0011 80000001 80000001 be1d89d9 be834836 
-warp 3 0x8000028c 0x0000217b v  2 0011 00000000 00000000 bf07ae14 3f4e81b5 
-warp 3 0x80000294 0xa22091d7 v  3 0011 00000000 00000000 befb461a 3f5f3ec1 
+warp 3 0x8000028c 0x0000217b v  2 0011 00000000 00000000 bfcfaffd bfcfaffd 
+warp 3 0x80000294 0xa22091d7 v  3 0011 00000000 00000000 bfafbc4c bf9a6f2b 
 warp 3 0x8000029c 0x0000205b Jump? 1  8000029c
 warp 3 0x8000029c 0x0000205b join    mask and npc:    1111 0x8000029c pop stack ? 1
-warp 3 0x80000298 0x0030607b lsu.w v  3 op 3 mask 1111 00000001 00000001 befb461a 3f5f3ec1 @ 00000000+00000000 00000000+00000000 9000100c+00000000 90001008+00000000
+warp 3 0x80000298 0x0030607b lsu.w v  3 op 3 mask 1111 00000001 00000001 bfafbc4c bf9a6f2b @ 00000000+00000000 00000000+00000000 9000100c+00000000 90001008+00000000
 warp 3 0x8000029c 0x0000205b Jump? 0  00000000
 warp 3 0x8000029c 0x0000205b join    mask and npc:    0000 0x00000000 pop stack ? 0
 warp 3 0x800002a4 0x0400c00b barrier
@@ -3457,12 +3464,12 @@ warp 3 0x80000270 0x0001a1fb v  3 0001 00000000 00000000 00000000 be87d634
 warp 3 0x80000288 0x02010057 v  0 0001 00000000 00000000 00000000 9000100c 
 warp 3 0x8000028c 0x0000217b lsu.r v  2 op 3 @ 00000000+00000000 00000000+00000000 00000000+00000000 9000100c+00000000
 warp 3 0x80000290 0x2e32c1d7 v  3 0001 80000001 80000001 80000001 3e87d634 
-warp 3 0x80000280 0x0000a0fb v  1 0001 00000000 00000000 00000000 3f5f3ec1 
-warp 3 0x8000028c 0x0000217b v  2 0001 00000000 00000000 00000000 befb461a 
-warp 3 0x80000294 0xa22091d7 v  3 0001 00000000 00000000 00000000 be84d136 
+warp 3 0x80000280 0x0000a0fb v  1 0001 00000000 00000000 00000000 bfbfff6f 
+warp 3 0x8000028c 0x0000217b v  2 0001 00000000 00000000 00000000 bfbfff6f 
+warp 3 0x80000294 0xa22091d7 v  3 0001 00000000 00000000 00000000 bff2ef9c 
 warp 3 0x8000029c 0x0000205b Jump? 1  8000029c
 warp 3 0x8000029c 0x0000205b join    mask and npc:    1110 0x8000029c pop stack ? 1
-warp 3 0x80000298 0x0030607b lsu.w v  3 op 3 mask 1110 00000001 00000001 00000001 be84d136 @ 00000000+00000000 00000000+00000000 00000000+00000000 9000100c+00000000
+warp 3 0x80000298 0x0030607b lsu.w v  3 op 3 mask 1110 00000001 00000001 00000001 bff2ef9c @ 00000000+00000000 00000000+00000000 00000000+00000000 9000100c+00000000
 warp 3 0x8000029c 0x0000205b Jump? 1  8000029c
 warp 3 0x8000029c 0x0000205b join    mask and npc:    1111 0x8000029c pop stack ? 1
 warp 3 0x80000298 0x0030607b lsu.w fin

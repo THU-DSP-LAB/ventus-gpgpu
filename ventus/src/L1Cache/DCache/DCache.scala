@@ -434,7 +434,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   dirtyReplace_st1.a_opcode := 0.U//PutFullData
   dirtyReplace_st1.a_param := 0.U//regular write
   dirtyReplace_st1.a_source := DontCare//wait for WSHR in next next cycle
-  dirtyReplace_st1.a_addr := TagAccess.io.a_addrReplacement_st1.get
+  dirtyReplace_st1.a_addr := RegNext(TagAccess.io.a_addrReplacement_st1.get)
   dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(true.B))
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
   dirtyReplace_st1.hasCoreRsp := false.B
