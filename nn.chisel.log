@@ -17,16 +17,21 @@
 [1A[2K[9999D[197/315] foreign-modules.dependencies.fpuv2.fpuv2.sources 
 [1A[2K[9999D[203/315] foreign-modules.dependencies.fpuv2.fpuv2.resources 
 [1A[2K[9999D[226/315] ventus.sources 
+[1A[2K[9999D[228/315] ventus.allSources 
+[1A[2K[9999D[229/315] ventus.allSourceFiles 
 [1A[2K[9999D[233/315] ventus.resources 
-[1A[2K[9999D[258/315] foreign-modules.dependencies.fpuv2.fpuv2.test.sources 
-[1A[2K[9999D[263/315] foreign-modules.dependencies.fpuv2.fpuv2.test.resources 
-[1A[2K[9999D[282/315] ventus.tests.sources 
-[1A[2K[9999D[284/315] ventus.tests.allSources 
-[1A[2K[9999D[285/315] ventus.tests.allSourceFiles 
-[1A[2K[9999D[305/315] ventus.tests.compile 
-[info] compiling 1 Scala source to /home/ventus/ventus-gpgpu/out/ventus/tests/compile.dest/classes ...
+[1A[2K[9999D[255/315] ventus.compile 
+[info] compiling 1 Scala source to /home/ventus/ventus-gpgpu/out/ventus/compile.dest/classes ...
 [info] done compiling
-[306/315] ventus.tests.localClasspath 
+[258/315] foreign-modules.dependencies.fpuv2.fpuv2.test.sources 
+[1A[2K[9999D[263/315] foreign-modules.dependencies.fpuv2.fpuv2.test.resources 
+[1A[2K[9999D[281/315] ventus.tests.upstreamCompileOutput 
+[1A[2K[9999D[282/315] ventus.tests.sources 
+[1A[2K[9999D[286/315] ventus.localClasspath 
+[1A[2K[9999D[288/315] ventus.tests.transitiveLocalClasspath 
+[1A[2K[9999D[301/315] ventus.tests.compileClasspath 
+[1A[2K[9999D[305/315] ventus.tests.compile 
+[1A[2K[9999D[309/315] ventus.tests.upstreamAssemblyClasspath 
 [1A[2K[9999D[310/315] ventus.tests.runClasspath 
 [1A[2K[9999D[312/315] ventus.tests.forkEnv.overridden.mill.scalalib.JavaModule.forkEnv 
 [1A[2K[9999D[315/315] ventus.tests.testOnly 
@@ -1354,18 +1359,82 @@ warp 2 0x80000134 0x0000e07b lsu.w v  0 op 3 mask 11111111 43271ed7 436fd2ba 42d
 warp 1 0x8000013c 0xff412083 lsu.r x   1 op 3 @ 7000180c+fffffff4
 warp 2 0x80000138 0x0000205b join    mask and npc:    00000000 0x00000000 pop stack ? 0
 warp 2 0x80000138 0x0000205b Jump? 0  00000000
+warp 1 0x80000140 0xff410113 x  2  70001800
+warp 2 0x8000013c 0xff412083 lsu.r x   1 op 3 @ 7000140c+fffffff4
+warp 2 0x80000134 0x0000e07b lsu.w fin
+warp 2 0x80000140 0xff410113 x  2  70001400
+warp 1 0x80000144 0xffc20213 x  4  00000000
+warp 2 0x80000144 0xffc20213 x  4  00000000
+warp 2 0x8000013c 0xff412083 x  1  80000090
+warp 4 0x80000138 0x0000205b join    mask and npc:    00000000 0x00000000 pop stack ? 0
+warp 4 0x80000138 0x0000205b Jump? 0  00000000
+warp 4 0x80000134 0x0000e07b lsu.w v  0 op 3 mask 11111111 437c266f 4217b8cb 42353c5c 4194008d 437cc0db 41986e53 423849f7 4191ff4c @ 9000107c+00000000 90001078+00000000 90001074+00000000 90001070+00000000 9000106c+00000000 90001068+00000000 90001064+00000000 90001060+00000000
+warp 3 0x8000013c 0xff412083 x  1  80000090
+warp 2 0x80000148 0x00008067 x  0  8000014c
+warp 2 0x80000148 0x00008067 Jump? 1  80000090
+warp 4 0x8000013c 0xff412083 lsu.r x   1 op 3 @ 70000c0c+fffffff4
+warp 4 0x80000140 0xff410113 x  2  70000c00
+warp 5 0x80000134 0x0000e07b lsu.w v  0 op 3 mask 11111111 432b76ee 42d7b7d2 42b1427c 42a32e6e 4327f4e2 420a87ae 41a2eee1 41b08224 @ 9000105c+00000000 90001058+00000000 90001054+00000000 90001050+00000000 9000104c+00000000 90001048+00000000 90001044+00000000 90001040+00000000
+warp 1 0x8000013c 0xff412083 x  1  80000090
+warp 5 0x80000138 0x0000205b Jump? 0  00000000
+warp 5 0x80000138 0x0000205b join    mask and npc:    00000000 0x00000000 pop stack ? 0
+warp 4 0x80000144 0xffc20213 x  4  00000000
+warp 3 0x80000140 0xff410113 x  2  70001000
+warp 2 0x80000090 0x0000400b endprg
+warp 4 0x80000134 0x0000e07b lsu.w fin
+warp 5 0x8000013c 0xff412083 lsu.r x   1 op 3 @ 7000080c+fffffff4
+warp 3 0x80000144 0xffc20213 x  4  00000000
+warp 3 0x80000148 0x00008067 x  0  8000014c
+warp 3 0x80000148 0x00008067 Jump? 1  80000090
+warp 5 0x80000140 0xff410113 x  2  70000800
+warp 1 0x80000148 0x00008067 x  0  8000014c
+warp 1 0x80000148 0x00008067 Jump? 1  80000090
+warp 5 0x80000144 0xffc20213 x  4  00000000
+warp 5 0x80000134 0x0000e07b lsu.w fin
+warp 3 0x80000090 0x0000400b endprg
+warp 1 0x80000090 0x0000400b endprg
+warp 4 0x8000013c 0xff412083 x  1  80000090
+warp 5 0x8000013c 0xff412083 x  1  80000090
+warp 4 0x80000148 0x00008067 x  0  8000014c
+warp 4 0x80000148 0x00008067 Jump? 1  80000090
+warp 5 0x80000148 0x00008067 x  0  8000014c
+warp 5 0x80000148 0x00008067 Jump? 1  80000090
+warp 6 0x80000134 0x0000e07b lsu.w v  0 op 3 mask 11111111 41ee4460 432b202e 42a1a289 40fbe842 42642ba4 42ac21d5 434c306a 41756be4 @ 9000103c+00000000 90001038+00000000 90001034+00000000 90001030+00000000 9000102c+00000000 90001028+00000000 90001024+00000000 90001020+00000000
+warp 6 0x80000138 0x0000205b Jump? 0  00000000
+warp 6 0x80000138 0x0000205b join    mask and npc:    00000000 0x00000000 pop stack ? 0
+warp 7 0x80000134 0x0000e07b lsu.w v  0 op 3 mask 11111111 43146968 4376a596 4268bf41 4374559a 41f162a4 4262d4c0 425f3d4b 421841d5 @ 9000101c+00000000 90001018+00000000 90001014+00000000 90001010+00000000 9000100c+00000000 90001008+00000000 90001004+00000000 90001000+00000000
+warp 6 0x8000013c 0xff412083 lsu.r x   1 op 3 @ 7000040c+fffffff4
+warp 4 0x80000090 0x0000400b endprg
+warp 6 0x80000134 0x0000e07b lsu.w fin
+warp 6 0x80000140 0xff410113 x  2  70000400
+warp 6 0x80000144 0xffc20213 x  4  00000000
+warp 5 0x80000090 0x0000400b endprg
+warp 7 0x80000134 0x0000e07b lsu.w fin
+warp 6 0x8000013c 0xff412083 x  1  80000090
+warp 6 0x80000148 0x00008067 x  0  8000014c
+warp 6 0x80000148 0x00008067 Jump? 1  80000090
+warp 7 0x80000138 0x0000205b join    mask and npc:    00000000 0x00000000 pop stack ? 0
+warp 7 0x80000138 0x0000205b Jump? 0  00000000
+warp 7 0x8000013c 0xff412083 lsu.r x   1 op 3 @ 7000000c+fffffff4
+warp 7 0x80000140 0xff410113 x  2  70000000
+warp 6 0x80000090 0x0000400b endprg
+warp 7 0x80000144 0xffc20213 x  4  00000000
+warp 7 0x8000013c 0xff412083 x  1  80000090
+warp 7 0x80000148 0x00008067 x  0  8000014c
+warp 7 0x80000148 0x00008067 Jump? 1  80000090
+warp 7 0x80000090 0x0000400b endprg
 [31m- adv_test *** FAILED ***[0m
-[31m  java.lang.ArrayIndexOutOfBoundsException: Index 212 out of bounds for length 212[0m
-[31m  at top.MemBox.$anonfun$writeMem$6(MemBox.scala:222)[0m
-[31m  at scala.collection.immutable.Range.foreach$mVc$sp(Range.scala:158)[0m
-[31m  at top.MemBox.writeMem(MemBox.scala:220)[0m
-[31m  at play.AdvancedTest.$anonfun$new$31(tests.scala:231)[0m
-[31m  at chiseltest.internal.GenericBackend.doTimescope(GenericBackend.scala:111)[0m
-[31m  at chiseltest.package$.timescope(package.scala:288)[0m
-[31m  at play.AdvancedTest.$anonfun$new$28(tests.scala:209)[0m
-[31m  at chiseltest.internal.ThreadedBackend$TesterThread$$anon$1.$anonfun$run$1(ThreadedBackend.scala:495)[0m
-[31m  at chiseltest.internal.GenericBackend.doTimescope(GenericBackend.scala:111)[0m
-[31m  at chiseltest.internal.ThreadedBackend$TesterThread$$anon$1.run(ThreadedBackend.scala:495)[0m
+[31m  chiseltest.TimeoutException: timeout on GPGPU_SimWrapper.clock: IO[Clock] at 300 idle cycles. You can extend the timeout by calling .setTimeout(<n>) on your clock (setting it to 0 means 'no timeout').[0m
+[31m  at chiseltest.internal.GenericBackend.$anonfun$run$7(GenericBackend.scala:203)[0m
+[31m  at chiseltest.internal.GenericBackend.$anonfun$run$7$adapted(GenericBackend.scala:200)[0m
+[31m  at scala.collection.mutable.HashMap.$anonfun$foreach$1(HashMap.scala:149)[0m
+[31m  at scala.collection.mutable.HashTable.foreachEntry(HashTable.scala:237)[0m
+[31m  at scala.collection.mutable.HashTable.foreachEntry$(HashTable.scala:230)[0m
+[31m  at scala.collection.mutable.HashMap.foreachEntry(HashMap.scala:44)[0m
+[31m  at scala.collection.mutable.HashMap.foreach(HashMap.scala:149)[0m
+[31m  at chiseltest.internal.GenericBackend.run(GenericBackend.scala:200)[0m
+[31m  at chiseltest.internal.Context$.$anonfun$run$1(Testers2.scala:34)[0m
+[31m  at scala.util.DynamicVariable.withValue(DynamicVariable.scala:62)[0m
 [31m  ...[0m
 1 targets failed
 ventus.tests.testOnly 1 tests failed: 
