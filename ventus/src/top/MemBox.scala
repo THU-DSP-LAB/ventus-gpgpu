@@ -217,7 +217,7 @@ class MemBox{
     )
     if(findBuf.nonEmpty){
       val paddr = addr - memory(findBuf.head).base
-      for (i <- 0 until len){
+      for (i <- 0 until scala.math.min(len, memory(findBuf.head).size.toInt - paddr.toInt)){
         if(mask(i))
           memory(findBuf.head).data(paddr.toInt + i) = data(i)
       }
