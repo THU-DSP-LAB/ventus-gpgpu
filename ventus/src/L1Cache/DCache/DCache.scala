@@ -222,24 +222,24 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val activeLaneMaskPress = activeLaneMask.asTypeOf(UInt(num_thread.W))
   val blockaddr_ = activeLaneAddr.reduce(_ | _)
   val blockaddr_1 = LaneAddrOH.reduce(_ | _)
+  val LaneBlockConv = Wire(Vec(dcache_BlockWords,Vec(NLanes,UInt(1.W))))
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
   writeMissReq.a_source := DontCare//wait for WSHR
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   writeMissReq.a_mask := blockaddr_1.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
-  for(i<-0 until NLanes){
-    for(j<-0 until dcache_BlockWords){
-      when(coreReq_st1.perLaneAddr(i).blockOffset === j.asUInt && coreReq_st1.perLaneAddr(i).activeMask){
-        writeMissReq.a_data(j) := coreReq_st1.data(i)
-      }.otherwise{
-        writeMissReq.a_data(j) := 0.U
+  for(j<-0 until dcache_BlockWords) {
+    for (i <- 0 until NLanes) {
+      when(coreReq_st1.perLaneAddr(i).blockOffset === j.asUInt && coreReq_st1.perLaneAddr(i).activeMask) {
+        LaneBlockConv(j)(i) := 1.U
+      }.otherwise {
+        LaneBlockConv(j)(i) := 0.U
       }
     }
   }
-  for(i<-0 until dcache_BlockWords){
-    writeMissReq.a_data(i) := Mux1H(activeLaneMaskPress,coreReq_st1.data)
+  for(j<-0 until dcache_BlockWords){
+    writeMissReq.a_data(j) := coreReq_st1.data.zip(LaneBlockConv(j)).map{case(a,b) => Mux(b.asBool,a, 0.U)}.reduce(_ | _)
   }
-  //writeMissReq.a_data := Mux1H(activeLaneMaskPress,coreReq_st1.data)//coreReq_st1.data
   writeMissReq.hasCoreRsp := true.B
   writeMissReq.coreRspInstrId := coreReq_st1.instrId
 
