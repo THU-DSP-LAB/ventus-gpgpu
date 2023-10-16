@@ -224,3 +224,35 @@ class MemBox{
     }
   }
 }
+
+case class DelayFIFOEntry(
+  val opcode: Int,
+  val data: BigInt,
+  val source: BigInt,
+  val size: BigInt,
+  val param: BigInt
+)
+class DelayFIFO[T<: DelayFIFOEntry](val latency: Int, val depth: Int){
+  class EntryWithTime(var ttl: Int, val entry: T){
+    def step(minpos: Int): Unit = {
+      if(ttl > minpos) ttl = ttl - 1 else ttl = minpos
+    }
+  }
+
+  var ram: Seq[EntryWithTime] = Seq.empty
+  def step() = {
+    ram.zipWithIndex.foreach{ case(entry, idx) =>
+      entry.step(idx)
+    }
+  }
+  def isFull = ram.length == depth
+  def canPop = ram.nonEmpty && ram.head.ttl == 0
+  def push(in: T) = {
+    ram = ram :+ new EntryWithTime(latency, in)
+  }
+  def pop: T = {
+    val out = ram.head
+    ram = ram.tail
+    out.entry
+  }
+}
