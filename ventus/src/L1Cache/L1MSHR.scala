@@ -113,7 +113,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //  ******     missReq decide selected subentries are full or not     ******
   val entryMatchMissRsp = Wire(UInt(log2Up(NMshrEntry).W))
   val entryMatchProbe = Wire(UInt(NMshrEntry.W))
-  val subentrySelectedForReq = subentry_valid(OHToUInt(entryMatchProbe))
+  val allfalse_subentryvalidtype = Wire(VecInit(Seq.fill(NMshrSubEntry)(false.B)))
+  val subentrySelectedForReq = Mux(entryMatchProbe===0.U,allfalse_subentryvalidtype, subentry_valid(OHToUInt(entryMatchProbe)))
   val subentryStatus = Module(new getEntryStatusReq(NMshrSubEntry)) // Output: alm_full, full, next
   subentryStatus.io.valid_list := Reverse(Cat(subentrySelectedForReq))
 
@@ -143,6 +144,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   assert(PopCount(entryMatchProbe) <= 1.U)
   val entryMatchProbeid_reg = OHToUInt(Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) & entry_valid)//RegEnable(OHToUInt(entryMatchProbe),io.missReq.fire())
   val secondaryMiss = RegEnable(entryMatchProbe.orR ,io.probe.valid) //???
+  val secondaryMiss_st0 = entryMatchProbe.orR
+  val primaryMiss_st0 = !secondaryMiss_st0
   val primaryMiss = !secondaryMiss
   val mainEntryFull = entryStatus.io.full
   val mainEntryAlmFull = entryStatus.io.alm_full
