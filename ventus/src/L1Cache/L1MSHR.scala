@@ -114,7 +114,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val entryMatchMissRsp = Wire(UInt(log2Up(NMshrEntry).W))
   val entryMatchProbe = Wire(UInt(NMshrEntry.W))
   val allfalse_subentryvalidtype = Wire(Vec(NMshrSubEntry,Bool()))
-  for (i<-0 until NMshrEntry){
+  for (i<-0 until NMshrSubEntry){
     allfalse_subentryvalidtype(i) := false.B
   }
   val subentrySelectedForReq = Mux(entryMatchProbe===0.U,allfalse_subentryvalidtype, subentry_valid(OHToUInt(entryMatchProbe)))
