@@ -83,5 +83,5 @@ class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
-  override val d_source = UInt((log2Up(NCacheInSM)+WIdBits+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
+  override val d_source = UInt((log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
 }

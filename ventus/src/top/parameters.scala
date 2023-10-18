@@ -1,7 +1,7 @@
 package top
 
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
-import chisel3.util.log2Ceil
+import chisel3.util._
 
 // TODO: MOVE parameters to `ventus/top'
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
@@ -101,6 +101,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def l2cache_memCycles: Int = 4
 
   def l2cache_portFactor: Int = 2
+
+  def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)
 
   def l2cache_cache = CacheParameters(2, l2cache_NWays, l2cache_NSets, num_l2cache, l2cache_BlockWords << 2, l2cache_BlockWords << 2)
   def l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster,dcache_MshrEntry,dcache_NSets)

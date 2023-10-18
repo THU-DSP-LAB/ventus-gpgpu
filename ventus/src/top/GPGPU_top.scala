@@ -371,20 +371,20 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
     if(NSmInCluster == 1){
       io.memRspVecOut(i).valid := io.memRspIn.valid
     } else if(NSmInCluster == 2){
-      io.memRspVecOut(i).valid := io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Ceil(NCacheInSM)+WIdBits-1)===i.asUInt && io.memRspIn.valid
+      io.memRspVecOut(i).valid := io.memRspIn.bits.source(log2Up(NSmInCluster)+log2Ceil(NCacheInSM)+l1cache_sourceBits-1)===i.asUInt && io.memRspIn.valid
     }
    // io.memRspVecOut(i).valid :=
     else {
-      io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, WIdBits + log2Ceil(NCacheInSM)) === i.asUInt && io.memRspIn.valid
+      io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + l1cache_sourceBits- 1, l1cache_sourceBits + log2Ceil(NCacheInSM)) === i.asUInt && io.memRspIn.valid
     }
   }
   if(NSmInCluster == 1){
     io.memRspIn.ready := io.memRspVecOut(0).ready
   } else if(NSmInCluster == 2){
-    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1)),
+    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + l1cache_sourceBits - 1)),
       Reverse(Cat(io.memRspVecOut.map(_.ready))))
   } else {
-    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, WIdBits + log2Up(NCacheInSM))),
+    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Up(NSmInCluster) + log2Ceil(NCacheInSM) + l1cache_sourceBits - 1, l1cache_sourceBits + log2Up(NCacheInSM))),
       Reverse(Cat(io.memRspVecOut.map(_.ready)))) //TODO check order in test
   }
   // ****************
@@ -458,7 +458,7 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
   if(NCluster == 1){
     io.memRspIn.ready := io.memRspVecOut(0).ready
   } else {
-    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + WIdBits - 1, log2Ceil(NSmInCluster) + WIdBits + log2Up(NCacheInSM))),
+    io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.source(log2Ceil(NCluster) + log2Ceil(NSmInCluster) + log2Ceil(NCacheInSM) + l1cache_sourceBits - 1, log2Ceil(NSmInCluster) + l1cache_sourceBits + log2Up(NCacheInSM))),
       Reverse(Cat(io.memRspVecOut.map(_.ready)))) //TODO check order in test
   }
   // ****************
