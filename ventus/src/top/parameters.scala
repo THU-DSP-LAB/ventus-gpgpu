@@ -29,7 +29,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def depth_thread = log2Ceil(num_thread)
 
-  def num_fetch = 2;
+  def num_fetch = 2
   Predef.assert((num_fetch & (num_fetch - 1)) == 0, "num_fetch should be power of 2")
 
   def icache_align = num_fetch * 4
