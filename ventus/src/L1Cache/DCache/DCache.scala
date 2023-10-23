@@ -209,6 +209,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
   MshrAccess.io.missReq.bits.blockAddr := Cat(coreReq_st1.tag, coreReq_st1.setIdx)
   MshrAccess.io.missReq.bits.targetInfo := mshrMissReqTI.asUInt
+  MshrAccess.io.stage2_ready := MemReqArb.io.in(1).ready
 
   // ******      memReq_Q enq      ******
   val missMemReq = Wire(new WshrMemReq) //writeMiss_st1 || readMiss_st1

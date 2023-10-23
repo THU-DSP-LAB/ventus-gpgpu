@@ -78,6 +78,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val empty = Output(Bool())
     val probestatus = Output(Bool())
     val mshrStatus_st0 = Output(UInt(3.W))
+    val stage2_ready = Input(Bool())
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
@@ -154,7 +155,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val mainEntryAlmFull = entryStatus.io.alm_full
   val subEntryFull = subentryStatus.io.full
   val subEntryAlmFull = subentryStatus.io.alm_full
-  when(io.missReq.fire && !io.probe.valid) {
+  when(io.missReq.fire && !io.probe.valid && io.stage2_ready) {
     when(primaryMiss && mainEntryAlmFull) {
       mshrStatus_st1_r := 1.U //PRIMARY_FULL
     }.elsewhen(secondaryMiss && subEntryAlmFull) {
@@ -213,7 +214,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //mshrStatus依赖primaryMiss和SecondaryMiss，它们依赖entryValid。
   //mshrStatus必须是寄存器，需要在probe valid的下个周期正确显示。entryValid更新的下一个周期已经来不及。
   //所以用组合逻辑加工一次mshrStatus。
-  when(secondaryMiss_st0 && (mshrStatus_st1_r === 0.U || mshrStatus_st1_r === 1.U)) {
+  when(secondaryMiss_st0 && (mshrStatus_st1_r === 0.U || mshrStatus_st1_r === 1.U)&& io.stage2_ready) {
     when(subEntryFull) {
       mshrStatus_st1_w := 3.U //SECONDARY_FULL
     }.otherwise {
@@ -247,7 +248,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
   }
 
-  io.probeOut_st1.a_source := real_SRAMAddrUp
+  io.probeOut_st1.a_source := Mux(io.missReq.valid,real_SRAMAddrUp,entryMatchProbeid_reg)
 
   //  ******      mshr::vec_arrange_core_rsp    ******
   subentryStatusForRsp.io.valid_list := Reverse(Cat(subentry_valid(entryMatchMissRsp)))
