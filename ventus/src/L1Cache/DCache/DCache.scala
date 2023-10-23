@@ -166,6 +166,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready
   MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
+  MshrAccess.io.stage1_ready := coreReq_st1_ready
 
   val genCtrl = Module(new genControl)
   genCtrl.io.opcode := io.coreReq.bits.opcode
