@@ -43,6 +43,7 @@ class pipe extends Module{
     val wg_id_lookup=Output(UInt(depth_warp.W))
     val wg_id_tag=Input(UInt(TAG_WIDTH.W))
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -66,6 +67,7 @@ class pipe extends Module{
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
+  io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
 //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
   val exe_data=Module(new Module{
     val io = IO(new Bundle{
