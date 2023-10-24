@@ -42,7 +42,17 @@ class ibuffer2issue extends Module{
     val in=Flipped(Vec(num_warp,Decoupled(new CtrlSigs)))
     val out=Decoupled(new CtrlSigs)
     val out_sel=Output(UInt(depth_warp.W))
+    val cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
   })
+  //
+  if(INST_CNT){
+    val cnt = new Counter(200000)
+    when(io.out.fire) {
+      cnt.inc
+    }
+    io.cnt.foreach(_ := cnt.value)
+  }
+  //
   val rrarbit=Module(new RRArbiter(new CtrlSigs(),num_warp))
   rrarbit.io.in<>io.in
   io.out<>rrarbit.io.out
