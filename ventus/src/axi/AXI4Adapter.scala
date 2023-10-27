@@ -64,7 +64,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
 
   io.AXI_master_bundle.aw.valid := (io.l2cache_outa.bits.opcode === PutFullData) && io.l2cache_outa.valid
 
-  io.AXI_master_bundle.ar.valid:=(io.l2cache_outa.bits.opcode === Get) && io.l2cache_outa.fire
+  io.AXI_master_bundle.ar.valid:=(io.l2cache_outa.bits.opcode === Get) && io.l2cache_outa.valid
 
   io.AXI_master_bundle.ar.bits.addr := io.l2cache_outa.bits.address
   io.AXI_master_bundle.ar.bits.size:= (log2Up( params.AXI_params.dataBits/8)).asUInt()
