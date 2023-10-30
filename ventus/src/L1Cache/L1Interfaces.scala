@@ -79,7 +79,7 @@ class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
-  val a_mask = Vec(dcache_BlockWords, Bool())
+  val a_mask = Vec(dcache_BlockWords, UInt(BytesOfWord.W))
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
