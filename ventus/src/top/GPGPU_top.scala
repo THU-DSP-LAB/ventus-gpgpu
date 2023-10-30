@@ -120,8 +120,8 @@ class GPGPU_axi_top extends Module{
   val axi_adapter=Module(new AXI4Adapter(l2_axi_params))
   axi_lite_adapter.io.ctl<>io.s
   axi_adapter.io.AXI_master_bundle<>io.m
-  gpgpu_top.io.out_a<>axi_adapter.io.l2cache_outa
-  gpgpu_top.io.out_d<>axi_adapter.io.l2cache_outd
+  gpgpu_top.io.out_a(0)<>axi_adapter.io.l2cache_outa
+  gpgpu_top.io.out_d(0)<>axi_adapter.io.l2cache_outd
   gpgpu_top.io.host_req<>axi_lite_adapter.io.data
   gpgpu_top.io.host_rsp<>axi_lite_adapter.io.rsp
 }

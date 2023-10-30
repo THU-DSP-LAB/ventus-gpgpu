@@ -90,7 +90,7 @@ class ImmGen extends Module {
   val Jimm = Cat(io.inst(31), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W)).asSInt // jal
   val Zimm = Cat(0.U(27.W),io.inst(19, 15)).asSInt // CSR I
   val Imm2 = io.inst(24,20).asSInt
-  val Vimm = Cat(io.imm_ext, io.inst(19,15)).asSInt
+  val Vimm = Mux(io.imm_ext.orR, Cat(io.imm_ext, io.inst(19,15)).asSInt, io.inst(19,15).asSInt)
   val Iimm11L = io.inst(30, 20).asSInt
   val Iimm11S = Cat(io.inst(30, 25), io.inst(11, 7)).asSInt
 
