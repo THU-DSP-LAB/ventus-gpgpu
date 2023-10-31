@@ -125,7 +125,15 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   }.elsewhen(counter_write===(total_times-1).asUInt()&&io.AXI_master_bundle.w.fire()){
     buffer_write_valid:= false.B
   }
-  val write_busy_reg=RegNext(io.AXI_master_bundle.aw.fire())
+  val write_busy_reg=RegInit(false.B)
+
+  when(io.AXI_master_bundle.aw.fire()){
+    write_busy_reg:=true.B
+  }.elsewhen(io.AXI_master_bundle.w.fire){
+    write_busy_reg:=false.B
+  }
+
+
   buffer_write_busy:= write_busy_reg|| (counter_write=/=0.U && counter_write=/=(total_times-1).asUInt())
   when(io.AXI_master_bundle.w.fire){
     when(io.AXI_master_bundle.w.bits.last){
