@@ -52,7 +52,9 @@ class pipe extends Module{
   //val pcfifo=Module(new PCfifo)
   val control=Module(new InstrDecodeV2)
   val operand_collector=Module(new operandCollector)
-  val issue=Module(new Issue)
+  //val issue=Module(new Issue)
+  val issueX = Module(new Issue)
+  val issueV = Module(new Issue)
   val alu=Module(new ALUexe)
   val valu=Module(new vALUv2(num_thread, num_lane))
   val fpu=Module(new FPUexe(num_thread,num_lane))
@@ -101,7 +103,7 @@ class pipe extends Module{
   warp_sche.io.pc_rsp.bits.status:=Mux(ibuffer.io.in.ready,io.icache_rsp.bits.status,1.U(2.W))
 
   warp_sche.io.pc_req<>io.icache_req
-  warp_sche.io.warp_control<>issue.io.out_warpscheduler
+  warp_sche.io.warp_control<>issueX.io.out_warpscheduler
   warp_sche.io.issued_warp.bits:=exe_data.io.enq.bits.ctrl.wid
   warp_sche.io.issued_warp.valid:=exe_data.io.enq.fire()
   warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt()
@@ -268,26 +270,35 @@ class pipe extends Module{
     operand_collector.io.out.ready := exe_data.io.enq.ready
   }
 //  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
-  issue.io.in<>exe_data.io.deq
+  issueV.io.in<>exe_data.io.deq
+  issueX.io.in<>exe_data.io.deq
 
-  issue.io.out_vALU<>valu.io.in
-  issue.io.out_LSU<>lsu.io.lsu_req
-  issue.io.out_sALU<>alu.io.in
-  issue.io.out_CSR<>csrfile.io.in
-  issue.io.out_SIMT<>simt_stack.io.branch_ctl
-  issue.io.out_SFU<>sfu.io.in
+  issueV.io.out_vALU<>valu.io.in
+  issueX.io.out_vALU.ready := false.B
+  issueV.io.out_LSU<>lsu.io.lsu_req
+  issueX.io.out_LSU.ready := false.B
+  issueX.io.out_sALU<>alu.io.in
+  issueV.io.out_sALU.ready := false.B
+  issueX.io.out_CSR<>csrfile.io.in
+  issueV.io.out_CSR.ready := false.B
+  issueV.io.out_SIMT<>simt_stack.io.branch_ctl
+  issueX.io.out_SIMT.ready := false.B
+  issueV.io.out_SFU<>sfu.io.in
+  issueX.io.out_SFU.ready := false.B
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
   simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
-  simt_stack.io.pc_reconv.valid := issue.io.out_SIMT.valid//true.B //todo check this
+  simt_stack.io.pc_reconv.valid := issueV.io.out_SIMT.valid//true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 
-  issue.io.out_MUL<>mul.io.in
-  issue.io.out_TC<>tensorcore.io.in
-
-  issue.io.out_vFPU<>fpu.io.in
+  issueV.io.out_MUL<>mul.io.in
+  issueX.io.out_MUL.ready := false.B
+  issueV.io.out_TC<>tensorcore.io.in
+  issueX.io.out_TC.ready := false.B
+  issueV.io.out_vFPU<>fpu.io.in
+  issueX.io.out_vFPU := false.B
   fpu.io.rm:=csrfile.io.rm(0)
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
   sfu.io.rm := csrfile.io.rm(1)
