@@ -252,7 +252,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_param := 0.U //regular read
   readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//setIdx for memRsp tag access in 1st stage
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
-  readMissReq.a_mask := VecInit(Seq.fill(BlockWords)(~0.U))//lockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
+  readMissReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))//lockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B
   readMissReq.coreRspInstrId := DontCare
