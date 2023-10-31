@@ -57,7 +57,7 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
   // data crossbar
   val data_write_in_vec = Wire(Vec(BlockWords,UInt(WordLength.W)))
   for (i<- 0 until BlockWords){
-    data_write_in_vec(i) := Mux(io.memReq.bits.a_mask(i),io.memReq.bits.a_data(i),raw_vec(i))
+    data_write_in_vec(i) := Mux(io.memReq.bits.a_mask(i).orR,io.memReq.bits.a_data(i),raw_vec(i))
     when(io.memReq.fire && (a_opcode === TLAOp_PutPart || a_opcode === TLAOp_PutFull)) {
       memory.write(idx = Cat(get_blockAddr(io.memReq.bits.a_addr),i.U(BlockOffsetBits.W)),
         data = data_write_in_vec(i))

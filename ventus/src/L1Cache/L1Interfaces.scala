@@ -30,7 +30,7 @@ class DCachePerLaneAddr(implicit p: Parameters) extends DCacheBundle{
 class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
   //val ctrlAddr = new Bundle{
   val instrId = UInt(WIdBits.W)//TODO length unsure
-  val opcode = UInt(3.W)
+  val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
   val param = UInt(4.W)
   val tag = UInt(TagBits.W)
   val setIdx = UInt(SetIdxBits.W)
@@ -63,7 +63,7 @@ class L1CacheMemReq extends Bundle{
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
-  val a_mask = Vec(dcache_BlockWords, Bool())
+  val a_mask = Vec(dcache_BlockWords,UInt(BytesOfWord.W))
 }
 
 class DCacheMemReq extends L1CacheMemReq{
@@ -79,7 +79,7 @@ class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
-  val a_mask = Vec(dcache_BlockWords, Bool())
+  val a_mask = Vec(dcache_BlockWords, UInt(BytesOfWord.W))
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{
