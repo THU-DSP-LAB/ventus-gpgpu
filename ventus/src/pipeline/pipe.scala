@@ -69,8 +69,15 @@ class pipe extends Module{
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
 //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
-  val exe_data=Module(new Module{
+  val exe_dataX=Module(new Module{
     val io = IO(new Bundle{
+      val enq = Flipped(DecoupledIO(new vExeData))
+      val deq = DecoupledIO(Output(new vExeData))
+    })
+    io.deq <> io.enq
+  })
+  val exe_dataV = Module(new Module {
+    val io = IO(new Bundle {
       val enq = Flipped(DecoupledIO(new vExeData))
       val deq = DecoupledIO(Output(new vExeData))
     })
@@ -104,8 +111,8 @@ class pipe extends Module{
 
   warp_sche.io.pc_req<>io.icache_req
   warp_sche.io.warp_control<>issueX.io.out_warpscheduler
-  warp_sche.io.issued_warp.bits:=exe_data.io.enq.bits.ctrl.wid
-  warp_sche.io.issued_warp.valid:=exe_data.io.enq.fire()
+  warp_sche.io.issued_warp.bits:=exe_dataX.io.enq.bits.ctrl.wid // not used
+  warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire() // not used
   warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt()
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
@@ -180,31 +187,41 @@ class pipe extends Module{
     scoreb(i).wb_v_fire:=false.B
     scoreb(i).wb_x_fire:=false.B
     scoreb(i).br_ctrl:=false.B
-    scoreb(i).op_col_in_fire:=false.B
-    scoreb(i).op_col_out_fire:=false.B
+    scoreb(i).op_colX_in_fire:=false.B
+    scoreb(i).op_colX_out_fire:=false.B
+    scoreb(i).op_colV_in_fire := false.B
+    scoreb(i).op_colV_out_fire := false.B
 
     when(warp_sche.io.branch.fire&(warp_sche.io.branch.bits.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
  }
-  val op_col_in_wid = Wire(Bool())
-  val op_col_out_wid = Wire(Bool())
-  op_col_in_wid := operand_collector.io.control.bits.wid
-  op_col_out_wid := operand_collector.io.out.bits.control.wid
-  scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
-  scoreb(op_col_out_wid).op_col_out_fire:=operand_collector.io.out.fire
+  val op_colV_in_wid = Wire(UInt(depth_warp.W))
+  val op_colV_out_wid = Wire(UInt(depth_warp.W))
+  val op_colX_in_wid = Wire(UInt(depth_warp.W))
+  val op_colX_out_wid = Wire(UInt(depth_warp.W))
+  op_colV_in_wid := operand_collector.io.controlV.bits.wid
+  op_colV_out_wid := operand_collector.io.out(0).bits.control.wid
+  scoreb(op_colV_in_wid).op_colV_in_fire:=operand_collector.io.controlV.fire
+  scoreb(op_colV_in_wid).op_colV_out_fire:=operand_collector.io.out(0).fire
+
+  op_colX_in_wid := operand_collector.io.controlX.bits.wid
+  op_colX_out_wid := operand_collector.io.out(1).bits.control.wid
+  scoreb(op_colX_in_wid).op_colX_in_fire := operand_collector.io.controlX.fire
+  scoreb(op_colX_in_wid).op_colX_out_fire := operand_collector.io.out(1).fire
 
   scoreb(ibuffer2issue.io.out.bits.wid).if_fire:=(ibuffer2issue.io.out.fire)
   scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
   scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
 
 
-  operand_collector.io.control<>ibuffer2issue.io.out//ibuffer2issue.io.out.bits
+  operand_collector.io.controlV<>ibuffer2issue.io.out_v//ibuffer2issue.io.out.bits
+  operand_collector.io.controlX<>ibuffer2issue.io.out_x//ibuffer2issue.io.out.bits
   operand_collector.io.writeVecCtrl<>wb.io.out_v
   operand_collector.io.writeScalarCtrl<>wb.io.out_x
 
-  simt_stack.io.input_wid:=operand_collector.io.out.bits.control.wid//ibuffer2issue.io.out.bits.wid
-  csrfile.io.simt_wid := operand_collector.io.out.bits.control.wid // todo check this
+  simt_stack.io.input_wid:=operand_collector.io.out(0).bits.control.wid//ibuffer2issue.io.out.bits.wid
+  csrfile.io.simt_wid := operand_collector.io.out(0).bits.control.wid // todo check this
 
   when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
@@ -212,8 +229,11 @@ class pipe extends Module{
   when(io.icache_rsp.fire&(io.icache_rsp.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_rsp.bits.warpid},pc=0x${Hexadecimal(io.icache_rsp.bits.addr)},inst=0x${Hexadecimal(io.icache_rsp.bits.data)}\n")
   }
-  when(exe_data.io.deq.fire&(exe_data.io.deq.bits.ctrl.wid===2.U)){
-    //printf(p"wid=${exe_data.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)}\n")
+  when(exe_dataX.io.deq.fire&(exe_dataX.io.deq.bits.ctrl.wid===2.U)){
+    //printf(p"wid=${exe_dataX.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.inst)}\n")
+  }
+  when(exe_dataV.io.deq.fire&(exe_dataV.io.deq.bits.ctrl.wid===2.U)) {
+    //printf(p"wid=${exe_dataV.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.inst)}\n")
   }
 
 
@@ -261,17 +281,25 @@ class pipe extends Module{
 //  }
 
   {
-    exe_data.io.enq.bits.ctrl := operand_collector.io.out.bits.control
-    exe_data.io.enq.bits.in1 := operand_collector.io.out.bits.alu_src1
-    exe_data.io.enq.bits.in2 := operand_collector.io.out.bits.alu_src2
-    exe_data.io.enq.bits.in3 := operand_collector.io.out.bits.alu_src3
-    exe_data.io.enq.bits.mask := (operand_collector.io.out.bits.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
-    exe_data.io.enq.valid:=operand_collector.io.out.valid
-    operand_collector.io.out.ready := exe_data.io.enq.ready
+    exe_dataX.io.enq.bits.ctrl := operand_collector.io.out(1).bits.control
+    exe_dataX.io.enq.bits.in1 := operand_collector.io.out(1).bits.alu_src1
+    exe_dataX.io.enq.bits.in2 := operand_collector.io.out(1).bits.alu_src2
+    exe_dataX.io.enq.bits.in3 := operand_collector.io.out(1).bits.alu_src3
+    exe_dataX.io.enq.bits.mask := (operand_collector.io.out(1).bits.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
+    exe_dataX.io.enq.valid:=operand_collector.io.out(1).valid
+    operand_collector.io.out(1).ready := exe_dataX.io.enq.ready
+
+    exe_dataV.io.enq.bits.ctrl := operand_collector.io.out(0).bits.control
+    exe_dataV.io.enq.bits.in1 := operand_collector.io.out(0).bits.alu_src1
+    exe_dataV.io.enq.bits.in2 := operand_collector.io.out(0).bits.alu_src2
+    exe_dataV.io.enq.bits.in3 := operand_collector.io.out(0).bits.alu_src3
+    exe_dataV.io.enq.bits.mask := (operand_collector.io.out(0).bits.mask.zipWithIndex.map { case (x, y) => x & simt_stack.io.out_mask(y) })
+    exe_dataV.io.enq.valid := operand_collector.io.out(0).valid
+    operand_collector.io.out(0).ready := exe_dataX.io.enq.ready
   }
 //  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
-  issueV.io.in<>exe_data.io.deq
-  issueX.io.in<>exe_data.io.deq
+  issueV.io.in<>exe_dataV.io.deq
+  issueX.io.in<>exe_dataX.io.deq
 
   issueV.io.out_vALU<>valu.io.in
   issueX.io.out_vALU.ready := false.B
@@ -325,5 +353,5 @@ class pipe extends Module{
   wb.io.in_v(4)<>mul.io.out_v
   wb.io.in_v(5)<>tensorcore.io.out_v
 
-  issue_stall:=(~issue.io.in.ready).asBool()//scoreb.io.delay | issue.io.in.ready
+  issue_stall:=(~issueX.io.in.ready).asBool | (~issueV.io.in.ready).asBool//scoreb.io.delay | issue.io.in.ready
 }
