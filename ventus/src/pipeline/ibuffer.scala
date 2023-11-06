@@ -41,11 +41,33 @@ class ibuffer2issue extends Module{
   val io = IO(new Bundle{
     val in=Flipped(Vec(num_warp,Decoupled(new CtrlSigs)))
     val out=Decoupled(new CtrlSigs)
-    val out_sel=Output(UInt(depth_warp.W))
+    val out_x = Decoupled(new CtrlSigs)
+    val out_v = Decoupled(new CtrlSigs)
+    //val out_sel=Output(UInt(depth_warp.W))
   })
-  val rrarbit=Module(new RRArbiter(new CtrlSigs(),num_warp))
-  rrarbit.io.in<>io.in
-  io.out<>rrarbit.io.out
+  val rrarbit_x=Module(new RRArbiter(new CtrlSigs(),num_warp))
+  val rrarbit_v=Module(new RRArbiter(new CtrlSigs(),num_warp))
+  def inst_is_vec(in: CtrlSigs): Bool = {
+    val out = Wire(new Bool)
+    // sALU | CSR | warpscheduler
+    // vFPU | vSFU | vALU&SIMT | vMUL | vTC | LSU
+    when(in.tc || in.fp || in.mul || in.sfu || in.mem) {
+      out := true.B
+    }.elsewhen(in.csr.orR || in.barrier) {
+      out := false.B
+    }.elsewhen(in.isvec) {
+      out := true.B
+    }.otherwise {
+      out := false.B
+    }
+    out
+  }
+  (0 until num_warp).foreach{ i =>
+    rrarbit_x.io.in(i).valid := io.in(i).valid && !inst_is_vec(io.in(i).bits)
+    rrarbit_v.io.in(i).valid := io.in(i).valid && inst_is_vec(io.in(i).bits)
+    io.in(i).ready := Mux(inst_is_vec(io.in(i).bits), rrarbit_v.io.in(i).ready, rrarbit_x.io.in(i).ready)
+  }
+
 /*
   rrarbit.io.out.ready:=false.B
   io.out.bits:=io.in(0).bits
@@ -53,7 +75,7 @@ class ibuffer2issue extends Module{
   io.in.foreach(_.ready:=false.B)
   io.in(0).ready:=io.out.ready
 */
-  io.out_sel:=rrarbit.io.chosen
+  //io.out_sel:=rrarbit.io.chosen
   //input:ibuffer output: issue exe
 
 }
