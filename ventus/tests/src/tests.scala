@@ -133,6 +133,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     // TODO: rename
     val testbench = AdvancedTestList.bfs4x32
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
+
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
 

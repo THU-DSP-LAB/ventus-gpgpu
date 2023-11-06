@@ -81,6 +81,45 @@ class genControl extends Module{
   }
 }
 
+class genDataMapPerByte(numdata:Int, NLanes:Int) extends Module{
+  val io = IO(new Bundle{
+    val OriData = Input(Vec(numdata,UInt(NLanes.W)))
+    val offsetMask = Input(Vec(numdata,UInt(4.W)))
+    val DataOut = Output(Vec(numdata,UInt(NLanes.W)))
+  })
+  for(i <- 0 until NLanes){
+    when(io.offsetMask(i).andR){
+      io.DataOut(i) := io.OriData(i)
+    }.elsewhen(PopCount(io.offsetMask(i))=== 1.U){
+      io.DataOut(i) := io.OriData(i) << (OHToUInt(io.offsetMask(i)) << 3)
+    }.elsewhen(io.offsetMask(i)(3,2) === 3.U){
+      io.DataOut(i) := io.OriData(i) << 16
+    }.otherwise{
+      io.DataOut(i) := io.OriData(i)
+    }
+  }
+}
+
+class relocateDataByte(numdata:Int, NLanes:Int) extends Module{
+  val io = IO(new Bundle{
+    val OriData = Input(Vec(numdata,UInt(NLanes.W)))
+    val offsetMask = Input(Vec(numdata,UInt(4.W)))
+    val DataOut = Output(Vec(numdata,UInt(NLanes.W)))
+  })
+  for(i <- 0 until numdata){
+    when(io.offsetMask(i).andR){
+      io.DataOut(i) := io.OriData(i)
+    }.elsewhen(PopCount(io.offsetMask(i))=== 1.U){
+      io.DataOut(i) := io.OriData(i) >> (OHToUInt(io.offsetMask(i)) << 3)
+    }.elsewhen(io.offsetMask(i)(3,2) === 3.U){
+      io.DataOut(i) := io.OriData(i) >> 16
+    }.otherwise{
+      io.DataOut(i) := io.OriData(i)
+    }
+  }
+}
+
+
 class WshrMemReq extends DCacheMemReq{
   val hasCoreRsp = Bool()
   val coreRspInstrId = UInt(32.W)
@@ -116,6 +155,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   val memReq_Q = Module(new Queue(new WshrMemReq,entries = 8,flow=false,pipe=false))
   val MemReqArb = Module(new Arbiter(new WshrMemReq, 3))
+  val genData = Module(new genDataMapPerByte(NLanes,WordLength))
+  val recData = Module(new relocateDataByte(BlockWords,WordLength))
+  val recDataMemRsp = Module(new relocateDataByte(BlockWords,WordLength))
   val waitforL2flush = RegInit(false.B)
   val probereadAllocateWriteConflict = Wire(Bool())
   val inflightReadWriteMiss = RegInit(false.B)
@@ -202,7 +244,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******      mshr missReq      ******
   //val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U) early definition
-  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && MshrAccess.io.probestatus
+  MshrAccess.io.missReq.valid := readMiss_st1 && !MshrAccess.io.missRspOut.valid && coreReq_st1_valid && coreReq_st1_ready && MshrAccess.io.probestatus
   val mshrMissReqTI = Wire(new VecMshrTargetInfo)
   //mshrMissReqTI.isWrite := coreReqControl_st1.isWrite
   mshrMissReqTI.instrId := coreReq_st1.instrId
@@ -226,6 +268,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val blockaddr_1 = LaneAddrOH.reduce(_ | _)
   val LaneBlockConv = Wire(Vec(dcache_BlockWords,Vec(NLanes,UInt(1.W))))
   val WordOffsetConv = Wire(Vec(dcache_BlockWords,UInt(BytesOfWord.W)))
+  val coreReq_st1_data_map_byte = Wire(Vec(NLanes,UInt(WordLength.W)))
+  genData.io.OriData := coreReq_st1.data
+  genData.io.offsetMask := coreReq_st1.perLaneAddr.map(a => a.wordOffset1H)
+  coreReq_st1_data_map_byte := genData.io.DataOut
+
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
   writeMissReq.a_source := DontCare//wait for WSHR
@@ -241,7 +288,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     }
   }
   for(j<-0 until dcache_BlockWords){
-    writeMissReq.a_data(j) := coreReq_st1.data.zip(LaneBlockConv(j)).map{case(a,b) => Mux(b.asBool,a, 0.U)}.reduce(_ | _)
+    writeMissReq.a_data(j) := coreReq_st1_data_map_byte.zip(LaneBlockConv(j)).map{case(a,b) => Mux(b.asBool,a, 0.U)}.reduce(_ | _)
     WordOffsetConv(j) := coreReq_st1.perLaneAddr.zip(LaneBlockConv(j)).map{case(a,b) => Mux(b.asBool, a.wordOffset1H,0.U)}.reduce(_|_)
     writeMissReq.a_mask(j) := WordOffsetConv(j)
   }
@@ -258,7 +305,6 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.coreRspInstrId := DontCare
 
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
-
   // ******      dataAccess bank enable     ******
   val getBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = NLanes))
   getBankEn.io.perLaneBlockIdx := coreReq_st1.perLaneAddr.map(_.blockOffset)
@@ -270,7 +316,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   DataAccessWriteHitSRAMWReq.foreach(_.setIdx := Cat(coreReq_st1.setIdx,OHToUInt(TagAccess.io.waymaskHit_st1)))
   for (i <- 0 until BlockWords){
     DataAccessWriteHitSRAMWReq(i).waymask.get := coreReq_st1.perLaneAddr(getBankEn.io.perBankBlockIdx(i)).wordOffset1H
-    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1.data(getBankEn.io.perBankBlockIdx(i)).asTypeOf(Vec(BytesOfWord,UInt(8.W)))//TODO check order
+    DataAccessWriteHitSRAMWReq(i).data := coreReq_st1_data_map_byte(getBankEn.io.perBankBlockIdx(i)).asTypeOf(Vec(BytesOfWord,UInt(8.W)))//TODO check order
   }
   val memRspIsFluOrInv: Bool = memRsp_Q.io.deq.bits.d_opcode === 2.U //hintAck
   // ******      dataAccess read hit      ******
@@ -355,7 +401,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   InvOrFluMemReq.a_source := DontCare //wait for WSHR
   InvOrFluMemReq.a_addr := Cat(TagAccess.io.dirtyTag_st1.get,
     RegNext(TagAccess.io.dirtySetIdx_st0.get), 0.U((WordLength - TagBits - SetIdxBits).W))
-  InvOrFluMemReq.a_mask := VecInit(Seq.fill(BlockWords)(~0.U))
+  InvOrFluMemReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   //InvOrFluMemReq.a_data :=
   InvOrFluMemReq.hasCoreRsp := waitforL2flush_st2
   InvOrFluMemReq.coreRspInstrId := coreReq_st1.instrId
@@ -365,7 +411,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   L2flush.a_source := DontCare
   L2flush.a_addr := Cat(TagAccess.io.dirtyTag_st1.get,
     RegNext(TagAccess.io.dirtySetIdx_st0.get), 0.U((WordLength - TagBits - SetIdxBits).W))
-  L2flush.a_mask := VecInit(Seq.fill(BlockWords)(~0.U))
+  L2flush.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   L2flush.hasCoreRsp := true.B
   L2flush.coreRspInstrId := coreReq_st1.instrId
   L2flush.a_data := DontCare
@@ -450,7 +496,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   dirtyReplace_st1.a_param := 0.U//regular write
   dirtyReplace_st1.a_source := DontCare//wait for WSHR in next next cycle
   dirtyReplace_st1.a_addr := RegNext(TagAccess.io.a_addrReplacement_st1.get)
-  dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(~0.U))
+  dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
   dirtyReplace_st1.hasCoreRsp := false.B
   dirtyReplace_st1.coreRspInstrId := DontCare
@@ -502,6 +548,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     Cat(DataAccess.io.r.resp.data.reverse)
   }
   val DataAccessReadSRAMRRsp: Vec[UInt] = VecInit(DataAccessesRRsp)
+  val coreRsp_data_map_per_byte = Wire(Vec(NLanes,UInt(WordLength.W)))
+  recData.io.OriData := DataAccessesRRsp
+  recData.io.offsetMask := coreReq_st1.perLaneAddr.map(a => a.wordOffset1H)
+  coreRsp_data_map_per_byte := recData.io.DataOut
+  val coreRsp_data_map_per_byte_memrsp = Wire(Vec(NLanes,UInt(WordLength.W)))
+  recData.io.OriData := memRsp_st1.d_data
+  recData.io.offsetMask := missRspTI_st1.perLaneAddr.map(a => a.wordOffset1H)
+  coreRsp_data_map_per_byte_memrsp := recData.io.DataOut
 
   // ******      core rsp
   when(cacheHit_st1 && (RegNext(io.coreReq.fire) || injectTagProbe)) {
@@ -512,7 +566,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(MshrAccess.io.missRspOut.valid){
     //coreRsp_st2_valid := true.B
     coreRsp_st2.io.enq.valid := true.B
-    coreRsp_st2.io.enq.bits.data := memRsp_st1.d_data
+    coreRsp_st2.io.enq.bits.data := coreRsp_data_map_per_byte_memrsp//memRsp_st1.d_data
     coreRsp_st2.io.enq.bits.isWrite := false.B
   }.elsewhen(waitMSHRCoreRsp_st1 || fluCoreRsp_st1 || invCOreRsp_st1){
     coreRsp_st2.io.enq.valid := true.B
@@ -520,7 +574,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.io.enq.bits.isWrite := false.B
   }.elsewhen(readHit_st2 && !coreRsp_Q.io.enq.ready){
     coreRsp_st2.io.enq.valid := true.B
-    coreRsp_st2.io.enq.bits.data := DataAccessesRRsp
+    coreRsp_st2.io.enq.bits.data := coreRsp_data_map_per_byte
     coreRsp_st2.io.enq.bits.isWrite := false.B
   }.otherwise{
     coreRsp_st2.io.enq.valid := false.B
