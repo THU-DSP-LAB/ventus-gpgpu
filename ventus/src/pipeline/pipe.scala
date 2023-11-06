@@ -68,7 +68,7 @@ class pipe extends Module{
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
-//  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
+  //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
   val exe_dataX=Module(new Module{
     val io = IO(new Bundle{
       val enq = Flipped(DecoupledIO(new vExeData))
@@ -167,7 +167,7 @@ class pipe extends Module{
     ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i)
     ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
     if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
-    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
+      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
     val ctrl=ibuffer.io.out(i).bits
     /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
@@ -195,7 +195,7 @@ class pipe extends Module{
     when(warp_sche.io.branch.fire&(warp_sche.io.branch.bits.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
- }
+  }
   val op_colV_in_wid = Wire(UInt(depth_warp.W))
   val op_colV_out_wid = Wire(UInt(depth_warp.W))
   val op_colX_in_wid = Wire(UInt(depth_warp.W))
@@ -239,19 +239,19 @@ class pipe extends Module{
 
   //输出所有write mem的操作
   //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
-//  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
-//    when(exe_data.io.deq.bits.ctrl.isvec){
-//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
-//      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
-//      printf(p"mask ${Binary(exe_data.io.deq.bits.mask.asUInt)} @")
-//      (exe_data.io.deq.bits.in1 zip exe_data.io.deq.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
-//      printf("\n")
-//    }.otherwise{
-//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w x${exe_data.io.deq.bits.ctrl.reg_idxw} ")
-//      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0))} ")
-//      printf(p"@ ${Hexadecimal(exe_data.io.deq.bits.in1(0))}+${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
-//    }
-//  }
+  //  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
+  //    when(exe_data.io.deq.bits.ctrl.isvec){
+  //      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
+  //      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
+  //      printf(p"mask ${Binary(exe_data.io.deq.bits.mask.asUInt)} @")
+  //      (exe_data.io.deq.bits.in1 zip exe_data.io.deq.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
+  //      printf("\n")
+  //    }.otherwise{
+  //      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w x${exe_data.io.deq.bits.ctrl.reg_idxw} ")
+  //      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0))} ")
+  //      printf(p"@ ${Hexadecimal(exe_data.io.deq.bits.in1(0))}+${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
+  //    }
+  //  }
   //输出所有发射的指令
   //when( exe_data.io.deq.fire()){
   //  printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
@@ -270,15 +270,15 @@ class pipe extends Module{
   //  printf(p"\n")
   //}
   //输出写入向量寄存器的
-//  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
-//    printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
-//    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
-//    printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
-//  }
-//  ////输出写入标量寄存器的
-//  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
-//    printf(p"write x${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
-//  }
+  //  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
+  //    printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
+  //    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
+  //    printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
+  //  }
+  //  ////输出写入标量寄存器的
+  //  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
+  //    printf(p"write x${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
+  //  }
 
   {
     exe_dataX.io.enq.bits.ctrl := operand_collector.io.out(1).bits.control
@@ -297,7 +297,7 @@ class pipe extends Module{
     exe_dataV.io.enq.valid := operand_collector.io.out(0).valid
     operand_collector.io.out(0).ready := exe_dataX.io.enq.ready
   }
-//  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
+  //  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
   issueV.io.in<>exe_dataV.io.deq
   issueX.io.in<>exe_dataX.io.deq
 
@@ -326,7 +326,7 @@ class pipe extends Module{
   issueV.io.out_TC<>tensorcore.io.in
   issueX.io.out_TC.ready := false.B
   issueV.io.out_vFPU<>fpu.io.in
-  issueX.io.out_vFPU := false.B
+  issueX.io.out_vFPU.ready := false.B
   fpu.io.rm:=csrfile.io.rm(0)
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
   sfu.io.rm := csrfile.io.rm(1)

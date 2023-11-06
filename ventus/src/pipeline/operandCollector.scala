@@ -44,8 +44,8 @@ class issueIO extends Bundle{
   val control = new CtrlSigs
 }
 /**
-  *One of the number of num_warp collector Units, instantiating this class in operand collector for num_warps.
-  */
+ *One of the number of num_warp collector Units, instantiating this class in operand collector for num_warps.
+ */
 class collectorUnit extends Module{
   val io = IO(new Bundle{
     val control = Flipped(Decoupled(new CtrlSigs))
@@ -305,9 +305,9 @@ class collectorUnit extends Module{
 }
 
 /**
-  * Arbitrating which reading (TO DO: writing) request should
-  * be send to register files
-  */
+ * Arbitrating which reading (TO DO: writing) request should
+ * be send to register files
+ */
 class operandArbiter extends Module{
   val io = IO(new Bundle{
     val readArbiterIO = Vec(num_collectorUnit, Vec(4, Flipped(Decoupled(new CU2Arbiter))))
@@ -389,7 +389,7 @@ class crossBar  extends Module{
   })
   io.out.foreach(_.foreach(_.bits.data := 0.U.asTypeOf(Vec(num_thread, UInt(xLen.W)))))
   io.out.foreach(_.foreach(_.bits.v0 := 0.U.asTypeOf(Vec(num_thread, UInt(xLen.W)))))
-//  validDelay.foreach(_.foreach(_ := false.B))
+  //  validDelay.foreach(_.foreach(_ := false.B))
   io.out.foreach(_.foreach(_.valid := (false.B)))
   io.out.foreach(_.foreach(_.bits.regOrder := 0.U))
   for( i <- 0 until num_bank){
@@ -397,28 +397,28 @@ class crossBar  extends Module{
       for(k <- 0 until 4){
         when((CUIdScalar(i)===j.U) && io.validArbiterScalar(i) &&(regOrderScalar(i)===k.U)){
           io.out(j)(k).bits.data := VecInit.fill(num_thread)(io.dataInScalar.rs(i))
-//          validDelay(j)(k) := true.B
-//          io.out(j)(k).valid := validDelay
+          //          validDelay(j)(k) := true.B
+          //          io.out(j)(k).valid := validDelay
           io.out(j)(k).valid := true.B
           io.out(j)(k).bits.regOrder := regOrderScalar(i)
         }
         when((CUIdVector(i) === j.U) && io.validArbiterVector(i) && (regOrderVector(i) === k.U)) {
           io.out(j)(k).bits.data := io.dataInVector.rs(i)
           io.out(j)(k).bits.v0 := io.dataInVector.v0(i)
-//          validDelay(j)(k) := true.B
-//          io.out(j)(k).valid := validDelay
+          //          validDelay(j)(k) := true.B
+          //          io.out(j)(k).valid := validDelay
           io.out(j)(k).valid := true.B
           io.out(j)(k).bits.regOrder := regOrderVector(i)
         }
-//      io.out(j)(k).valid := RegNext(validDelay(j)(k))
+        //      io.out(j)(k).valid := RegNext(validDelay(j)(k))
       }
     }
   }
 }
 
 /**
-  * Allocating the collector unit to new input instruction
-  */
+ * Allocating the collector unit to new input instruction
+ */
 class instDemux extends Module{
   val io = IO(new Bundle{
     val in = Vec(2, Flipped(Decoupled(new CtrlSigs)))
@@ -431,7 +431,7 @@ class instDemux extends Module{
   })
 
   // Each data on out port is identical
-  io.out.foreach(_.bits := 0.U)
+  io.out.foreach(_.bits := io.in(0).bits)
 
   // For those out port ready, selecting one by bitwise priority.
   val outReady1 = VecInit(io.out.map(_.ready))
@@ -439,10 +439,10 @@ class instDemux extends Module{
 
   for (i <- (0 until num_collectorUnit).reverse) {
     when(outReady1.asUInt.orR) {
-      io.out(PriorityEncoder(outReady1)) := io.in(0)
+      io.out(PriorityEncoder(outReady1)) <> io.in(0)
     }
     when(outReady2.asUInt.orR) {
-      io.out(PriorityEncoder(outReady2)) := io.in(1)
+      io.out(PriorityEncoder(outReady2)) <> io.in(1)
     }
   }
 
@@ -553,7 +553,46 @@ class operandCollector extends Module{
   io.writeVecCtrl.ready := true.B
 
   // when all operands of an instruction has prepared, issue it.
-  val issueUnit = Module(new XVDualIssue(num_collectorUnit))
+  class DualIssueIO(num_buffer: Int) extends Module {
+    val io = IO(new Bundle {
+      val in = Flipped(Vec(num_buffer, Decoupled(Output(new issueIO))))
+      val out_x = Decoupled(Output(new issueIO))
+      val out_v = Decoupled(Output(new issueIO))
+    })
+
+    def inst_is_vec(in: issueIO): Bool = {
+      val out = Wire(new Bool)
+      // sALU | CSR | warpscheduler
+      // vFPU | vSFU | vALU&SIMT | vMUL | vTC | LSU
+      when(in.control.tc || in.control.fp || in.control.mul || in.control.sfu || in.control.mem) {
+        out := true.B
+      }.elsewhen(in.control.csr.orR || in.control.barrier) {
+        out := false.B
+      }.elsewhen(in.control.isvec) {
+        out := true.B
+      }.otherwise {
+        out := false.B
+      }
+      out
+    }
+
+    val arb_x = Module(new RRArbiter(new issueIO, num_buffer))
+    val arb_v = Module(new RRArbiter(new issueIO, num_buffer))
+
+    (0 until num_buffer).foreach { i =>
+      val in_isvec = inst_is_vec(io.in(i).bits)
+      io.in(i).ready := Mux(in_isvec, arb_v.io.in(i).ready, arb_x.io.in(i).ready)
+
+      arb_x.io.in(i).valid := io.in(i).valid && !in_isvec
+      arb_x.io.in(i).bits := io.in(i).bits
+      arb_v.io.in(i).valid := io.in(i).valid && in_isvec
+      arb_v.io.in(i).bits := io.in(i).bits
+    }
+    io.out_x <> arb_x.io.out
+    io.out_v <> arb_v.io.out
+  }
+
+  val issueUnit = Module(new DualIssueIO(num_collectorUnit))
   (0 until num_collectorUnit).foreach{ i =>
     issueUnit.io.in(i) <> collectorUnits(i).issue
   }
