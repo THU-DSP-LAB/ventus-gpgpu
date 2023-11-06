@@ -17,23 +17,23 @@ import top.parameters._
 class warp_scheduler extends Module{
   val io = IO(new Bundle{
     val pc_reset = Input(Bool())
-    val warpReq=Flipped(Decoupled(new warpReqData))
-    val warpRsp=Decoupled(new warpRspData)
-    val wg_id_lookup=Output(UInt(depth_warp.W))
-    val wg_id_tag=Input(UInt(TAG_WIDTH.W))
-    val pc_req=Decoupled(new ICachePipeReq_np)
-    val pc_rsp=Flipped(Valid(new ICachePipeRsp_np))
-    val branch = Flipped(DecoupledIO(new BranchCtrl))
-    val warp_control=Flipped(DecoupledIO(new warpSchedulerExeData))
-    val issued_warp=Flipped(Valid(UInt(depth_warp.W)))
-    val scoreboard_busy=Input(UInt(num_warp.W))
-    val exe_busy=Input(UInt(num_warp.W))
+    val warpReq=Flipped(Decoupled(new warpReqData)) //new warp
+    val warpRsp=Decoupled(new warpRspData) //endprg
+    val wg_id_lookup=Output(UInt(depth_warp.W)) //lookup CTA
+    val wg_id_tag=Input(UInt(TAG_WIDTH.W))  //barrier related
+    val pc_req=Decoupled(new ICachePipeReq_np) //should flush icache
+    val pc_rsp=Flipped(Valid(new ICachePipeRsp_np)) //icache miss state
+    val branch = Flipped(DecoupledIO(new BranchCtrl)) //branch, flush pipeline
+    val warp_control=Flipped(DecoupledIO(new warpSchedulerExeData)) //engprg and barrier
+    val issued_warp=Flipped(Valid(UInt(depth_warp.W))) //not use
+    val scoreboard_busy=Input(UInt(num_warp.W)) //scoreboard race
+    val exe_busy=Input(UInt(num_warp.W)) //exe race
     //val pc_icache_ready=Input(Vec(num_warp,Bool()))
-    val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W)))
-    val warp_ready=Output(UInt(num_warp.W))
+    val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W))) //ibuffer ready
+    val warp_ready=Output(UInt(num_warp.W)) //to issue
     val flush=(ValidIO(UInt(depth_warp.W)))
     val flushCache=(ValidIO(UInt(depth_warp.W)))
-    val CTA2csr=ValidIO(new warpReqData)
+    val CTA2csr=ValidIO(new warpReqData) //redirect warpreq
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
   })
