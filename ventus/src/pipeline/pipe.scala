@@ -179,7 +179,7 @@ class pipe extends Module{
                   Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))*/
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
     scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
-    scoreb(i).if_ctrl:= (ibuffer2issue.io.out.bits)
+    scoreb(i).if_ctrl:= (ibuffer2issue.io.out_x.bits)
     scoreb(i).wb_v_ctrl:=wb.io.out_v.bits
     scoreb(i).wb_x_ctrl:=wb.io.out_x.bits
     scoreb(i).fence_end:=lsu.io.fence_end(i)
@@ -210,7 +210,11 @@ class pipe extends Module{
   scoreb(op_colX_in_wid).op_colX_in_fire := operand_collector.io.controlX.fire
   scoreb(op_colX_in_wid).op_colX_out_fire := operand_collector.io.out(1).fire
 
-  scoreb(ibuffer2issue.io.out.bits.wid).if_fire:=(ibuffer2issue.io.out.fire)
+  scoreb(ibuffer2issue.io.out_x.bits.wid).if_fire:=(ibuffer2issue.io.out_x.fire)
+  scoreb(ibuffer2issue.io.out_x.bits.wid).if_ctrl:=(ibuffer2issue.io.out_x.bits)
+  scoreb(ibuffer2issue.io.out_v.bits.wid).if_fire:=(ibuffer2issue.io.out_v.fire)
+  scoreb(ibuffer2issue.io.out_v.bits.wid).if_ctrl:=(ibuffer2issue.io.out_v.bits)
+
   scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
   scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
 
