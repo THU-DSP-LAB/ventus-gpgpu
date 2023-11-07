@@ -277,11 +277,12 @@ for(i<- 0 until params.cache.sets){
   when(io.read.fire){
     read_bits_reg:= io.read.bits
   }
+  val about_replace = (io.write.bits.set === io.result.bits.set) && (io.write.bits.way === io.result.bits.way) && io.write.fire
 
 
-  io.read.ready:= ((wipeDone&& !io.write.fire()) ||(setQuash_1&&tagMatch_1) )&& !flush_issue_reg    //also fire when bypass
-  io.result.valid := Mux(RegNext(flush_issue),RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue),valid_signal)
-  io.result.bits.hit  := Mux(RegNext(flush_issue),true.B, hit ||(setQuash && tagMatch))
+  io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg //also fire when bypass
+  io.result.valid := Mux(RegNext(flush_issue), RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
+  io.result.bits.hit := Mux(RegNext(flush_issue), true.B, (hit || (setQuash && tagMatch)) && (!about_replace))
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
   io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,read_bits_reg.put)
   io.result.bits.data   :=Mux(RegNext(flush_issue),0.U,read_bits_reg.data)
