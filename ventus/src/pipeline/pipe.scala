@@ -333,6 +333,9 @@ class pipe extends Module{
   issueX.io.out_TC.ready := false.B
   issueV.io.out_vFPU<>fpu.io.in
   issueX.io.out_vFPU.ready := false.B
+  issueX.io.out_warpscheduler <> warp_sche.io.warp_control
+  issueV.io.out_warpscheduler.ready := false.B
+
   fpu.io.rm:=csrfile.io.rm(0)
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
   sfu.io.rm := csrfile.io.rm(1)

@@ -48,11 +48,15 @@ class ibuffer2issue extends Module{
   })
   //
   if(INST_CNT){
-    val cnt = new Counter(200000)
-    when(io.out.fire) {
-      cnt.inc
+    val cnt = WireInit(0.U(20.W))
+    when(io.out_x.fire || io.out_v.fire) {
+      when(io.out_x.fire && io.out_v.fire) {
+        cnt := cnt + 2.U
+      }.otherwise{
+        cnt := cnt + 1.U
+      }
     }
-    io.cnt.foreach(_ := cnt.value)
+    io.cnt.foreach(_ := cnt)
   }
   //
   val rrarbit_x=Module(new RRArbiter(new CtrlSigs(),num_warp))
@@ -79,6 +83,8 @@ class ibuffer2issue extends Module{
     rrarbit_v.io.in(i).bits := io.in(i).bits
     io.in(i).ready := Mux(inst_is_vec(io.in(i).bits), rrarbit_v.io.in(i).ready, rrarbit_x.io.in(i).ready)
   }
+  io.out_x <> rrarbit_x.io.out
+  io.out_v <> rrarbit_v.io.out
 
   /*
     rrarbit.io.out.ready:=false.B
