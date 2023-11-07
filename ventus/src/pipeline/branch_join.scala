@@ -79,7 +79,7 @@ class branch_join(val depth_stack: Int) extends Module{
 
   val branch_ctl_buf = Queue(io.branch_ctl, 1, flow = true)
   val if_mask_buf = Queue(io.if_mask, 0)
-  val PC_reconv_buf = Queue(io.pc_reconv, 1)
+  val PC_reconv_buf = Queue(io.pc_reconv, 1, pipe = true)
 
   val fetch_ctl_buf = Module(new Queue(new BranchCtrl, 1, flow = true))
 
