@@ -44,7 +44,17 @@ class ibuffer2issue extends Module{
     val out_x = Decoupled(new CtrlSigs)
     val out_v = Decoupled(new CtrlSigs)
     //val out_sel=Output(UInt(depth_warp.W))
+    val cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
   })
+  //
+  if(INST_CNT){
+    val cnt = new Counter(200000)
+    when(io.out.fire) {
+      cnt.inc
+    }
+    io.cnt.foreach(_ := cnt.value)
+  }
+  //
   val rrarbit_x=Module(new RRArbiter(new CtrlSigs(),num_warp))
   val rrarbit_v=Module(new RRArbiter(new CtrlSigs(),num_warp))
   def inst_is_vec(in: CtrlSigs): Bool = {
