@@ -432,17 +432,31 @@ class instDemux extends Module{
 
   // Each data on out port is identical
   io.out.foreach(_.bits := io.in(0).bits)
+  io.out.foreach(_.valid := 0.U)
 
   // For those out port ready, selecting one by bitwise priority.
-  val outReady1 = VecInit(io.out.map(_.ready))
-  val outReady2 = outReady1.asUInt & (~PriorityEncoder(outReady1)).asUInt
+  val outReady1 = VecInit(io.out.map(_.ready)).asUInt
+  val outV_sel_oh = Wire(UInt(num_collectorUnit.W))
+  outV_sel_oh :=  PriorityEncoderOH(outReady1)
+  val outV_sel = OHToUInt(outV_sel_oh)
+  val outReady2 = outReady1 & (~outV_sel_oh)
+  val outX_sel = Wire(UInt(num_collectorUnit.W))
+  outX_sel := PriorityEncoder(outReady2)
+  io.in(0).ready := outReady1.orR
+  io.in(1).ready := outReady2.orR
+
+
 
   for (i <- (0 until num_collectorUnit).reverse) {
     when(outReady1.asUInt.orR) {
-      io.out(PriorityEncoder(outReady1)) <> io.in(0)
+      io.out(outV_sel).bits :=  io.in(0).bits
+      io.out(outV_sel).valid :=  io.in(0).valid
+
     }
     when(outReady2.asUInt.orR) {
-      io.out(PriorityEncoder(outReady2)) <> io.in(1)
+      io.out(outX_sel).bits :=  io.in(1).bits
+      io.out(outX_sel).valid :=  io.in(1).valid
+
     }
   }
 
@@ -553,9 +567,9 @@ class operandCollector extends Module{
   io.writeVecCtrl.ready := true.B
 
   // when all operands of an instruction has prepared, issue it.
-  class DualIssueIO(num_buffer: Int) extends Module {
+  class DualIssueIO(num_CU: Int) extends Module {
     val io = IO(new Bundle {
-      val in = Flipped(Vec(num_buffer, Decoupled(Output(new issueIO))))
+      val in = Flipped(Vec(num_CU, Decoupled(Output(new issueIO))))
       val out_x = Decoupled(Output(new issueIO))
       val out_v = Decoupled(Output(new issueIO))
     })
@@ -576,10 +590,10 @@ class operandCollector extends Module{
       out
     }
 
-    val arb_x = Module(new RRArbiter(new issueIO, num_buffer))
-    val arb_v = Module(new RRArbiter(new issueIO, num_buffer))
+    val arb_x = Module(new RRArbiter(new issueIO, num_CU))
+    val arb_v = Module(new RRArbiter(new issueIO, num_CU))
 
-    (0 until num_buffer).foreach { i =>
+    (0 until num_CU).foreach { i =>
       val in_isvec = inst_is_vec(io.in(i).bits)
       io.in(i).ready := Mux(in_isvec, arb_v.io.in(i).ready, arb_x.io.in(i).ready)
 

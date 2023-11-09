@@ -48,7 +48,7 @@ class ibuffer2issue extends Module{
   })
   //
   if(INST_CNT){
-    val cnt = WireInit(0.U(20.W))
+    val cnt = RegInit(0.U(20.W))
     when(io.out_x.fire || io.out_v.fire) {
       when(io.out_x.fire && io.out_v.fire) {
         cnt := cnt + 2.U

@@ -205,12 +205,12 @@ class pipe extends Module{
   op_colV_in_wid := operand_collector.io.controlV.bits.wid
   op_colV_out_wid := operand_collector.io.out(0).bits.control.wid
   scoreb(op_colV_in_wid).op_colV_in_fire:=operand_collector.io.controlV.fire
-  scoreb(op_colV_in_wid).op_colV_out_fire:=operand_collector.io.out(0).fire
+  scoreb(op_colV_out_wid).op_colV_out_fire:=operand_collector.io.out(0).fire
 
   op_colX_in_wid := operand_collector.io.controlX.bits.wid
   op_colX_out_wid := operand_collector.io.out(1).bits.control.wid
   scoreb(op_colX_in_wid).op_colX_in_fire := operand_collector.io.controlX.fire
-  scoreb(op_colX_in_wid).op_colX_out_fire := operand_collector.io.out(1).fire
+  scoreb(op_colX_out_wid).op_colX_out_fire := operand_collector.io.out(1).fire
 
   scoreb(ibuffer2issue.io.out_x.bits.wid).if_fire:=(ibuffer2issue.io.out_x.fire)
   scoreb(ibuffer2issue.io.out_x.bits.wid).if_ctrl:=(ibuffer2issue.io.out_x.bits)
@@ -291,7 +291,7 @@ class pipe extends Module{
     exe_dataX.io.enq.bits.in1 := operand_collector.io.out(1).bits.alu_src1
     exe_dataX.io.enq.bits.in2 := operand_collector.io.out(1).bits.alu_src2
     exe_dataX.io.enq.bits.in3 := operand_collector.io.out(1).bits.alu_src3
-    exe_dataX.io.enq.bits.mask := (operand_collector.io.out(1).bits.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
+    exe_dataX.io.enq.bits.mask.foreach(_ := true.B)
     exe_dataX.io.enq.valid:=operand_collector.io.out(1).valid
     operand_collector.io.out(1).ready := exe_dataX.io.enq.ready
 
@@ -301,7 +301,7 @@ class pipe extends Module{
     exe_dataV.io.enq.bits.in3 := operand_collector.io.out(0).bits.alu_src3
     exe_dataV.io.enq.bits.mask := (operand_collector.io.out(0).bits.mask.zipWithIndex.map { case (x, y) => x & simt_stack.io.out_mask(y) })
     exe_dataV.io.enq.valid := operand_collector.io.out(0).valid
-    operand_collector.io.out(0).ready := exe_dataX.io.enq.ready
+    operand_collector.io.out(0).ready := exe_dataV.io.enq.ready
   }
   //  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
   issueV.io.in<>exe_dataV.io.deq
