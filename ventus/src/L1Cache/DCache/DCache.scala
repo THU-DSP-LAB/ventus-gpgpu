@@ -87,7 +87,7 @@ class genDataMapPerByte(numdata:Int, NLanes:Int) extends Module{
     val offsetMask = Input(Vec(numdata,UInt(4.W)))
     val DataOut = Output(Vec(numdata,UInt(NLanes.W)))
   })
-  for(i <- 0 until NLanes){
+  for(i <- 0 until numdata){
     when(io.offsetMask(i).andR){
       io.DataOut(i) := io.OriData(i)
     }.elsewhen(PopCount(io.offsetMask(i))=== 1.U){
