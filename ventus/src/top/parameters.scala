@@ -5,7 +5,7 @@ import chisel3.util._
 
 // TODO: MOVE parameters to `ventus/top'
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
-  def num_sm = 2
+  def num_sm = 1
   val SINGLE_INST: Boolean = false
   val SPIKE_OUTPUT: Boolean = true
   val INST_CNT: Boolean = true
@@ -26,7 +26,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = log2Ceil(num_warp)
 
-  var num_thread = 4
+  var num_thread = 16
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -91,13 +91,13 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sharemem_size = sharedmem_depth * sharedmem_BlockWords * 4 //bytes
 
-  def l2cache_NSets: Int = 32
+  def l2cache_NSets: Int = 2048
 
   def l2cache_NWays: Int = 16
 
   def l2cache_BlockWords: Int = dcache_BlockWords
 
-  def l2cache_writeBytes: Int = 1
+  def l2cache_writeBytes: Int = 4
 
   def l2cache_memCycles: Int = 4
 
