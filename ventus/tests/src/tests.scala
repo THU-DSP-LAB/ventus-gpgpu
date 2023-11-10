@@ -97,7 +97,7 @@ object AdvancedTestList{
   case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
 
   val gaussian = new AdvTest(
-    "adv_gaussian_1x16",
+    "adv_gaussian",
     Seq(
       "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
     ),
@@ -113,8 +113,11 @@ object AdvancedTestList{
   val vecadd = new AdvTest(
     "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000
   )
+  val vecadd4x16 = new AdvTest(
+    "adv_vecadd_4x16", Seq("vecadd.metadata"), Seq("vecadd.data"), 4, 16, 10000
+  )
   val nn = new AdvTest(
-    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
+    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 15000
   )
   val bfs4x32 = {
     var tmp: Seq[String] = Nil
@@ -151,7 +154,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         }
         true
       }
-      def memLatency = 5
+      def memLatency = 60
 
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)
