@@ -48,10 +48,13 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val flushChoosen = if (!readOnly) {Some(Flipped(ValidIO(UInt((log2Up(set)+way).W))))} else None
     //For Inv
     val invalidateAll = Input(Bool())
+    val tagready_st1 = Input(Bool())
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
   assert(!(io.probeRead.fire && io.allocateWrite.fire), s"tag probe and allocate in same cycle")
+  val probeReadBuf = Queue(io.probeRead,1,pipe=true)
+  probeReadBuf.ready := io.tagready_st1
 
   //access time counter
   val accessFire = io.probeRead.fire || io.allocateWrite.fire
@@ -138,7 +141,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
-  io.hit_st1 := iTagChecker.io.cache_hit && RegNext(io.probeRead.fire)
+  val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
+  io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold) && probeReadBuf.valid//RegNext(io.probeRead.fire)
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty

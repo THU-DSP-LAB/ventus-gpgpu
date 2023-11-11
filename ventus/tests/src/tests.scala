@@ -97,7 +97,7 @@ object AdvancedTestList{
   case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
 
   val gaussian = new AdvTest(
-    "adv_gaussian_1x16",
+    "adv_gaussian",
     Seq(
       "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
     ),
@@ -121,11 +121,11 @@ object AdvancedTestList{
   )
   val bfs4x32 = {
     var tmp: Seq[String] = Nil
-    for(i <- 0 until 8){
+    for(i <- 0 until 5){
       tmp = tmp ++ Seq(s"BFS_1_${i}", s"BFS_2_${i}")
     }
     new AdvTest(
-      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 3000
+      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 20000
     )
   }
 }
@@ -134,7 +134,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
   import top.helper._
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.gaussian
+    val testbench = AdvancedTestList.bfs4x32
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
@@ -144,7 +144,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation,VerilatorBackendAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
