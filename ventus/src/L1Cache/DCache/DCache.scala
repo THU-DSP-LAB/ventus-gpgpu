@@ -216,14 +216,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreReqControl_st1_Q = Module(new Queue(new DCacheControl,1,true,false))
   coreReqControl_st1_Q.io.enq.bits := coreReqControl_st0
   coreReqControl_st1_Q.io.enq.valid := io.coreReq.fire()
-  coreReqControl_st1_Q.io.deq.ready := coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready
+  coreReqControl_st1_Q.io.deq.ready := coreReq_st1_ready//coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready
   val cacheHit_st1 = Wire(Bool())
   cacheHit_st1 := TagAccess.io.hit_st1
   val cacheMiss_st1 = !TagAccess.io.hit_st1
 
 
   val readHit_st1 = cacheHit_st1 & coreReqControl_st1_Q.io.deq.bits.isRead & coreReqControl_st1_Q.io.deq.fire()
-  val readMiss_st1 = cacheMiss_st1 & coreReqControl_st1_Q.io.deq.bits.isRead & coreReqControl_st1_Q.io.deq.fire()
+  val readMiss_st1 = cacheMiss_st1 & coreReqControl_st1_Q.io.deq.bits.isRead & coreReqControl_st1_Q.io.deq.valid//coreReqControl_st1_Q.io.deq.fire()
   val writeHit_st1 = cacheHit_st1 & coreReqControl_st1_Q.io.deq.bits.isWrite & coreReqControl_st1_Q.io.deq.fire()
   val writeMiss_st1 = cacheMiss_st1 & coreReqControl_st1_Q.io.deq.bits.isWrite & coreReqControl_st1_Q.io.deq.fire()
 
@@ -248,7 +248,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeRead.valid := io.coreReq.fire || injectTagProbe
   TagAccess.io.probeRead.bits.setIdx := Mux(injectTagProbe,coreReq_st1.setIdx,io.coreReq.bits.setIdx)
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
-  TagAccess.io.tagready_st1 := coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready
+  TagAccess.io.tagready_st1 := coreReq_st1_ready//coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready
 
 
   // ******      mshr probe      ******
@@ -287,7 +287,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   // ******      l1_data_cache::coreReq_pipe1_cycle      ******
   coreReq_st1_valid := coreReq_Q.io.deq.valid && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)
-  TagAccess.io.probeIsWrite_st1.get := writeHit_st1
+  TagAccess.io.probeIsWrite_st1.get := coreReqControl_st1_Q.io.deq.bits.isWrite && coreReqControl_st1_Q.io.deq.valid &&cacheHit_st1//writeHit_st1
 
   // ******      mshr missReq      ******
   //val secondaryFullReturn = RegNext(MshrAccess.io.probeOut_st1.probeStatus === 4.U) early definition
