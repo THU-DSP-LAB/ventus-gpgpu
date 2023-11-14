@@ -79,7 +79,7 @@ class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag�
   val warp_id = UInt(depth_warp.W)
   val wfd = Bool()
   val wxd = Bool()
-  val reg_idxw = UInt(5.W)
+  val reg_idxw = UInt((regidx_width + regext_width).W)
   val mask = Vec(num_thread, Bool())
   val unsigned = Bool()
   val isvec = Bool()
