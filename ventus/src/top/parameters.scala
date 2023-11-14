@@ -91,9 +91,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sharemem_size = sharedmem_depth * sharedmem_BlockWords * 4 //bytes
 
-  def l2cache_NSets: Int = 2048
+  def l2cache_NSets: Int = 2 //2048
 
-  def l2cache_NWays: Int = 16
+  def l2cache_NWays: Int = 2 //16
 
   def l2cache_BlockWords: Int = dcache_BlockWords
 
