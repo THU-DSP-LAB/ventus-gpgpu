@@ -141,7 +141,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
-  val cachehit_hold = Module(new Queue(Bool(),1,flow = true))
+  val cachehit_hold = Module(new Queue(Bool(),1))
   cachehit_hold.io.enq.bits := iTagChecker.io.cache_hit && !probeReadBuf.ready
   cachehit_hold.io.enq.valid := probeReadBuf.valid
   cachehit_hold.io.deq.ready := probeReadBuf.ready
