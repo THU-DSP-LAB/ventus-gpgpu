@@ -141,8 +141,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
   io.waymaskHit_st1 := iTagChecker.io.waymask//st1
-  val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
-  io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold) && probeReadBuf.valid//RegNext(io.probeRead.fire)
+  val cachehit_hold = Module(new Queue(Bool(),1,flow = true))
+  cachehit_hold.io.enq.bits := iTagChecker.io.cache_hit && !probeReadBuf.ready
+  cachehit_hold.io.enq.valid := probeReadBuf.valid
+  cachehit_hold.io.deq.ready := probeReadBuf.ready
+  //val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
+  io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold.io.deq.bits && cachehit_hold.io.deq.valid) && probeReadBuf.valid//RegNext(io.probeRead.fire)
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
