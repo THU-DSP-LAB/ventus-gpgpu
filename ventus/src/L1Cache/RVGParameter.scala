@@ -37,6 +37,8 @@ trait HasRVGParameters {
 
   def NSms = RVGParams.NSms
   def NLanes = RVGParams.NLanes
+
+  def NLanesd = RVGParams.BlockWords
   def NWarps = RVGParams.NWarps
   def WordLength = RVGParams.WordLength
   def WIdBits = log2Up(NWarps)

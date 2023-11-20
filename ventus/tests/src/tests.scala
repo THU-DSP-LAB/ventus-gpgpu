@@ -111,7 +111,7 @@ object AdvancedTestList{
     "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
   )
   val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000
+    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1200
   )
   val nn = new AdvTest(
     "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
@@ -131,7 +131,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
   import top.helper._
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.bfs4x32
+    val testbench = AdvancedTestList.vecadd
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
@@ -161,7 +161,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(2000)
+      c.clock.setTimeout(200)
       c.clock.step(5)
 
       var meta = new MetaData

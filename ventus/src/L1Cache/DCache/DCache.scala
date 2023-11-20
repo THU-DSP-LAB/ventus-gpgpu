@@ -157,6 +157,11 @@ class WshrMemReq extends DCacheMemReq{
   val coreRspInstrId = UInt(32.W)
 }
 
+class WshrMemReq_withMask(NLanes: Int) extends DCacheMemReq{
+  val wshrMemReq = new WshrMemReq
+  val activeMask = Vec(NLanes, Bool())
+}
+
 class DataCache(implicit p: Parameters) extends DCacheModule{
   val io = IO(new Bundle{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
@@ -227,7 +232,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val writeHit_st1 = cacheHit_st1 & coreReqControl_st1_Q.io.deq.bits.isWrite & coreReqControl_st1_Q.io.deq.fire()
   val writeMiss_st1 = cacheMiss_st1 & coreReqControl_st1_Q.io.deq.bits.isWrite & coreReqControl_st1_Q.io.deq.fire()
 
-  val coreRsp_st2 =Module(new Queue(new DCacheCoreRsp,1,true,false))//Reg(new DCacheCoreRsp)
+  val coreRsp_st2 =Module(new Queue(new DCacheCoreRsp_d,1,true,false))//Reg(new DCacheCoreRsp)
   val coreRsp_st2_valid =Wire(Bool())
   val coreRsp_st2_perLaneAddr = Reg(Vec(NLanes, new DCachePerLaneAddr))
   val readHit_st2 = Module(new Queue(Bool(),1,true,false))
@@ -644,7 +649,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.io.enq.bits.data := DontCare
     coreRsp_st2.io.enq.bits.isWrite := false.B
   }
-  when((cacheHit_st1 && (coreReq_Q.io.deq.fire) ) ||
+  when(((cacheHit_st1||writeMiss_st1) && (coreReq_Q.io.deq.fire) ) ||
     waitMSHRCoreRsp_st1 || fluCoreRsp_st1 || invCOreRsp_st1){
 
     coreRsp_st2.io.enq.bits.instrId := coreReq_st1.instrId
@@ -690,8 +695,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreRsp_st2_valid || (memRspIsFluOrInv && memRsp_Q.io.deq.fire())
-  coreRsp_Q.io.enq.bits := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq,coreRsp_st2.io.deq.bits)
-
+  coreRsp_Q.io.enq.bits.isWrite := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq.isWrite,coreRsp_st2.io.deq.bits.isWrite)
+  coreRsp_Q.io.enq.bits.activeMask := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq.activeMask,coreRsp_st2.io.deq.bits.activeMask)
+  coreRsp_Q.io.enq.bits.instrId := Mux(coreRsp_st2_valid_from_memReq,coreRspFromMemReq.instrId,coreRsp_st2.io.deq.bits.instrId)
 
   coreRsp_Q.io.enq.bits.data := coreRsp_st2_dataCoreOrder//coreRsp_data_map_per_byte
 
@@ -756,7 +762,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRspFromMemReq.isWrite := true.B
   //st指令的regIdx对SM流水线提交级无意义，且memReq_Q没有传输该数据的通道
   coreRspFromMemReq.instrId := memReq_Q.io.deq.bits.coreRspInstrId
-  coreRspFromMemReq.activeMask := VecInit(Seq.fill(NLanes)(true.B))
+  coreRspFromMemReq.activeMask := coreRsp_st2.io.deq.bits.activeMask//VecInit(Seq.fill(NLanes)(true.B))
   // memReq(st3)
   io.memReq.bits := memReq_st3
 

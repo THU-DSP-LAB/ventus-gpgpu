@@ -150,7 +150,13 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
     assert(blockOffset_sel_st1(log2Ceil(num_fetch)-1,0).orR === false.B)
   }
   val data_to_blockOffset_st1 = data_after_wayidx_st1
-  val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))(num_fetch*xLen,0)
+  val data_after_blockOffset_st1 = Wire(UInt((num_fetch*xLen).W))//(data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))//(num_fetch*xLen,0)
+  if(num_fetch * xLen == BlockBits){
+    data_after_blockOffset_st1 := (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))
+  } else{
+    data_after_blockOffset_st1 := (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))(num_fetch*xLen,0)
+  }
+  //val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))//(num_fetch*xLen,0)
   //val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1*32))(31,0)
   val data_after_blockOffset_st2 = RegNext(data_after_blockOffset_st1)
 
