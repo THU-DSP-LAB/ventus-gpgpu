@@ -649,7 +649,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     coreRsp_st2.io.enq.bits.data := DontCare
     coreRsp_st2.io.enq.bits.isWrite := false.B
   }
-  when(((cacheHit_st1||writeMiss_st1) && (coreReq_Q.io.deq.fire) ) ||
+  when(((cacheHit_st1) && (coreReq_Q.io.deq.fire) ) ||
     waitMSHRCoreRsp_st1 || fluCoreRsp_st1 || invCOreRsp_st1){
 
     coreRsp_st2.io.enq.bits.instrId := coreReq_st1.instrId
@@ -719,7 +719,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0).valid := tagReplaceStatus
   MemReqArb.io.in(0).bits := dirtyReplace_st1
-  MemReqArb.io.in(1).valid := coreReq_st1_valid &&coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready && coreReq_Q.io.deq.fire() && ((writeMiss_st1 || readMiss_st1) && mshrProbeStatus === 0.U) && !injectTagProbe
+  MemReqArb.io.in(1).valid := coreReq_st1_valid  && coreReq_Q.io.deq.fire() && ((writeMiss_st1 || readMiss_st1) && mshrProbeStatus === 0.U) && !injectTagProbe
   MemReqArb.io.in(1).bits := missMemReq
   MemReqArb.io.in(2).valid := Mux(waitforL2flush_st2,flushL2,RegNext(InvOrFluMemReqValid_st1))
   MemReqArb.io.in(2).bits := InvOrFluMemReq
@@ -757,12 +757,17 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
     //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
   }
+  val coreRspFromMemReqMask_st1 = coreReq_st1.perLaneAddr.map(_.activeMask)
+  val coreReqMask_Q = Module(new Queue(Vec(NLanes, Bool()),8,false ,false))
+  coreReqMask_Q.io.enq.bits := coreRspFromMemReqMask_st1
+  coreReqMask_Q.io.enq.valid := memReq_Q.io.enq.valid//writeMiss_st1 && MemReqArb.io.in(1).ready
+  coreReqMask_Q.io.deq.ready := memReq_Q.io.deq.ready && coreRsp_Q.io.enq.ready
 
   coreRspFromMemReq.data := DontCare
   coreRspFromMemReq.isWrite := true.B
   //st指令的regIdx对SM流水线提交级无意义，且memReq_Q没有传输该数据的通道
   coreRspFromMemReq.instrId := memReq_Q.io.deq.bits.coreRspInstrId
-  coreRspFromMemReq.activeMask := coreRsp_st2.io.deq.bits.activeMask//VecInit(Seq.fill(NLanes)(true.B))
+  coreRspFromMemReq.activeMask := coreReqMask_Q.io.deq.bits//coreRsp_st2.io.deq.bits.activeMask//VecInit(Seq.fill(NLanes)(true.B))
   // memReq(st3)
   io.memReq.bits := memReq_st3
 

@@ -14,7 +14,10 @@ import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import top.parameters._
-
+class tagCheckerResult(way: Int) extends Bundle{
+  val waymask = UInt(way.W)
+  val hit = Bool()
+}
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
 class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Module{
   val io = IO(new Bundle {
@@ -137,16 +140,19 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   val allocateWrite_st1 = RegEnable(io.allocateWrite.bits, io.allocateWrite.fire)
   // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
+  val cachehit_hold = Module(new Queue(new tagCheckerResult(way),1))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
-  io.waymaskHit_st1 := iTagChecker.io.waymask//st1
-  val cachehit_hold = Module(new Queue(Bool(),1))
-  cachehit_hold.io.enq.bits := iTagChecker.io.cache_hit && !probeReadBuf.ready
+  ////st1
+
+  cachehit_hold.io.enq.bits.hit := iTagChecker.io.cache_hit && !probeReadBuf.ready
+  cachehit_hold.io.enq.bits.waymask := Mux(!probeReadBuf.ready, iTagChecker.io.waymask ,0.U)
   cachehit_hold.io.enq.valid := probeReadBuf.valid
   cachehit_hold.io.deq.ready := probeReadBuf.ready
   //val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
-  io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold.io.deq.bits && cachehit_hold.io.deq.valid) && probeReadBuf.valid//RegNext(io.probeRead.fire)
+  io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold.io.deq.bits.hit && cachehit_hold.io.deq.valid) && probeReadBuf.valid//RegNext(io.probeRead.fire)
+  io.waymaskHit_st1 := Mux(cachehit_hold.io.deq.valid,cachehit_hold.io.deq.bits.waymask,iTagChecker.io.waymask)
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
