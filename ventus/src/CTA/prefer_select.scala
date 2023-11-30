@@ -11,6 +11,7 @@
 package CTA
 
 import chisel3._
+import chisel3.util.log2Ceil
 
 class prefer_select(val RANGE: Int, val ID_WIDTH: Int) extends RawModule{
     val io = IO(new Bundle{
@@ -21,22 +22,35 @@ class prefer_select(val RANGE: Int, val ID_WIDTH: Int) extends RawModule{
     })
     val found = Wire(Bool())
     val found_id = Wire(UInt((ID_WIDTH + 1).W))
+    val prefer_pre = Wire(UInt((log2Ceil(RANGE)).W))
+
+
+    prefer_pre := io.prefer(log2Ceil(RANGE)-1,0)
+
     found := false.B
     found_id := 0.U
-    for(i <- 1 until RANGE + 1){
-        when(i.U((ID_WIDTH + 1).W) + io.prefer >= RANGE.U((ID_WIDTH + 1).W)){
-            when(io.signal(i.U((ID_WIDTH + 1).W) + io.prefer - RANGE.U((ID_WIDTH + 1).W))){
-                found := true.B
-                found_id := i.U((ID_WIDTH + 1).W) + io.prefer - RANGE.U((ID_WIDTH + 1).W)
-            }
+//    for(i <- 1 until RANGE + 1){
+//        when(i.U((ID_WIDTH + 1).W) + io.prefer >= RANGE.U((ID_WIDTH + 1).W)){
+//            when(io.signal(i.U((ID_WIDTH + 1).W) + io.prefer - RANGE.U((ID_WIDTH + 1).W))){
+//                found := true.B
+//                found_id := i.U((ID_WIDTH + 1).W) + io.prefer - RANGE.U((ID_WIDTH + 1).W)
+//            }
+//        }
+//        .otherwise{
+//            when(io.signal(i.U + io.prefer)){
+//                found := true.B
+//                found_id := i.U + io.prefer
+//            }
+//        }
+//    }
+        for(i <- 0 until RANGE ){
+                when(io.signal((i.U + prefer_pre)(log2Ceil(RANGE)-1,0))){
+                    found := true.B
+                    found_id := (i.U + prefer_pre)(log2Ceil(RANGE)-1,0)
+                }
         }
-        .otherwise{
-            when(io.signal(i.U + io.prefer)){
-                found := true.B
-                found_id := i.U + io.prefer
-            }
-        }
-    }
+
+
     io.valid := found
     io.id := found_id(ID_WIDTH - 1, 0)
 }

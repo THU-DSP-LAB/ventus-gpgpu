@@ -50,6 +50,7 @@ object IDecode //extends DecodeConstants
   val IMM_Z = 7.U(4.W)
   val IMM_S11 = 8.U(4.W)
   val IMM_L11 = 9.U(4.W)
+  val IMM_V5  = 10.U(4.W)
 
   val MEM_W = 3.U(2.W)
   val MEM_B = 2.U(2.W)
@@ -334,7 +335,7 @@ object IDecodeLUT_V{
     VMSLEU_VI-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_Z,MEM_X,FN_SGEU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSLEU_VX-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_SGEU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSLE_VV->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
-    VMSLE_VI->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
+    VMSLE_VI->  List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),//VMSLE_VI->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSLE_VX->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSGTU_VI-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_Z,MEM_X,FN_SLTU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSGTU_VX-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_SLTU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
@@ -537,6 +538,7 @@ class InstrDecodeV2 extends Module {
   // maskAfterExt       0    0    1    1                    |    1    0    1    0                       |   0    1    1    0
   // result             0    0   EA    B                    |   EA    0   EB    0                       |   0    A    B    0
   val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
+  val regext_valid = RegInit(VecInit(Seq.fill(num_warp){false.B}))
   when(io.flush_wid.valid){
     scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
     when(io.flush_wid.bits =/= io.wid && io.inst_mask.last && io.ibuffer_ready(io.wid)){
@@ -545,6 +547,27 @@ class InstrDecodeV2 extends Module {
   }.otherwise{
     when(io.inst_mask.last && io.ibuffer_ready(io.wid)){ scratchPads(io.wid) := regextInfo_pre.last }
   }
+  when(io.flush_wid.valid) {
+    regext_valid(io.flush_wid.bits) := false.B
+    when(io.flush_wid.bits =/= io.wid && io.inst_mask.last && io.ibuffer_ready(io.wid) && ("h300b".U === (io.inst(1) & "h707f".U))) {
+      regext_valid(io.wid) := true.B
+    }.otherwise {
+      when(io.inst_mask.reduce(_ | _) & io.ibuffer_ready(io.wid)) {
+        regext_valid(io.wid) := false.B
+      }
+    }
+  }.otherwise {
+    when(io.inst_mask.last && io.ibuffer_ready(io.wid) && ("h300b".U === (io.inst(1) & "h707f".U))) {
+      regext_valid(io.wid) := true.B
+    }.otherwise {
+      when(io.inst_mask.reduce(_ | _) && io.ibuffer_ready(io.wid)) {
+        regext_valid(io.wid) := false.B
+      }
+    }
+  }
+  val exit_valid = Wire(Vec(2, Bool()))
+  exit_valid(0) := regext_valid(io.wid)
+  exit_valid(1) := Mux((io.inst_mask(0) === "h0".U), "h0".U, ("h300b".U === (io.inst(0) & "h707f".U)))
   // regextInfo: 0<>Scratchpad, 1<>decode_0, 2<>decode_1, 3<>decode_2
   val regextInfo = VecInit(Seq(scratchPads(io.wid)) ++ regextInfo_pre.take(num_fetch-1))
 
@@ -584,7 +607,7 @@ class InstrDecodeV2 extends Module {
     c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
     c.sel_alu2 := s(9)
     c.sel_alu1 := s(10)
-    c.sel_imm := s(11)
+    c.sel_imm := Mux(((s(11) === 6.U) && (!exit_valid(i))),"ha".U,s(11))//c.sel_imm := s(11)
     c.mem_whb := s(12)
     c.alu_fn := s(13)
     c.force_rm_rtz := io.inst(i) === Instructions.VFCVT_RTZ_X_F_V || io.inst(i) === pipeline.Instructions.VFCVT_RTZ_XU_F_V
@@ -597,7 +620,7 @@ class InstrDecodeV2 extends Module {
     c.sfu := s(18)
     c.wvd := s(19)
     c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
-    c.writemask := s(21) //write mode is mask - for mask bitwise opcode
+    c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
     c.tc := s(23)
     c.disable_mask := s(24)

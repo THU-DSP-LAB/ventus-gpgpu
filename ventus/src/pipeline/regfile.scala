@@ -90,12 +90,14 @@ class ImmGen extends Module {
   val Jimm = Cat(io.inst(31), io.inst(19, 12), io.inst(20), io.inst(30, 21), 0.U(1.W)).asSInt // jal
   val Zimm = Cat(0.U(27.W),io.inst(19, 15)).asSInt // CSR I
   val Imm2 = io.inst(24,20).asSInt
-  val Vimm = Mux(io.imm_ext.orR, Cat(io.imm_ext, io.inst(19,15)).asSInt, io.inst(19,15).asSInt)
+  //val Vimm = Mux(io.imm_ext.orR, Cat(io.imm_ext, io.inst(19,15)).asSInt, io.inst(19,15).asSInt)
+  val Vimm = Cat(io.imm_ext,io.inst(19,15)).asSInt
+  val Vimm5 = io.inst(19,15).asSInt
   val Iimm11L = io.inst(30, 20).asSInt
   val Iimm11S = Cat(io.inst(30, 25), io.inst(11, 7)).asSInt
 
   val out = WireInit(0.S(32.W))
 
-  out := MuxLookup(io.sel, Iimm & -2.S, Seq(IMM_I -> Iimm,IMM_J->Jimm, IMM_S -> Simm, IMM_B -> Bimm, IMM_U -> Uimm, IMM_2 -> Imm2,IMM_Z -> Zimm,IMM_V->Vimm,IMM_L11->Iimm11L,IMM_S11->Iimm11S))
+  out := MuxLookup(io.sel, Iimm & -2.S, Seq(IMM_I -> Iimm,IMM_J->Jimm, IMM_S -> Simm, IMM_B -> Bimm, IMM_U -> Uimm, IMM_2 -> Imm2,IMM_Z -> Zimm,IMM_V->Vimm,IMM_L11->Iimm11L,IMM_S11->Iimm11S,IMM_V5->Vimm5))
   io.out:=out.asUInt
 }

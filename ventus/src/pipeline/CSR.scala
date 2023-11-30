@@ -293,7 +293,7 @@ class CSRFile extends Module {
     wf_size_dispatch :=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_size_dispatch
     sgpr_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_sgpr_base_dispatch
     vgpr_base_dispatch:=io.CTA2csr.bits.CTAdata.dispatch2cu_vgpr_base_dispatch
-    wf_tag_dispatch :=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch
+    wf_tag_dispatch :=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)// wf_tag_dispatch :=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch
     //todo fix lds_base_dispatch to a certain param
     lds_base_dispatch:=Cat("h70000000".U(31, LDS_ID_WIDTH + 1), io.CTA2csr.bits.CTAdata.dispatch2cu_lds_base_dispatch)
     pds_baseaddr:=io.CTA2csr.bits.CTAdata.dispatch2cu_pds_base_dispatch
@@ -303,12 +303,12 @@ class CSRFile extends Module {
     wg_id_z:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_z_dispatch
     wg_id:=io.CTA2csr.bits.CTAdata.dispatch2cu_wg_id
 
-    threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
+    threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)<<depth_thread//threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
   }
-  //todo check function of this signals
-  io.lsu_tid := 0.U
-  io.lsu_pds := 0.U
-  io.lsu_numw := 0.U
+  //todo check function of this signals//fix by rk
+  io.lsu_tid := wf_tag_dispatch * num_thread.asUInt
+  io.lsu_pds := pds_baseaddr
+  io.lsu_numw := wg_wf_count
 }
 
 class CSRexe extends Module {
