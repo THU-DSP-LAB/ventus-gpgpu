@@ -50,7 +50,6 @@ object IDecode //extends DecodeConstants
   val IMM_Z = 7.U(4.W)
   val IMM_S11 = 8.U(4.W)
   val IMM_L11 = 9.U(4.W)
-  val IMM_V5  = 10.U(4.W)
 
   val MEM_W = 3.U(2.W)
   val MEM_B = 2.U(2.W)
@@ -538,7 +537,6 @@ class InstrDecodeV2 extends Module {
   // maskAfterExt       0    0    1    1                    |    1    0    1    0                       |   0    1    1    0
   // result             0    0   EA    B                    |   EA    0   EB    0                       |   0    A    B    0
   val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
-  val regext_valid = RegInit(VecInit(Seq.fill(num_warp){false.B}))
   when(io.flush_wid.valid){
     scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
     when(io.flush_wid.bits =/= io.wid && io.inst_mask.last && io.ibuffer_ready(io.wid)){
@@ -547,27 +545,6 @@ class InstrDecodeV2 extends Module {
   }.otherwise{
     when(io.inst_mask.last && io.ibuffer_ready(io.wid)){ scratchPads(io.wid) := regextInfo_pre.last }
   }
-  when(io.flush_wid.valid) {
-    regext_valid(io.flush_wid.bits) := false.B
-    when(io.flush_wid.bits =/= io.wid && io.inst_mask.last && io.ibuffer_ready(io.wid) && ("h300b".U === (io.inst(1) & "h707f".U))) {
-      regext_valid(io.wid) := true.B
-    }.otherwise {
-      when(io.inst_mask.reduce(_ | _) & io.ibuffer_ready(io.wid)) {
-        regext_valid(io.wid) := false.B
-      }
-    }
-  }.otherwise {
-    when(io.inst_mask.last && io.ibuffer_ready(io.wid) && ("h300b".U === (io.inst(1) & "h707f".U))) {
-      regext_valid(io.wid) := true.B
-    }.otherwise {
-      when(io.inst_mask.reduce(_ | _) && io.ibuffer_ready(io.wid)) {
-        regext_valid(io.wid) := false.B
-      }
-    }
-  }
-  val exit_valid = Wire(Vec(2, Bool()))
-  exit_valid(0) := regext_valid(io.wid)
-  exit_valid(1) := Mux((io.inst_mask(0) === "h0".U), "h0".U, ("h300b".U === (io.inst(0) & "h707f".U)))
   // regextInfo: 0<>Scratchpad, 1<>decode_0, 2<>decode_1, 3<>decode_2
   val regextInfo = VecInit(Seq(scratchPads(io.wid)) ++ regextInfo_pre.take(num_fetch-1))
 
@@ -607,7 +584,7 @@ class InstrDecodeV2 extends Module {
     c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
     c.sel_alu2 := s(9)
     c.sel_alu1 := s(10)
-    c.sel_imm := Mux(((s(11) === 6.U) && (!exit_valid(i))),"ha".U,s(11))//c.sel_imm := s(11)
+    c.sel_imm := s(11)
     c.mem_whb := s(12)
     c.alu_fn := s(13)
     c.force_rm_rtz := io.inst(i) === Instructions.VFCVT_RTZ_X_F_V || io.inst(i) === pipeline.Instructions.VFCVT_RTZ_XU_F_V
@@ -629,7 +606,7 @@ class InstrDecodeV2 extends Module {
     c.reg_idx2 := Cat(regextInfo(i).regPrefix(2), io.inst(i)(24, 20))
     c.reg_idx3 := Mux(c.fp & !c.isvec, Cat(0.U(3.W),io.inst(i)(31, 27)), Cat(regextInfo(i).regPrefix(0) ,io.inst(i)(11, 7)))
     c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
-    c.imm_ext := regextInfo(i).immHigh
+    c.imm_ext := Cat(regextInfo(i).isExtI, regextInfo(i).immHigh) // pack exti valid bit at MSB
     if (SPIKE_OUTPUT) {
       c.spike_info.get.inst := io.inst(i)
       c.spike_info.get.pc := io.pc+ (i.U << 2.U)
