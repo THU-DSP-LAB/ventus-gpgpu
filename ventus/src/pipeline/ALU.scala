@@ -102,7 +102,8 @@ class ScalarALU() extends Module{
       Mux(io.func === FN_AND, io.in1 & io.in2, 0.U(xLen.W))))
 
   val shift_logic_cmp = (isCmp(io.func)&&slt) | logic | shout
-  val out = Mux(io.func === FN_ADD || io.func === FN_SUB, adder_out, shift_logic_cmp)
+  val out = Mux(io.func === FN_ADD || io.func === FN_SUB, adder_out, Mux(io.func === FN_SEQ, io.in1 === io.in2 , Mux(io.func === FN_SNE,io.in1 =/= io.in2,shift_logic_cmp)))
+  //val out = Mux(io.func === FN_ADD || io.func === FN_SUB, adder_out, shift_logic_cmp)
 
   //MIN, MAX
   val minu=Mux(io.in1>io.in2,io.in2,io.in1)

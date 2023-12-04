@@ -334,7 +334,7 @@ object IDecodeLUT_V{
     VMSLEU_VI-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_Z,MEM_X,FN_SGEU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSLEU_VX-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_SGEU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSLE_VV->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
-    VMSLE_VI->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
+    VMSLE_VI->  List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),//VMSLE_VI->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSLE_VX->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_SGE,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSGTU_VI-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_Z,MEM_X,FN_SLTU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
     VMSGTU_VX-> List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_SLTU,N,M_X,N,N,N,Y,N,Y,N,N,N,N,N),
@@ -401,6 +401,8 @@ object IDecodeLUT_V{
     VFSGNJX_VF->List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_FSGNJX,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCVT_XU_F_V->List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_F2IU,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCVT_X_F_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_F2I,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VFCVT_RTZ_XU_F_V->List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_F2IU,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VFCVT_RTZ_X_F_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_F2I,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCVT_F_XU_V->List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_IU2F,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCVT_F_X_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_I2F,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VFCLASS_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_FCLASS,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
@@ -585,6 +587,7 @@ class InstrDecodeV2 extends Module {
     c.sel_imm := s(11)
     c.mem_whb := s(12)
     c.alu_fn := s(13)
+    c.force_rm_rtz := io.inst(i) === Instructions.VFCVT_RTZ_X_F_V || io.inst(i) === pipeline.Instructions.VFCVT_RTZ_XU_F_V
     c.is_vls12 := s(13) === pipeline.IDecode.FN_VLS12
     c.mul := s(14)
     c.mem := c.mem_cmd.orR
@@ -594,7 +597,7 @@ class InstrDecodeV2 extends Module {
     c.sfu := s(18)
     c.wvd := s(19)
     c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
-    c.writemask := s(21) //write mode is mask - for mask bitwise opcode
+    c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
     c.tc := s(23)
     c.disable_mask := s(24)
@@ -603,7 +606,7 @@ class InstrDecodeV2 extends Module {
     c.reg_idx2 := Cat(regextInfo(i).regPrefix(2), io.inst(i)(24, 20))
     c.reg_idx3 := Mux(c.fp & !c.isvec, Cat(0.U(3.W),io.inst(i)(31, 27)), Cat(regextInfo(i).regPrefix(0) ,io.inst(i)(11, 7)))
     c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
-    c.imm_ext := regextInfo(i).immHigh
+    c.imm_ext := Cat(regextInfo(i).isExtI, regextInfo(i).immHigh) // pack exti valid bit at MSB
     if (SPIKE_OUTPUT) {
       c.spike_info.get.inst := io.inst(i)
       c.spike_info.get.pc := io.pc+ (i.U << 2.U)

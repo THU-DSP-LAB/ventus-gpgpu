@@ -44,6 +44,12 @@ class DCacheCoreRsp(implicit p: Parameters) extends DCacheBundle{
   val data = Vec(NLanes, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
 }
+class DCacheCoreRsp_d(implicit p: Parameters) extends DCacheBundle{
+  val instrId = UInt(WIdBits.W)
+  val isWrite = Bool()
+  val data = Vec(NLanesd, UInt(WordLength.W))
+  val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
+}
 
 class DCacheMemRsp(implicit p: Parameters) extends DCacheBundle{
   val d_opcode = UInt(3.W)// AccessAckData only

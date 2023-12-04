@@ -202,7 +202,7 @@ class ArrayMultiplier(num_thread: Int, len: Int)
 
   val xlen = len - 1
   val res = Mux(isMAC(func),mac_out(xlen,0),
-    Mux(func===FN_MULH | func===FN_MULHU, result(2*xlen-1, xlen),result(xlen,0)))
+    Mux(func===FN_MULH | func===FN_MULHU, result(2*len-1, len),result(xlen,0)))//Mux(func===FN_MULH | func===FN_MULHU, result(2*xlen-1, xlen),result(xlen,0)))
   io.out.bits.result:=PipelineReg(latency)(res)
   io.out.bits.ctrl:=ctrlVec.last
   io.out.bits.mask:=maskVec.last

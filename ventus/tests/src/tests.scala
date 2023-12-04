@@ -97,32 +97,32 @@ object AdvancedTestList{
   case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
 
   val gaussian = new AdvTest(
-    "adv_gaussian",
+    "adv_gaussian_1x16",
     Seq(
       "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
     ),
     Seq(
       "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.data", "Fan1_2.data", "Fan2_2.data"
     ),
-    4, 4, 10500
+    1, 16, 10500
   )
 
   val matadd = new AdvTest(
     "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
   )
   val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 3000
+    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1200
   )
   val nn = new AdvTest(
     "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
   )
   val bfs4x32 = {
     var tmp: Seq[String] = Nil
-    for(i <- 0 until 8){
+    for(i <- 0 until 5){
       tmp = tmp ++ Seq(s"BFS_1_${i}", s"BFS_2_${i}")
     }
     new AdvTest(
-      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 3000
+      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 20000
     )
   }
 }
@@ -131,9 +131,8 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
   import top.helper._
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.bfs4x32
+    val testbench = AdvancedTestList.vecadd
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
-
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
 
@@ -142,7 +141,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation,VerilatorBackendAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
@@ -162,23 +161,24 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(300)
+      c.clock.setTimeout(200)
       c.clock.step(5)
 
       var meta = new MetaData
       var size3d = Array.fill(3)(0)
-      var wg_list = Array.fill(1)(false)
+      var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
 
       val DelayMem = new DelayFIFO[DelayFIFOEntry](memLatency, memLatency + 5)
       val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
       fork{
         while(c.io.cnt.peek().litValue <= maxCycle){
+          c.io.out_a.ready.poke((!DelayMem.isFull).B)
           c.clock.step(1)
           DelayMem.step()
         }
         c.clock.step(2)
       }.fork{ // HOST <-> GPU
-        def enq = fork{
+        def enq(knl: Int) = fork{
           for (i <- 0 until size3d(0);
                j <- 0 until size3d(1);
                k <- 0 until size3d(2)
@@ -186,13 +186,13 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
             c.io.host_req.enqueue(meta.generateHostReq(i, j, k))
           }
         }
-        def deq = fork {
+        def deq(knl: Int) = fork {
           timescope {
             c.io.host_rsp.ready.poke(true.B)
             if (waitForValid(c.io.host_rsp, maxCycle)) {
               val rsp = c.io.host_rsp.bits.peek().litValue
               val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
-              wg_list(extract_rsp) = true
+              wg_list(knl)(extract_rsp) = true
             }
             c.clock.step(1)
           }
@@ -200,21 +200,21 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         metaFileDir.indices.foreach { i =>
           meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
           size3d = meta.kernel_size.map(_.toInt)
-          wg_list = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+          wg_list(i) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
           if(c.io.cnt.peek().litValue <= maxCycle){
             print(s"kernel $i \n")
-            enq.join()
-            while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
-              deq.join()
+            enq(i).join()
+            while (!wg_list(i).reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
+              deq(i).join()
             }
           }
           c.clock.step(2)
         }
       }.fork{ // GPU <-> MEM
         fork{
-          while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
-            if(!wg_list.reduce(_ && _)){
-              c.io.out_a.ready.poke((!DelayMem.isFull).B)
+          while (!wg_list.flatten.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
+            if(!wg_list.flatten.reduce(_ && _)){
+              //c.io.out_a.ready.poke((!DelayMem.isFull).B)
               if (DelayMem.canPop) {
                 val out = DelayMem.pop
                 c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
@@ -226,12 +226,12 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                 ))
               }
             }
-            c.io.out_a.ready.poke((!DelayMem.isFull).B)
+            //c.io.out_a.ready.poke((!DelayMem.isFull).B)
             c.clock.step(1)
           }
         }.fork{
-          while (!wg_list.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
-            if (!wg_list.reduce(_ && _)) {
+          while (!wg_list.flatten.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
+            if (!wg_list.flatten.reduce(_ && _)) {
               if (waitForValid(c.io.out_a, maxCycle)) {
                 if(!DelayMem.isFull) {
                   val addr = c.io.out_a.bits.address.peek().litValue

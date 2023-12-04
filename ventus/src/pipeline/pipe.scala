@@ -288,7 +288,7 @@ class pipe extends Module{
   issue.io.out_TC<>tensorcore.io.in
 
   issue.io.out_vFPU<>fpu.io.in
-  fpu.io.rm:=csrfile.io.rm(0)
+  fpu.io.rm := Mux(fpu.io.in.bits.ctrl.force_rm_rtz, RoundingMode.RTZ, csrfile.io.rm(0))
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
   sfu.io.rm := csrfile.io.rm(1)
   csrfile.io.rm_wid(1):=sfu.io.in.bits.ctrl.wid
