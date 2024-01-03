@@ -106,7 +106,7 @@ class CTAinterface extends Module{
   //for (i <- 0 until NUMBER_CU){}
 }
 class GPGPU_axi_top extends Module{
-  val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_sm)+log2Up(l2cache_micro.num_warp)+1)
+  val l2cache_axi_params=AXI4BundleParameters(32,64,l2cache_params.source_bits)
   val l2_axi_params=InclusiveCacheParameters_lite_withAXI(l2cache_params,l2cache_axi_params)
 
   val io=IO(new Bundle{
