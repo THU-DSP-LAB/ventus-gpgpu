@@ -91,7 +91,7 @@ class BankedStore(params:InclusiveCacheParameters_lite) extends Module
   val codeBits = 8*params.micro.writeBytes
   val singlePort= false
   val cc_banks = Module(new SRAMTemplate(UInt(codeBits.W), set=rowEntries, way=numBanks,
-        shouldReset=false, holdRead=false, singlePort=singlePort,bypassWrite = true))  //single bank so far
+        shouldReset=false, holdRead=false, singlePort=singlePort,bypassWrite = false))  //single bank so far
 
 
 
