@@ -100,19 +100,6 @@ class collectorUnit extends Module{
   //reading the register bank for those operand which type is not an immediate
   for (i <- 0 until 4) {
 
-    //    val addrTypeScalar = MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupScalar)
-    //    val addrTypeVector = MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid, controlReg.wid), 0.U, addrLookupVector)
-    //    io.outArbiterIO(i).bits.bankID := MuxLookup(Mux(io.control.fire&&(state===s_idle), io.control.bits.wid+regIdxWire(i), controlReg.wid+regIdx(i)), 0.U, bankIdLookup)
-    //    io.outArbiterIO(i).bits.rsType := Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))
-    //
-    //    when(Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))===1.U) {
-    //      io.outArbiterIO(i).bits.rsAddr := addrTypeScalar + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
-    //    }.elsewhen(Mux(io.control.fire&&(state===s_idle), rsTypeWire(i), rsType(i))===2.U) {
-    //      io.outArbiterIO(i).bits.rsAddr := addrTypeVector + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
-    //    }.otherwise {
-    //      io.outArbiterIO(i).bits.rsAddr := addrTypeScalar + Mux(io.control.fire && (state === s_idle), regIdxWire(i), regIdx(i)) >> log2Ceil(num_bank)
-    //    }
-
     io.outArbiterIO(i).bits.bankID := Mux(io.control.fire && (state === s_idle),
       io.control.bits.wid(log2Ceil(num_bank)-1, 0) + regIdxWire(i)(log2Ceil(num_bank)-1, 0),
       controlReg.wid(log2Ceil(num_bank)-1, 0) + regIdx(i)(log2Ceil(num_bank)-1, 0))
@@ -280,7 +267,15 @@ class collectorUnit extends Module{
       when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
         rsRead := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
           Array(
-            A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+            A1_RS1 -> Mux(
+              MuxLookup(state, false.B, 
+                Array(
+                  s_idle -> regIdxWire(0).orR,
+                  s_add -> regIdx(0).orR
+                )), 
+              VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+              VecInit.fill(num_thread)(0.U(xLen.W))
+            ),
             A1_VRS1 -> io.bankIn(i).bits.data)
         )
         when(Mux(io.control.fire,customCtrlWire,customCtrlReg)){
@@ -288,16 +283,19 @@ class collectorUnit extends Module{
         }.otherwise{
           rsReg(0) := rsRead
         }
-        /*rsReg(0) := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
-          Array(
-            A1_RS1 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
-            A1_VRS1 -> io.bankIn(i).bits.data)
-        )*/
         ready(0) := 1.U
       }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
         rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)),
           Array(
-            A2_RS2 -> VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+            A2_RS2 -> Mux(
+              MuxLookup(state, false.B, 
+                Array(
+                  s_idle -> regIdxWire(1).orR,
+                  s_add -> regIdx(1).orR
+                )), 
+              VecInit.fill(num_thread)(io.bankIn(i).bits.data(0)),
+              VecInit.fill(num_thread)(0.U(xLen.W))
+            ),
             A2_VRS2 -> io.bankIn(i).bits.data)
         )
         ready(1) := 1.U
