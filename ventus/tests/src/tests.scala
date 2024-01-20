@@ -93,45 +93,27 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
   }
 }
 
-object AdvancedTestList{
-  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
-
-  val gaussian = new AdvTest(
-    "adv_gaussian_1x16",
-    Seq(
-      "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
-    ),
-    Seq(
-      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.data", "Fan1_2.data", "Fan2_2.data"
-    ),
-    1, 16, 10500
-  )
-
-  val matadd = new AdvTest(
-    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
-  )
-  val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1200
-  )
-  val nn = new AdvTest(
-    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
-  )
-  val bfs4x32 = {
-    var tmp: Seq[String] = Nil
-    for(i <- 0 until 5){
-      tmp = tmp ++ Seq(s"BFS_1_${i}", s"BFS_2_${i}")
-    }
-    new AdvTest(
-      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 20000
-    )
-  }
-}
-
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
+
+  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
+
   "adv_test" in {
     // TODO: rename
-    val testbench = AdvancedTestList.vecadd
+
+    val iniFile = new IniFile("./ventus/txt/_cases.ini")
+    val defaultCaseName: String = iniFile.sections("")("Default").head
+    val section = iniFile.sections(defaultCaseName)
+
+    val testbench = AdvTest(
+      defaultCaseName,
+      section("Files").map(_ + ".metadata"),
+      section("Files").map(_ + ".data"),
+      section("nWarps").head.toInt,
+      section("nThreads").head.toInt,
+      section("SimCycles").head.toInt
+    )
+
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
