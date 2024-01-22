@@ -118,7 +118,9 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
 
-    if(parameters.num_warp < testbench.warp) parameters.num_warp = testbench.warp
+    val metas = metaFileDir.map(MetaData(_))
+
+    parameters.num_warp = (metas.map(_.wg_size.toInt) :+ testbench.warp).max
     parameters.num_thread = testbench.thread
 
     val mem = new MemBox
@@ -146,7 +148,6 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.clock.setTimeout(200)
       c.clock.step(5)
 
-      var meta = new MetaData
       var size3d = Array.fill(3)(0)
       var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
 
@@ -165,7 +166,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
                j <- 0 until size3d(1);
                k <- 0 until size3d(2)
                ) {
-            c.io.host_req.enqueue(meta.generateHostReq(i, j, k))
+            c.io.host_req.enqueue(metas(knl).generateHostReq(i, j, k))
           }
         }
         def deq(knl: Int) = fork {
@@ -180,8 +181,8 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           }
         }
         metaFileDir.indices.foreach { i =>
-          meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
-          size3d = meta.kernel_size.map(_.toInt)
+          mem.loadfile(metas(i), dataFileDir(i))
+          size3d = metas(i).kernel_size.map(_.toInt)
           wg_list(i) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
           if(c.io.cnt.peek().litValue <= maxCycle){
             print(s"kernel $i \n")
