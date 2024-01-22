@@ -1,4 +1,5 @@
-package pipeline
+package pipeline.mmu
+import L2cache._
 import chisel3._
 import chisel3.util._
 
@@ -15,6 +16,7 @@ import chisel3.util._
 */
 
 trait SVParam{
+  def asidLen = 16
   def xLen = 32
   def vaLen = 32
   def paLen = 34
@@ -55,10 +57,7 @@ object MMUParam{
   def depth_mem_source = log2Ceil(mem_source)
 }
 
-class PTE extends Bundle with SVParam{
-  val reserved1 = UInt((xLen - ppnLen - 10).W)
-  val PPN = UInt(ppnLen.W) // SV32: 22, SV39: 44
-  val reserved2 = UInt(2.W)
+class FlagBundle extends Bundle{
   val D = Bool()
   val A = Bool()
   val G = Bool()
@@ -67,11 +66,18 @@ class PTE extends Bundle with SVParam{
   val W = Bool()
   val R = Bool()
   val V = Bool()
-  def isPDE: Bool = V && !R && !W
-  def isLeaf: Bool = V && (R || W)
 }
 
-import MMUParam._
+class PTE extends Bundle with SVParam{
+  val reserved1 = UInt((xLen - ppnLen - 10).W)
+  val PPN = UInt(ppnLen.W) // SV32: 22, SV39: 44
+  val reserved2 = UInt(2.W)
+  val flag = new FlagBundle()
+  def isPDE: Bool = flag.V && !flag.R && !flag.W
+  def isLeaf: Bool = flag.V && (flag.R || flag.W)
+}
+
+import pipeline.mmu.MMUParam._
 
 class PTW_Req(SV: SVParam) extends Bundle{
   val addr = UInt(SV.vpnLen.W)
@@ -181,4 +187,18 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module {
   when(io.ptw_rsp.fire){
     state(ptwrsp_arb.io.chosen) := s_idle
   }
+}
+
+class PTW_L2Cluster_Adapter(SV: SVParam) extends Module{
+  import top.parameters._
+
+  val cache_param = (new L1Cache.MyConfig).toInstance
+  val io = IO(new Bundle{
+    val memreq_in = Flipped(DecoupledIO(new Cache_Req(SV)))
+    val memrsp_out = DecoupledIO(new Cache_Rsp(SV))
+    val memrsp_in = Seq.fill(num_cluster)(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
+    val memreq_out = Flipped(DecoupledIO(new TLBundleA_lite(l2cache_params)))
+  })
+  val align_mask = 1.U(SV.xLen.W) << ()
+  val addr_base = io.memreq_in.bits.addr
 }
