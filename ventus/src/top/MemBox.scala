@@ -154,9 +154,7 @@ class MemBox{
 
   val lds_memory = new DynamicMem
   lds_memory.insertPage(BigInt("70000000", 16))
-  def loadfile(metafile: String, datafile: String): MetaData = {
-    val metaData = MetaData(metafile)
-
+  def loadfile(metaData: MetaData, datafile: String): MetaData = {
     memory = (memory ++ {
       var mem: Seq[MemBuffer] = Nil
       val file = Source.fromFile(datafile)
