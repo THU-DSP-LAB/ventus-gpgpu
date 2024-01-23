@@ -96,7 +96,7 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
 
-  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
+  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], var warp: Int, var cycles: Int)
 
   "adv_test" in {
     // TODO: rename
@@ -110,7 +110,6 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       section("Files").map(_ + ".metadata"),
       section("Files").map(_ + ".data"),
       section("nWarps").head.toInt,
-      section("nThreads").head.toInt,
       section("SimCycles").head.toInt
     )
 
@@ -121,7 +120,10 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val metas = metaFileDir.map(MetaData(_))
 
     parameters.num_warp = (metas.map(_.wg_size.toInt) :+ testbench.warp).max
-    parameters.num_thread = testbench.thread
+    assert(metas.map(_.wf_size.toInt == metas.head.wf_size.toInt).reduceLeft(_ && _))
+    parameters.num_thread = metas.head.wf_size.toInt
+
+    print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
     val mem = new MemBox
 
