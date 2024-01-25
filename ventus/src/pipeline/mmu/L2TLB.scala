@@ -3,10 +3,16 @@ package pipeline.mmu
 import L2cache.{SRAMTemplate, TLBundleA_lite, TLBundleD_lite}
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.util.SetAssocLRU
 
 object L2TlbParam{
   val nSets = 64
   val nWays = 4
+
+  def vpnTlbBundle(SV: SVParam) = new Bundle {
+    val tag = UInt((SV.vpnLen - log2Up(nSets)).W)
+    val index = UInt(log2Up(nSets).W)
+  }
 }
 
 class L2TlbEntry(SV: SVParam) extends Bundle{
@@ -37,8 +43,9 @@ class L2TlbStorage(SV: SVParam) extends Module{
   import L2TlbParam._
   val io = IO(new Bundle{
     val rindex = Input(UInt(log2Up(nSets).W))
-    val tlbOut = Output(Vec(nWays, new L2TlbEntry(SV)))
+    val tlbOut = Output(Vec(nWays, new L2TlbEntryA(SV)))
     val write = Flipped(ValidIO(new L2TlbWriteBundle(SV)))
+    val wAvail = Output(UInt(nWays.W))
     val ready = Output(Bool())
     val invalidate = Flipped(ValidIO(UInt(SV.asidLen.W)))
   })
@@ -52,6 +59,8 @@ class L2TlbStorage(SV: SVParam) extends Module{
       })
     ))
   ))
+
+  io.wAvail := Mux(io.write.valid, VecInit(AsidV(io.write.bits.windex).map(_.v)).asUInt, 0.U)
 
   val s_idle :: s_reset :: Nil = Enum(2)
   val nState = WireInit(s_idle)
@@ -91,13 +100,14 @@ class L2TlbStorage(SV: SVParam) extends Module{
   // change the valid bit with Storage2
   val readTlbOut = {
     val raw = Entries.read(io.rindex)
-    val out = WireInit(raw)
+    val out = Wire(Vec(nWays, new L2TlbEntryA(SV)))
     ((raw zip out) zip AsidV(io.rindex)).foreach{ case ((r, o), av) =>
       o := r
       val x = Wire(Vec(8, Bool()))
       x := VecInit(r.flags.asBools)
       x(0) := r.flags(0) & av.v
       o.flags := x.asUInt
+      o.asid := av.asid
     }
     out
   }
@@ -108,18 +118,25 @@ class L2TlbStorage(SV: SVParam) extends Module{
       tlbOut(i) := Mux(waymask(i), wdata(i).toBase._2, readTlbOut)
     }
   }
-
+  io.ready := cState === s_idle
   io.tlbOut := tlbOut
 }
 
 class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Module{
+  import L2TlbParam._
   val io = IO(new Bundle{
     val in = Flipped(DecoupledIO(new Bundle{
       val asid = UInt(SV.asidLen.W)
-      val vaddr = UInt(SV.vaLen.W)
+      val ptbr = UInt(SV.xLen.W)
+      val vpn = UInt(SV.vpnLen.W)
+      val id = UInt(8.W) // L1's id
+    }))
+    val invalidate = Flipped(ValidIO(new Bundle{
+      val asid = UInt(SV.asidLen.W)
     }))
     val out = DecoupledIO(new Bundle{
-
+      val id = UInt(8.W)
+      val ppn = UInt(SV.ppnLen.W)
     })
     val mem = DecoupledIO(new Bundle{
       val req = new TLBundleA_lite(L2C)
@@ -128,4 +145,91 @@ class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Mod
   })
 
   val storage = Module(new L2TlbStorage(SV))
+  val walker = Module(new PTW(SV, 1))
+
+  val replace = new SetAssocLRU(nSets, nWays, "lru")
+  val refillWay = Mux(storage.io.wAvail.orR, PriorityEncoder(storage.io.wAvail), replace.way(storage.io.write.bits.windex))
+
+  val refillData = RegInit(0.U.asTypeOf(new L2TlbEntryA(SV)))
+
+  val s_idle :: s_check :: s_ptw_req :: s_ptw_rsp :: s_reply :: Nil = Enum(5)
+  val nState = WireInit(s_idle)
+  val cState = RegNext(nState)
+
+  io.in.ready := cState === s_idle
+
+  val tlb_req = RegInit(0.U.asTypeOf(io.in.bits))
+  storage.io.rindex := tlb_req.asTypeOf(vpnTlbBundle(SV)).index
+  val storage_rsp = storage.io.tlbOut
+  val tlb_rsp = RegInit(0.U.asTypeOf(io.out.bits))
+
+  val hitVec = VecInit(storage_rsp.map(m =>
+    m.flags(0)
+    && (m.vpn === tlb_req.vpn)
+    && (m.asid === tlb_req.asid)
+  )).asUInt
+  val hit = cState === s_check && hitVec.orR
+  val miss = cState === s_check && !hitVec.orR
+
+  walker.io.ptw_req.bits.source := tlb_req.id
+  walker.io.ptw_req.bits.vpn := tlb_req.vpn
+  walker.io.ptw_req.bits.ptbr := tlb_req.ptbr
+  walker.io.ptw_req.valid := cState === s_ptw_req
+
+  walker.io.ptw_rsp.ready := storage.io.ready && cState === s_ptw_rsp
+  storage.io.write.valid := RegNext(cState === s_ptw_rsp && walker.io.ptw_rsp.fire) // s_ptw_rsp -> [s_reply]
+  storage.io.write.bits.waymask := UIntToOH(refillWay)
+  storage.io.write.bits.wdata := VecInit(Seq.fill(nWays)(refillData))
+
+  io.out.bits := tlb_rsp
+  io.out.valid := cState === s_reply
+
+  switch(cState){
+    is(s_idle){
+      when(io.in.fire){
+        tlb_req := io.in.bits
+        when(storage.io.ready) {
+          nState := s_check
+        }.otherwise{
+          nState := s_ptw_req
+          refillData.asid := io.in.bits.asid
+          refillData.vpn := io.in.bits.vpn
+        }
+      }
+    }
+    is(s_check){
+      when(hit){
+        replace.access(storage.io.rindex, hitVec)
+        tlb_rsp.id := tlb_req.id
+        tlb_rsp.ppn := storage_rsp(OHToUInt(hitVec)).ppn
+        nState := s_reply
+      }.otherwise{
+        nState := s_ptw_req
+        refillData.asid := tlb_req.asid
+        refillData.vpn := tlb_req.vpn
+        refillData.level := SV39.levels.U
+      }
+    }
+    is(s_ptw_req){
+      when(walker.io.ptw_req.fire){
+        nState := s_ptw_rsp
+      }
+    }
+    is(s_ptw_rsp){
+      when(walker.io.ptw_rsp.fire){
+        storage.io.write.bits.windex := tlb_req.vpn.asTypeOf(vpnTlbBundle(SV)).index
+        refillData.ppn := walker.io.ptw_rsp.bits.ppn
+        refillData.flags := walker.io.ptw_rsp.bits.flags
+        replace.access(tlb_req.vpn.asTypeOf(vpnTlbBundle(SV)).index, refillWay)
+
+        tlb_rsp.id := tlb_req.id
+        tlb_rsp.ppn := walker.io.ptw_rsp.bits.ppn
+        nState := s_reply
+      }
+    }
+    is(s_reply){
+      refillData := 0.U.asTypeOf(refillData)
+      when(io.out.fire){ nState := s_idle }
+    }
+  }
 }

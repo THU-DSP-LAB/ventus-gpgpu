@@ -80,14 +80,16 @@ class PTE extends Bundle with SVParam{
 import pipeline.mmu.MMUParam._
 
 class PTW_Req(SV: SVParam) extends Bundle{
-  val addr = UInt(SV.vpnLen.W)
+  val vpn = UInt(SV.vpnLen.W)
   val ptbr = UInt(SV.xLen.W)
   val source = UInt(depth_ptw_source.W)
 }
 
 class PTW_Rsp(SV: SVParam) extends Bundle{
-  val addr = UInt(SV.ppnLen.W)
+  val ppn = UInt(SV.ppnLen.W)
+  val flags = UInt(8.W)
   val source = UInt(depth_ptw_source.W)
+  val fault = Bool()
 }
 
 class Cache_Req(SV: SVParam) extends Bundle{
@@ -112,9 +114,11 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module {
 
   class PTWEntry extends Bundle{
     val ppn = UInt(SV.ppnLen.W)
+    val flags = UInt(8.W)
     val vpn = UInt(SV.vpnLen.W)
     val cur_level = UInt(log2Up(SV.levels).W)
     val source = UInt(depth_ptw_source.W)
+    val fault = Bool()
   }
 
   def makePA(x: PTWEntry) = SV.PPN2PtePA(x.ppn, SV.getVPNIdx(x.vpn, x.cur_level))
@@ -130,11 +134,12 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module {
   val enq_ptr = PriorityEncoder(is_idle)
 
   io.ptw_req.ready := avail
-  when(io.ptw_req.fire){
+  when(io.ptw_req.fire){ // idle -> mem req
     state(enq_ptr) := s_memreq
     entries(enq_ptr).cur_level := (SV.levels - 1).U
     entries(enq_ptr).ppn := io.ptw_req.bits.ptbr(SV.ppnLen - 1, 0)
     entries(enq_ptr).source := io.ptw_req.bits.source
+    entries(enq_ptr).fault := false.B
   }
   val memreq_arb = Module(new RRArbiter(new PTWEntry, Ways))
   (0 until Ways).foreach{ i =>
@@ -146,45 +151,53 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module {
   io.mem_req.valid := memreq_arb.io.out.valid
   memreq_arb.io.out.ready := io.mem_req.ready
 
-  when(io.mem_req.fire){
+  when(io.mem_req.fire){ // mem req -> mem_wait
     state(memreq_arb.io.chosen) := s_memwait
   }
 
   io.mem_rsp.ready := is_memwait.reduce(_ || _)
 
   val pte_rsp = io.mem_rsp.bits.data.asTypeOf(new PTE)
+
   when(io.mem_rsp.fire){
     (0 until Ways).foreach{ i =>
       when(is_memwait(i) && entries(i).source === io.mem_rsp.bits.source){
         // 非叶子节点
-        when(pte_rsp.isPDE && entries(i).cur_level > 0.U){
+        when(pte_rsp.isPDE && entries(i).cur_level > 0.U){ // mem wait -> mem req
           state(i) := s_memreq
           entries(i).cur_level := entries(i).cur_level - 1.U
           entries(i).ppn := SV.PTE2PPN(io.mem_rsp.bits.data)
         // 叶子节点
-        }.elsewhen(pte_rsp.isLeaf){
+        }.elsewhen(pte_rsp.isLeaf){ // mem wait -> mem rsp
           entries(i).cur_level := 0.U
           entries(i).ppn := SV.PTE2PPN(io.mem_rsp.bits.data)
+          entries(i).flags := io.mem_rsp.bits.data(7, 0)
           state(i) := s_rsp
-        }.otherwise{
+        }.otherwise{ // mem wait -> page fault
           entries(i).cur_level := 0.U
           entries(i).ppn := 0.U
+          entries(i).flags := io.mem_rsp.bits.data(7, 0)
+          entries(i).fault := true.B
           state(i) := s_fault
         }
       }
     }
   }
+
   val ptwrsp_arb = Module(new RRArbiter(new PTWEntry, Ways))
   (0 until Ways).foreach{ i =>
     ptwrsp_arb.io.in(i).bits := entries(i)
-    ptwrsp_arb.io.in(i).valid := is_rsp(i)
+    ptwrsp_arb.io.in(i).valid := is_rsp(i) || state(i) === s_fault
   }
   ptwrsp_arb.io.out.ready := io.ptw_rsp.ready
   io.ptw_rsp.valid := ptwrsp_arb.io.out.valid
-  io.ptw_rsp.bits.addr := SV.PTE2PPN(ptwrsp_arb.io.out.bits.ppn)
+  io.ptw_rsp.bits.ppn := SV.PTE2PPN(ptwrsp_arb.io.out.bits.ppn)
   io.ptw_rsp.bits.source := ptwrsp_arb.io.out.bits.source
+  io.ptw_rsp.bits.fault := ptwrsp_arb.io.out.bits.fault
+  io.ptw_rsp.bits.flags := ptwrsp_arb.io.out.bits.flags
 
-  when(io.ptw_rsp.fire){
+  when(io.ptw_rsp.fire){ // mem rsp -> idle, page fault -> idle
+    entries(ptwrsp_arb.io.chosen) := 0.U.asTypeOf(new PTWEntry)
     state(ptwrsp_arb.io.chosen) := s_idle
   }
 }
