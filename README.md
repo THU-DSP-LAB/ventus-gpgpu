@@ -9,6 +9,14 @@ We are calling for contributors. If you are interested in Ventus GPGPU, please c
 
 乘影2.0架构文档在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/乘影GPGPU架构文档手册v2.0.pdf)，添加了对OpenCL支持所需的改动。如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
 
+乘影开源GPGPU项目网站：[opengpgpu.org.cn](https://opengpgpu.org.cn/)
+
+Home page of Ventus-GPGPU project: [opengpgpu.org.cn](https://opengpgpu.org.cn/)
+
+乘影软件工具链release版本在[这里](https://opengpgpu.org.cn/html/web/project/release/index.html)获取.
+
+You can get the release version of software toolchain [here](https://opengpgpu.org.cn/html/web/project/release/index.html).
+
 ## Architecture
 
 The micro-architecture overview of Ventus(乘影) is shown below. 
