@@ -14,3 +14,6 @@
 	path = dependencies/fpuv2
 	url = git@github.com:liuxd17thu/fpuv2.git
 	branch = master
+[submodule "dependencies/Membox2.Scala"]
+	path = dependencies/Membox2.Scala
+	url = git@github.com:liuxd17thu/Membox2.Scala.git

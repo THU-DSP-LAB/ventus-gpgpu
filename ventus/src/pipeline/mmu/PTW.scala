@@ -94,12 +94,12 @@ class PTW_Rsp(SV: SVParam) extends Bundle with L2TlbParam {
 
 class Cache_Req(SV: SVParam) extends Bundle{
   val addr = UInt(SV.xLen.W)
-  val source = UInt(depth_mem_source.W)
+  //val source = UInt(depth_mem_source.W)
 }
 
 class Cache_Rsp(SV: SVParam) extends Bundle with L2TlbParam{
   val data = Vec(nSectors, UInt(SV.xLen.W))
-  val source = UInt(depth_mem_source.W)
+  //val source = UInt(depth_mem_source.W)
 }
 
 class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {

@@ -8,7 +8,7 @@ import freechips.rocketchip.util.SetAssocLRU
 trait L2TlbParam{
   val nSets = 64
   val nWays = 4
-  val nSectors = 8
+  val nSectors = 4
 
   def vpnL2TlbBundle(SV: SVParam) = new Bundle {
     val tag = UInt((SV.vpnLen - log2Up(nSets) - log2Up(nSectors)).W)
@@ -122,14 +122,27 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   io.tlbOut := tlbOut
 }
 
-class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Module with L2TlbParam {
+class L2TlbMemReq_Test(SV: SVParam, sectors: Int) extends Bundle{
+  val addr = UInt(SV.xLen.W)
+  val data = UInt((SV.xLen * sectors).W)
+  val op = UInt(2.W) // 10: read, 01: write
+}
+class L2TlbMemRsp_Test(SV: SVParam, sectors: Int) extends Bundle{
+  val addr = UInt(SV.xLen.W)
+  val data = UInt((SV.xLen * sectors).W)
+  val op = UInt(2.W)
+}
+
+class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends Module with L2TlbParam {
+  //override val nSectors = L2C.beatBytes / (SV.xLen/8)
+  //verride val nSectors = sectors
+
   val io = IO(new Bundle{
     val in = Flipped(DecoupledIO(new Bundle{
       val asid = UInt(SV.asidLen.W)
       val ptbr = UInt(SV.xLen.W)
       val vpn = UInt(SV.vpnLen.W)
       val id = UInt(8.W) // L1's id
-      val invalidate = Bool()
     }))
     val invalidate = Flipped(ValidIO(new Bundle{
       val asid = UInt(SV.asidLen.W)
@@ -137,11 +150,11 @@ class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Mod
     val out = DecoupledIO(new Bundle{
       val id = UInt(8.W)
       val ppn = UInt(SV.ppnLen.W)
+      val flag = UInt(8.W)
     })
-    val mem = DecoupledIO(new Bundle{
-      val req = new TLBundleA_lite(L2C)
-      val rsp = new TLBundleD_lite(L2C)
-    })
+    // Request Always Read!
+    val mem_req = DecoupledIO(new Cache_Req(SV))
+    val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
   })
 
   val storage = Module(new L2TlbStorage(SV))
@@ -181,6 +194,9 @@ class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Mod
   storage.io.write.bits.waymask := UIntToOH(refillWay)
   storage.io.write.bits.wdata := VecInit(Seq.fill(nWays)(refillData))
 
+  io.mem_req <> walker.io.mem_req
+  walker.io.mem_rsp <> io.mem_rsp
+
   io.out.bits := tlb_rsp
   io.out.valid := cState === s_reply
 
@@ -210,7 +226,7 @@ class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Mod
         nState := s_ptw_req
         refillData.asid := tlb_req.asid
         refillData.vpn := tlb_req.vpn
-        refillData.level := SV39.levels.U
+        refillData.level := SV.levels.U
       }
     }
     is(s_ptw_req){
@@ -227,6 +243,7 @@ class L2Tlb(SV: SVParam, L2C: L2cache.InclusiveCacheParameters_lite) extends Mod
 
         tlb_rsp.id := tlb_req.id
         tlb_rsp.ppn := walker.io.ptw_rsp.bits.ppns
+        tlb_rsp.flag := walker.io.ptw_rsp.bits.flags
         nState := s_reply
       }
     }
