@@ -4,11 +4,12 @@ import L2cache.{SRAMTemplate, TLBundleA_lite, TLBundleD_lite}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SetAssocLRU
+import chisel3.experimental.dataview._
 
 trait L2TlbParam{
-  val nSets = 64
+  val nSets = 16
   val nWays = 4
-  val nSectors = 4
+  val nSectors = 2
 
   def vpnL2TlbBundle(SV: SVParam) = new Bundle {
     val tag = UInt((SV.vpnLen - log2Up(nSets) - log2Up(nSectors)).W)
@@ -51,15 +52,14 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   })
 
   val Entries = Mem(nSets, Vec(nWays, new L2TlbEntry(SV))) // Storage1
-  val AsidV = RegInit(VecInit(Seq.fill(nSets) // Storage2, asid & valid
-    (VecInit(Seq.fill(nWays)
-      (new Bundle{
-        val asid = UInt(SV.asidLen.W)
-        val v = Vec(nSectors, Bool())
-      })
-    ))
-  ))
 
+  class AsidVBundle extends Bundle{ val asid = UInt(SV.asidLen.W); val v = Vec(nSectors, Bool()); }
+  // Storage2, {nSets * nWays * {asid, nSectors * valid}}
+  val AsidV = RegInit(
+    VecInit(Seq.fill(nSets)(
+      VecInit(Seq.fill(nWays)(0.U.asTypeOf(new AsidVBundle)))
+    ))
+  )
   io.wAvail := Mux(io.write.valid, VecInit(AsidV(io.write.bits.windex).map(_.v)).asUInt, 0.U)
 
   val s_idle :: s_reset :: Nil = Enum(2)
@@ -70,8 +70,12 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
 
   val wen = Mux(cState === s_reset, true.B, io.write.valid && io.ready)
   val windex = Mux(cState === s_reset, resetState, io.write.bits.windex)
-  val wdata = Mux(cState === s_reset, 0.U.asTypeOf(Vec(nWays, io.write.bits.wdata)), VecInit(Seq.fill(nWays)(io.write.bits.wdata)))
-  val waymask = Mux(cState === s_reset, false.B, io.write.bits.waymask)
+
+  val wdata = Wire(Vec(nWays, new L2TlbEntryA(SV)))
+  when(cState === s_reset){
+    wdata := 0.U.asTypeOf(Vec(nWays, new L2TlbEntryA(SV)))
+  }.otherwise{ wdata.foreach{ _ := io.write.bits.wdata }}
+  val waymask = Mux(cState === s_reset, 0.U, io.write.bits.waymask)
 
   when(cState === s_idle){
     when(io.invalidate.valid){
@@ -81,7 +85,7 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
       Entries.write(windex, VecInit(wdata.map(_.toBase._2)), waymask.asBools)
       for (((d, m), i) <- (wdata zip waymask.asBools).zipWithIndex) {
         when(m) {
-          AsidV(windex)(i).v := d.flags(0)
+          (AsidV(windex)(i).v zip d.flags).foreach{ case (v, f) => v := f(0) } // for each sector
           AsidV(windex)(i).asid := d.asid
         }
       }
@@ -89,23 +93,26 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   }.elsewhen(cState === s_reset){ // Reset valid signal depends on ASID match (set by set
     AsidV(resetState).foreach{ av =>
       when(av.asid === resetAsid){
-        av.v := false.B
+        av.v.foreach{ _ := false.B }
       }
     }
     when(resetFin){
       nState := s_idle
       resetAsid := 0.U
+    }.otherwise{
+      nState := s_reset
     }
   }
   // change the valid bit with Storage2
   val readTlbOut= {
     val raw = Entries.read(io.rindex)
     val out = Wire(Vec(nWays, new L2TlbEntryA(SV)))
+    // for each way:
     ((raw zip out) zip AsidV(io.rindex)).foreach{ case ((r, o), av) =>
-      o := r
-      val x = Wire(Vec(nSectors,Vec(8, Bool())))
-      x := VecInit(r.flags)
-      (0 until nSectors).foreach{ i => x(i)(0) := r.flags(i)(0) & av.v(0) }
+      o.viewAsSupertype(new L2TlbEntry(SV)) := r
+      val x = Wire(Vec(nSectors, Vec(8, Bool())))
+      x := VecInit(r.flags.map(x => VecInit(x.asBools)))
+      (0 until nSectors).foreach{ i => x(i)(0) := r.flags(i)(0) & av.v(i) }
       o.flags := VecInit(x.map(_.asUInt))
       o.asid := av.asid
     }
@@ -115,7 +122,7 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   val tlbOut = WireInit(readTlbOut)
   when(io.write.valid && windex === io.rindex){
     for(i <- 0 until nWays){
-      tlbOut(i) := Mux(waymask(i), wdata(i).toBase._2, readTlbOut)
+      tlbOut(i) := Mux(waymask(i), wdata(i), readTlbOut(i))
     }
   }
   io.ready := cState === s_idle

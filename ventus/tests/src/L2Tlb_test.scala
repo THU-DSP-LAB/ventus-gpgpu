@@ -3,6 +3,7 @@ package pipeline
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
+import chisel3.experimental.VecLiterals._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import pipeline.mmu._
@@ -48,13 +49,75 @@ class L2TlbWrapper(SV: SVParam) extends Module{
 }
 
 class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
-  test(new L2TlbWrapper(SV32)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
-    val memory = new Memory(BigInt("10000000", 16), SV32)
+  test(new L2TlbWrapper(mmu.SV32)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
+    val memory = new Memory(BigInt("10000000", 16), MemboxS.SV32)
     val ptbr = memory.createRootPageTable()
 
     d.io.in.setSourceClock(d.clock)
     d.io.out.setSinkClock(d.clock)
     d.io.mem_req.setSinkClock(d.clock)
     d.io.mem_rsp.setSourceClock(d.clock)
+  }
+}
+
+class L2TlbStorage_test extends AnyFreeSpec with ChiselScalatestTester {
+  "L2TLB Storage" in {
+    test(new L2TlbStorage(mmu.SV32)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
+      println("L2TLB Test: Storage")
+      println(s"${d.nSets} Sets, ${d.nWays} Ways, ${d.nSectors} Sectors per item.")
+
+      def write(windex: Int, waymask: Int, data: L2TlbEntryA) = {
+        d.io.write.valid.poke(true.B)
+        d.io.write.bits.windex.poke(windex.U)
+        d.io.write.bits.waymask.poke(waymask.U)
+        d.io.write.bits.wdata.poke(data)
+      }
+
+      d.clock.step(2)
+      write(1, 1, (new L2TlbEntryA(mmu.SV32)).Lit(
+        _.asid -> 1.U,
+        _.vpn -> "h80101".U,
+        _.level -> 1.U,
+        _.ppns -> Vec(d.nSectors, UInt(mmu.SV32.ppnLen.W)).Lit(
+          (0 until d.nSectors).map{ i =>
+            i -> "h3ccccc".U
+          }: _*
+        ),
+        _.flags -> Vec(d.nSectors, UInt(8.W)).Lit(
+          (0 until d.nSectors).map{ i =>
+            i -> 7.U
+          }: _*
+        )
+      ))
+      d.io.rindex.poke(1.U)
+      d.clock.step(1)
+      d.io.write.valid.poke(false.B)
+
+      write(2, 4, (new L2TlbEntryA(mmu.SV32)).Lit(
+        _.asid -> 4.U,
+        _.vpn -> "h84444".U,
+        _.level -> 1.U,
+        _.ppns -> Vec(d.nSectors, UInt(mmu.SV32.ppnLen.W)).Lit(
+          (0 until d.nSectors).map{ i =>
+            i -> "h3ababa".U
+          }: _*
+        ),
+        _.flags -> Vec(d.nSectors, UInt(8.W)).Lit(
+          (0 until d.nSectors).map{ i =>
+            i -> 7.U
+          }: _*
+        )
+      ))
+      d.clock.step(1)
+      d.io.rindex.poke(2.U)
+      d.io.write.valid.poke(false.B)
+
+      d.clock.step(2)
+      d.io.invalidate.valid.poke(true.B)
+      d.io.invalidate.bits.poke(4.U)
+      d.clock.step(1)
+      d.io.invalidate.valid.poke(false.B)
+      d.clock.step(20)
+    }
   }
 }

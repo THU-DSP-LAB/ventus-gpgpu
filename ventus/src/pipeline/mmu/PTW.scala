@@ -94,12 +94,12 @@ class PTW_Rsp(SV: SVParam) extends Bundle with L2TlbParam {
 
 class Cache_Req(SV: SVParam) extends Bundle{
   val addr = UInt(SV.xLen.W)
-  //val source = UInt(depth_mem_source.W)
+  val source = UInt(depth_mem_source.W)
 }
 
 class Cache_Rsp(SV: SVParam) extends Bundle with L2TlbParam{
   val data = Vec(nSectors, UInt(SV.xLen.W))
-  //val source = UInt(depth_mem_source.W)
+  val source = UInt(depth_mem_source.W)
 }
 
 class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
@@ -216,16 +216,16 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
   }
 }
 
-class PTW_L2Cluster_Adapter(SV: SVParam) extends Module{
-  import top.parameters._
-
-  val cache_param = (new L1Cache.MyConfig).toInstance
-  val io = IO(new Bundle{
-    val memreq_in = Flipped(DecoupledIO(new Cache_Req(SV)))
-    val memrsp_out = DecoupledIO(new Cache_Rsp(SV))
-    val memrsp_in = Seq.fill(num_cluster)(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
-    val memreq_out = Flipped(DecoupledIO(new TLBundleA_lite(l2cache_params)))
-  })
-  val align_mask = 1.U(SV.xLen.W) << ()
-  val addr_base = io.memreq_in.bits.addr
-}
+//class PTW_L2Cluster_Adapter(SV: SVParam) extends Module{
+//  import top.parameters._
+//
+//  val cache_param = (new L1Cache.MyConfig).toInstance
+//  val io = IO(new Bundle{
+//    val memreq_in = Flipped(DecoupledIO(new Cache_Req(SV)))
+//    val memrsp_out = DecoupledIO(new Cache_Rsp(SV))
+//    val memrsp_in = Seq.fill(num_cluster)(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
+//    val memreq_out = Flipped(DecoupledIO(new TLBundleA_lite(l2cache_params)))
+//  })
+//  val align_mask = 1.U(SV.xLen.W) << ()
+//  val addr_base = io.memreq_in.bits.addr
+//}
