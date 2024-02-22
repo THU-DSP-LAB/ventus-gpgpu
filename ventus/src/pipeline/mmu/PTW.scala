@@ -87,7 +87,7 @@ class PTW_Req(SV: SVParam) extends Bundle{
 
 class PTW_Rsp(SV: SVParam) extends Bundle with L2TlbParam {
   val ppns = Vec(nSectors, UInt(SV.ppnLen.W))
-  val flags = UInt(8.W)
+  val flags = Vec(nSectors, UInt(8.W))
   val source = UInt(depth_ptw_source.W)
   val fault = Bool()
 }
@@ -132,7 +132,7 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
     (aligned, sectorIdx)
   }
 
-  val entries = RegInit(Vec(Ways, 0.U.asTypeOf(new PTWEntry)))
+  val entries = RegInit(VecInit(Seq.fill(Ways)(0.U.asTypeOf(new PTWEntry))))
 
   val state = RegInit(VecInit(Seq.fill(Ways)(s_idle)))
   val is_idle = state.map(_ === s_idle)
@@ -146,7 +146,8 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
   when(io.ptw_req.fire){ // idle -> mem req
     state(enq_ptr) := s_memreq
     entries(enq_ptr).cur_level := (SV.levels - 1).U
-    entries(enq_ptr).ppns(0) := io.ptw_req.bits.ptbr(SV.ppnLen - 1, 0)
+    entries(enq_ptr).vpn := io.ptw_req.bits.vpn
+    entries(enq_ptr).ppns(0) := io.ptw_req.bits.ptbr >> SV.offsetLen
     entries(enq_ptr).sectorIdx := 0.U // access PTBR always sector 0
     entries(enq_ptr).source := io.ptw_req.bits.source
     entries(enq_ptr).fault := false.B
@@ -189,7 +190,7 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
           state(i) := s_rsp
         }.otherwise{ // mem wait -> page fault
           entries(i).cur_level := 0.U
-          entries(i).ppns := 0.U
+          entries(i).ppns.foreach{ _ := 0.U }
           entries(i).flags := VecInit(io.mem_rsp.bits.data.map(_(7, 0)))
           entries(i).fault := true.B
           state(i) := s_fault
