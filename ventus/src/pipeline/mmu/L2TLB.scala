@@ -129,6 +129,18 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   io.tlbOut := tlbOut
 }
 
+class L2TlbReq(SV: SVParam) extends Bundle{
+  val asid = UInt(SV.asidLen.W)
+  val ptbr = UInt(SV.xLen.W)
+  val vpn = UInt(SV.vpnLen.W)
+  val id = UInt(8.W) // L1's id
+}
+class L2TlbRsp(SV: SVParam) extends Bundle{
+  val id = UInt(8.W)
+  val ppn = UInt(SV.ppnLen.W)
+  val flag = UInt(8.W)
+}
+
 class L2TlbMemReq_Test(SV: SVParam, sectors: Int) extends Bundle{
   val addr = UInt(SV.xLen.W)
   val data = UInt((SV.xLen * sectors).W)
@@ -145,20 +157,11 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
   //verride val nSectors = sectors
 
   val io = IO(new Bundle{
-    val in = Flipped(DecoupledIO(new Bundle{
-      val asid = UInt(SV.asidLen.W)
-      val ptbr = UInt(SV.xLen.W)
-      val vpn = UInt(SV.vpnLen.W)
-      val id = UInt(8.W) // L1's id
-    }))
+    val in = Flipped(DecoupledIO(new L2TlbReq(SV)))
     val invalidate = Flipped(ValidIO(new Bundle{
       val asid = UInt(SV.asidLen.W)
     }))
-    val out = DecoupledIO(new Bundle{
-      val id = UInt(8.W)
-      val ppn = UInt(SV.ppnLen.W)
-      val flag = UInt(8.W)
-    })
+    val out = DecoupledIO(new L2TlbRsp(SV))
     // Request Always Read!
     val mem_req = DecoupledIO(new Cache_Req(SV))
     val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
@@ -199,7 +202,8 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
   walker.io.ptw_rsp.ready := storage.io.ready && cState === s_ptw_rsp
   storage.io.write.valid := RegNext(cState === s_ptw_rsp && walker.io.ptw_rsp.fire) // s_ptw_rsp -> [s_reply]
   storage.io.write.bits.waymask := UIntToOH(refillWay)
-  storage.io.write.bits.wdata := VecInit(Seq.fill(nWays)(refillData))
+  storage.io.write.bits.wdata := refillData
+  storage.io.write.bits.windex := 0.U
 
   io.mem_req <> walker.io.mem_req
   walker.io.mem_rsp <> io.mem_rsp
@@ -249,8 +253,8 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
         replace.access(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).setIndex, refillWay)
 
         tlb_rsp.id := tlb_req.id
-        tlb_rsp.ppn := walker.io.ptw_rsp.bits.ppns
-        tlb_rsp.flag := walker.io.ptw_rsp.bits.flags
+        tlb_rsp.ppn := walker.io.ptw_rsp.bits.ppns(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex)
+        tlb_rsp.flag := walker.io.ptw_rsp.bits.flags(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex)
         nState := s_reply
       }
     }
