@@ -30,9 +30,10 @@ class RequestSender[A <: Data, B <: Data](
   var send_list: Seq[A] = Nil
   val Idle = 0; val SendingReq = 1; val WaitingRsp = 2
   var state = Idle; var next_state = Idle
-  def add(req: A): Unit = {
-    send_list = send_list :+ req
-  }
+
+  def add(req: A): Unit = send_list = send_list :+ req
+  def add(req: Seq[A]): Unit = send_list = send_list ++ req
+
   def eval(): Unit = {
     state = next_state
     state match {
@@ -132,19 +133,23 @@ class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
 
       val internal = Module(new L2Tlb(SV))
 
-      internal.io.in <> io.in
-      io.out <> internal.io.out
+      val pipe_tlb_req = Module(new Queue(new L2TlbReq(SV), 1))
+      val pipe_tlb_rsp = Module(new Queue(new L2TlbRsp(SV), 1))
+      internal.io.in <> pipe_tlb_req.io.deq
+      pipe_tlb_req.io.enq <> io.in
+      io.out <> pipe_tlb_rsp.io.deq
+      pipe_tlb_rsp.io.enq <> internal.io.out
 
       internal.io.invalidate.bits.asid := 0.U
       internal.io.invalidate.valid := false.B
 
-      val pipe_req = Module(new DecoupledPipe(io.mem_req.bits.cloneType, 1))
-      val pipe_rsp = Module(new DecoupledPipe(io.mem_rsp.bits.cloneType, 1))
-      pipe_req.io.enq <> internal.io.mem_req
-      io.mem_req <> pipe_req.io.deq
+      val pipe_mem_req = Module(new DecoupledPipe(io.mem_req.bits.cloneType, 0, insulate = true))
+      val pipe_mem_rsp = Module(new DecoupledPipe(io.mem_rsp.bits.cloneType, 0, insulate = true))
+      pipe_mem_req.io.enq <> internal.io.mem_req
+      io.mem_req <> pipe_mem_req.io.deq
 
-      pipe_rsp.io.enq <> io.mem_rsp
-      internal.io.mem_rsp <> pipe_rsp.io.deq
+      pipe_mem_rsp.io.enq <> io.mem_rsp
+      internal.io.mem_rsp <> pipe_mem_rsp.io.deq
     }
     test(new L2TlbWrapper(SV32.device)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       val memory = new Memory(BigInt("10000000", 16), SV32.host)
@@ -153,14 +158,25 @@ class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
       memory.allocateMemory(ptbr, BigInt("090000000", 16), SV32.host.PageSize)
 
       var clock_cnt = 0; var tlb_cnt = 0;
-      val req_list = Seq(BigInt("080000", 16), BigInt("090000", 16))
+      val req_list = Seq(BigInt("080000", 16), BigInt("080000", 16))
       val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
+      val tlb_sender = new RequestSender(d.io.in, d.io.out)
+      tlb_sender.add(req_list.map{a =>
+        (new L2TlbReq(SV32.device)).Lit(
+          _.ptbr -> ptbr.U, _.vpn -> a.U, _.asid -> 1.U, _.id -> 1.U
+        )
+      })
 
       d.io.in.setSourceClock(d.clock)
       d.io.out.setSinkClock(d.clock)
       d.io.mem_req.setSinkClock(d.clock)
       d.io.mem_rsp.setSourceClock(d.clock)
 
+      while(tlb_sender.send_list.nonEmpty && clock_cnt <= 30){
+        tlb_sender.eval()
+        mem_driver.eval()
+        d.clock.step(); clock_cnt += 1;
+      }
       d.clock.step(3)
     }
   }

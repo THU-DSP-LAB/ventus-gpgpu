@@ -48,6 +48,8 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
   else{
     io.deq.valid := valids.last
     io.deq.bits := regs.last
+    out_pipe.io.enq <> DontCare
+    out_pipe.io.deq <> DontCare
   }
   io.enq.ready := (if(latency > 0) !(!regs_out_ready && valids.drop(1).reduce(_ && _)) else regs_out_ready)
 }

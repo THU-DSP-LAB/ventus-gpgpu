@@ -243,7 +243,7 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
     is(s_ptw_req){
       when(walker.io.ptw_req.fire){
         nState := s_ptw_rsp
-      }
+      }.otherwise{ nState := s_ptw_req }
     }
     is(s_ptw_rsp){
       when(walker.io.ptw_rsp.fire){
@@ -256,11 +256,11 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
         tlb_rsp.ppn := walker.io.ptw_rsp.bits.ppns(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex)
         tlb_rsp.flag := walker.io.ptw_rsp.bits.flags(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex)
         nState := s_reply
-      }
+      }.otherwise{ nState := s_ptw_rsp }
     }
     is(s_reply){
       refillData := 0.U.asTypeOf(refillData)
-      when(io.out.fire){ nState := s_idle }
+      when(io.out.fire){ nState := s_idle }.otherwise{ nState := s_reply }
     }
   }
 }
