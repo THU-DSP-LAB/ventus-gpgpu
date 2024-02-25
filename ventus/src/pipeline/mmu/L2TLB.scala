@@ -152,7 +152,7 @@ class L2TlbMemRsp_Test(SV: SVParam, sectors: Int) extends Bundle{
   val op = UInt(2.W)
 }
 
-class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends Module with L2TlbParam {
+class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: Boolean = false) extends Module with L2TlbParam {
   //override val nSectors = L2C.beatBytes / (SV.xLen/8)
   //verride val nSectors = sectors
 
@@ -191,6 +191,7 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
     && (m.vpn.asTypeOf(vpnL2TlbBundle(SV)).tag === tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).tag)
     && (m.asid === tlb_req.asid)
   )).asUInt
+  assert(PopCount(hitVec) <= 1.U)
   val hit = cState === s_check && hitVec.orR
   val miss = cState === s_check && !hitVec.orR
 
@@ -261,6 +262,46 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/) extends
     is(s_reply){
       refillData := 0.U.asTypeOf(refillData)
       when(io.out.fire){ nState := s_idle }.otherwise{ nState := s_reply }
+    }
+  }
+
+  if (debug){
+    val cnt = new Counter(65535)
+    cnt.inc()
+    when(io.in.fire){
+      printf(p"[TLB ${cnt.value}] ")
+      printf(p"REQ | asid: 0x${Hexadecimal(io.in.bits.asid)} ptbr: 0x${Hexadecimal(io.in.bits.ptbr)} vpn: 0x${Hexadecimal(io.in.bits.vpn)}\n")
+    }
+    when(cState === s_check){
+      printf(p"[TLB ${cnt.value}] ")
+      when(hit){ printf(p"-| HIT  | ")
+      }.otherwise{ printf(p"-| MISS | ") }
+      printf(p"line: ${storage.io.rindex} way: ${Decimal(OHToUInt(hitVec))} sector: ${tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex}\n")
+    }
+    when(walker.io.ptw_req.fire){
+      printf(p"[TLB ${cnt.value}] ")
+      printf(p"- -| >>PTW | vpn: 0x${Hexadecimal(walker.io.ptw_req.bits.vpn)}\n")
+    }
+    when(walker.io.ptw_rsp.fire){
+      printf(p"[TLB ${cnt.value}] ")
+      printf(p"- -| PTW>> | ppn+flag:")
+      (0 until nSectors).foreach{ i =>
+        printf(p" 0x${Hexadecimal(walker.io.ptw_rsp.bits.ppns(i))}+${Hexadecimal(walker.io.ptw_rsp.bits.flags(i))}")
+      }
+      printf("\n")
+    }
+    when(storage.io.write.valid){
+      printf(p"[TLB ${cnt.value}] ")
+      printf(p"- -|REFILL | line: ${storage.io.write.bits.windex} way: ${Decimal(refillWay)}\n")
+      printf(p"[TLB ${cnt.value}]            | asid: 0x${Hexadecimal(storage.io.write.bits.wdata.asid)} vpn: 0x${Hexadecimal(storage.io.write.bits.wdata.vpn)} ppn+flag: ")
+      (0 until nSectors).foreach{ i =>
+        printf(p" 0x${Hexadecimal(storage.io.write.bits.wdata.ppns(i))}+${Hexadecimal(storage.io.write.bits.wdata.flags(i))}")
+      }
+      printf("\n")
+    }
+    when(io.out.fire){
+      printf(p"[TLB ${cnt.value}] ")
+      printf(p"RSP | ppn+flag: 0x${Hexadecimal(io.out.bits.ppn)}+${Hexadecimal(io.out.bits.flag)}\n")
     }
   }
 }

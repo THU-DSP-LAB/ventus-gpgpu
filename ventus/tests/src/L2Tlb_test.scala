@@ -1,4 +1,4 @@
-package pipeline
+package play
 
 import chisel3._
 import chisel3.util._
@@ -6,6 +6,7 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
+import pipeline._
 import pipeline.mmu._
 import top.DecoupledPipe
 import MemboxS._
@@ -131,7 +132,7 @@ class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
         val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
       })
 
-      val internal = Module(new L2Tlb(SV))
+      val internal = Module(new L2Tlb(SV, debug = true))
 
       val pipe_tlb_req = Module(new Queue(new L2TlbReq(SV), 1))
       val pipe_tlb_rsp = Module(new Queue(new L2TlbRsp(SV), 1))
@@ -154,11 +155,11 @@ class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
     test(new L2TlbWrapper(SV32.device)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       val memory = new Memory(BigInt("10000000", 16), SV32.host)
       val ptbr = memory.createRootPageTable()
-      memory.allocateMemory(ptbr, BigInt("080000000", 16), SV32.host.PageSize)
-      memory.allocateMemory(ptbr, BigInt("090000000", 16), SV32.host.PageSize)
+      memory.allocateMemory(ptbr, BigInt("080000000", 16), SV32.host.PageSize*4)
+      memory.allocateMemory(ptbr, BigInt("090000000", 16), SV32.host.PageSize*4)
 
       var clock_cnt = 0; var tlb_cnt = 0;
-      val req_list = Seq(BigInt("080000", 16), BigInt("080000", 16))
+      val req_list = Seq(BigInt("080000", 16), BigInt("080001", 16))
       val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
       val tlb_sender = new RequestSender(d.io.in, d.io.out)
       tlb_sender.add(req_list.map{a =>
