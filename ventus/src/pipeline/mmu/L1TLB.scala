@@ -55,6 +55,7 @@ class L1TLB(SV: SVParam, nWays: Int) extends Module{
   io.in.ready := cState === s_idle && !io.invalidate.valid
 
   val tlb_req = RegInit(0.U.asTypeOf(io.in.bits))
+  val tlb_rsp = RegInit(0.U(SV.paLen.W))
 
   val hitVec = VecInit(storage.map{ x =>
     (x.asid === tlb_req.asid) && (x.vpn === SV.getVPN(tlb_req.vaddr)) && x.flags(0)
@@ -76,7 +77,7 @@ class L1TLB(SV: SVParam, nWays: Int) extends Module{
       when(hit){
         nState := s_reply
         replace.access(hitVec)
-        tlb_req := Cat(storage(OHToUInt(hitVec)).ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
+        tlb_rsp := Cat(storage(OHToUInt(hitVec)).ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
       }.otherwise{
         nState := s_l2tlb_req
         storage(refillWay).vpn := SV.getVPN(tlb_req.vaddr)
@@ -90,6 +91,7 @@ class L1TLB(SV: SVParam, nWays: Int) extends Module{
     }
     is(s_l2tlb_rsp){
       when(io.l2_rsp.fire){
+        tlb_rsp := Cat(io.l2_rsp.bits.ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
         storage(refillWay).ppn := io.l2_rsp.bits.ppn
         storage(refillWay).flags := io.l2_rsp.bits.flags
         replace.access(refillWay)
@@ -104,5 +106,11 @@ class L1TLB(SV: SVParam, nWays: Int) extends Module{
     }
   }
   io.out.valid := cState === s_reply
-  io.out.bits.paddr := Cat(storage(refillWay).ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
+  io.out.bits.paddr := tlb_rsp
+  io.l2_req.valid := cState === s_l2tlb_req
+  io.l2_req.bits.ptbr := tlb_req.ptbr
+  io.l2_req.bits.asid := tlb_req.asid
+  io.l2_req.bits.vpn := SV.getVPN(tlb_req.vaddr)
+
+  io.l2_rsp.ready := cState === s_l2tlb_rsp
 }
