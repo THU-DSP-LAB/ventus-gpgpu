@@ -223,10 +223,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   io.to_dcache.bits.setIdx := setIdx
   val opcode_wire =Wire(UInt(3.W))
   val param_wire_alt =Wire(UInt(4.W))
-param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
+  param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
   Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
     Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
-val param_wire=Wire(UInt(4.W))
+  val param_wire=Wire(UInt(4.W))
   when(reg_save.ctrl.atomic){
     when(reg_save.ctrl.aq &&reg_save.ctrl.rl){
       opcode_wire :=Mux(state===s_dcache_2,3.U,Mux(state===s_dcache_1,2.U,3.U))
@@ -354,6 +354,50 @@ val param_wire=Wire(UInt(4.W))
         reg_save.mask := mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
+      }
+    }
+  }
+
+  if (SPIKE_OUTPUT){
+    when( state===s_save && io.to_mshr.fire && reg_save.ctrl.mem/*&&reg_save.ctrl.wid===wid_to_check.U*/){
+      printf(p"warp ${Decimal(reg_save.ctrl.wid)} ")
+      printf(p"0x${Hexadecimal(reg_save.ctrl.spike_info.get.pc)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.inst)}")
+      when(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
+        printf(p" lsu.r ")
+      }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XWR){
+        printf(p" lsu.w ")
+      }
+      when(!reg_save.ctrl.isvec){
+        when(reg_save.ctrl.mem_cmd === IDecode.M_XWR){
+          printf(p"x ${reg_save.ctrl.reg_idx2} op ${reg_save.ctrl.mop} ")
+          printf(p"${Hexadecimal(reg_save.in3(0))} ")
+        }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
+          printf(p"x ${reg_save.ctrl.reg_idxw} op ${reg_save.ctrl.mop} ")
+        }
+        printf(p"@ ${Hexadecimal(reg_save.in1(0))}+${Hexadecimal(reg_save.in2(0))}\n")
+      }.otherwise{
+        when(reg_save.ctrl.mem_cmd === IDecode.M_XWR) {
+          // vsw12 uses inst[24:20] as src
+          when(reg_save.ctrl.disable_mask){
+            printf(p"v${reg_save.ctrl.reg_idx2} op ${reg_save.ctrl.mop} ")
+          }.otherwise{
+            printf(p"v${reg_save.ctrl.reg_idxw} op ${reg_save.ctrl.mop} ")
+          }
+          printf(p"mask ${Binary(reg_save.mask.asUInt)} ")
+          reg_save.in3.reverse.foreach { x => printf(p"${Hexadecimal(x)} ") }
+        }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
+          printf(p"v${reg_save.ctrl.reg_idx3} op ${reg_save.ctrl.mop} ")
+        }
+        printf(p"@")
+        when(false.B){
+          //(reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+        }.otherwise{
+          //(reg_save.in1 zip reg_save.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
+          addr.foreach{ x =>
+            printf(p" ${Hexadecimal(x)}")
+          }
+        }
+        printf(p"\n")
       }
     }
   }
