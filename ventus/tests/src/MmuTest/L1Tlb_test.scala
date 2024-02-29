@@ -10,12 +10,14 @@ import pipeline._
 import pipeline.mmu._
 import top.DecoupledPipe
 import MemboxS._
+import play.TestUtils._
 import MmuTestUtils._
 
-class L1Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
-  import IOHelpers._
+class L1Tlb_test extends AnyFreeSpec
+  with ChiselScalatestTester
+  with MMUHelpers {
   "L1TLB Main" in {
-    test(new L1TLB(IOHelpers.SV32.device, 1)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
+    test(new L1TLB(SV32.device, 1)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       d.io.in.setSourceClock(d.clock)
       d.io.out.setSinkClock(d.clock)
       d.io.l2_req.setSinkClock(d.clock)

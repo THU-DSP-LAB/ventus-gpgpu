@@ -42,7 +42,7 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
   out_port.valid := valids.last
 
   if (insulate){
-    io.deq <> Queue(out_port, 1)
+    io.deq <> Queue(out_port, 1, pipe = true)
   }
   else{
     io.deq <> out_port

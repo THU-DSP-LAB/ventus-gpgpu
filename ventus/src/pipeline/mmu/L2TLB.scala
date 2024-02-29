@@ -168,7 +168,7 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
   })
 
   val storage = Module(new L2TlbStorage(SV))
-  val walker = Module(new PTW(SV, 1))
+  val walker = Module(new PTW(SV, 1, debug))
 
   val replace = new SetAssocLRU(nSets, nWays, "lru")
   val refillWay = Mux(storage.io.wAvail.orR, PriorityEncoder(storage.io.wAvail), replace.way(storage.io.write.bits.windex))
@@ -293,7 +293,7 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
     when(storage.io.write.valid){
       printf(p"[TLB ${cnt.value}] ")
       printf(p"- -|REFILL | line: ${storage.io.write.bits.windex} way: ${Decimal(refillWay)}\n")
-      printf(p"[TLB ${cnt.value}]            | asid: 0x${Hexadecimal(storage.io.write.bits.wdata.asid)} vpn: 0x${Hexadecimal(storage.io.write.bits.wdata.vpn)} ppn+flag: ")
+      printf(p"[TLB ${cnt.value}]            | asid: 0x${Hexadecimal(storage.io.write.bits.wdata.asid)} vpn: 0x${Hexadecimal(storage.io.write.bits.wdata.vpn)} ppn+flag:")
       (0 until nSectors).foreach{ i =>
         printf(p" 0x${Hexadecimal(storage.io.write.bits.wdata.ppns(i))}+${Hexadecimal(storage.io.write.bits.wdata.flags(i))}")
       }
@@ -302,6 +302,9 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
     when(io.out.fire){
       printf(p"[TLB ${cnt.value}] ")
       printf(p"RSP | ppn+flag: 0x${Hexadecimal(io.out.bits.ppn)}+${Hexadecimal(io.out.bits.flag)}\n")
+    }
+    when(io.mem_req.fire || io.mem_rsp.fire){
+      printf(p"[TLB ${cnt.value}] ")
     }
   }
 }

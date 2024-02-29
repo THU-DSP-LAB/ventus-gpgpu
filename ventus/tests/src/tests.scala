@@ -20,6 +20,7 @@ import chiseltest._
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
 import chiseltest.simulator.WriteFstAnnotation
+import play.TestUtils._
 //import chiseltest.simulator.
 import pipeline.pipe
 import top._
@@ -125,10 +126,26 @@ object AdvancedTestList{
       "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 20000
     )
   }
+  val nw4x4 = new AdvTest("adv_nw_4x4", Seq("nw_kernel1_0.metadata", "nw_kernel1_1.metadata", "nw_kernel2_0.metadata"),
+    Seq("nw_kernel1_0.data", "nw_kernel1_1.data", "nw_kernel2_0.data"), 4, 4, 1000)
 }
 
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
+
+  "membox_test" in {
+    val testbench = AdvancedTestList.nw4x4
+    val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
+    val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
+    val mem = new MemBox
+    var meta = new MetaData
+
+    metaFileDir.indices.foreach { i =>
+      meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
+    }
+    val x = ByteArray2BigInt(mem.readMem(BigInt("7ffff140", 16), 4))
+  }
+
   "adv_test" in {
     // TODO: rename
     val testbench = AdvancedTestList.vecadd
@@ -270,6 +287,75 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           }
         }.join
       }.join
+    }
+  }
+  "adv_test2" in {
+    val testbench = AdvancedTestList.vecadd
+    val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
+    val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
+    val maxCycle = testbench.cycles
+
+    if(parameters.num_warp < testbench.warp) parameters.num_warp = testbench.warp
+    parameters.num_thread = testbench.thread
+
+    val mem = new MemBox
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
+
+      c.io.host_req.initSource()
+      c.io.host_req.setSourceClock(c.clock)
+      c.io.out_d.initSource()
+      c.io.out_d.setSourceClock(c.clock)
+      c.io.host_rsp.initSink()
+      c.io.host_rsp.setSinkClock(c.clock)
+      c.io.out_a.initSink()
+      c.io.out_a.setSinkClock(c.clock)
+      c.clock.setTimeout(200)
+      c.clock.step(5)
+
+      var meta = new MetaData
+      var size3d = Array.fill(3)(0)
+      var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
+      var current_kernel = 0
+      var clock_cnt = 0
+      var timestamp = 0
+
+      class RequestSenderGPU(gap: Int = 5) extends RequestSender(c.io.host_req, c.io.host_rsp){
+        override def finishWait(): Boolean = {
+          val rsp = c.io.host_rsp.bits.peek().litValue
+          val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt
+          wg_list(current_kernel)(extract_rsp) = true
+
+          if(wg_list(current_kernel).reduce(_ && _)){
+            timestamp = clock_cnt
+            current_kernel += 1
+          }
+          return (clock_cnt - timestamp > gap)
+        }
+      }
+
+      val host_driver = new RequestSenderGPU(5)
+      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 5, 5)
+
+      while(clock_cnt <= maxCycle && !wg_list.flatten.reduce(_ && _)){
+        if(clock_cnt - timestamp == 0){
+          meta = mem.loadfile(metaFileDir(current_kernel), dataFileDir(current_kernel))
+          size3d = meta.kernel_size.map(_.toInt)
+          wg_list(current_kernel) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+          host_driver.add(
+            for {
+              i <- 0 until size3d(0)
+              j <- 0 until size3d(1)
+              k <- 0 until size3d(2)
+            } yield meta.generateHostReq(i, j, k)
+          )
+        }
+
+        host_driver.eval()
+        mem_driver.eval()
+
+        c.clock.step(1)
+        clock_cnt += 1
+      }
     }
   }
 }

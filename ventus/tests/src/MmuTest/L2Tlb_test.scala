@@ -12,8 +12,11 @@ import top.DecoupledPipe
 import MemboxS._
 import MmuTestUtils._
 
-class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
-  import IOHelpers._
+class L2Tlb_test extends AnyFreeSpec
+  with ChiselScalatestTester
+  with MMUHelpers {
+  import play.TestUtils.RequestSender
+
   "L2TLB Main" in {
     class L2TlbWrapper(SV: SVParam) extends Module{
       val io = IO(new Bundle {
@@ -50,7 +53,7 @@ class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
 
       var clock_cnt = 0; var tlb_cnt = 0;
       val req_list = Seq(BigInt("080000", 16), BigInt("080001", 16))
-      val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
+      val mem_driver = new MMUMemPortDriverDelay(SV32)(d.io.mem_req, d.io.mem_rsp, memory, 5, 5)
       val tlb_sender = new RequestSender(d.io.in, d.io.out)
       tlb_sender.add(req_list.map{a =>
         (new L2TlbReq(SV32.device)).Lit(
@@ -73,8 +76,10 @@ class L2Tlb_test extends AnyFreeSpec with ChiselScalatestTester {
   }
 }
 
-class L2TlbComponentTest extends AnyFreeSpec with ChiselScalatestTester {
-  import IOHelpers._
+class L2TlbComponentTest extends AnyFreeSpec
+  with ChiselScalatestTester
+  with MMUHelpers {
+  import play.TestUtils._
   "L2TLB Storage" in {
     test(new L2TlbStorage(SV32.device)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       println("L2TLB Test: Storage")
@@ -142,7 +147,7 @@ class L2TlbComponentTest extends AnyFreeSpec with ChiselScalatestTester {
         val mem_req = DecoupledIO(new Cache_Req(SV))
         val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
       })
-      val internal = Module(new PTW(SV))
+      val internal = Module(new PTW(SV, debug = true))
       internal.io.ptw_req <> Queue(io.ptw_req, 1)
       io.ptw_rsp <> Queue(internal.io.ptw_rsp, 1)
 
@@ -161,7 +166,7 @@ class L2TlbComponentTest extends AnyFreeSpec with ChiselScalatestTester {
       val memory = new Memory(BigInt("10000000", 16), SV32.host)
       val ptbr = memory.createRootPageTable()
       val vaddr1 = BigInt("080000000", 16)
-      memory.allocateMemory(ptbr, vaddr1, SV32.host.PageSize * 2)
+      memory.allocateMemory(ptbr, vaddr1, SV32.host.PageSize * 4)
       println(f"V: $vaddr1%08x -> P: ${memory.addrConvert(ptbr, vaddr1)}%08x")
       var clock_cnt = 0
       d.io.ptw_req.setSourceClock(d.clock)
@@ -176,11 +181,19 @@ class L2TlbComponentTest extends AnyFreeSpec with ChiselScalatestTester {
       d.io.mem_req.ready.poke(true.B)
 
       d.io.ptw_rsp.ready.poke(true.B)
-      val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
+      val mem_driver = new MMUMemPortDriverDelay(SV32)(d.io.mem_req, d.io.mem_rsp, memory, 5, 5)
+      //val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
+
       val tlb_requestor = new RequestSender(d.io.ptw_req, d.io.ptw_rsp)
       tlb_requestor.add(makeReq("h80000".U, ptbr.U, 1.U))
       tlb_requestor.add(makeReq("h80001".U, ptbr.U, 1.U))
-      while(tlb_requestor.send_list.nonEmpty && clock_cnt <= 30){
+      tlb_requestor.add(makeReq("h80002".U, ptbr.U, 1.U))
+      tlb_requestor.add(makeReq("h80003".U, ptbr.U, 1.U))
+      var timestamp_rsp = -1000
+      while(tlb_requestor.send_list.nonEmpty && clock_cnt <= 1000){
+        if(checkForReady(tlb_requestor.rspPort) && checkForValid(tlb_requestor.rspPort))
+          timestamp_rsp = clock_cnt
+        tlb_requestor.pause = if(clock_cnt <= timestamp_rsp + 20) true else false
         tlb_requestor.eval()
         mem_driver.eval()
         d.clock.step(1); clock_cnt += 1

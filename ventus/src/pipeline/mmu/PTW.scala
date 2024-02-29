@@ -102,7 +102,7 @@ class Cache_Rsp(SV: SVParam) extends Bundle with L2TlbParam{
   val source = UInt(depth_mem_source.W)
 }
 
-class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
+class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module with L2TlbParam {
   val io = IO(new Bundle{
     val ptw_req = Flipped(DecoupledIO(new PTW_Req(SV)))
     val ptw_rsp = DecoupledIO(new PTW_Rsp(SV))
@@ -151,6 +151,7 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
     entries(enq_ptr).sectorIdx := 0.U // access PTBR always sector 0
     entries(enq_ptr).source := io.ptw_req.bits.source
     entries(enq_ptr).fault := false.B
+    //printf(p"PTW#${enq_ptr} REQ | vpn: ${Hexadecimal(io.ptw_req.bits.vpn)} ptbr: ${io.ptw_req.bits.ptbr}\n")
   }
   val memreq_arb = Module(new RRArbiter(new Cache_Req(SV), Ways))
   (0 until Ways).foreach{ i =>
@@ -214,6 +215,31 @@ class PTW(SV: SVParam, Ways: Int = 1) extends Module with L2TlbParam {
   when(io.ptw_rsp.fire){ // mem rsp -> idle, page fault -> idle
     entries(ptwrsp_arb.io.chosen) := 0.U.asTypeOf(new PTWEntry)
     state(ptwrsp_arb.io.chosen) := s_idle
+  }
+
+  if(debug){
+    when(io.mem_req.fire){
+      val cur_entry = entries(memreq_arb.io.chosen)
+      val cur_sector = cur_entry.sectorIdx
+      printf(p"PTW#${memreq_arb.io.chosen} MEM | ppn: 0x${Hexadecimal(SV.PPN2PtePA(cur_entry.ppns(cur_sector), 0.U))}[" +
+        p"idx: 0x${Hexadecimal(SV.getVPNIdx(cur_entry.vpn, cur_entry.cur_level))}] " +
+        p"pa: 0x${Hexadecimal(alignedPA(makePA(cur_entry))._1)}+${Hexadecimal(alignedPA(makePA(cur_entry))._2)}\n")
+    }
+    when(io.mem_rsp.fire){
+      (0 until Ways).foreach{ i =>
+        when(is_memwait(i) && entries(i).source === io.mem_rsp.bits.source){
+          printf(p"PTW#${i.U} MEM | ->")
+          (0 until nSectors).foreach{ j =>
+            when(j.U === entries(i).sectorIdx){
+              printf(p" [0x${Hexadecimal(SV.PTE2PPN(io.mem_rsp.bits.data(j)))}+${Hexadecimal(io.mem_rsp.bits.data(j)(7, 0))}]")
+            }.otherwise {
+              printf(p" 0x${Hexadecimal(SV.PTE2PPN(io.mem_rsp.bits.data(j)))}+${Hexadecimal(io.mem_rsp.bits.data(j)(7, 0))}")
+            }
+          }
+          printf(p"\n")
+        }
+      }
+    }
   }
 }
 
