@@ -127,7 +127,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
 
       def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
         while (x.valid.peek().litToBoolean == false) {
@@ -147,7 +147,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(200)
+      c.clock.setTimeout(1000)
       c.clock.step(5)
 
       var size3d = Array.fill(3)(0)
@@ -183,6 +183,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           }
         }
         metaFileDir.indices.foreach { i =>
+          print(s"load ${dataFileDir(i)}\n")
           mem.loadfile(metas(i), dataFileDir(i))
           size3d = metas(i).kernel_size.map(_.toInt)
           wg_list(i) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
