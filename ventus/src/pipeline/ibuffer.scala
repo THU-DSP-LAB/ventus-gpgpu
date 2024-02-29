@@ -27,12 +27,12 @@ class instbuffer extends Module{
   io.in.ready:=false.B
   val fifo=(0 until num_warp).map(i=>{
     val x_single=Module(new Queue(new CtrlSigs,num_ibuffer,hasFlush=true))
-      io.ibuffer_ready(i):=x_single.io.enq.ready
-      x_single.io.enq.bits:=io.in.bits
-      x_single.io.enq.valid:=Mux((i.asUInt===io.in.bits.wid),io.in.valid,false.B)
-      when(i.asUInt===io.in.bits.wid){io.in.ready:=x_single.io.enq.ready}
-      io.out(i)<>x_single.io.deq
-      x_single.flush:=io.flush.valid&(i.asUInt===io.flush.bits)
+    io.ibuffer_ready(i):=x_single.io.enq.ready
+    x_single.io.enq.bits:=io.in.bits
+    x_single.io.enq.valid:=Mux((i.asUInt===io.in.bits.wid),io.in.valid,false.B)
+    when(i.asUInt===io.in.bits.wid){io.in.ready:=x_single.io.enq.ready}
+    io.out(i)<>x_single.io.deq
+    x_single.flush:=io.flush.valid&(i.asUInt===io.flush.bits)
     x_single
   })
   //val arbiter=Module(new arbiter_m2o(3))
@@ -40,30 +40,60 @@ class instbuffer extends Module{
 class ibuffer2issue extends Module{
   val io = IO(new Bundle{
     val in=Flipped(Vec(num_warp,Decoupled(new CtrlSigs)))
-    val out=Decoupled(new CtrlSigs)
-    val out_sel=Output(UInt(depth_warp.W))
+    //val out=Decoupled(new CtrlSigs)
+    val out_x = Decoupled(new CtrlSigs)
+    val out_v = Decoupled(new CtrlSigs)
+    //val out_sel=Output(UInt(depth_warp.W))
     val cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
   })
   //
   if(INST_CNT){
-    val cnt = new Counter(200000)
-    when(io.out.fire) {
-      cnt.inc
+    val cnt = RegInit(0.U(20.W))
+    when(io.out_x.fire || io.out_v.fire) {
+      when(io.out_x.fire && io.out_v.fire) {
+        cnt := cnt + 2.U
+      }.otherwise{
+        cnt := cnt + 1.U
+      }
     }
-    io.cnt.foreach(_ := cnt.value)
+    io.cnt.foreach(_ := cnt)
   }
   //
-  val rrarbit=Module(new RRArbiter(new CtrlSigs(),num_warp))
-  rrarbit.io.in<>io.in
-  io.out<>rrarbit.io.out
-/*
-  rrarbit.io.out.ready:=false.B
-  io.out.bits:=io.in(0).bits
-  io.out.valid:=io.in(0).valid
-  io.in.foreach(_.ready:=false.B)
-  io.in(0).ready:=io.out.ready
-*/
-  io.out_sel:=rrarbit.io.chosen
+  val rrarbit_x=Module(new RRArbiter(new CtrlSigs(),num_warp))
+  val rrarbit_v=Module(new RRArbiter(new CtrlSigs(),num_warp))
+  def inst_is_vec(in: CtrlSigs): Bool = {
+    val out = Wire(new Bool)
+    // sALU | CSR | warpscheduler
+    // vFPU | vSFU | vALU&SIMT | vMUL | vTC | LSU
+    when(in.tc || in.fp || in.mul || in.sfu || in.mem) {
+      out := true.B
+    }.elsewhen(in.csr.orR || in.barrier) {
+      out := false.B
+    }.elsewhen(in.isvec) {
+      out := true.B
+    }.otherwise {
+      out := false.B
+    }
+    out
+  }
+  (0 until num_warp).foreach{ i =>
+    rrarbit_x.io.in(i).valid := io.in(i).valid && !inst_is_vec(io.in(i).bits)
+    rrarbit_x.io.in(i).bits := io.in(i).bits
+    rrarbit_v.io.in(i).valid := io.in(i).valid && inst_is_vec(io.in(i).bits)
+    rrarbit_v.io.in(i).bits := io.in(i).bits
+    io.in(i).ready := Mux(inst_is_vec(io.in(i).bits), rrarbit_v.io.in(i).ready, rrarbit_x.io.in(i).ready)
+  }
+  io.out_x <> rrarbit_x.io.out
+  io.out_v <> rrarbit_v.io.out
+
+  /*
+    rrarbit.io.out.ready:=false.B
+    io.out.bits:=io.in(0).bits
+    io.out.valid:=io.in(0).valid
+    io.in.foreach(_.ready:=false.B)
+    io.in(0).ready:=io.out.ready
+  */
+  //io.out_sel:=rrarbit.io.chosen
   //input:ibuffer output: issue exe
 
 }
@@ -125,8 +155,8 @@ class InstrBufferV2 extends Module{
         mask_reg := mask_next
       }
       when(io.in.fire){
-          mask_reg := io.in.bits.control_mask.asUInt // cover io.out.fire
-          control_reg := io.in.bits.control
+        mask_reg := io.in.bits.control_mask.asUInt // cover io.out.fire
+        control_reg := io.in.bits.control
       }
     }
     io.in.ready := mask_next === 0.U && io.out.ready

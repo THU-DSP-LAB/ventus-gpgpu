@@ -165,6 +165,43 @@ class arbiter_o2m(numTarget:Int) extends Module {
 
 }
 
+class XVDualIssue(num_buffer: Int) extends Module{
+  val io = IO(new Bundle{
+    val in = Flipped(Vec(num_buffer, Decoupled(Output(new vExeData))))
+    val out_x = Decoupled(Output(new vExeData))
+    val out_v = Decoupled(Output(new vExeData))
+  })
+  def inst_is_vec(in: vExeData): Bool = {
+    val out = Wire(new Bool)
+    // sALU | CSR | warpscheduler
+    // vFPU | vSFU | vALU&SIMT | vMUL | vTC | LSU
+    when(in.ctrl.tc || in.ctrl.fp || in.ctrl.mul || in.ctrl.sfu || in.ctrl.mem){
+      out := true.B
+    }.elsewhen(in.ctrl.csr.orR || in.ctrl.barrier){
+      out := false.B
+    }.elsewhen(in.ctrl.isvec){
+      out := true.B
+    }.otherwise{
+      out := false.B
+    }
+    out
+  }
+  val arb_x = Module(new RRArbiter(new vExeData, num_buffer))
+  val arb_v = Module(new RRArbiter(new vExeData, num_buffer))
+
+  (0 until num_buffer).foreach{ i =>
+    val in_isvec = inst_is_vec(io.in(i).bits)
+    io.in(i).ready := Mux(in_isvec, arb_v.io.in(i).ready, arb_x.io.in(i).ready)
+
+    arb_x.io.in(i).valid := io.in(i).valid && !in_isvec
+    arb_x.io.in(i).bits := io.in(i).bits
+    arb_v.io.in(i).valid := io.in(i).valid && in_isvec
+    arb_v.io.in(i).bits := io.in(i).bits
+  }
+  io.out_x <> arb_x.io.out
+  io.out_v <> arb_v.io.out
+}
+
 class IssueV2 extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Vec(num_issue,Decoupled(Output(new vExeData))))

@@ -137,7 +137,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         }
         true
       }
-      def memLatency = 5
+      def memLatency = 60
 
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)

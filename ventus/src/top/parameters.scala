@@ -85,7 +85,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_MshrSubEntry: Int = 2
   def num_sfu = (num_thread >> 2).max(1)
 
-  def sharedmem_depth = 128
+  def sharedmem_depth = 256
 
   def sharedmem_BlockWords = num_thread//dcache_BlockWords
 
@@ -93,7 +93,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_NSets: Int = 32
 
-  def l2cache_NWays: Int = 4
+  def l2cache_NWays: Int = 16
 
   def l2cache_BlockWords: Int = dcache_BlockWords
 
