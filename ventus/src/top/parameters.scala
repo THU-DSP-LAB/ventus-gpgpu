@@ -99,7 +99,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_writeBytes: Int = 1
 
-  def l2cache_memCycles: Int = 4
+  def l2cache_memCycles: Int = 32
 
   def l2cache_portFactor: Int = 2
 
