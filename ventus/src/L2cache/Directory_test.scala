@@ -220,9 +220,9 @@ for(i<- 0 until params.cache.sets){
 
   val setQuash_1 = wen && io.write.bits.set === io.read.bits.set //表示write到上次读出来的set
 
-  val setQuash=RegNext(setQuash_1)||(wen && io.write.bits.set === set)
+  val setQuash=RegNext(setQuash_1)
   val tagMatch_1= io.write.bits.data.tag===io.read.bits.tag
-  val tagMatch = RegNext(tagMatch_1) ||(io.write.bits.data.tag === tag) //这是之前打算read的tag
+  val tagMatch = RegNext(tagMatch_1) //这是之前打算read的tag
   val writeWay1 = RegInit(0.U(params.wayBits.W))
   writeWay1:=io.write.bits.way
 
@@ -282,7 +282,7 @@ for(i<- 0 until params.cache.sets){
 
   io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg //also fire when bypass
   io.result.valid := Mux(RegNext(flush_issue), RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
-  io.result.bits.hit := Mux(RegNext(flush_issue), true.B, (hit || (setQuash && tagMatch )) && (!about_replace))
+  io.result.bits.hit := Mux(RegNext(flush_issue), true.B, (hit || (setQuash && tagMatch )||(setQuash_1 &&tagMatch_1)) && (!about_replace))
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
   io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,read_bits_reg.put)
   io.result.bits.data   :=Mux(RegNext(flush_issue),0.U,read_bits_reg.data)
