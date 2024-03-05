@@ -240,6 +240,7 @@ case class DelayFIFOEntry(
 class DelayFIFO[T<: DelayFIFOEntry](val latency: Int, val depth: Int){
   class EntryWithTime(var ttl: Int, val entry: T){
     def step(minpos: Int): Unit = {
+      if(ttl < 0) return
       if(ttl > minpos) ttl = ttl - 1 else ttl = minpos
     }
   }

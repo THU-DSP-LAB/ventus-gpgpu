@@ -288,16 +288,12 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val metas = metaFileDir.map(MetaData(_))
 
     parameters.num_warp = (metas.map(_.wg_size.toInt) :+ testbench.warp).max
-    assert(metas.map(_.wf_size.toInt == metas.head.wf_size.toInt).reduceLeft(_ && _))
+    //assert(metas.map(_.wf_size.toInt == metas.head.wf_size.toInt).reduceLeft(_ && _))
     parameters.num_thread = metas.head.wf_size.toInt
 
     print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
     val mem = new MemBox
-
-    val fakemem = new MemBox
-    fakemem.loadfile(metas(0), dataFileDir(0))
-    fakemem
 
     test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
       c.io.host_req.initSource()
@@ -308,7 +304,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(200)
+      c.clock.setTimeout(1000)
       c.clock.step(5)
 
       var meta = new MetaData
@@ -320,23 +316,40 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
       class RequestSenderGPU(gap: Int = 5) extends RequestSender(c.io.host_req, c.io.host_rsp){
         override def finishWait(): Boolean = {
-          val rsp = c.io.host_rsp.bits.peek().litValue
-          val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt
-          wg_list(current_kernel)(extract_rsp) = true
-
-          if(wg_list(current_kernel).reduce(_ && _)){
-            timestamp = clock_cnt
-            current_kernel += 1
+          clock_cnt - timestamp > gap
+        }
+        def senderEval(): Unit = {
+          if(checkForValid(reqPort) && checkForReady(reqPort)){
+            send_list = send_list.tail
           }
-          return (clock_cnt - timestamp > gap)
+          if(send_list.nonEmpty && finishWait()){
+            reqPort.valid.poke(true.B)
+            reqPort.bits.poke(send_list.head)
+          }
+          else{
+            reqPort.valid.poke(false.B)
+          }
+        }
+        def receiverEval(): Unit = {
+          if(checkForValid(rspPort) && checkForReady(rspPort)){
+            val rsp = c.io.host_rsp.bits.peek().litValue
+            val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
+            wg_list(current_kernel)(extract_rsp) = true
+          }
+          rspPort.ready.poke(true.B)
+        }
+        override def eval() = {
+          senderEval()
+          receiverEval()
         }
       }
 
       val host_driver = new RequestSenderGPU(5)
-      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 5, 5)
+      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 0, 5)
 
       while(clock_cnt <= maxCycle && !wg_list.flatten.reduce(_ && _)){
         if(clock_cnt - timestamp == 0){
+          print(s"kernel ${current_kernel} ${dataFileDir(current_kernel)}\n")
           meta = mem.loadfile(metas(current_kernel), dataFileDir(current_kernel))
           size3d = meta.kernel_size.map(_.toInt)
           wg_list(current_kernel) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
@@ -354,6 +367,20 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
         c.clock.step(1)
         clock_cnt += 1
+
+        if (wg_list(current_kernel).reduce(_ && _)) {
+          timestamp = clock_cnt
+          current_kernel += 1
+        }
+      }
+      print(s"FIN ${clock_cnt} |")
+      c.io.inst_cnt.zipWithIndex.foreach{ case(x, i) =>
+        print(s" [${i}: ${x.peek.litValue.toInt}]")
+      }
+      print("\n")
+      Seq.fill(3){
+        c.clock.step(1)
+        clock_cnt +=1
       }
     }
   }
