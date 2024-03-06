@@ -100,7 +100,7 @@ class warp_scheduler extends Module{
   when(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
     when(!warp_bar_lock(new_wg_id)){
-      warp_bar_exp(new_wg_id):= Fill(num_warp_in_a_block,1.U(1.W))>>(num_warp_in_a_block.asUInt-new_wg_wf_count)
+      warp_bar_exp(new_wg_id):= (Fill(num_warp_in_a_block,1.U(1.W))>>(num_warp_in_a_block.asUInt-new_wg_wf_count))<<io.warp_control.bits.ctrl.wid//显示warp中有哪些属于wg
       warp_bar_cur(new_wg_id):= 0.U
     }
   }
@@ -109,7 +109,7 @@ class warp_scheduler extends Module{
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
   warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
-  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){
+  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
     warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     when((warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt())===warp_bar_exp(end_wg_id)){
