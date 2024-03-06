@@ -99,9 +99,9 @@ class warp_scheduler extends Module{
 
   when(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
-    when(!warp_bar_lock(new_wg_id)){
-      warp_bar_exp(new_wg_id):= (Fill(num_warp_in_a_block,1.U(1.W))>>(num_warp_in_a_block.asUInt-new_wg_wf_count))<<io.warpReq.bits.wid//显示warp中有哪些属于wg
-      warp_bar_cur(new_wg_id):= 0.U
+      warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
+    when(!warp_bar_lock(new_wg_id)) {
+      warp_bar_cur(new_wg_id) := 0.U
     }
   }
   when(io.warpRsp.fire){
