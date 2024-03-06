@@ -88,7 +88,7 @@ class warp_scheduler extends Module{
   val warp_bar_exp=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   //val warp_bar_cur_next=warp_bar_cur
   //val warp_bar_exp_next=warp_bar_exp
-  val warp_bar_lock=RegInit(VecInit(Seq.fill(num_block)(false.B))) //equals to "active block"
+  val warp_bar_lock=WireInit(VecInit(Seq.fill(num_block)(false.B))) //equals to "active block"
   val new_wg_id=io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
   val new_wf_id=io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(WF_COUNT_WIDTH_PER_WG-1,0)
   val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
@@ -99,9 +99,9 @@ class warp_scheduler extends Module{
 
   when(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
-    when(!warp_bar_lock(new_wg_id)){
-      warp_bar_exp(new_wg_id):= Fill(num_warp_in_a_block,1.U(1.W))>>(num_warp_in_a_block.asUInt-new_wg_wf_count)
-      warp_bar_cur(new_wg_id):= 0.U
+      warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
+    when(!warp_bar_lock(new_wg_id)) {
+      warp_bar_cur(new_wg_id) := 0.U
     }
   }
   when(io.warpRsp.fire){
@@ -109,7 +109,7 @@ class warp_scheduler extends Module{
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
   warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
-  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){
+  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
     warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     when((warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt())===warp_bar_exp(end_wg_id)){
