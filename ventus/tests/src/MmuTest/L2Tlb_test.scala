@@ -18,21 +18,23 @@ class L2Tlb_test extends AnyFreeSpec
   import play.TestUtils.RequestSender
 
   "L2TLB Main" in {
-    class L2TlbWrapper(SV: SVParam) extends Module{
+    class L2TlbWrapper(SV: SVParam) extends Module with L2TlbParam {
       val io = IO(new Bundle {
-        val in = Flipped(DecoupledIO(new L2TlbReq(SV)))
+        val in = Vec(nBanks, Flipped(DecoupledIO(new L2TlbReq(SV))))
 //        val invalidate = Flipped(ValidIO(new Bundle{
 //          val asid = UInt(SV.asidLen.W)
 //        }))
-        val out = DecoupledIO(new L2TlbRsp(SV))
+        val out = Vec(nBanks, DecoupledIO(new L2TlbRsp(SV)))
         // Request Always Read!
         val mem_req = DecoupledIO(new Cache_Req(SV))
         val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
       })
 
       val internal = Module(new L2Tlb(SV, debug = true))
-      internal.io.in <> Queue(io.in, 1)
-      io.out <> Queue(internal.io.out, 1)
+      (0 until nBanks).foreach{ i =>
+        internal.io.in(i) <> Queue(io.in(i), 1)
+        io.out(i) <> Queue(internal.io.out(i), 1)
+      }
 
       internal.io.invalidate.bits.asid := 0.U
       internal.io.invalidate.valid := false.B
@@ -46,6 +48,7 @@ class L2Tlb_test extends AnyFreeSpec
       internal.io.mem_rsp <> pipe_mem_rsp.io.deq
     }
     test(new L2TlbWrapper(SV32.device)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
+      val nBanks = d.nBanks
       val memory = new Memory(BigInt("10000000", 16), SV32.host)
       val ptbr = memory.createRootPageTable()
       memory.allocateMemory(ptbr, BigInt("080000000", 16), SV32.host.PageSize*4)
@@ -54,20 +57,24 @@ class L2Tlb_test extends AnyFreeSpec
       var clock_cnt = 0; var tlb_cnt = 0;
       val req_list = Seq(BigInt("080000", 16), BigInt("080001", 16))
       val mem_driver = new MMUMemPortDriverDelay(SV32)(d.io.mem_req, d.io.mem_rsp, memory, 5, 5)
-      val tlb_sender = new RequestSender(d.io.in, d.io.out)
-      tlb_sender.add(req_list.map{a =>
-        (new L2TlbReq(SV32.device)).Lit(
-          _.ptbr -> ptbr.U, _.vpn -> a.U, _.asid -> 1.U, _.id -> 1.U
+      val tlb_sender = (d.io.in zip d.io.out).map { case (i, o) =>
+        new RequestSender(i, o)
+      }
+      req_list.foreach{ r =>
+        tlb_sender((r % nBanks).toInt).add(
+          (new L2TlbReq(SV32.device)).Lit(
+            _.ptbr -> ptbr.U, _.vpn -> r.U, _.asid -> 1.U, _.id -> (r % nBanks).U
+          )
         )
-      })
+      }
 
-      d.io.in.setSourceClock(d.clock)
-      d.io.out.setSinkClock(d.clock)
+      d.io.in.foreach{_.setSourceClock(d.clock)}
+      d.io.out.foreach{_.setSinkClock(d.clock)}
       d.io.mem_req.setSinkClock(d.clock)
       d.io.mem_rsp.setSourceClock(d.clock)
 
-      while(tlb_sender.send_list.nonEmpty && clock_cnt <= 30){
-        tlb_sender.eval()
+      while(tlb_sender.map{_.send_list.nonEmpty}.reduce(_ && _) && clock_cnt <= 30){
+        tlb_sender.foreach{_.eval()}
         mem_driver.eval()
         d.clock.step(); clock_cnt += 1;
       }
@@ -140,16 +147,18 @@ class L2TlbComponentTest extends AnyFreeSpec
     }
   }
   "L2TLB PTW" in {
-    class PTWWrapper(SV: SVParam) extends Module{
+    class PTWWrapper(SV: SVParam, val Ways: Int) extends Module{
       val io = IO(new Bundle{
-        val ptw_req = Flipped(DecoupledIO(new PTW_Req(SV)))
-        val ptw_rsp = DecoupledIO(new PTW_Rsp(SV))
+        val ptw_req = Vec(Ways, Flipped(DecoupledIO(new PTW_Req(SV))))
+        val ptw_rsp = Vec(Ways, DecoupledIO(new PTW_Rsp(SV)))
         val mem_req = DecoupledIO(new Cache_Req(SV))
         val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
       })
-      val internal = Module(new PTW(SV, debug = true))
-      internal.io.ptw_req <> Queue(io.ptw_req, 1)
-      io.ptw_rsp <> Queue(internal.io.ptw_rsp, 1)
+      val internal = Module(new PTW(SV, Ways, debug = true))
+      (0 until Ways).foreach{ i =>
+        internal.io.ptw_req(i) <> Queue(io.ptw_req(i), 1)
+        io.ptw_rsp(i) <> Queue(internal.io.ptw_rsp(i), 1)
+      }
 
       val pipe_mem_req = Module(new DecoupledPipe(io.mem_req.bits.cloneType, 0, insulate = true))
       val pipe_mem_rsp = Module(new DecoupledPipe(io.mem_rsp.bits.cloneType, 0, insulate = true))
@@ -159,7 +168,8 @@ class L2TlbComponentTest extends AnyFreeSpec
       internal.io.mem_rsp <> pipe_mem_rsp.io.deq
     }
 
-    test(new PTWWrapper(SV32.device)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
+    test(new PTWWrapper(SV32.device, Ways = 2)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
+      val Ways = d.Ways
       def makeReq(vpn: UInt, ptbr: UInt, source: UInt): PTW_Req = (new PTW_Req(SV32.device)).Lit(
         _.vpn -> vpn, _.ptbr -> ptbr, _.source -> source
       )
@@ -168,33 +178,40 @@ class L2TlbComponentTest extends AnyFreeSpec
       val vaddr1 = BigInt("080000000", 16)
       memory.allocateMemory(ptbr, vaddr1, SV32.host.PageSize * 4)
       println(f"V: $vaddr1%08x -> P: ${memory.addrConvert(ptbr, vaddr1)}%08x")
+      println(f"V: ${vaddr1 + SV32.host.PageSize}%08x -> P: ${memory.addrConvert(ptbr, vaddr1 + SV32.host.PageSize)}%08x")
       var clock_cnt = 0
-      d.io.ptw_req.setSourceClock(d.clock)
-      d.io.ptw_rsp.setSinkClock(d.clock)
+      d.io.ptw_req.foreach{_.setSourceClock(d.clock)}
+      d.io.ptw_rsp.foreach{_.setSinkClock(d.clock)}
       d.io.mem_req.setSinkClock(d.clock)
       d.io.mem_rsp.setSourceClock(d.clock)
       d.clock.step(2); clock_cnt += 2
 
       //d.io.ptw_req.enqueueNow(req)
       d.clock.step(); clock_cnt += 1
-      d.io.ptw_req.valid.poke(false.B)
+      d.io.ptw_req.foreach{_.valid.poke(false.B)}
       d.io.mem_req.ready.poke(true.B)
 
-      d.io.ptw_rsp.ready.poke(true.B)
+      d.io.ptw_rsp.foreach{_.ready.poke(true.B)}
       val mem_driver = new MMUMemPortDriverDelay(SV32)(d.io.mem_req, d.io.mem_rsp, memory, 5, 5)
       //val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
 
-      val tlb_requestor = new RequestSender(d.io.ptw_req, d.io.ptw_rsp)
-      tlb_requestor.add(makeReq("h80000".U, ptbr.U, 1.U))
-      tlb_requestor.add(makeReq("h80001".U, ptbr.U, 1.U))
-      tlb_requestor.add(makeReq("h80002".U, ptbr.U, 1.U))
-      tlb_requestor.add(makeReq("h80003".U, ptbr.U, 1.U))
-      var timestamp_rsp = -1000
-      while(tlb_requestor.send_list.nonEmpty && clock_cnt <= 1000){
-        if(checkForReady(tlb_requestor.rspPort) && checkForValid(tlb_requestor.rspPort))
-          timestamp_rsp = clock_cnt
-        tlb_requestor.pause = if(clock_cnt <= timestamp_rsp + 20) true else false
-        tlb_requestor.eval()
+      val tlb_requestor = (d.io.ptw_req zip d.io.ptw_rsp).map{ case (req, rsp) =>
+        new RequestSender(req, rsp)
+      }
+      tlb_requestor(0).add(makeReq("h80000".U, ptbr.U, 0.U))
+      tlb_requestor(1).add(makeReq("h80001".U, ptbr.U, 1.U))
+      //tlb_requestor(0).add(makeReq("h80002".U, ptbr.U, 0.U))
+      //tlb_requestor(1).add(makeReq("h80003".U, ptbr.U, 1.U))
+      var timestamp_rsp = Array.fill(Ways)(0)
+
+      while(tlb_requestor.map(_.send_list.nonEmpty).reduce(_ || _)
+            && clock_cnt <= 100){
+        (0 until Ways).foreach{ i =>
+          if(checkForReady(tlb_requestor(i).rspPort) && checkForValid(tlb_requestor(i).rspPort))
+            timestamp_rsp(i) = clock_cnt
+          tlb_requestor(i).pause = if(clock_cnt <= timestamp_rsp(i) + 5) true else false
+          tlb_requestor(i).eval()
+        }
         mem_driver.eval()
         d.clock.step(1); clock_cnt += 1
       }

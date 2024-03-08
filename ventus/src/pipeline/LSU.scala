@@ -168,22 +168,22 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
       same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
     )
   val blockOffset = Wire(Vec(num_thread, UInt(dcache_BlockOffsetBits.W)))
-    (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
+  (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(num_thread, UInt(BytesOfWord.W)))
-    (0 until num_thread).foreach( x => {
+  (0 until num_thread).foreach( x => {
   //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
-      wordOffset1H(x) := 15.U(4.W)
-      switch(reg_save.ctrl.mem_whb){
-        is(MEM_W) { wordOffset1H(x) := 15.U }
-        is(MEM_H) { wordOffset1H(x) :=
-          Mux(addr(x)(1)===0.U,
-            3.U,
-            12.U
-          )
-        }
-        is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+    wordOffset1H(x) := 15.U(4.W)
+    switch(reg_save.ctrl.mem_whb){
+      is(MEM_W) { wordOffset1H(x) := 15.U }
+      is(MEM_H) { wordOffset1H(x) :=
+        Mux(addr(x)(1)===0.U,
+          3.U,
+          12.U
+        )
       }
-    })
+      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+    }
+  })
   //val reg_toMSHR = Reg(new MshrTag)
   //val vld_toMSHR = Reg(Bool())
   io.to_mshr.bits.tag.mask := reg_save.mask
