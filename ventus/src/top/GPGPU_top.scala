@@ -106,7 +106,7 @@ class CTAinterface extends Module{
   //for (i <- 0 until NUMBER_CU){}
 }
 class GPGPU_axi_top extends Module{
-  val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_sm)+log2Up(l2cache_micro.num_warp)+1)
+  val l2cache_axi_params=AXI4BundleParameters(32,64,l2cache_params.source_bits)
   val l2_axi_params=InclusiveCacheParameters_lite_withAXI(l2cache_params,l2cache_axi_params)
 
   val io=IO(new Bundle{
@@ -143,6 +143,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
     val host_rsp=DecoupledIO(new CTA2host_data)
     val out_a =Vec(NL2Cache,Decoupled(new TLBundleA_lite(l2cache_params)))
     val out_d=Flipped(Vec(NL2Cache,Decoupled(new TLBundleD_lite(l2cache_params))))
+    val inst_cnt = if(INST_CNT) Some(Output(Vec(NSms, UInt(32.W)))) else None
   })
   val cta = Module(new CTAinterface)
   val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache)).io))
@@ -216,6 +217,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
     }
   io.host_rsp<>cta.io.CTA2host
   io.host_req<>cta.io.host2CTA
+  io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U)})
 }
 
 class SM_wrapper(FakeCache: Boolean = false) extends Module{
@@ -226,12 +228,14 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
     val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
   })
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
   cta2warp.io.CTArsp<>io.CTArsp
   val pipe=Module(new pipe)
   pipe.io.pc_reset:=true.B
+  io.inst_cnt.foreach(_ := pipe.io.inst_cnt.getOrElse(0.U))
   val cnt=Counter(10)
   when(cnt.value<5.U){cnt.inc()}
   when(cnt.value===5.U){pipe.io.pc_reset:=false.B}

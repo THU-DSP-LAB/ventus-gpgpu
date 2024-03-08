@@ -679,7 +679,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val coreRspFromMemReq = Wire(new DCacheCoreRsp)
   //val coreReq_Reg = RegNext(coreRsp_st2_valid_from_coreReq_Reg)
   val coreReqmemConflict_Reg = RegInit(false.B)
-  readHit_st2.io.deq.ready := !(coreRsp_st2_valid_from_memReq || coreRsp_st2_valid_from_memRsp)
+  readHit_st2.io.deq.ready := !(coreRsp_st2_valid_from_memReq || coreRsp_st2_valid_from_memRsp) && coreRsp_Q.io.enq.ready
 
 
   //if coreReq and memRsp happened in one cycle, corereq will hold for one more cycle

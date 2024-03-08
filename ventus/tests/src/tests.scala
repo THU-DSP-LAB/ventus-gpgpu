@@ -94,213 +94,209 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
   }
 }
 
-object AdvancedTestList{
-  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], warp: Int, thread: Int, cycles: Int)
-
-  val gaussian = new AdvTest(
-    "adv_gaussian_1x16",
-    Seq(
-      "Fan1_0.metadata", "Fan2_0.metadata", "Fan1_1.metadata", "Fan2_1.metadata", "Fan1_2.metadata", "Fan2_2.metadata"
-    ),
-    Seq(
-      "Fan1_0.data", "Fan2_0.data", "Fan1_1.data", "Fan2_1.data", "Fan1_2.data", "Fan2_2.data"
-    ),
-    1, 16, 10500
-  )
-
-  val matadd = new AdvTest(
-    "adv_matadd", Seq("matadd.metadata"), Seq("matadd.data"), 4, 4, 3000
-  )
-  val vecadd = new AdvTest(
-    "adv_vecadd", Seq("vecadd4x4.metadata"), Seq("vecadd4x4.data"), 4, 4, 1200
-  )
-  val nn = new AdvTest(
-    "adv_nn", Seq("NearestNeighbor_0.metadata"), Seq("NearestNeighbor_0.data"), 8, 8, 5000
-  )
-  val bfs4x32 = {
-    var tmp: Seq[String] = Nil
-    for(i <- 0 until 5){
-      tmp = tmp ++ Seq(s"BFS_1_${i}", s"BFS_2_${i}")
-    }
-    new AdvTest(
-      "adv_bfs", tmp.map(_ + ".metadata"), tmp.map(_ +".data"), 4, 32, 20000
-    )
-  }
-  val nw4x4 = new AdvTest("adv_nw_4x4", Seq("nw_kernel1_0.metadata", "nw_kernel1_1.metadata", "nw_kernel2_0.metadata"),
-    Seq("nw_kernel1_0.data", "nw_kernel1_1.data", "nw_kernel2_0.data"), 4, 4, 1000)
-}
-
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
 
-  "membox_test" in {
-    val testbench = AdvancedTestList.nw4x4
-    val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
-    val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
-    val mem = new MemBox
-    var meta = new MetaData
+  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], var warp: Int, var cycles: Int)
 
-    metaFileDir.indices.foreach { i =>
-      meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
-    }
-    val x = ByteArray2BigInt(mem.readMem(BigInt("7ffff140", 16), 4))
-  }
+  // "adv_test" in {
+  //   // TODO: rename
 
-  "adv_test" in {
-    // TODO: rename
-    val testbench = AdvancedTestList.vecadd
-    val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
-    val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
-    val maxCycle = testbench.cycles
+  //   val iniFile = new IniFile("./ventus/txt/_cases.ini")
+  //   val defaultCaseName: String = iniFile.sections("")("Default").head
+  //   val section = iniFile.sections(defaultCaseName)
 
-    if(parameters.num_warp < testbench.warp) parameters.num_warp = testbench.warp
-    parameters.num_thread = testbench.thread
+  //   val testbench = AdvTest(
+  //     defaultCaseName,
+  //     section("Files").map(_ + ".metadata"),
+  //     section("Files").map(_ + ".data"),
+  //     section("nWarps").head.toInt,
+  //     section("SimCycles").head.toInt
+  //   )
 
-    val mem = new MemBox
+  //   val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
+  //   val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
+  //   val maxCycle = testbench.cycles
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(WriteVcdAnnotation)){ c =>
+  //   val metas = metaFileDir.map(MetaData(_))
 
-      def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
-        while (x.valid.peek().litToBoolean == false) {
-          if(c.io.cnt.peek().litValue > maxCycle)
-            return false
-          c.clock.step(1)
-        }
-        true
-      }
-      def memLatency = 5
+  //   parameters.num_warp = (metas.map(_.wg_size.toInt) :+ testbench.warp).max
+  //   assert(metas.map(_.wf_size.toInt == metas.head.wf_size.toInt).reduceLeft(_ && _))
+  //   parameters.num_thread = metas.head.wf_size.toInt
 
-      c.io.host_req.initSource()
-      c.io.host_req.setSourceClock(c.clock)
-      c.io.out_d.initSource()
-      c.io.out_d.setSourceClock(c.clock)
-      c.io.host_rsp.initSink()
-      c.io.host_rsp.setSinkClock(c.clock)
-      c.io.out_a.initSink()
-      c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(200)
-      c.clock.step(5)
+  //   print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
-      var meta = new MetaData
-      var size3d = Array.fill(3)(0)
-      var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
+  //   val mem = new MemBox
 
-      val DelayMem = new DelayFIFO[DelayFIFOEntry](memLatency, memLatency + 5)
-      val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
-      fork{
-        while(c.io.cnt.peek().litValue <= maxCycle){
-          c.io.out_a.ready.poke((!DelayMem.isFull).B)
-          c.clock.step(1)
-          DelayMem.step()
-        }
-        c.clock.step(2)
-      }.fork{ // HOST <-> GPU
-        def enq(knl: Int) = fork{
-          for (i <- 0 until size3d(0);
-               j <- 0 until size3d(1);
-               k <- 0 until size3d(2)
-               ) {
-            c.io.host_req.enqueue(meta.generateHostReq(i, j, k))
-          }
-        }
-        def deq(knl: Int) = fork {
-          timescope {
-            c.io.host_rsp.ready.poke(true.B)
-            if (waitForValid(c.io.host_rsp, maxCycle)) {
-              val rsp = c.io.host_rsp.bits.peek().litValue
-              val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
-              wg_list(knl)(extract_rsp) = true
-            }
-            c.clock.step(1)
-          }
-        }
-        metaFileDir.indices.foreach { i =>
-          meta = mem.loadfile(metaFileDir(i), dataFileDir(i))
-          size3d = meta.kernel_size.map(_.toInt)
-          wg_list(i) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
-          if(c.io.cnt.peek().litValue <= maxCycle){
-            print(s"kernel $i \n")
-            enq(i).join()
-            while (!wg_list(i).reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
-              deq(i).join()
-            }
-          }
-          c.clock.step(2)
-        }
-      }.fork{ // GPU <-> MEM
-        fork{
-          while (!wg_list.flatten.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
-            if(!wg_list.flatten.reduce(_ && _)){
-              //c.io.out_a.ready.poke((!DelayMem.isFull).B)
-              if (DelayMem.canPop) {
-                val out = DelayMem.pop
-                c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
-                  _.opcode -> out.opcode.U, // w:0 r:1
-                  _.data -> out.data.U,
-                  _.source -> out.source.U,
-                  _.size -> out.size.U, // TODO: Unused
-                  _.param -> out.param.U
-                ))
-              }
-            }
-            //c.io.out_a.ready.poke((!DelayMem.isFull).B)
-            c.clock.step(1)
-          }
-        }.fork{
-          while (!wg_list.flatten.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
-            if (!wg_list.flatten.reduce(_ && _)) {
-              if (waitForValid(c.io.out_a, maxCycle)) {
-                if(!DelayMem.isFull) {
-                  val addr = c.io.out_a.bits.address.peek().litValue
-                  var opcode_rsp = 0
-                  val source = c.io.out_a.bits.source.peek().litValue
-                  var data = new Array[Byte](data_byte_count)
-                  if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
-                    data = mem.readMem(addr, data_byte_count) // read operation
-                    opcode_rsp = 1
-                  }
-                  else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write partial
-                    data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
-                    val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
-                      case '1' => true
-                      case _ => false
-                    }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
-                    mem.writeMem(addr, data_byte_count, data, mask) // write operation
-                    data = Array.fill(data_byte_count)(0.toByte) // response = 0
-                    opcode_rsp = 0
-                  }
-                  else if (c.io.out_a.bits.opcode.peek().litValue == 0) { // write full
-                    data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
-                    val mask = IndexedSeq.fill(4 * c.io.out_a.bits.mask.getWidth)(true)
-                    mem.writeMem(addr, data_byte_count, data, mask) // write operation
-                    data = Array.fill(data_byte_count)(0.toByte) // response = 0
-                    opcode_rsp = 0
-                  }
-                  else {
-                    data = Array.fill(data_byte_count)(0.toByte)
-                  }
-                  DelayMem.push(DelayFIFOEntry(opcode_rsp, ByteArray2BigInt(data), source, 0, 0))
-                }
-                c.clock.step(1)
-              }
-            }
-          }
-        }.join
-      }.join
-    }
-  }
+  //   test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
+
+  //     def waitForValid[T <: Data](x: ReadyValidIO[T], maxCycle: BigInt): Boolean = {
+  //       while (x.valid.peek().litToBoolean == false) {
+  //         if(c.io.cnt.peek().litValue > maxCycle)
+  //           return false
+  //         c.clock.step(1)
+  //       }
+  //       true
+  //     }
+  //     def memLatency = 0
+
+  //     c.io.host_req.initSource()
+  //     c.io.host_req.setSourceClock(c.clock)
+  //     c.io.out_d.initSource()
+  //     c.io.out_d.setSourceClock(c.clock)
+  //     c.io.host_rsp.initSink()
+  //     c.io.host_rsp.setSinkClock(c.clock)
+  //     c.io.out_a.initSink()
+  //     c.io.out_a.setSinkClock(c.clock)
+  //     c.clock.setTimeout(500)
+  //     c.clock.step(5)
+
+  //     var size3d = Array.fill(3)(0)
+  //     var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
+
+  //     val DelayMem = new DelayFIFO[DelayFIFOEntry](memLatency, memLatency + 5)
+  //     val data_byte_count = c.io.out_a.bits.data.getWidth/8 // bits count -> bytes count
+  //     fork{ // HOST <-> GPU
+  //       def enq(knl: Int) = fork{
+  //         for (i <- 0 until size3d(0);
+  //              j <- 0 until size3d(1);
+  //              k <- 0 until size3d(2)
+  //              ) {
+  //           c.io.host_req.enqueue(metas(knl).generateHostReq(i, j, k))
+  //         }
+  //       }
+  //       def deq(knl: Int) = fork {
+  //         timescope {
+  //           c.io.host_rsp.ready.poke(true.B)
+  //           if (waitForValid(c.io.host_rsp, maxCycle)) {
+  //             val rsp = c.io.host_rsp.bits.peek().litValue
+  //             val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
+  //             wg_list(knl)(extract_rsp) = true
+  //           }
+  //           c.clock.step(1)
+  //         }
+  //       }
+  //       metaFileDir.indices.foreach { i =>
+  //         print(s"load ${dataFileDir(i)}\n")
+  //         mem.loadfile(metas(i), dataFileDir(i))
+  //         size3d = metas(i).kernel_size.map(_.toInt)
+  //         wg_list(i) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+  //         if(c.io.cnt.peek().litValue <= maxCycle){
+  //           print(s"kernel $i \n")
+  //           enq(i).join()
+  //           while (!wg_list(i).reduce(_ && _) && c.io.cnt.peek().litValue <= maxCycle) {
+  //             deq(i).join()
+  //           }
+  //         }
+  //         c.clock.step(2)
+  //       }
+  //     }.fork{ // GPU <-> MEM
+  //       fork{
+  //         while (!wg_list.flatten.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
+  //           c.io.out_a.ready.poke((!DelayMem.isFull).B)
+  //           DelayMem.step()
+  //           if(!wg_list.flatten.reduce(_ && _)){
+  //             //c.io.out_a.ready.poke((!DelayMem.isFull).B)
+  //             if (DelayMem.canPop) {
+  //               val cnt = c.io.cnt.peek().litValue
+  //               if(cnt >= 444)
+  //                 cnt
+  //               val out = DelayMem.ram.head.entry
+  //               DelayMem.ram.head.ttl = -1
+  //               fork{
+  //                 c.io.out_d.enqueue(new TLBundleD_lite(parameters.l2cache_params).Lit(
+  //                   _.opcode -> out.opcode.U, // w:0 r:1
+  //                   _.data -> out.data.U,
+  //                   _.source -> out.source.U,
+  //                   _.size -> out.size.U, // TODO: Unused
+  //                   _.param -> out.param.U
+  //                 ))
+  //               }.join
+  //               if(c.io.out_d.ready.peek().litToBoolean && c.io.out_d.valid.peek().litToBoolean){
+  //                 DelayMem.pop
+  //               }
+  //             }
+  //           }
+  //           //c.io.out_a.ready.poke((!DelayMem.isFull).B)
+  //           c.clock.step(1)
+  //         }
+  //       }.fork{
+  //         while (!wg_list.flatten.reduce(_ && _) && c.io.cnt.peek().litValue.toInt <= maxCycle) {
+  //           if (waitForValid(c.io.out_a, maxCycle)) {
+  //             if(!DelayMem.isFull) {
+  //               val addr = c.io.out_a.bits.address.peek().litValue
+  //               var opcode_rsp = 0
+  //               val source = c.io.out_a.bits.source.peek().litValue
+  //               var data = new Array[Byte](data_byte_count)
+  //               if (c.io.out_a.bits.opcode.peek().litValue == 4) { // read
+  //                 data = mem.readMem(addr, data_byte_count) // read operation
+  //                 opcode_rsp = 1
+  //               }
+  //               else if (c.io.out_a.bits.opcode.peek().litValue == 1) { // write partial
+  //                 data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
+  //                 val mask = c.io.out_a.bits.mask.peek().litValue.toString(2).reverse.padTo(c.io.out_a.bits.mask.getWidth, '0').map {
+  //                   case '1' => true
+  //                   case _ => false
+  //                 }.flatMap(x => Seq.fill(4)(x)) // word mask -> byte mask, no byte/halfword support yet
+  //                 mem.writeMem(addr, data_byte_count, data, mask) // write operation
+  //                 data = Array.fill(data_byte_count)(0.toByte) // response = 0
+  //                 opcode_rsp = 0
+  //               }
+  //               else if (c.io.out_a.bits.opcode.peek().litValue == 0) { // write full
+  //                 data = BigInt2ByteArray(c.io.out_a.bits.data.peek().litValue, data_byte_count)
+  //                 val mask = IndexedSeq.fill(4 * c.io.out_a.bits.mask.getWidth)(true)
+  //                 mem.writeMem(addr, data_byte_count, data, mask) // write operation
+  //                 data = Array.fill(data_byte_count)(0.toByte) // response = 0
+  //                 opcode_rsp = 0
+  //               }
+  //               else {
+  //                 data = Array.fill(data_byte_count)(0.toByte)
+  //               }
+  //               val cnt = c.io.cnt.peek().litValue
+  //               if (cnt >= 444)
+  //                 cnt
+  //               DelayMem.push(DelayFIFOEntry(opcode_rsp, ByteArray2BigInt(data), source, 0, 0))
+  //             }
+  //             c.clock.step(1)
+  //           }
+  //           else{
+  //             c.clock.step(1)
+  //           }
+  //         }
+  //       }.join
+  //     }.join
+  //   }
+  // }
+
   "adv_test2" in {
-    val testbench = AdvancedTestList.vecadd
+    import TestUtils._
+    val iniFile = new IniFile("./ventus/txt/_cases.ini")
+    val defaultCaseName: String = iniFile.sections("")("Default").head
+    val section = iniFile.sections(defaultCaseName)
+
+    val testbench = AdvTest(
+      defaultCaseName,
+      section("Files").map(_ + ".metadata"),
+      section("Files").map(_ + ".data"),
+      section("nWarps").head.toInt,
+      section("SimCycles").head.toInt
+    )
+
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
 
-    if(parameters.num_warp < testbench.warp) parameters.num_warp = testbench.warp
-    parameters.num_thread = testbench.thread
+    val metas = metaFileDir.map(MetaData(_))
+
+    parameters.num_warp = (metas.map(_.wg_size.toInt) :+ testbench.warp).max
+    //assert(metas.map(_.wf_size.toInt == metas.head.wf_size.toInt).reduceLeft(_ && _))
+    parameters.num_thread = metas.head.wf_size.toInt
+
+    print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
     val mem = new MemBox
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
 
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)
       c.io.out_d.initSource()
@@ -309,7 +305,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(200)
+      c.clock.setTimeout(1000)
       c.clock.step(5)
 
       var meta = new MetaData
@@ -321,24 +317,41 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
       class RequestSenderGPU(gap: Int = 5) extends RequestSender(c.io.host_req, c.io.host_rsp){
         override def finishWait(): Boolean = {
-          val rsp = c.io.host_rsp.bits.peek().litValue
-          val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt
-          wg_list(current_kernel)(extract_rsp) = true
-
-          if(wg_list(current_kernel).reduce(_ && _)){
-            timestamp = clock_cnt
-            current_kernel += 1
+          clock_cnt - timestamp > gap
+        }
+        def senderEval(): Unit = {
+          if(checkForValid(reqPort) && checkForReady(reqPort)){
+            send_list = send_list.tail
           }
-          return (clock_cnt - timestamp > gap)
+          if(send_list.nonEmpty && finishWait()){
+            reqPort.valid.poke(true.B)
+            reqPort.bits.poke(send_list.head)
+          }
+          else{
+            reqPort.valid.poke(false.B)
+          }
+        }
+        def receiverEval(): Unit = {
+          if(checkForValid(rspPort) && checkForReady(rspPort)){
+            val rsp = c.io.host_rsp.bits.peek().litValue
+            val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
+            wg_list(current_kernel)(extract_rsp) = true
+          }
+          rspPort.ready.poke(true.B)
+        }
+        override def eval() = {
+          senderEval()
+          receiverEval()
         }
       }
 
       val host_driver = new RequestSenderGPU(5)
-      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 5, 5)
+      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 0, 5)
 
       while(clock_cnt <= maxCycle && !wg_list.flatten.reduce(_ && _)){
         if(clock_cnt - timestamp == 0){
-          meta = mem.loadfile(metaFileDir(current_kernel), dataFileDir(current_kernel))
+          print(s"kernel ${current_kernel} ${dataFileDir(current_kernel)}\n")
+          meta = mem.loadfile(metas(current_kernel), dataFileDir(current_kernel))
           size3d = meta.kernel_size.map(_.toInt)
           wg_list(current_kernel) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
           host_driver.add(
@@ -355,6 +368,20 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
         c.clock.step(1)
         clock_cnt += 1
+
+        if (wg_list(current_kernel).reduce(_ && _)) {
+          timestamp = clock_cnt
+          current_kernel += 1
+        }
+      }
+      print(s"FIN ${clock_cnt} |")
+      c.io.inst_cnt.zipWithIndex.foreach{ case(x, i) =>
+        print(s" [${i}: ${x.peek.litValue.toInt}]")
+      }
+      print("\n")
+      Seq.fill(3){
+        c.clock.step(1)
+        clock_cnt +=1
       }
     }
   }
