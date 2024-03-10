@@ -34,7 +34,7 @@ class DCachePerLaneAddr extends Bundle{
 
 class DCacheCoreReq_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-//  val isWrite = Bool()
+  //  val isWrite = Bool()
   val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(dcache_SetIdxBits.W)
   val perLaneAddr = Vec(num_thread, new DCachePerLaneAddr)
@@ -46,12 +46,12 @@ class DCacheCoreReq_np extends Bundle{
 class DCacheCoreRsp_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val data = Vec(num_thread, UInt(xLen.W))
-//  val ctrl = new Bundle{
-//    val mem_cmd = UInt(2.W)
-//    val mop = UInt(2.W)
-//  }
+  //  val ctrl = new Bundle{
+  //    val mem_cmd = UInt(2.W)
+  //    val mop = UInt(2.W)
+  //  }
   val activeMask = Vec(num_thread, Bool())
- // val isWrite = Bool()
+  // val isWrite = Bool()
 }
 
 class ShareMemPerLaneAddr_np extends Bundle{
@@ -138,20 +138,20 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
-                  Mux(reg_save.ctrl.is_vls12,
-                    reg_save.in1(x)+reg_save.in2(x),
-                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
-                  ),
-                  Mux(reg_save.ctrl.isvec,
-                    reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
-                      x.asUInt()<<2,
-                      Mux(reg_save.ctrl.mop===3.U,
-                        reg_save.in2(x),
-                        x.asUInt*reg_save.in2(x))
-                    ),
-                    reg_save.in1(0) + reg_save.in2(0)
-                  )
-                )
+      Mux(reg_save.ctrl.is_vls12,
+        reg_save.in1(x)+reg_save.in2(x),
+        (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread)
+      ),
+      Mux(reg_save.ctrl.isvec,
+        reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
+          x.asUInt()<<2,
+          Mux(reg_save.ctrl.mop===3.U,
+            reg_save.in2(x),
+            x.asUInt*reg_save.in2(x))
+        ),
+        reg_save.in1(0) + reg_save.in2(0)
+      )
+    )
     is_shared(x) := !reg_save.mask(x) || addr(x)<sharedmemory_addr_max
   })
   all_shared := Mux(reg_save.ctrl.isvec,
@@ -164,26 +164,26 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   val setIdx = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
 
   val same_tag = Wire(Vec(num_thread, Bool()))
-    (0 until num_thread).foreach( x =>
-      same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
-    )
+  (0 until num_thread).foreach( x =>
+    same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
+  )
   val blockOffset = Wire(Vec(num_thread, UInt(dcache_BlockOffsetBits.W)))
-    (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
+  (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(num_thread, UInt(BytesOfWord.W)))
-    (0 until num_thread).foreach( x => {
-  //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
-      wordOffset1H(x) := 15.U(4.W)
-      switch(reg_save.ctrl.mem_whb){
-        is(MEM_W) { wordOffset1H(x) := 15.U }
-        is(MEM_H) { wordOffset1H(x) :=
-          Mux(addr(x)(1)===0.U,
-            3.U,
-            12.U
-          )
-        }
-        is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+  (0 until num_thread).foreach( x => {
+    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
+    wordOffset1H(x) := 15.U(4.W)
+    switch(reg_save.ctrl.mem_whb){
+      is(MEM_W) { wordOffset1H(x) := 15.U }
+      is(MEM_H) { wordOffset1H(x) :=
+        Mux(addr(x)(1)===0.U,
+          3.U,
+          12.U
+        )
       }
-    })
+      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+    }
+  })
   //val reg_toMSHR = Reg(new MshrTag)
   //val vld_toMSHR = Reg(Bool())
   io.to_mshr.bits.tag.mask := reg_save.mask
@@ -223,10 +223,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   io.to_dcache.bits.setIdx := setIdx
   val opcode_wire =Wire(UInt(3.W))
   val param_wire_alt =Wire(UInt(4.W))
-param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
-  Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
-    Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
-val param_wire=Wire(UInt(4.W))
+  param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
+    Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
+      Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
+  val param_wire=Wire(UInt(4.W))
   when(reg_save.ctrl.atomic){
     when(reg_save.ctrl.aq &&reg_save.ctrl.rl){
       opcode_wire :=Mux(state===s_dcache_2,3.U,Mux(state===s_dcache_1,2.U,3.U))
@@ -260,7 +260,7 @@ val param_wire=Wire(UInt(4.W))
 
   })
   io.to_dcache.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool(), VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
- // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
+  // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
   io.to_dcache.valid := (state===s_dcache) ||(state===s_dcache_1) ||(state===s_dcache_2)
   val mask_next = Wire(Vec(num_thread, Bool()))
 
@@ -307,12 +307,12 @@ val param_wire=Wire(UInt(4.W))
     is(s_dcache_1){
       when(io.to_dcache.fire()){
 
-          when(reg_save.ctrl.aq && reg_save.ctrl.rl) {
-            state := s_dcache_2
-          }.elsewhen(cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
-            cnt.reset(); state := s_idle
+        when(reg_save.ctrl.aq && reg_save.ctrl.rl) {
+          state := s_dcache_2
+        }.elsewhen(cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
+          cnt.reset(); state := s_idle
         }.otherwise{
-            cnt.inc(); state :=s_dcache
+          cnt.inc(); state :=s_dcache
         }
       }.otherwise{
         state :=s_dcache_1
@@ -354,6 +354,50 @@ val param_wire=Wire(UInt(4.W))
         reg_save.mask := mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
+      }
+    }
+  }
+
+  if (SPIKE_OUTPUT){
+    when( state===s_save && io.to_mshr.fire && reg_save.ctrl.mem/*&&reg_save.ctrl.wid===wid_to_check.U*/){
+      printf(p"warp ${Decimal(reg_save.ctrl.wid)} ")
+      printf(p"0x${Hexadecimal(reg_save.ctrl.spike_info.get.pc)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.inst)}")
+      when(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
+        printf(p" lsu.r ")
+      }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XWR){
+        printf(p" lsu.w ")
+      }
+      when(!reg_save.ctrl.isvec){
+        when(reg_save.ctrl.mem_cmd === IDecode.M_XWR){
+          printf(p"x ${reg_save.ctrl.reg_idx2} op ${reg_save.ctrl.mop} ")
+          printf(p"${Hexadecimal(reg_save.in3(0))} ")
+        }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
+          printf(p"x ${reg_save.ctrl.reg_idxw} op ${reg_save.ctrl.mop} ")
+        }
+        printf(p"@ ${Hexadecimal(reg_save.in1(0))}+${Hexadecimal(reg_save.in2(0))}\n")
+      }.otherwise{
+        when(reg_save.ctrl.mem_cmd === IDecode.M_XWR) {
+          // vsw12 uses inst[24:20] as src
+          when(reg_save.ctrl.disable_mask){
+            printf(p"v${reg_save.ctrl.reg_idx2} op ${reg_save.ctrl.mop} ")
+          }.otherwise{
+            printf(p"v${reg_save.ctrl.reg_idxw} op ${reg_save.ctrl.mop} ")
+          }
+          printf(p"mask ${Binary(reg_save.mask.asUInt)} ")
+          reg_save.in3.reverse.foreach { x => printf(p"${Hexadecimal(x)} ") }
+        }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
+          printf(p"v${reg_save.ctrl.reg_idx3} op ${reg_save.ctrl.mop} ")
+        }
+        printf(p"@")
+        when(false.B){
+          //(reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread)
+        }.otherwise{
+          //(reg_save.in1 zip reg_save.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
+          addr.foreach{ x =>
+            printf(p" ${Hexadecimal(x)}")
+          }
+        }
+        printf(p"\n")
       }
     }
   }
@@ -399,7 +443,7 @@ class LSU2WB extends Module{
   })
 }
 class LSUexe() extends Module{
-// default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
+  // default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
   val io = IO(new Bundle{
     val lsu_req = Flipped(DecoupledIO(new vExeData()))
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np()))
@@ -442,7 +486,7 @@ class LSUexe() extends Module{
   shiftBoard.zipWithIndex.foreach{case(a,b)=> {
     a.left:=io.lsu_req.fire & io.lsu_req.bits.ctrl.wid===b.asUInt
     a.right:=io.lsu_rsp.fire & io.lsu_rsp.bits.tag.warp_id===b.asUInt
-    }}
+  }}
   io.fence_end:=VecInit(shiftBoard.map(x=>x.empty)).asUInt()
   io.lsu_req.ready:=Mux(shiftBoard(io.lsu_req.bits.ctrl.wid).full,false.B,InputFIFO.io.enq.ready)
   InputFIFO.io.enq.valid:=Mux(shiftBoard(io.lsu_req.bits.ctrl.wid).full,false.B,io.lsu_req.valid)
