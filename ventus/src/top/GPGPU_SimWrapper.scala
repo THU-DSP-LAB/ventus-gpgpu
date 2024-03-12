@@ -54,9 +54,9 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   val L1param = (new MyConfig).toInstance
   val L2param = InclusiveCacheParameters_lite(
     CacheParameters(
-      2,
-      l2cache_NSets,
-      l2cache_NWays,
+      level = 2,
+      sets = l2cache_NSets,
+      ways = l2cache_NWays,
       blockBytes = (l2cache_BlockWords << 2),
       beatBytes = (l2cache_BlockWords << 2),
       l2cs = num_l2cache

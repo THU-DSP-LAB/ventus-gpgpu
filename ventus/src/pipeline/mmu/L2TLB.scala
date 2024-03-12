@@ -1,16 +1,16 @@
 package pipeline.mmu
 
-import L2cache.{SRAMTemplate, TLBundleA_lite, TLBundleD_lite}
+import L2cache.{SRAMTemplate, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.util.SetAssocLRU
 import chisel3.experimental.dataview._
 
 trait L2TlbParam{
-  val nSets = 16
-  val nWays = 4
-  val nSectors = 2
-  val nBanks = 2
+  def nSets = 16
+  def nWays = 4
+  def nSectors = 2
+  def nBanks = 2
 
   def vpnL2TlbBundle(SV: SVParam) = new Bundle {
     val tag = UInt((SV.vpnLen - log2Up(nSets) - log2Up(nSectors)).W)
@@ -131,14 +131,24 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   io.tlbOut := tlbOut
 }
 
-class L2TlbReq(SV: SVParam) extends Bundle{
-  val asid = UInt(SV.asidLen.W)
-  val ptbr = UInt(SV.xLen.W)
-  val vpn = UInt(SV.vpnLen.W)
-  val id = UInt(8.W) // L1's id
+object TlbID extends L2TlbParam{
+  def apply(implicit param: Option[L1Cache.HasRVGParameters]): UInt = {
+    return param match {
+      // MSB -> {L2Tlb Bank, cache id, isTLB} -> LSB
+      case Some(param) => UInt((log2Ceil(nBanks) + log2Ceil(param.NSms * param.NCacheInSM) + 1).W)
+      case None => UInt(8.W)
+    }
+  }
 }
-class L2TlbRsp(SV: SVParam) extends Bundle{
-  val id = UInt(8.W)
+
+class L2TlbReq(SV: SVParam)(implicit param: Option[L1Cache.HasRVGParameters]) extends Bundle{
+  val asid = UInt(SV.asidLen.W)
+  //val ptbr = UInt(SV.xLen.W)
+  val vpn = UInt(SV.vpnLen.W)
+  val id: UInt = TlbID.apply
+}
+class L2TlbRsp(SV: SVParam)(implicit param: Option[L1Cache.HasRVGParameters]) extends Bundle{
+  val id = TlbID.apply
   val ppn = UInt(SV.ppnLen.W)
   val flag = UInt(8.W)
 }
@@ -154,10 +164,19 @@ class L2TlbMemRsp_Test(SV: SVParam, sectors: Int) extends Bundle{
   val op = UInt(2.W)
 }
 
-class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: Boolean = false) extends Module with L2TlbParam {
-  //override val nSectors = L2C.beatBytes / (SV.xLen/8)
-  //verride val nSectors = sectors
-
+class L2Tlb(
+  SV: SVParam,
+  debug: Boolean = false,
+  L2C: Option[L2cache.InclusiveCacheParameters_lite] = None,
+)(
+  implicit val L1C: Option[L1Cache.HasRVGParameters]
+)
+  extends Module with L2TlbParam {
+  assert(log2Ceil(nBanks) == log2Floor(nBanks))
+  override def nSectors: Int = L2C match {
+    case Some(l2c) => l2c.beatBytes / (SV.xLen / 8)
+    case None => super.nSectors
+  }
   val io = IO(new Bundle{
     val in = Vec(nBanks, Flipped(DecoupledIO(new L2TlbReq(SV))))
     val invalidate = Flipped(ValidIO(new Bundle{
@@ -165,11 +184,21 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
     }))
     val out = Vec(nBanks, DecoupledIO(new L2TlbRsp(SV)))
     // Request Always Read!
-    val mem_req = DecoupledIO(new Cache_Req(SV))
-    val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
+    val mem_req = L2C match {
+      case Some(l2c) => Vec(nBanks, DecoupledIO(new TLBundleA_lite(l2c))) // interconnect with xbar
+      case None => Vec(nBanks, DecoupledIO(new Cache_Req(SV)))
+    }
+    val mem_rsp = Flipped(L2C match {
+      case Some(l2c) => Vec(nBanks, DecoupledIO(new TLBundleD_lite(l2c))) // interconnect with xbar
+      case None => Vec(nBanks, DecoupledIO(new Cache_Rsp(SV)))
+    })
+    val asid_req = Output(Vec(nBanks, UInt(SV.asidLen.W)))
+    val ptbr_rsp = Flipped(Vec(nBanks, Valid(UInt(SV.xLen.W))))
   })
 
   val storageArray = Seq.fill(nBanks)(Module(new L2TlbStorage(SV)))
+  //val nonleafStorageArray =
+
   val walker = Module(new PTW(SV, nBanks, debug))
 
   val replace = Seq.fill(nBanks)(new SetAssocLRU(nSets, nWays, "lru"))
@@ -181,6 +210,8 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
   val nextState = WireInit(VecInit(Seq.fill(nBanks)(s_idle)))
   val curState = nextState.map(RegNext(_))
 
+  val cnt = new Counter(65535)
+
   (0 until nBanks).foreach{ i =>
     val in = io.in(i)
     val out = io.out(i)
@@ -189,6 +220,8 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
     val storage = storageArray(i)
     val ptw_req = walker.io.ptw_req(i)
     val ptw_rsp = walker.io.ptw_rsp(i)
+    val asid_req = io.asid_req(i)
+    val ptbr_rsp = io.ptbr_rsp(i)
 
     in.ready := cState === s_idle && !io.invalidate.valid
 
@@ -208,7 +241,7 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
 
     ptw_req.bits.source := tlb_req.id
     ptw_req.bits.vpn := tlb_req.vpn
-    ptw_req.bits.ptbr := tlb_req.ptbr
+    ptw_req.bits.ptbr := ptbr_rsp.bits
     ptw_req.valid := cState === s_ptw_req
 
     ptw_rsp.ready := storage.io.ready && cState === s_ptw_rsp
@@ -222,6 +255,8 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
 
     storage.io.invalidate.valid := io.invalidate.valid
     storage.io.invalidate.bits := io.invalidate.bits.asid
+
+    asid_req := tlb_req.asid
 
     switch(cState){
       is(s_idle){
@@ -274,11 +309,9 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
     }
 
     if (debug){
-      val cnt = new Counter(65535)
-      cnt.inc()
       when(in.fire){
         printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"REQ | asid: 0x${Hexadecimal(in.bits.asid)} ptbr: 0x${Hexadecimal(in.bits.ptbr)} vpn: 0x${Hexadecimal(in.bits.vpn)}\n")
+        printf(p"REQ | asid: 0x${Hexadecimal(in.bits.asid)} vpn: 0x${Hexadecimal(in.bits.vpn)}\n")
       }
       when(cState === s_check){
         printf(p"[TLB${i} ${cnt.value}] ")
@@ -288,7 +321,7 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
       }
       when(ptw_req.fire){
         printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"- -| >>PTW | vpn: 0x${Hexadecimal(ptw_req.bits.vpn)}\n")
+        printf(p"- -| >>PTW | ptbr: 0x${Hexadecimal(ptw_req.bits.ptbr)} vpn: 0x${Hexadecimal(ptw_req.bits.vpn)}\n")
       }
       when(ptw_rsp.fire){
         printf(p"[TLB${i} ${cnt.value}] ")
@@ -311,17 +344,24 @@ class L2Tlb(SV: SVParam/*, L2C: L2cache.InclusiveCacheParameters_lite*/, debug: 
         printf(p"[TLB${i} ${cnt.value}] ")
         printf(p"RSP | ppn+flag: 0x${Hexadecimal(out.bits.ppn)}+${Hexadecimal(out.bits.flag)}\n")
       }
-      when(io.mem_req.fire || io.mem_rsp.fire){
-        printf(p"[TLB${i} ${cnt.value}] ")
-      }
+//      when(io.mem_req(i).fire || io.mem_rsp(i).fire){
+//        printf(p"[MEM${i} ${cnt.value}] ")
+//      }
     }
   }
-
+  if(debug){
+    cnt.inc()
+  }
   io.mem_req <> walker.io.mem_req
   walker.io.mem_rsp <> io.mem_rsp
 }
 
-class L2TlbXBar(SV: SVParam, num_l1: Int) extends Module with L2TlbParam {
+class L1ToL2TlbXBar(SV: SVParam, n_l1: Int = 1)(implicit val L1C: Option[L1Cache.HasRVGParameters])
+  extends Module with L2TlbParam {
+  val num_l1 = L1C match {
+    case Some(x) => x.NSms * x.NCacheInSM
+    case None => n_l1
+  }
   val num_l2 = nBanks
   val io = IO(new Bundle{
     val req_l1 = Flipped(Vec(num_l1, DecoupledIO(new L2TlbReq(SV))))
@@ -329,21 +369,113 @@ class L2TlbXBar(SV: SVParam, num_l1: Int) extends Module with L2TlbParam {
     val rsp_l1 = Vec(num_l1, DecoupledIO(new L2TlbReq(SV)))
     val rsp_l2 = Flipped(Vec(num_l2, DecoupledIO(new L2TlbRsp(SV))))
   })
+  if(num_l1 == 1){
+    for(j <- 0 until num_l2){
+      val req_bank_idx = io.req_l1(0).bits.vpn.asTypeOf(vpnL2TlbBundle(SV)).bankIndex
+      io.req_l2(j).valid := io.req_l1(0).valid && req_bank_idx === j.U
+      io.req_l2(j).bits := io.req_l1(0).bits
+      io.req_l2(j).bits.id := Cat(req_bank_idx(log2Ceil(nBanks)-1, 0), 1.U(1.W))
+      io.req_l1(0).ready := (VecInit(io.req_l2.map(_.ready)).asUInt)(req_bank_idx)
+    }
+  }
+  else {
+    val arb_req = Seq.fill(num_l2)(Module(new RRArbiter(new L2TlbReq(SV), num_l1)))
+    for (i <- 0 until num_l1;
+         j <- 0 until num_l2) {
+      val req_bank_idx = io.req_l1(i).bits.vpn.asTypeOf(vpnL2TlbBundle(SV)).bankIndex
 
-  val arb_req = Seq.fill(num_l2)(Module(new RRArbiter(new L2TlbReq(SV), num_l1)))
-  (arb_req zip io.req_l2).foreach{ case(a, r) => r <> a.io.out }
-  for(i <- 0 until num_l1;
-      j <- 0 until num_l2){
-    io.req_l2(j) <> arb_req(j).io.out
-    val req_bank_idx = io.req_l1(i).bits.vpn.asTypeOf(vpnL2TlbBundle(SV)).bankIndex
+      arb_req(j).io.in(i).valid := io.req_l1(i).valid && req_bank_idx === j.U
+      arb_req(j).io.in(i).bits := Mux(io.req_l1(i).valid && req_bank_idx === j.U, io.req_l1(i).bits, 0.U.asTypeOf(new L2TlbReq(SV)))
+      arb_req(j).io.in(i).bits.id := Cat(req_bank_idx(log2Ceil(nBanks)-1, 0), i.U(log2Ceil(num_l1).W), 1.U(1.W))
+      io.req_l1(i).ready := (VecInit(arb_req.map {
+        _.io.in(i).ready
+      }).asUInt)(req_bank_idx)
 
-    arb_req(j).io.in(i).valid := io.req_l1(i).valid && req_bank_idx === j.U
-    arb_req(j).io.in(i).bits := Mux(io.req_l1(i).valid && req_bank_idx === j.U, io.req_l1(i).bits, 0.U.asTypeOf(new L2TlbReq(SV)))
-    arb_req(j).io.in(i).bits.id := Cat(io.req_l1(i).bits.id)
-    io.req_l1(i).ready := (VecInit(arb_req.map{_.io.in(i).ready}).asUInt)(req_bank_idx)
+      io.req_l2(j) <> arb_req(j).io.out
+    }
   }
 
-  val arb_rsp = Seq.fill(num_l1)(Module(new RRArbiter(new L2TlbRsp(SV), num_l2)))
-  (arb_rsp zip io.rsp_l1).foreach{ case(a, r) => r <> a.io.out }
+  if(num_l2 == 1){
+    for(i <- 0 until num_l1){
+      val reply_id = (io.rsp_l2(0).bits.id >> 1)(log2Ceil(num_l1) - 1, 0)
+      io.rsp_l1(i).valid := io.rsp_l2(0).valid
+      io.rsp_l1(i).bits := io.rsp_l2(0).bits
+      io.rsp_l2(0).ready := (VecInit(io.rsp_l1.map(_.ready)).asUInt)(reply_id)
+    }
+  }
+  else {
+    val arb_rsp = Seq.fill(num_l1)(Module(new RRArbiter(new L2TlbRsp(SV), num_l2)))
+    for (i <- 0 until num_l1;
+         j <- 0 until num_l2) {
 
+      val reply_id = (io.rsp_l2(j).bits.id >> 1)(log2Ceil(num_l1) - 1, 0)
+
+      arb_rsp(i).io.in(j).valid := io.rsp_l2(j).valid && reply_id === i.U
+      arb_rsp(i).io.in(j).bits := Mux(io.rsp_l2(j).valid && reply_id === i.U, io.rsp_l2(j).bits, 0.U.asTypeOf(new L2TlbRsp(SV)))
+      io.rsp_l2(j).ready := (VecInit(arb_rsp.map{
+        _.io.in(j).ready}
+      ).asUInt)(reply_id)
+
+      io.rsp_l1(i) <> arb_rsp(i).io.out
+    }
+  }
+}
+// send to L2C port by parseAddress()
+class L2TlbToL2CacheXBar(
+  SV: SVParam,
+  nL2CReqPort: Int,
+  L2C: L2cache.InclusiveCacheParameters_lite)
+(
+  implicit val L1C: L1Cache.HasRVGParameters
+)extends Module
+  with L2TlbParam{
+  val nTlbMemPort = nBanks
+  val io = IO(new Bundle{
+    val req_tlb = Vec(nTlbMemPort, Flipped(DecoupledIO(new TLBundleA_lite(L2C))))
+    val rsp_tlb = Vec(nTlbMemPort, DecoupledIO(new TLBundleD_lite(L2C)))
+    val req_cache = Vec(nL2CReqPort, DecoupledIO(new TLBundleA_lite(L2C)))
+    val rsp_cache = Vec(nL2CReqPort, Flipped(DecoupledIO(new TLBundleD_lite_plus(L2C))))
+  })
+  if(nTlbMemPort == 1){
+    for(j <- 0 until nL2CReqPort){
+      val req_idx = L2C.parseAddress(io.req_tlb(0).bits.address)._2
+      io.req_cache(j).valid := io.req_tlb(0).valid & req_idx === j.U
+      io.req_cache(j).bits := Mux(io.req_tlb(0).valid & req_idx === j.U, io.req_tlb(0).bits, 0.U.asTypeOf(new TLBundleA_lite(L2C)))
+      io.req_tlb(0).ready := (VecInit(io.req_cache.map(_.ready)).asUInt)(req_idx)
+    }
+  }
+  else{
+    val arb_req = Seq.fill(nL2CReqPort)(Module(new RRArbiter(new TLBundleA_lite(L2C), nTlbMemPort)))
+    for (i <- 0 until nTlbMemPort;
+         j <- 0 until nL2CReqPort){
+      val req_idx = L2C.parseAddress(io.req_tlb(i).bits.address)._2
+      arb_req(j).io.in(i).valid := io.req_tlb(i).valid & req_idx === j.U
+      arb_req(j).io.in(i).bits := Mux(io.req_tlb(i).valid & req_idx === j.U, io.req_tlb(i).bits, 0.U.asTypeOf(new TLBundleA_lite(L2C)))
+      io.req_tlb(i).ready := (VecInit(arb_req.map{
+        _.io.in(i).ready
+      }).asUInt)(req_idx)
+      io.req_cache(j) <> arb_req(j).io.out
+    }
+  }
+  if(nL2CReqPort == 1){
+    val reply_id = (io.rsp_cache(0).bits.source >> (1 + log2Ceil(L1C.NSms)))(log2Ceil(nTlbMemPort) - 1, 0)
+    for(i <- 0 until nTlbMemPort) {
+      io.rsp_tlb(i).valid := io.rsp_cache(0).valid & reply_id === i.U
+      io.rsp_tlb(i).bits := Mux(io.rsp_cache(0).valid & reply_id === i.U, io.rsp_cache(0).bits, 0.U.asTypeOf(new TLBundleD_lite(L2C)))
+      io.rsp_cache(0).ready := (VecInit(io.rsp_tlb.map(_.ready)).asUInt)(reply_id)
+    }
+  }
+  else{
+    val arb_rsp = Seq.fill(nTlbMemPort)(Module(new RRArbiter(new TLBundleD_lite(L2C), nL2CReqPort)))
+    for (i <- 0 until nTlbMemPort;
+         j <- 0 until nL2CReqPort) {
+      val reply_id = (io.rsp_cache(j).bits.source >> (1 + log2Ceil(L1C.NSms)))(log2Ceil(nTlbMemPort)-1, 0)
+      arb_rsp(i).io.in(j).valid := io.rsp_cache(j).valid & reply_id === i.U
+      arb_rsp(i).io.in(j).bits := Mux(io.rsp_cache(j).valid & reply_id === i.U, io.rsp_cache(j).bits, 0.U.asTypeOf(new TLBundleD_lite(L2C)))
+      io.rsp_cache(j).ready := (VecInit(arb_rsp.map{
+        _.io.in(j).ready
+      }).asUInt)(reply_id)
+      io.rsp_tlb(i) <> arb_rsp(i).io.out
+    }
+  }
 }

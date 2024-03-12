@@ -17,6 +17,8 @@ class L2Tlb_test extends AnyFreeSpec
   with MMUHelpers {
   import play.TestUtils.RequestSender
 
+  implicit val L1C: Option[L1Cache.HasRVGParameters] = None
+
   "L2TLB Main" in {
     class L2TlbWrapper(SV: SVParam) extends Module with L2TlbParam {
       val io = IO(new Bundle {
@@ -26,26 +28,31 @@ class L2Tlb_test extends AnyFreeSpec
 //        }))
         val out = Vec(nBanks, DecoupledIO(new L2TlbRsp(SV)))
         // Request Always Read!
-        val mem_req = DecoupledIO(new Cache_Req(SV))
-        val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
+        val mem_req = Vec(nBanks, DecoupledIO(new Cache_Req(SV)))
+        val mem_rsp = Vec(nBanks, Flipped(DecoupledIO(new Cache_Rsp(SV))))
+        val fill_in = Flipped(ValidIO(new AsidLookupEntry(SV)))
       })
 
       val internal = Module(new L2Tlb(SV, debug = true))
+      val lookup = Module(new AsidLookup(SV, nBanks, 16))
       (0 until nBanks).foreach{ i =>
         internal.io.in(i) <> Queue(io.in(i), 1)
         io.out(i) <> Queue(internal.io.out(i), 1)
       }
 
+      lookup.io.lookup_req <> internal.io.asid_req
+      lookup.io.lookup_rsp <> internal.io.ptbr_rsp
+      lookup.io.fill_in <> io.fill_in
       internal.io.invalidate.bits.asid := 0.U
       internal.io.invalidate.valid := false.B
 
-      val pipe_mem_req = Module(new DecoupledPipe(io.mem_req.bits.cloneType, 0, insulate = true))
-      val pipe_mem_rsp = Module(new DecoupledPipe(io.mem_rsp.bits.cloneType, 0, insulate = true))
-      pipe_mem_req.io.enq <> internal.io.mem_req
-      io.mem_req <> pipe_mem_req.io.deq
+      val pipe_mem_req = io.mem_req.map{ req => Module(new DecoupledPipe(req.bits.cloneType, 0, insulate = true)) }
+      val pipe_mem_rsp = io.mem_rsp.map{ rsp => Module(new DecoupledPipe(rsp.bits.cloneType, 0, insulate = true)) }
+      (pipe_mem_req zip internal.io.mem_req).foreach{ x => x._1.io.enq <> x._2 }
+      (io.mem_req zip pipe_mem_req).foreach{ x => x._1 <> x._2.io.deq }
 
-      pipe_mem_rsp.io.enq <> io.mem_rsp
-      internal.io.mem_rsp <> pipe_mem_rsp.io.deq
+      (pipe_mem_rsp zip io.mem_rsp).foreach{ x => x._1.io.enq <> x._2 }
+      (internal.io.mem_rsp zip pipe_mem_rsp).foreach{ x => x._1 <> x._2.io.deq }
     }
     test(new L2TlbWrapper(SV32.device)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       val nBanks = d.nBanks
@@ -56,26 +63,40 @@ class L2Tlb_test extends AnyFreeSpec
 
       var clock_cnt = 0; var tlb_cnt = 0;
       val req_list = Seq(BigInt("080000", 16), BigInt("080001", 16))
-      val mem_driver = new MMUMemPortDriverDelay(SV32)(d.io.mem_req, d.io.mem_rsp, memory, 5, 5)
+      val mem_driver = (d.io.mem_req zip d.io.mem_rsp).map{ case(req, rsp) =>
+        new MMUMemPortDriverDelay(SV32)(req, rsp, memory, 5, 5)
+      }
       val tlb_sender = (d.io.in zip d.io.out).map { case (i, o) =>
         new RequestSender(i, o)
       }
       req_list.foreach{ r =>
         tlb_sender((r % nBanks).toInt).add(
           (new L2TlbReq(SV32.device)).Lit(
-            _.ptbr -> ptbr.U, _.vpn -> r.U, _.asid -> 1.U, _.id -> (r % nBanks).U
+            _.vpn -> r.U, _.asid -> 1.U, _.id -> (r % nBanks).U
           )
         )
       }
 
       d.io.in.foreach{_.setSourceClock(d.clock)}
       d.io.out.foreach{_.setSinkClock(d.clock)}
-      d.io.mem_req.setSinkClock(d.clock)
-      d.io.mem_rsp.setSourceClock(d.clock)
+      d.io.mem_req.foreach{_.setSinkClock(d.clock)}
+      d.io.mem_rsp.foreach{_.setSourceClock(d.clock)}
+      d.io.fill_in.setSourceClock(d.clock)
+
+      d.clock.step(); clock_cnt += 1
+      d.io.fill_in.valid.poke(true.B)
+      timescope {
+        d.io.fill_in.bits.poke(new AsidLookupEntry(SV32.device).Lit(
+          _.ptbr -> ptbr.U,
+          _.asid -> 1.U,
+          _.valid -> true.B
+        ))
+        d.clock.step(); clock_cnt += 1
+      }
 
       while(tlb_sender.map{_.send_list.nonEmpty}.reduce(_ && _) && clock_cnt <= 30){
         tlb_sender.foreach{_.eval()}
-        mem_driver.eval()
+        mem_driver.foreach{_.eval()}
         d.clock.step(); clock_cnt += 1;
       }
       d.clock.step(3)
@@ -151,8 +172,8 @@ class L2TlbComponentTest extends AnyFreeSpec
       val io = IO(new Bundle{
         val ptw_req = Vec(Ways, Flipped(DecoupledIO(new PTW_Req(SV))))
         val ptw_rsp = Vec(Ways, DecoupledIO(new PTW_Rsp(SV)))
-        val mem_req = DecoupledIO(new Cache_Req(SV))
-        val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
+        val mem_req = Vec(Ways, DecoupledIO(new Cache_Req(SV)))
+        val mem_rsp = Vec(Ways, Flipped(DecoupledIO(new Cache_Rsp(SV))))
       })
       val internal = Module(new PTW(SV, Ways, debug = true))
       (0 until Ways).foreach{ i =>
@@ -160,12 +181,12 @@ class L2TlbComponentTest extends AnyFreeSpec
         io.ptw_rsp(i) <> Queue(internal.io.ptw_rsp(i), 1)
       }
 
-      val pipe_mem_req = Module(new DecoupledPipe(io.mem_req.bits.cloneType, 0, insulate = true))
-      val pipe_mem_rsp = Module(new DecoupledPipe(io.mem_rsp.bits.cloneType, 0, insulate = true))
-      io.mem_req <> pipe_mem_req.io.deq
-      pipe_mem_req.io.enq <> internal.io.mem_req
-      pipe_mem_rsp.io.enq <> io.mem_rsp
-      internal.io.mem_rsp <> pipe_mem_rsp.io.deq
+      val pipe_mem_req = io.mem_req.map{ req => Module(new DecoupledPipe(req.bits.cloneType, 0, insulate = true))}
+      val pipe_mem_rsp = io.mem_rsp.map{ rsp => Module(new DecoupledPipe(rsp.bits.cloneType, 0, insulate = true)) }
+      (io.mem_req zip pipe_mem_req).foreach{ x => x._1 <> x._2.io.deq }
+      (pipe_mem_req zip internal.io.mem_req).foreach{ x => x._1.io.enq <> x._2 }
+      (pipe_mem_rsp zip io.mem_rsp).foreach{ x => x._1.io.enq <> x._2 }
+      (internal.io.mem_rsp zip pipe_mem_rsp).foreach{ x => x._1 <> x._2.io.deq }
     }
 
     test(new PTWWrapper(SV32.device, Ways = 2)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
@@ -182,17 +203,19 @@ class L2TlbComponentTest extends AnyFreeSpec
       var clock_cnt = 0
       d.io.ptw_req.foreach{_.setSourceClock(d.clock)}
       d.io.ptw_rsp.foreach{_.setSinkClock(d.clock)}
-      d.io.mem_req.setSinkClock(d.clock)
-      d.io.mem_rsp.setSourceClock(d.clock)
+      d.io.mem_req.foreach(_.setSinkClock(d.clock))
+      d.io.mem_rsp.foreach(_.setSourceClock(d.clock))
       d.clock.step(2); clock_cnt += 2
 
       //d.io.ptw_req.enqueueNow(req)
       d.clock.step(); clock_cnt += 1
       d.io.ptw_req.foreach{_.valid.poke(false.B)}
-      d.io.mem_req.ready.poke(true.B)
+      d.io.mem_req.foreach{_.ready.poke(true.B)}
 
       d.io.ptw_rsp.foreach{_.ready.poke(true.B)}
-      val mem_driver = new MMUMemPortDriverDelay(SV32)(d.io.mem_req, d.io.mem_rsp, memory, 5, 5)
+      val mem_driver = (d.io.mem_req zip d.io.mem_rsp).map{ case (memreq, memrsp) =>
+        new MMUMemPortDriverDelay(SV32)(memreq, memrsp, memory, 5, 5)
+      }
       //val mem_driver = new MemPortDriver(SV32)(d.io.mem_req, d.io.mem_rsp, memory)
 
       val tlb_requestor = (d.io.ptw_req zip d.io.ptw_rsp).map{ case (req, rsp) =>
@@ -212,7 +235,7 @@ class L2TlbComponentTest extends AnyFreeSpec
           tlb_requestor(i).pause = if(clock_cnt <= timestamp_rsp(i) + 5) true else false
           tlb_requestor(i).eval()
         }
-        mem_driver.eval()
+        mem_driver.foreach{_.eval()}
         d.clock.step(1); clock_cnt += 1
       }
       d.clock.step(3)

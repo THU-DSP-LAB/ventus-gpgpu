@@ -24,6 +24,7 @@ import L2cache._
 import CTA._
 import axi._
 import freechips.rocketchip.amba.axi4._
+import pipeline.mmu.{L2Tlb, L2TlbToL2CacheXBar}
 
 class host2CTA_data extends Bundle{
   val host_wg_id            = (UInt(WG_ID_WIDTH.W))
@@ -137,7 +138,8 @@ class GPGPU_axi_adapter_top extends Module{
   io.m<>gpgpu_axi_top.io.m
 }
 
-class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGModule{
+class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None)
+  extends RVGModule{
     val io = IO(new Bundle{
     val host_req=Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp=DecoupledIO(new CTA2host_data)
@@ -179,42 +181,54 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
   //  sm_wrapper(i).memRsp <> sm2L2Arb.io.memRspVecOut(i)
   //  sm2L2Arb.io.memReqVecIn(i) <> sm_wrapper(i).memReq
   }
-  for(i<-0 until NL2Cache){
-      for(j<- 0 until NCluster){
-        cluster2l2Arb(i).memReqVecIn(j).valid := l2distribute(j).memReqVecOut(i).valid
-        cluster2l2Arb(i).memReqVecIn(j).bits := l2distribute(j).memReqVecOut(i).bits
-        l2distribute(j).memReqVecOut(i).ready := cluster2l2Arb(i).memReqVecIn(j).ready
 
-        l2distribute(j).memRspVecIn(i).valid := cluster2l2Arb(i).memRspVecOut(j).valid
-        l2distribute(j).memRspVecIn(i).bits := cluster2l2Arb(i).memRspVecOut(j).bits
-        cluster2l2Arb(i).memRspVecOut(j).ready := l2distribute(j).memRspVecIn(i).ready
-        //cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
-        //l2distribute(j).memRspVecIn(i) <> cluster2l2Arb(i).memRspVecOut(j)
-        //l2cache(i).out_a <> io.out_a(i)
-        //l2cache(i).out_d <> io.out_d(i)
-        //cluster2l2Arb.memRspVecIn(i) <> l2cache(i).in_d
+  SV match {
+    case None => {
+      for(i <- 0 until NL2Cache){
+        l2cache(i).in_a.valid <> cluster2l2Arb(i).memReqOut
+        cluster2l2Arb(i).memRspIn <> l2cache(i).in_d
+
+        for(j <- 0 until NCluster){
+          cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
+          l2distribute(j).memRspVecIn(i) <> cluster2l2Arb(i).memRspVecOut(j)
+        }
+
+        io.out_a(i) <> l2cache(i).out_a
+        l2cache(i).out_d <> io.out_d(i)
       }
-    l2cache(i).in_a.valid := cluster2l2Arb(i).memReqOut.valid
-    l2cache(i).in_a.bits := cluster2l2Arb(i).memReqOut.bits
-    cluster2l2Arb(i).memReqOut.ready := l2cache(i).in_a.ready
-
-    io.out_a(i).valid:=l2cache(i).out_a.valid
-    io.out_a(i).bits:= l2cache(i).out_a.bits
-    l2cache(i).out_a.ready  :=   io.out_a(i).ready
-
-    l2cache(i).out_d.valid := io.out_d(i).valid
-    l2cache(i).out_d.bits := io.out_d(i).bits
-    io.out_d(i).ready := l2cache(i).out_d.ready
-
-    cluster2l2Arb(i).memRspIn.valid := l2cache(i).in_d.valid
-    cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
-    l2cache(i).in_d.ready := cluster2l2Arb(i).memRspIn.ready
-
-    /*l2cache(i).in_a <> cluster2l2Arb(i).memReqOut
-    l2cache(i).out_a <> io.out_a(i)
-    l2cache(i).out_d <> io.out_d(i)
-    cluster2l2Arb(i).memRspIn <> l2cache(i).in_d*/
     }
+    case Some(sv) => {
+      val l2tlb = Module(new L2Tlb(sv, L2C = Some(l2cache_params))(Some(this.asInstanceOf[HasRVGParameters])))
+      val tlb_req_arb = VecInit(Seq.fill(NL2Cache)(Module(new Arbiter(new TLBundleA_lite(l2cache_params), 2)).io))
+
+      val tlb_l2c_xbar = Module(new L2TlbToL2CacheXBar(sv, NL2Cache, l2cache_params)(this.asInstanceOf[HasRVGParameters]))
+      tlb_l2c_xbar.io.req_tlb <> l2tlb.io.mem_req
+      l2tlb.io.mem_rsp <> tlb_l2c_xbar.io.rsp_tlb
+
+      for(i <- 0 until NL2Cache) {
+        tlb_req_arb(i).in(0) <> tlb_l2c_xbar.io.req_cache(i)
+        tlb_req_arb(i).in(1) <> cluster2l2Arb(i).memReqOut
+        tlb_req_arb(i).in(1).bits.source := Cat(l2cache(i).in_a.bits.source, 0.U(1.W))
+        tlb_req_arb(i).out <> l2cache(i).in_a
+
+        cluster2l2Arb(i).memRspIn.valid := l2cache(i).in_d.valid & !l2cache(i).in_d.bits.source(0)
+        cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
+        cluster2l2Arb(i).memRspIn.bits.source := l2cache(i).in_d.bits.source >> 1
+
+        l2cache(i).in_a <> tlb_l2c_xbar.io.req_cache(i)
+        tlb_l2c_xbar.io.rsp_cache(i) <> l2cache(i).in_d
+
+        for(j <- 0 until NCluster){
+          cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
+          l2distribute(j).memRspVecIn(i) <> cluster2l2Arb(i).memRspVecOut(j)
+        }
+
+        io.out_a(i) <> l2cache(i).out_a
+        l2cache(i).out_d <> io.out_d(i)
+      }
+    }
+  }
+
   io.host_rsp<>cta.io.CTA2host
   io.host_req<>cta.io.host2CTA
   io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U)})

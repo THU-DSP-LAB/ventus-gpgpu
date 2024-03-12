@@ -102,12 +102,26 @@ class Cache_Rsp(SV: SVParam) extends Bundle with L2TlbParam{
   val source = UInt(depth_mem_source.W)
 }
 
-class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module with L2TlbParam {
+class PTW(
+   SV: SVParam,
+   Banks: Int = 1,
+   debug: Boolean = false,
+   L2C: Option[L2cache.InclusiveCacheParameters_lite] = None
+) extends Module with L2TlbParam {
+  def memreq_gen: Bundle = L2C match {
+    case Some(l2c) => new TLBundleA_lite(l2c)
+    case None => new Cache_Req(SV)
+  }
+  def memrsp_gen: Bundle = L2C match {
+    case Some(l2c) => new TLBundleD_lite(l2c)
+    case None => new Cache_Rsp(SV)
+  }
+
   val io = IO(new Bundle{
-    val ptw_req = Vec(Ways, Flipped(DecoupledIO(new PTW_Req(SV))))
-    val ptw_rsp = Vec(Ways, DecoupledIO(new PTW_Rsp(SV)))
-    val mem_req = DecoupledIO(new Cache_Req(SV))
-    val mem_rsp = Flipped(DecoupledIO(new Cache_Rsp(SV)))
+    val ptw_req = Vec(Banks, Flipped(DecoupledIO(new PTW_Req(SV))))
+    val ptw_rsp = Vec(Banks, DecoupledIO(new PTW_Rsp(SV)))
+    val mem_req: Vec[DecoupledIO[Bundle]] = Vec(Banks, DecoupledIO(memreq_gen))
+    val mem_rsp: Vec[DecoupledIO[Bundle]] = Vec(Banks, Flipped(DecoupledIO(memrsp_gen)))
   })
 
   val s_idle :: s_memreq :: s_memwait :: s_rsp :: s_fault :: Nil = Enum(5)
@@ -118,7 +132,10 @@ class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module wit
     val flags = Vec(nSectors, UInt(8.W))
     val vpn = UInt(SV.vpnLen.W)
     val cur_level = UInt(log2Up(SV.levels).W)
-    val source = UInt(depth_ptw_source.W)
+    val source = L2C match {
+      case Some(l2c) => UInt(l2c.source_bits.W)
+      case None => UInt(depth_ptw_source.W)
+    }
     val fault = Bool()
   }
 
@@ -132,9 +149,9 @@ class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module wit
     (aligned, sectorIdx)
   }
 
-  val entries = RegInit(VecInit(Seq.fill(Ways)(0.U.asTypeOf(new PTWEntry))))
+  val entries = RegInit(VecInit(Seq.fill(Banks)(0.U.asTypeOf(new PTWEntry))))
 
-  val state = RegInit(VecInit(Seq.fill(Ways)(s_idle)))
+  val state = RegInit(VecInit(Seq.fill(Banks)(s_idle)))
   val is_idle = VecInit(state.map(_ === s_idle))
   val is_memwait = VecInit(state.map(_ === s_memwait))
   val is_rsp = VecInit(state.map{x => x === s_rsp || x === s_fault})
@@ -143,7 +160,7 @@ class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module wit
   //val enq_ptr = PriorityEncoder(is_idle)
 
   (io.ptw_req zip is_idle).foreach{ case(req, idle) => req.ready := idle }
-  (0 until Ways).foreach{ i =>
+  (0 until Banks).foreach{ i =>
     val ptw_req = io.ptw_req(i)
     when(ptw_req.fire){ // idle -> mem req
       state(i) := s_memreq
@@ -151,7 +168,7 @@ class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module wit
       entries(i).vpn := ptw_req.bits.vpn
       entries(i).ppns(0) := ptw_req.bits.ptbr >> SV.offsetLen
       entries(i).sectorIdx := 0.U // access PTBR always sector 0
-      entries(i).source := i.U
+      entries(i).source := ptw_req.bits.source
       entries(i).fault := false.B
       //printf(p"PTW#${enq_ptr} REQ | vpn: ${Hexadecimal(io.ptw_req.bits.vpn)} ptbr: ${io.ptw_req.bits.ptbr}\n")
     }
@@ -162,94 +179,92 @@ class PTW(SV: SVParam, Ways: Int = 1, debug: Boolean = false) extends Module wit
     }
   }
 
-  val memreq_arb = Module(new RRArbiter(new Cache_Req(SV), Ways))
-  (0 until Ways).foreach{ i =>
-    val req = Wire(new Cache_Req(SV))
-    req.addr := alignedPA(makePA(entries(i)))._1 // makePA: select correct sector of PPN, append VPN index by cur_level
-    req.source := entries(i).source
-    memreq_arb.io.in(i).bits := req
-    memreq_arb.io.in(i).valid := state(i) === s_memreq
+//  val memreq_arb = L2C match {
+//    case Some(l2c) => Module(new RRArbiter(new TLBundleA_lite(l2c), Banks))
+//    case None => Module(new RRArbiter(new Cache_Req(SV), Banks))
+//  }
+  (0 until Banks).foreach{ i =>
+    val req = Wire(memreq_gen)
+    req match {
+      case r1: Cache_Req => {
+        r1.addr := alignedPA(makePA(entries(i)))._1 // makePA: select correct sector of PPN, append VPN index by cur_level
+        r1.source := entries(i).source
+      }
+      case r1: TLBundleA_lite => {
+        r1.address := alignedPA(makePA(entries(i)))._1
+        r1.source := entries(i).source
+        r1.data := 0.U.asTypeOf(r1.data)
+        r1.mask := Fill(r1.mask.getWidth, true.B)
+        r1.opcode := 4.U // READ
+        r1.size := 0.U // TODO: correct the value
+        r1.param := 0.U // TODO: correct the value
+      }
+    }
+    io.mem_req(i).bits := req
+    io.mem_req(i).valid := state(i) === s_memreq
   }
-  io.mem_req <> memreq_arb.io.out
 
-  when(io.mem_req.fire){ // mem req -> mem_wait
-    state(memreq_arb.io.chosen) := s_memwait
-    // update sector Index when send, so it can be read when mem_rsp
-    // e.g. after sending mem_req(PTBR), sectorIdx will update to VPN(2)
-    entries(memreq_arb.io.chosen).sectorIdx :=
-      SV.getVPNIdx(entries(memreq_arb.io.chosen).vpn, entries(memreq_arb.io.chosen).cur_level)(log2Up(nSectors)-1, 0)
-  }
+  (0 until Banks).foreach{ i =>
+    when(io.mem_req(i).fire){ // mem req -> mem_wait
+      state(i) := s_memwait
+      // update sector Index when send, so it can be read when mem_rsp
+      // e.g. after sending mem_req(PTBR), sectorIdx will update to VPN(2)
+      entries(i).sectorIdx :=
+        SV.getVPNIdx(entries(i).vpn, entries(i).cur_level)(log2Up(nSectors)-1, 0)
+    }
+    val mem_rsp_data = io.mem_rsp(i).bits match {
+      case x: TLBundleD_lite => VecInit((0 until nSectors).map{ i => (x.data >> (i * SV.xLen))(SV.xLen-1, 0) })
+      case y: Cache_Rsp => y.data
+    }
+    io.mem_rsp(i).ready := is_memwait(i)
 
-  io.mem_rsp.ready := (is_memwait.asUInt)(io.mem_rsp.bits.source)
+    val pte_rsp = mem_rsp_data.asTypeOf(new PTE)
 
-  val pte_rsp = io.mem_rsp.bits.data.asTypeOf(new PTE)
-
-  when(io.mem_rsp.fire){
-    (0 until Ways).foreach{ i =>
-      when(is_memwait(i) && entries(i).source === io.mem_rsp.bits.source){
+    when(io.mem_rsp(i).fire){
+      when(is_memwait(i)){
         // 非叶子节点
         when(pte_rsp.isPDE && entries(i).cur_level > 0.U){ // mem wait -> mem req
           state(i) := s_memreq
           entries(i).cur_level := entries(i).cur_level - 1.U
-          entries(i).ppns := VecInit(io.mem_rsp.bits.data.map(SV.PTE2PPN))
-        // 叶子节点
+          entries(i).ppns := VecInit(mem_rsp_data.map(SV.PTE2PPN))
+          // 叶子节点
         }.elsewhen(pte_rsp.isLeaf){ // mem wait -> mem rsp
           entries(i).cur_level := 0.U
-          entries(i).ppns := VecInit(io.mem_rsp.bits.data.map(SV.PTE2PPN))
-          entries(i).flags := VecInit(io.mem_rsp.bits.data.map(_(7, 0)))
+          entries(i).ppns := VecInit(mem_rsp_data.map(SV.PTE2PPN))
+          entries(i).flags := VecInit(mem_rsp_data.map(_(7, 0)))
           state(i) := s_rsp
         }.otherwise{ // mem wait -> page fault
           entries(i).cur_level := 0.U
           entries(i).ppns.foreach{ _ := 0.U }
-          entries(i).flags := VecInit(io.mem_rsp.bits.data.map(_(7, 0)))
+          entries(i).flags := VecInit(mem_rsp_data.map(_(7, 0)))
           entries(i).fault := true.B
           state(i) := s_fault
         }
       }
     }
-  }
-
-  (0 until Ways).foreach{ i =>
     io.ptw_rsp(i).bits := entries(i)
     io.ptw_rsp(i).valid := is_rsp(i) || state(i) === s_fault
-  }
 
-  if(debug){
-    when(io.mem_req.fire){
-      val cur_entry = entries(memreq_arb.io.chosen)
-      val cur_sector = cur_entry.sectorIdx
-      printf(p"PTW#${memreq_arb.io.chosen} MEM | ppn: 0x${Hexadecimal(SV.PPN2PtePA(cur_entry.ppns(cur_sector), 0.U))}[" +
-        p"idx: 0x${Hexadecimal(SV.getVPNIdx(cur_entry.vpn, cur_entry.cur_level))}] " +
-        p"pa: 0x${Hexadecimal(alignedPA(makePA(cur_entry))._1)}+${Hexadecimal(alignedPA(makePA(cur_entry))._2)}\n")
-    }
-    when(io.mem_rsp.fire){
-      (0 until Ways).foreach{ i =>
-        when(is_memwait(i) && entries(i).source === io.mem_rsp.bits.source){
-          printf(p"PTW#${i.U} MEM | ->")
-          (0 until nSectors).foreach{ j =>
-            when(j.U === entries(i).sectorIdx){
-              printf(p" [0x${Hexadecimal(SV.PTE2PPN(io.mem_rsp.bits.data(j)))}+${Hexadecimal(io.mem_rsp.bits.data(j)(7, 0))}]")
-            }.otherwise {
-              printf(p" 0x${Hexadecimal(SV.PTE2PPN(io.mem_rsp.bits.data(j)))}+${Hexadecimal(io.mem_rsp.bits.data(j)(7, 0))}")
-            }
+    if(debug){
+      when(io.mem_req(i).fire){
+        val cur_entry = entries(i)
+        val cur_sector = cur_entry.sectorIdx
+        printf(p"PTW#${i} MEM | ppn: 0x${Hexadecimal(SV.PPN2PtePA(cur_entry.ppns(cur_sector), 0.U))}[" +
+          p"idx: 0x${Hexadecimal(SV.getVPNIdx(cur_entry.vpn, cur_entry.cur_level))}] " +
+          p"pa: 0x${Hexadecimal(alignedPA(makePA(cur_entry))._1)}+${Hexadecimal(alignedPA(makePA(cur_entry))._2)}\n")
+      }
+      when(io.mem_rsp(i).fire){
+        printf(p"PTW#${i} MEM | ->")
+        (0 until nSectors).foreach{ j =>
+          when(j.U === entries(i).sectorIdx){
+            printf(p" [0x${Hexadecimal(SV.PTE2PPN(mem_rsp_data(j)))}+${Hexadecimal(mem_rsp_data(j)(7, 0))}]")
+          }.otherwise {
+            printf(p" 0x${Hexadecimal(SV.PTE2PPN(mem_rsp_data(j)))}+${Hexadecimal(mem_rsp_data(j)(7, 0))}")
           }
-          printf(p"\n")
         }
+        printf(p"\n")
       }
     }
   }
 }
 
-//class PTW_L2Cluster_Adapter(SV: SVParam) extends Module{
-//  import top.parameters._
-//
-//  val cache_param = (new L1Cache.MyConfig).toInstance
-//  val io = IO(new Bundle{
-//    val memreq_in = Flipped(DecoupledIO(new Cache_Req(SV)))
-//    val memrsp_out = DecoupledIO(new Cache_Rsp(SV))
-//    val memrsp_in = Seq.fill(num_cluster)(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
-//    val memreq_out = Flipped(DecoupledIO(new TLBundleA_lite(l2cache_params)))
-//  })
-//  val align_mask = 1.U(SV.xLen.W) << ()
-//  val addr_base = io.memreq_in.bits.addr
-//}
