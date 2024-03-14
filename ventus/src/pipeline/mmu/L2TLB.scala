@@ -3,14 +3,14 @@ package pipeline.mmu
 import L2cache.{SRAMTemplate, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.util.SetAssocLRU
+import freechips.rocketchip.util.{RandomReplacement, SetAssocLRU}
 import chisel3.experimental.dataview._
 
 trait L2TlbParam{
-  def nSets = 16
+  def nSets = 16 // total Sets of all banks
   def nWays = 4
   def nSectors = 2
-  def nBanks = 2
+  def nBanks = 1
 
   def vpnL2TlbBundle(SV: SVParam) = new Bundle {
     val tag = UInt((SV.vpnLen - log2Up(nSets) - log2Up(nSectors)).W)
@@ -53,7 +53,7 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
     val invalidate = Flipped(ValidIO(UInt(SV.asidLen.W)))
   })
 
-  val Entries = Mem(nSets, Vec(nWays, new L2TlbEntry(SV))) // Storage1
+  val Entries = Mem(nSets/nBanks, Vec(nWays, new L2TlbEntry(SV))) // Storage1
 
   class AsidVBundle extends Bundle{ val asid = UInt(SV.asidLen.W); val v = Vec(nSectors, Bool()); }
   // Storage2, {nSets * nWays * {asid, nSectors * valid}}
@@ -131,6 +131,54 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   io.tlbOut := tlbOut
 }
 
+class L2TlbAccelStorage(SV: SVParam, _nWays: Int, level: Int) extends Module with L2TlbParam {
+  def vpnSplit(vpn: UInt): (UInt, UInt) = {
+    val sectorIdx: UInt = vpn(level * SV.idxLen + log2Up(nSectors) - 1, level * SV.idxLen)
+    val vpnBase: UInt = Cat(
+      vpn(vpn.getWidth-1, level * SV.idxLen + log2Up(nSectors)),
+      0.U((level * SV.idxLen + log2Up(nSectors)).W)
+    )
+    (vpnBase, sectorIdx)
+  }
+  val io = IO(new Bundle{
+    val accelReq = Vec(nBanks, Flipped(ValidIO(new Bundle{
+      val asid = UInt(SV.asidLen.W)
+      val vpn = UInt(SV.vpnLen.W)
+    })))
+    val accelOut = Vec(nBanks, ValidIO(UInt(SV.ppnLen.W)))
+    val refill = Flipped(ValidIO(new L2TlbEntryA(SV)))
+    val invalidate = Flipped(ValidIO(UInt(SV.asidLen.W)))
+  })
+  val Entries = Reg(Vec(_nWays, new L2TlbEntryA(SV)))
+  val Valids = Reg(Vec(_nWays, Bool()))
+  val replace = new RandomReplacement(_nWays)
+  val replaceWay = Mux(Valids.reduce(_ && _), PriorityEncoder(Valids), replace.get_replace_way(0.U))
+  (0 until nBanks).foreach{ b =>
+    val accelReq_split = vpnSplit(io.accelReq(b).bits.vpn)
+    val hitVec = VecInit((Entries zip Valids).map{ case(m, v) => // asid match + vpn match + sector valid
+      m.asid === io.accelReq(b).bits.asid && vpnSplit(m.vpn)._1 === accelReq_split._1 && m.flags(accelReq_split._2)(0) && v
+    })
+    val hitWay = PriorityEncoder(hitVec)
+    val hit = hitVec.asUInt =/= 0.U
+
+    // --- Output
+    io.accelOut(b).valid := io.accelReq(b).valid && hit
+    io.accelOut(b).bits := Mux(io.accelReq(b).valid && hit, Entries(hitWay).ppns(accelReq_split._2), 0.U(SV.ppnLen.W))
+    // Output ---
+  }
+  when(io.invalidate.valid){
+    (Entries zip Valids).foreach{ case(m, v) =>
+      when(m.asid === io.invalidate.bits){
+        m := 0.U.asTypeOf(m)
+        v := false.B
+      }
+    }
+  }.elsewhen(io.refill.valid){
+    Entries(replaceWay) := io.refill.bits
+    Valids(replaceWay) := true.B
+  }
+}
+
 object TlbID extends L2TlbParam{
   def apply(implicit param: Option[L1Cache.HasRVGParameters]): UInt = {
     return param match {
@@ -168,6 +216,7 @@ class L2Tlb(
   SV: SVParam,
   debug: Boolean = false,
   L2C: Option[L2cache.InclusiveCacheParameters_lite] = None,
+  accelSize: Int = 8
 )(
   implicit val L1C: Option[L1Cache.HasRVGParameters]
 )
@@ -197,7 +246,10 @@ class L2Tlb(
   })
 
   val storageArray = Seq.fill(nBanks)(Module(new L2TlbStorage(SV)))
-  //val nonleafStorageArray =
+  val accelStorageArray = (1 until SV.levels).map{ i => Module(new L2TlbAccelStorage(SV, accelSize, i))}
+  val accelOut_delay = accelStorageArray.map{ a => RegNext(a.io.accelOut) }
+  val accelRefillArb = (1 until SV.levels).map{i => Module(new RRArbiter(new L2TlbEntryA(SV), nBanks)) }
+  accelRefillArb.foreach{ a => a.io.out.ready := true.B }
 
   val walker = Module(new PTW(SV, nBanks, debug))
 
@@ -239,9 +291,39 @@ class L2Tlb(
     val hit = cState === s_check && hitVec.orR
     val miss = cState === s_check && !hitVec.orR
 
+    // for SV39 VA {VPN2, VPN1, VPN0}:
+    //   accelStorage(1) checks VPN2 and gives out level = 2 when match (2 walks to go)
+    //   accelStorage(0) checks {VPN2, VPN1} and gives out level = 1 when match (1 walk to go)
+    //   hit checks whole vpn and gives out level = 0 when match
+    //   nothing match will gives out level = 3
+    val accelLevel_pre = PriorityEncoder((hit +: accelStorageArray.map(_.io.accelOut(i).valid)) :+ true.B)
+    val accelLevel = RegNext(accelLevel_pre)
+    (0 until SV.levels-1).foreach{ j => // j for selecting level, i for selecting walker ways / tlb banks
+      accelStorageArray(j).io.accelReq(i).valid := curState(i) === s_check
+      accelStorageArray(j).io.accelReq(i).bits.asid := tlb_req.asid
+      accelStorageArray(j).io.accelReq(i).bits.vpn := tlb_req.vpn
+
+      val refill_level = walker.io.accel_fill(i).bits.cur_level
+      accelRefillArb(j).io.in(i).valid := walker.io.accel_fill(i).valid && refill_level === j.U
+      accelRefillArb(j).io.in(i).bits.asid := tlb_req.asid
+      accelRefillArb(j).io.in(i).bits.vpn := accelStorageArray(j).vpnSplit(tlb_req.vpn)._1
+      accelRefillArb(j).io.in(i).bits.level := i.U // likely unused at all
+      accelRefillArb(j).io.in(i).bits.ppns := Mux(accelRefillArb(j).io.in(i).valid, walker.io.accel_fill(i).bits.ppns, 0.U.asTypeOf(accelRefillArb(j).io.in(i).bits.ppns))
+      accelRefillArb(j).io.in(i).bits.flags := Mux(accelRefillArb(j).io.in(i).valid, walker.io.accel_fill(i).bits.flags, 0.U.asTypeOf(accelRefillArb(j).io.in(i).bits.flags))
+
+      accelStorageArray(j).io.refill := accelRefillArb(j).io.out
+      accelStorageArray(j).io.invalidate.valid := io.invalidate.valid
+      accelStorageArray(j).io.invalidate.bits := io.invalidate.bits.asid
+    }
+    val accelPA = MuxLookup(accelLevel, 0.U,
+      (1 to SV.levels).map(_.U) zip
+        (accelOut_delay.map{a => Cat(a(i).bits, 0.U(SV.offsetLen.W))} :+ ptbr_rsp.bits)
+    )
+
     ptw_req.bits.source := tlb_req.id
     ptw_req.bits.vpn := tlb_req.vpn
-    ptw_req.bits.ptbr := ptbr_rsp.bits
+    ptw_req.bits.paddr := accelPA
+    ptw_req.bits.curlevel := accelLevel - 1.U
     ptw_req.valid := cState === s_ptw_req
 
     ptw_rsp.ready := storage.io.ready && cState === s_ptw_rsp
@@ -272,6 +354,11 @@ class L2Tlb(
         }
       }
       is(s_check){
+        (0 until SV.levels - 1).foreach{ j =>
+          accelStorageArray(j).io.accelReq(i).bits.asid := tlb_req.asid
+          accelStorageArray(j).io.accelReq(i).bits.vpn := tlb_req.vpn
+          accelStorageArray(j).io.accelReq(i).valid := true.B
+        }
         when(hit){
           replace(i).access(storage.io.rindex, hitVec)
           tlb_rsp.id := tlb_req.id
@@ -315,13 +402,14 @@ class L2Tlb(
       }
       when(cState === s_check){
         printf(p"[TLB${i} ${cnt.value}] ")
-        when(hit){ printf(p"-| HIT  | ")
-        }.otherwise{ printf(p"-| MISS | ") }
+        when(hit){ printf(p"-| HIT  | ") }
+          .elsewhen(accelLevel_pre =/= SV.levels.U){ printf(p"-| AC ${accelLevel_pre} |") }
+          .otherwise{ printf(p"-| MISS | ") }
         printf(p"line: ${storage.io.rindex} way: ${Decimal(OHToUInt(hitVec))} sector: ${tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex}\n")
       }
       when(ptw_req.fire){
         printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"- -| >>PTW | ptbr: 0x${Hexadecimal(ptw_req.bits.ptbr)} vpn: 0x${Hexadecimal(ptw_req.bits.vpn)}\n")
+        printf(p"- -| >>PTW | ptbr: 0x${Hexadecimal(ptw_req.bits.paddr)} vpn: 0x${Hexadecimal(ptw_req.bits.vpn)}\n")
       }
       when(ptw_rsp.fire){
         printf(p"[TLB${i} ${cnt.value}] ")

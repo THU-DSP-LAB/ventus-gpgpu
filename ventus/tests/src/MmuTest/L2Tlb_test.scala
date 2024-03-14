@@ -59,10 +59,10 @@ class L2Tlb_test extends AnyFreeSpec
       val memory = new Memory(BigInt("10000000", 16), SV32.host)
       val ptbr = memory.createRootPageTable()
       memory.allocateMemory(ptbr, BigInt("080000000", 16), SV32.host.PageSize*4)
-      memory.allocateMemory(ptbr, BigInt("090000000", 16), SV32.host.PageSize*4)
+      memory.allocateMemory(ptbr, BigInt("080400000", 16), SV32.host.PageSize*4)
 
       var clock_cnt = 0; var tlb_cnt = 0;
-      val req_list = Seq(BigInt("080000", 16), BigInt("080001", 16))
+      val req_list = Seq(BigInt("080000", 16), BigInt("080400", 16), BigInt("080000", 16))
       val mem_driver = (d.io.mem_req zip d.io.mem_rsp).map{ case(req, rsp) =>
         new MMUMemPortDriverDelay(SV32)(req, rsp, memory, 5, 5)
       }
@@ -94,7 +94,7 @@ class L2Tlb_test extends AnyFreeSpec
         d.clock.step(); clock_cnt += 1
       }
 
-      while(tlb_sender.map{_.send_list.nonEmpty}.reduce(_ && _) && clock_cnt <= 30){
+      while(tlb_sender.map{_.send_list.nonEmpty}.reduce(_ && _) && clock_cnt <= 60){
         tlb_sender.foreach{_.eval()}
         mem_driver.foreach{_.eval()}
         d.clock.step(); clock_cnt += 1;
@@ -192,7 +192,7 @@ class L2TlbComponentTest extends AnyFreeSpec
     test(new PTWWrapper(SV32.device, Ways = 2)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       val Ways = d.Ways
       def makeReq(vpn: UInt, ptbr: UInt, source: UInt): PTW_Req = (new PTW_Req(SV32.device)).Lit(
-        _.vpn -> vpn, _.ptbr -> ptbr, _.source -> source
+        _.vpn -> vpn, _.paddr -> ptbr, _.source -> source
       )
       val memory = new Memory(BigInt("10000000", 16), SV32.host)
       val ptbr = memory.createRootPageTable()

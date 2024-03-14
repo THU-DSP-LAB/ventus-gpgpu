@@ -81,7 +81,8 @@ import pipeline.mmu.MMUParam._
 
 class PTW_Req(SV: SVParam) extends Bundle{
   val vpn = UInt(SV.vpnLen.W)
-  val ptbr = UInt(SV.xLen.W)
+  val paddr = UInt(SV.xLen.W)
+  val curlevel = UInt(log2Ceil(SV.levels + 1).W)
   val source = UInt(depth_ptw_source.W)
 }
 
@@ -122,6 +123,11 @@ class PTW(
     val ptw_rsp = Vec(Banks, DecoupledIO(new PTW_Rsp(SV)))
     val mem_req: Vec[DecoupledIO[Bundle]] = Vec(Banks, DecoupledIO(memreq_gen))
     val mem_rsp: Vec[DecoupledIO[Bundle]] = Vec(Banks, Flipped(DecoupledIO(memrsp_gen)))
+    val accel_fill = Vec(Banks, ValidIO(new Bundle{
+      val ppns = Vec(nSectors, UInt(SV.ppnLen.W))
+      val flags = Vec(nSectors, UInt(8.W))
+      val cur_level = UInt(log2Ceil(SV.levels).W)
+    }))
   })
 
   val s_idle :: s_memreq :: s_memwait :: s_rsp :: s_fault :: Nil = Enum(5)
@@ -131,7 +137,7 @@ class PTW(
     val sectorIdx = UInt(log2Up(nSectors).W)
     val flags = Vec(nSectors, UInt(8.W))
     val vpn = UInt(SV.vpnLen.W)
-    val cur_level = UInt(log2Up(SV.levels).W)
+    val cur_level = UInt(log2Up(SV.levels + 1).W)
     val source = L2C match {
       case Some(l2c) => UInt(l2c.source_bits.W)
       case None => UInt(depth_ptw_source.W)
@@ -164,10 +170,10 @@ class PTW(
     val ptw_req = io.ptw_req(i)
     when(ptw_req.fire){ // idle -> mem req
       state(i) := s_memreq
-      entries(i).cur_level := (SV.levels - 1).U
+      entries(i).cur_level := ptw_req.bits.curlevel
       entries(i).vpn := ptw_req.bits.vpn
-      entries(i).ppns(0) := ptw_req.bits.ptbr >> SV.offsetLen
-      entries(i).sectorIdx := 0.U // access PTBR always sector 0
+      entries(i).ppns(0) := ptw_req.bits.paddr >> SV.offsetLen
+      entries(i).sectorIdx := 0.U // root of a page directory is always sector 0
       entries(i).source := ptw_req.bits.source
       entries(i).fault := false.B
       //printf(p"PTW#${enq_ptr} REQ | vpn: ${Hexadecimal(io.ptw_req.bits.vpn)} ptbr: ${io.ptw_req.bits.ptbr}\n")
@@ -219,15 +225,20 @@ class PTW(
     io.mem_rsp(i).ready := is_memwait(i)
 
     val pte_rsp = mem_rsp_data.asTypeOf(new PTE)
+    io.accel_fill(i).bits.ppns := VecInit(mem_rsp_data.map(SV.PTE2PPN))
+    io.accel_fill(i).bits.flags := VecInit(mem_rsp_data.map(_(7, 0)))
+    io.accel_fill(i).bits.cur_level := entries(i).cur_level - 1.U
+    io.accel_fill(i).valid := false.B
 
     when(io.mem_rsp(i).fire){
       when(is_memwait(i)){
-        // 非叶子节点
+        // non-leaf node
         when(pte_rsp.isPDE && entries(i).cur_level > 0.U){ // mem wait -> mem req
           state(i) := s_memreq
           entries(i).cur_level := entries(i).cur_level - 1.U
           entries(i).ppns := VecInit(mem_rsp_data.map(SV.PTE2PPN))
-          // 叶子节点
+          io.accel_fill(i).valid := true.B
+          // leaf node
         }.elsewhen(pte_rsp.isLeaf){ // mem wait -> mem rsp
           entries(i).cur_level := 0.U
           entries(i).ppns := VecInit(mem_rsp_data.map(SV.PTE2PPN))
