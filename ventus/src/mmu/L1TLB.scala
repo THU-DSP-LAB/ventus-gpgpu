@@ -128,7 +128,7 @@ class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
     is(s_check){
       when(hit){
         nState := s_reply
-        replace.access(hitVec)
+        replace.access(OHToUInt(hitVec))
         tlb_rsp := Cat(storage(OHToUInt(hitVec)).ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
       }.otherwise{
         nState := s_l2tlb_req
