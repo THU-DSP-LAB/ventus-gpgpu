@@ -24,7 +24,7 @@ import L2cache._
 import CTA._
 import axi._
 import freechips.rocketchip.amba.axi4._
-import pipeline.mmu.{L2Tlb, L2TlbToL2CacheXBar}
+import mmu.{L2Tlb, L2TlbToL2CacheXBar}
 
 class host2CTA_data extends Bundle{
   val host_wg_id            = (UInt(WG_ID_WIDTH.W))

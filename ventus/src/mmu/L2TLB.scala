@@ -1,4 +1,4 @@
-package pipeline.mmu
+package mmu
 
 import L2cache.{SRAMTemplate, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
 import chisel3._

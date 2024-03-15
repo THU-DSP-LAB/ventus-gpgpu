@@ -5,8 +5,7 @@ import chisel3.util._
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals._
 import chiseltest._
-import pipeline.mmu
-import pipeline.mmu._
+import mmu._
 import play.TestUtils.{IOTestDriver, IOTransform, checkForReady, checkForValid}
 import MemboxS.Memory
 

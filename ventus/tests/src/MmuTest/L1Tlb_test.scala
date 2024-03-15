@@ -7,7 +7,7 @@ import chisel3.experimental.VecLiterals._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import pipeline._
-import pipeline.mmu._
+import mmu._
 import top.DecoupledPipe
 import MemboxS._
 import play.TestUtils._

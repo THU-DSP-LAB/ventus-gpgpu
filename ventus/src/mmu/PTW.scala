@@ -1,4 +1,5 @@
-package pipeline.mmu
+package mmu
+
 import L2cache._
 import chisel3._
 import chisel3.util._
@@ -77,7 +78,7 @@ class PTE extends Bundle with SVParam{
   def isLeaf: Bool = flag.V && (flag.R || flag.W)
 }
 
-import pipeline.mmu.MMUParam._
+import MMUParam._
 
 class PTW_Req(SV: SVParam) extends Bundle{
   val vpn = UInt(SV.vpnLen.W)

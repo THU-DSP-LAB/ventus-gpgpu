@@ -1,4 +1,4 @@
-package pipeline.mmu
+package mmu
 
 import chisel3._
 import chisel3.util._
