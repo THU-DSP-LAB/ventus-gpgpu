@@ -24,6 +24,7 @@ import L2cache._
 import CTA._
 import axi._
 import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.util.EnhancedChisel3Assign
 import mmu.{L2Tlb, L2TlbToL2CacheXBar}
 
 class host2CTA_data extends Bundle{
@@ -185,16 +186,16 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   SV match {
     case None => {
       for(i <- 0 until NL2Cache){
-        l2cache(i).in_a.valid <> cluster2l2Arb(i).memReqOut
-        cluster2l2Arb(i).memRspIn <> l2cache(i).in_d
+        l2cache(i).in_a :<> cluster2l2Arb(i).memReqOut
+        cluster2l2Arb(i).memRspIn :<> l2cache(i).in_d
 
         for(j <- 0 until NCluster){
-          cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
-          l2distribute(j).memRspVecIn(i) <> cluster2l2Arb(i).memRspVecOut(j)
+          cluster2l2Arb(i).memReqVecIn(j) :<> l2distribute(j).memReqVecOut(i)
+          l2distribute(j).memRspVecIn(i) :<> cluster2l2Arb(i).memRspVecOut(j)
         }
 
         io.out_a(i) <> l2cache(i).out_a
-        l2cache(i).out_d <> io.out_d(i)
+        l2cache(i).out_d :<> io.out_d(i)
       }
     }
     case Some(sv) => {

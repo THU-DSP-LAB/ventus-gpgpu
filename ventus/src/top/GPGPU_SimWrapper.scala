@@ -24,6 +24,10 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
     }
   }
 
+  val out_port = Wire(DecoupledIO(dat))
+  out_port.valid := valids.last
+  out_port.ready := io.deq.ready
+
   def generate: Seq[T] = {
     if (latency == 0){
       var regs = Seq(io.enq.bits)
@@ -37,15 +41,14 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
   }
 
   val regs = generate
-  val out_port = Wire(DecoupledIO(dat))
   out_port.bits := regs.last
-  out_port.valid := valids.last
 
   if (insulate){
     io.deq <> Queue(out_port, 1, pipe = true)
   }
   else{
-    io.deq <> out_port
+    io.deq.bits := out_port.bits
+    io.deq.valid := out_port.valid
   }
   io.enq.ready := (if(latency > 0) !(!out_port.ready && valids.drop(1).reduce(_ && _)) else out_port.ready)
 }
