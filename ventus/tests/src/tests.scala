@@ -294,7 +294,8 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
-    val mem = new MemBox
+    val mem = new MemBox(MemboxS.Bare32)
+    mem.loadfile(0, metas.head, dataFileDir.head)
 
     test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
       c.io.host_req.initSource()
@@ -351,7 +352,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       while(clock_cnt <= maxCycle && !wg_list.flatten.reduce(_ && _)){
         if(clock_cnt - timestamp == 0){
           print(s"kernel ${current_kernel} ${dataFileDir(current_kernel)}\n")
-          meta = mem.loadfile(metas(current_kernel), dataFileDir(current_kernel))
+          meta = mem.loadfile(0, metas(current_kernel), dataFileDir(current_kernel))
           size3d = meta.kernel_size.map(_.toInt)
           wg_list(current_kernel) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
           host_driver.add(

@@ -5,6 +5,7 @@ import scala.io.Source
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals._
 import parameters._
+import MemboxS._
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -142,91 +143,35 @@ class DynamicMem(val stepSize: Int = 4096){
   }
 }
 
-class MemBuffer(val base: BigInt, val size: BigInt){
-  var data = Array.fill(0)(0.toByte)
-}
+class MemBox[T <: BaseSV](SV: T) extends Memory(SV.MaxPhyRange, SV) {
 
-class MemBox{
   import helper._
+
   val bytesPerLine = 4
 
-  var memory: Seq[MemBuffer] = Nil
+  //val memory = new Memory(SV.MaxPhyRange, SV)
 
-  val lds_memory = new DynamicMem
-  lds_memory.insertPage(BigInt("70000000", 16))
-  def loadfile(metaData: MetaData, datafile: String): MetaData = {
-    memory = (memory ++ {
-      var mem: Seq[MemBuffer] = Nil
-      val file = Source.fromFile(datafile)
-      var fileBytes = file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
+  def loadfile(ptbr: BigInt, metaData: MetaData, datafile: String): MetaData = {
+    val file = Source.fromFile(datafile)
+    var fileBytes = file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
+    for (i <- metaData.buffer_base.indices) {
+      val lower = metaData.buffer_base(i)
+      val real_size = metaData.buffer_size(i).toInt
+      val upper = lower + real_size - (lower + real_size) % SV.PageSize
 
-      for (i <- metaData.buffer_base.indices) { // load data
-        if(metaData.lds_mem_index.exists(_ == i)){ // is dynamic ram
-          val cut = fileBytes.take(metaData.buffer_size(i).toInt)
-          lds_memory.writeMem(metaData.buffer_base(i), metaData.buffer_size(i).toInt,
-            cut, IndexedSeq.fill(metaData.buffer_size(i).toInt)(true))
+      if(real_size > 0){
+        if (metaData.lds_mem_index.contains(i)) { // dynamic
+          tryAllocate(ptbr, lower, real_size)
+          writeDataVirtual(ptbr, lower, real_size, fileBytes.take(real_size))
         }
-        else{
-          mem = mem :+ new MemBuffer(metaData.buffer_base(i), metaData.buffer_size(i))
-          mem.last.data = fileBytes.take(metaData.buffer_size(i).toInt)
+        else { // static
+          val alloc_pa = allocateMemory(ptbr, lower, real_size)
+          writeDataPhysical(alloc_pa, real_size, fileBytes.take(real_size))
         }
-        fileBytes = fileBytes.drop(metaData.buffer_size(i).toInt)
       }
-      // move lds data from datafile to dynamic ram
-      // for (i <- metaData.lds_mem_base.indices) {
-      //   val cut = memory.head
-      //   lds_memory.writeMem(metaData.lds_mem_base(i), metaData.lds_mem_size(i).toInt,
-      //     cut.data, IndexedSeq.fill(metaData.lds_mem_size(i).toInt)(true))
-      //   mem = mem.drop(1)
-      // }
-      mem
-    }).sortWith(_.base < _.base)
-
+      fileBytes = fileBytes.drop(real_size)
+    }
     metaData
-  }
-
-  /*
-  Word Map:
-  0x00    0x04030201
-  0x04    0x08070605
-  ... ...
-  Byte Map:
-  [7]   [6]   [5]   [4]   [3]   [2]   [1]   [0]   | Index
- 0x08  0x07  0x06  0x05  0x04  0x03  0x02  0x01   | Byte Value
-
-  */
-  def readMem(addr: BigInt, len: Int): Array[Byte] = {
-    if(addr < BigInt("80000000", 16) && addr >= BigInt("70000000", 16))
-      return lds_memory.readMem(addr, len)
-    val findBuf = memory.indices.filter(i =>
-      addr >= memory(i).base && addr < memory(i).base + memory(i).size
-    )
-    if(findBuf.isEmpty){
-      Array.fill(len)(0.toByte)
-    }
-    else{
-      val paddr = addr - memory(findBuf.head).base
-      val paddr_tail = paddr + len
-      val buffer_tail = memory(findBuf.head).base + memory(findBuf.head).size
-      val true_tail: BigInt = if(paddr_tail <= buffer_tail) paddr_tail else buffer_tail
-      memory(findBuf.head).data.slice(paddr.toInt, true_tail.toInt).padTo(len, 0.toByte)
-    }
-  }
-  def writeMem(addr: BigInt, len: Int, data: Array[Byte], mask: IndexedSeq[Boolean]): Unit = { // 1-bit mask <-> 1 byte data
-    if (addr < BigInt("80000000", 16)) {
-      lds_memory.writeMem(addr, len, data, mask)
-      return
-    }
-    val findBuf = memory.indices.filter(i =>
-      addr >= memory(i).base && addr < memory(i).base + memory(i).size
-    )
-    if(findBuf.nonEmpty){
-      val paddr = addr - memory(findBuf.head).base
-      for (i <- 0 until scala.math.min(len, memory(findBuf.head).size.toInt - paddr.toInt)){
-        if(mask(i))
-          memory(findBuf.head).data(paddr.toInt + i) = data(i)
-      }
-    }
   }
 }
 
