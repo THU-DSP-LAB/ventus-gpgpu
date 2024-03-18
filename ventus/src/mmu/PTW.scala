@@ -225,7 +225,7 @@ class PTW(
     }
     io.mem_rsp(i).ready := is_memwait(i)
 
-    val pte_rsp = mem_rsp_data.asTypeOf(new PTE)
+    val pte_rsp = mem_rsp_data(entries(i).sectorIdx).asTypeOf(new PTE)
     io.accel_fill(i).bits.ppns := VecInit(mem_rsp_data.map(SV.PTE2PPN))
     io.accel_fill(i).bits.flags := VecInit(mem_rsp_data.map(_(7, 0)))
     io.accel_fill(i).bits.cur_level := entries(i).cur_level - 1.U

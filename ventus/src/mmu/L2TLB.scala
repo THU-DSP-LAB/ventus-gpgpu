@@ -254,7 +254,8 @@ class L2Tlb(
   val walker = Module(new PTW(SV, nBanks, debug))
 
   val replace = Seq.fill(nBanks)(new SetAssocLRU(nSets, nWays, "lru"))
-  val refillWay = (storageArray zip replace).map{ case(s, r) => Mux(s.io.wAvail.orR, PriorityEncoder(s.io.wAvail), r.way(s.io.write.bits.windex))}
+  val refillIndex = RegInit(VecInit(Seq.fill(nBanks)(0.U(log2Up(nSets).W))))
+  val refillWay = VecInit((storageArray zip replace).map{ case(s, r) => Mux(s.io.wAvail.orR, PriorityEncoder(s.io.wAvail), r.way(s.io.write.bits.windex))})
 
   val refillData = Seq.fill(nBanks)(RegInit(0.U.asTypeOf(new L2TlbEntryA(SV))))
 
@@ -330,7 +331,7 @@ class L2Tlb(
     storage.io.write.valid := RegNext(cState === s_ptw_rsp && ptw_rsp.fire) // s_ptw_rsp -> [s_reply]
     storage.io.write.bits.waymask := UIntToOH(refillWay(i))
     storage.io.write.bits.wdata := refillData(i)
-    storage.io.write.bits.windex := 0.U
+    storage.io.write.bits.windex := refillIndex(i)
 
     out.bits := tlb_rsp
     out.valid := cState === s_reply
@@ -378,7 +379,7 @@ class L2Tlb(
       }
       is(s_ptw_rsp){
         when(ptw_rsp.fire){
-          storage.io.write.bits.windex := tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).setIndex
+          refillIndex(i) := tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).setIndex
           refillData(i).ppns := ptw_rsp.bits.ppns
           refillData(i).flags := ptw_rsp.bits.flags
           replace(i).access(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).setIndex, refillWay(i))
