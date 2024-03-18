@@ -7,7 +7,7 @@ import chisel3.experimental.VecLiterals._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import pipeline._
-import pipeline.mmu._
+import mmu._
 import top.DecoupledPipe
 import MemboxS._
 import play.TestUtils._
@@ -15,13 +15,13 @@ import MmuTestUtils._
 
 class L1TlbReq(SV: SVParam) extends Bundle {
   val asid = UInt(SV.asidLen.W)
-  val ptbr = UInt(SV.xLen.W)
+  //val ptbr = UInt(SV.xLen.W)
   val vaddr = UInt(SV.vaLen.W)
 }
 
 class L2TlbReq_Single(SV: SVParam) extends Bundle {
   val asid = UInt(SV.asidLen.W)
-  val ptbr = UInt(SV.xLen.W)
+  //val ptbr = UInt(SV.xLen.W)
   val vpn = UInt(SV.vpnLen.W)
 }
 
@@ -34,16 +34,14 @@ class L2TlbReqDriver[A <: MemboxS.BaseSV, B <: mmu.SVParam](SV: SVPair[A, B])(
     val reqPort: DecoupledIO[L2TlbReq_Single],
     val rspPort: DecoupledIO[L2TlbRsp_Single],
     val memory: Memory[A]
-) {
-  import play.TestUtils._
+) extends MMUHelpers {
 
   val WaitingReq = 1
   val SendingRsp = 2
   var state = WaitingReq
   var vpn: BigInt = 0
   var ppn: BigInt = 0
-  var ptbr: BigInt = 0
-
+  var asid: BigInt = 0
   def eval(): Unit = {
     var next_state = state
     state match {
@@ -52,17 +50,16 @@ class L2TlbReqDriver[A <: MemboxS.BaseSV, B <: mmu.SVParam](SV: SVPair[A, B])(
         if (checkForValid(reqPort) && checkForReady(reqPort)) {
           next_state = SendingRsp
           vpn = reqPort.bits.vpn.peek().litValue
-          ptbr = reqPort.bits.ptbr.peek().litValue
-          ppn = memory.addrConvert(ptbr, vpn << 12)
+          asid = reqPort.bits.asid.peek().litValue
           println(
-            f"L2 TLB请求: VPN = ${vpn.toString(16)}, PPN = ${ppn.toString(16)}"
+            f"L2 TLB请求: VPN = ${vpn.toString(16)}, ASID = ${asid.toString(16)}"
           )
         }
       }
       case SendingRsp => {
         if (checkForValid(reqPort) && checkForReady(rspPort)) {
           next_state = WaitingReq
-          vpn = 0; ptbr = 0; ppn = 0
+          vpn = 0; asid = 0
         }
       }
       case _ => {}
@@ -91,7 +88,6 @@ class L1Tlb_test
     extends AnyFreeSpec
     with ChiselScalatestTester
     with MMUHelpers {
-  import IOHelpers._
   "L1TLB Main" in {
     class L1TlbWrapper(SV: SVParam, nWays: Int) extends Module {
       val io = IO(new Bundle() {
@@ -122,7 +118,7 @@ class L1Tlb_test
       internal.io.l2_rsp <> pipe_l2_rsp.io.deq
 
     }
-
+    var asid_ptbr = scala.collection.mutable.Map.empty[BigInt, BigInt]
     def handleL2TlbReq[T <: BaseSV](
         d: L1TlbWrapper,
         memory: Memory[T]
@@ -130,8 +126,8 @@ class L1Tlb_test
       if (d.io.l2_req.valid.peek.litToBoolean) {
         // 模拟计算物理地址的过程
         val vpn: BigInt = d.io.l2_req.bits.vpn.peek.litValue
-        val ptbr = d.io.l2_req.bits.ptbr.peek.litValue
-        val ppn: BigInt = memory.addrConvert(ptbr, vpn << 12)
+        val asid: BigInt = d.io.l2_req.bits.asid.peek.litValue
+        val ppn: BigInt = memory.addrConvert(asid_ptbr(asid), vpn << 12)
 
         println(
           f"检测到L2 TLB请求: VPN = ${vpn.toString(16)}, PPN = ${ppn.toString(16)}"
@@ -147,7 +143,7 @@ class L1Tlb_test
       d.io.l2_req.ready.poke(true.B)
     }
 
-    test(new L1TlbWrapper(IOHelpers.SV32.device, 2))
+    test(new L1TlbWrapper(SV32.device, 2))
       .withAnnotations(Seq(WriteVcdAnnotation)) { d =>
         d.io.in.setSourceClock(d.clock)
         d.io.out.setSinkClock(d.clock)
@@ -157,6 +153,7 @@ class L1Tlb_test
 
         val memory = new Memory(BigInt("10000000", 16), SV32.host)
         val ptbr = memory.createRootPageTable()
+        asid_ptbr += (BigInt(1) -> ptbr)
         memory.allocateMemory(
           ptbr,
           BigInt("080000000", 16),
@@ -181,14 +178,14 @@ class L1Tlb_test
 
         tlb_sender.add(req_list.map { a =>
           (new L1TlbReq(SV32.device))
-            .Lit(_.asid -> 1.U, _.ptbr -> ptbr.U, _.vaddr -> a.U)
+            .Lit(_.asid -> 1.U, _.vaddr -> a.U)
         })
 
         while (tlb_sender.send_list.nonEmpty && clock_cnt <= 30) {
           println(s"At cycle $clock_cnt:")
           tlb_sender.eval()
 
-          //        handleL2TlbReq(d, memory)
+          handleL2TlbReq(d, memory)
           l2tlb_driver.eval()
           d.clock.step()
           clock_cnt += 1
