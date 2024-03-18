@@ -192,14 +192,8 @@ class L2TlbComponentTest extends AnyFreeSpec
     test(new PTWWrapper(SV32.device, Ways = 2)).withAnnotations(Seq(WriteVcdAnnotation)){ d =>
       val Ways = d.Ways
       def makeReq(vpn: UInt, ptbr: UInt, source: UInt): PTW_Req = (new PTW_Req(SV32.device)).Lit(
-        _.vpn -> vpn, _.paddr -> ptbr, _.source -> source
+        _.vpn -> vpn, _.paddr -> ptbr, _.source -> source, _.curlevel -> (SV32.device.levels-1).U
       )
-      val memory = new Memory(BigInt("10000000", 16), SV32.host)
-      val ptbr = memory.createRootPageTable()
-      val vaddr1 = BigInt("080000000", 16)
-      memory.allocateMemory(ptbr, vaddr1, SV32.host.PageSize * 4)
-      println(f"V: $vaddr1%08x -> P: ${memory.addrConvert(ptbr, vaddr1)}%08x")
-      println(f"V: ${vaddr1 + SV32.host.PageSize}%08x -> P: ${memory.addrConvert(ptbr, vaddr1 + SV32.host.PageSize)}%08x")
       var clock_cnt = 0
       d.io.ptw_req.foreach{_.setSourceClock(d.clock)}
       d.io.ptw_rsp.foreach{_.setSinkClock(d.clock)}
@@ -213,6 +207,15 @@ class L2TlbComponentTest extends AnyFreeSpec
       d.io.mem_req.foreach{_.ready.poke(true.B)}
 
       d.io.ptw_rsp.foreach{_.ready.poke(true.B)}
+
+      val memory = new Memory(BigInt("10000000", 16), SV32.host)
+      val ptbr = memory.createRootPageTable()
+      val vaddr1 = BigInt("080000000", 16)
+      memory.allocateMemory(ptbr, vaddr1, SV32.host.PageSize * 4)
+      (0 until 4).foreach{ i =>
+        println(f"V: ${vaddr1 + i*SV32.host.PageSize}%08x -> P: ${memory.addrConvert(ptbr, vaddr1 + i*SV32.host.PageSize)}%08x")
+      }
+
       val mem_driver = (d.io.mem_req zip d.io.mem_rsp).map{ case (memreq, memrsp) =>
         new MMUMemPortDriverDelay(SV32)(memreq, memrsp, memory, 5, 5)
       }
@@ -222,13 +225,15 @@ class L2TlbComponentTest extends AnyFreeSpec
         new RequestSender(req, rsp)
       }
       tlb_requestor(0).add(makeReq("h80000".U, ptbr.U, 0.U))
-      tlb_requestor(1).add(makeReq("h80001".U, ptbr.U, 1.U))
-      //tlb_requestor(0).add(makeReq("h80002".U, ptbr.U, 0.U))
-      //tlb_requestor(1).add(makeReq("h80003".U, ptbr.U, 1.U))
+      tlb_requestor(0).add(makeReq("h80002".U, ptbr.U, 0.U))
+      tlb_requestor(1).add(makeReq("h80003".U, ptbr.U, 1.U))
       var timestamp_rsp = Array.fill(Ways)(0)
 
       while(tlb_requestor.map(_.send_list.nonEmpty).reduce(_ || _)
             && clock_cnt <= 100){
+        if(clock_cnt == 7){
+          tlb_requestor(1).add(makeReq("h80001".U, ptbr.U, 1.U))
+        }
         (0 until Ways).foreach{ i =>
           if(checkForReady(tlb_requestor(i).rspPort) && checkForValid(tlb_requestor(i).rspPort))
             timestamp_rsp(i) = clock_cnt
