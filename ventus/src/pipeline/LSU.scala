@@ -163,10 +163,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   val tag = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
   val setIdx = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
 
-  val same_tag = Wire(Vec(num_thread, Bool()))
-  (0 until num_thread).foreach( x =>
-    same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
-  )
+//  val same_tag = Wire(Vec(num_thread, Bool()))
+//  (0 until num_thread).foreach( x =>
+//    same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
+//  )
   val blockOffset = Wire(Vec(num_thread, UInt(dcache_BlockOffsetBits.W)))
   (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(num_thread, UInt(BytesOfWord.W)))
