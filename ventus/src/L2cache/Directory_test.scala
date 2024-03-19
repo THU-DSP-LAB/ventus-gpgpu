@@ -230,7 +230,7 @@ for(i<- 0 until params.cache.sets){
   val status = status_reg(set)
   // 这边作为LLC，没有块儿权限之说，这里hit，不用检查权限
   val hits = Cat(ways.zip(status.valid).map { case (w,s) =>
-    w.tag === tag  && (!setQuash) && s//这个相当于read到了read出来的tag，但是不是bypass情况
+    w.tag === tag   && s//这个相当于read到了read出来的tag，但是不是bypass情况
 
   }.reverse)
 
@@ -279,11 +279,12 @@ for(i<- 0 until params.cache.sets){
   }
   val about_replace = (io.write.bits.set === io.result.bits.set) && (io.write.bits.way === io.result.bits.way) && io.write.fire
 
+  val timely_hit = (RegNext(io.read.bits.tag) ===io.write.bits.data.tag) && io.write.fire && (RegNext(io.read.bits.set)===io.write.bits.set)
 
-  io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg //also fire when bypass
+  io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
   io.result.valid := Mux(RegNext(flush_issue), RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
-  io.result.bits.hit := Mux(RegNext(flush_issue), true.B, (hit || (setQuash && tagMatch )||(setQuash_1 &&tagMatch_1)) && (!about_replace))
-  io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,io.write.bits.way,victimWay)))
+  io.result.bits.hit := Mux(RegNext(flush_issue), true.B, (hit || (setQuash && tagMatch )|| timely_hit) && (!about_replace))
+  io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,RegNext(io.write.bits.way),Mux(timely_hit,io.write.bits.way,victimWay))))
   io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,read_bits_reg.put)
   io.result.bits.data   :=Mux(RegNext(flush_issue),0.U,read_bits_reg.data)
   io.result.bits.offset :=Mux(RegNext(flush_issue),0.U,read_bits_reg.offset)

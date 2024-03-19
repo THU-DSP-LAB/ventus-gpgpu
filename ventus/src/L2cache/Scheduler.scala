@@ -239,7 +239,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  val dir_result_buffer=Module(new Queue(new DirectoryResult_lite_victim(params),4))
+  val dir_result_buffer=Module(new Queue(new DirectoryResult_lite_victim(params),1))
 
   dir_result_buffer.io.enq.valid:= directory.io.result.valid && (directory.io.result.bits.hit||directory.io.result.bits.dirty) //hit or miss dirty, sourceD don't care if dirty when hit
   dir_result_buffer.io.enq.bits:=directory.io.result.bits
