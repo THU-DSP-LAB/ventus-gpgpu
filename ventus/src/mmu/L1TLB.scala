@@ -94,7 +94,7 @@ class L1TlbAutoForward(SV: SVParam) extends L1TlbIO(SV){
 class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
 
   val storage = Reg(Vec(nWays, new L1TlbEntry(SV)))
-  val avails = VecInit(storage.map(x => x.flags(0)))
+  val avails = VecInit(storage.map(x => !x.flags(0)))
 
   val s_idle :: s_check :: s_l2tlb_req :: s_l2tlb_rsp :: s_reply :: Nil = Enum(5)
   val nState = WireInit(s_idle)
@@ -132,8 +132,6 @@ class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
         tlb_rsp := Cat(storage(OHToUInt(hitVec)).ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
       }.otherwise{
         nState := s_l2tlb_req
-        storage(refillWay).vpn := SV.getVPN(tlb_req.vaddr)
-        storage(refillWay).asid := tlb_req.asid
       }
     }
     is(s_l2tlb_req){
@@ -143,6 +141,8 @@ class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
     }
     is(s_l2tlb_rsp){
       when(io.l2_rsp.fire){
+        storage(refillWay).vpn := SV.getVPN(tlb_req.vaddr)
+        storage(refillWay).asid := tlb_req.asid
         tlb_rsp := Cat(io.l2_rsp.bits.ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
         storage(refillWay).ppn := io.l2_rsp.bits.ppn
         storage(refillWay).flags := io.l2_rsp.bits.flags

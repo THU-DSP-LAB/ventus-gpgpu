@@ -127,7 +127,7 @@ class L1Tlb_test
         // 模拟计算物理地址的过程
         val vpn: BigInt = d.io.l2_req.bits.vpn.peek.litValue
         val asid: BigInt = d.io.l2_req.bits.asid.peek.litValue
-        val ppn: BigInt = memory.addrConvert(asid_ptbr(asid), vpn << 12)
+        val ppn: BigInt = memory.addrConvert(asid_ptbr(asid), vpn << 12) >> 12
 
         println(
           f"检测到L2 TLB请求: VPN = ${vpn.toString(16)}, PPN = ${ppn.toString(16)}"
@@ -143,7 +143,7 @@ class L1Tlb_test
       d.io.l2_req.ready.poke(true.B)
     }
 
-    test(new L1TlbWrapper(SV32.device, 2))
+    test(new L1TlbWrapper(SV32.device, 4))
       .withAnnotations(Seq(WriteVcdAnnotation)) { d =>
         d.io.in.setSourceClock(d.clock)
         d.io.out.setSinkClock(d.clock)
@@ -170,7 +170,13 @@ class L1Tlb_test
         val req_list = Seq(
           BigInt("080000000", 16),
           BigInt("080001000", 16),
-          BigInt("080000000", 16)
+          BigInt("080002000", 16),
+          BigInt("080003000", 16),
+          BigInt("090002000", 16),
+          BigInt("080000000", 16),
+          BigInt("080001000", 16),
+          BigInt("080002000", 16),
+          BigInt("080003000", 16),
         ) // 测试两个不同的虚拟地址
         val tlb_sender = new RequestSender(d.io.in, d.io.out)
         val l2tlb_driver =
@@ -181,12 +187,11 @@ class L1Tlb_test
             .Lit(_.asid -> 1.U, _.vaddr -> a.U)
         })
 
-        while (tlb_sender.send_list.nonEmpty && clock_cnt <= 30) {
+        while (tlb_sender.send_list.nonEmpty && clock_cnt <= 200) {
           println(s"At cycle $clock_cnt:")
           tlb_sender.eval()
 
           handleL2TlbReq(d, memory)
-          l2tlb_driver.eval()
           d.clock.step()
           clock_cnt += 1
         }
