@@ -22,6 +22,9 @@ object CONFIG {
     // WF tag = cat(wg_slot_id_in_cu, wf_id_in_wg)
     val WF_TAG_WIDTH = (log2Ceil(GPU.NUM_WG_SLOT) + log2Ceil(NUM_WF_MAX)).W
   }
+  object WG_BUFFER{
+    val NUM_ENTRIES = 16
+  }
 }
 
 /** IO Bundle: CTA information
@@ -108,7 +111,10 @@ class io_cu2cuinterface extends Bundle {
 
 /** IO between host and wg-buffer
  */
-class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to_cuinterface with ctainfo_host_to_cu
+//class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to_cuinterface with ctainfo_host_to_cu
+class io_host2cta extends Bundle{
+  val data = UInt(8.W)
+}
 class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
 }
@@ -124,9 +130,9 @@ class cta_scheduler(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
     val cu_wf_new = Vec(NUM_CU, DecoupledIO(new io_cuinterface2cu))
   })
 
-  io.host_wg_new.ready := false.B
-  io.host_wg_done.valid := false.B
-  io.host_wg_done.bits.wg_id := 0.U(CONFIG.WG.WG_ID_WIDTH)
+  val wg_buffer_inst = new wg_buffer
+  io.host_wg_new <> wg_buffer_inst.io.host_wg_new
+  io.host_wg_done <> wg_buffer_inst.io.host_wg_done
 
   for(i <- 0 until NUM_CU){
     io.cu_wf_new(i).valid := false.B
@@ -135,9 +141,11 @@ class cta_scheduler(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   }
 }
 
-object runner extends App {
+object emitVerilog extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(
-    new cta_scheduler(CONFIG.GPU.NUM_CU),
+    //new cta_scheduler(CONFIG.GPU.NUM_CU),
+    //new cta_util.RRPriorityEncoder(4),
+    new wg_buffer(),
     Array("--target-dir", "generated/")
   )
 }

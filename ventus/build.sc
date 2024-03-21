@@ -13,9 +13,9 @@ object ivys {
   val chiselCirct = ivy"com.sifive::chisel-circt:0.4.0"
 }
 
-object milltop extends ScalaModule {
+object cta extends ScalaModule {
   def scalaVersion = ivys.sv
-  override def millSourcePath = os.pwd
+  //override def millSourcePath = os.pwd
 
   override def forkArgs = Seq("-Xmx32G", "-Xss192m")
 
