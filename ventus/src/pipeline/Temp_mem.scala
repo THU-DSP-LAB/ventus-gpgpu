@@ -12,19 +12,25 @@ import org.scalactic.NumericEqualityConstraints.numericEqualityConstraint
 import scala.math.Ordered.orderingToOrdered
 
 //parameters
+var cacheline = 128 //bytes
 var tma_aligned = 1/2 //bytes
-var maxcopysize = 128 //bytes
+var maxcopysize = 1024 //bytes  all 5D multiply together
+var mincopysize = 16 //bytes
+var totaltempmem = 1024 // bytes
+var l2cacheline = cacheline
+var sharedcacheline = cacheline
 var l2cachetagbits = 16
 var l2cachesetbits = 4
-var l2cacheline = 128
-var sharedcacheline = 64
+var num_bank = 2
 def numgroupshared = sharedcacheline / tma_aligned  // num group in sharedcacheline: one tma_aligned is a group
 def numgroupl2cache = l2cacheline / tma_aligned  // num group in sharedcacheline: one tma_aligned is a group
-def numgroupentry = maxcopysize / tma_aligned // max num group per instruction
+def numgroupentry = l2cacheline / num_bank / tma_aligned // max num group per instruction
 
 def addr_tag_bits = l2cachetagbits + l2cachesetbits
 
-def num_in_group = tma_aligned / (xLen / 8)
+def num_tag_max = maxcopysize / cacheline
+def tma_nMshrEntry = 8// todo just set it to 8, 
+//def num_in_group = tma_aligned / (xLen / 8)
 //Bundles
 class l2cache_transform(params: InclusiveCacheParameters_lite) extends Bundle
 {
@@ -36,16 +42,16 @@ class l2cache_transform(params: InclusiveCacheParameters_lite) extends Bundle
 }
 
 class ShareMemCoreRsp_np_transform extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
+  val instrId = UInt(log2Up(tma_nMshrEntry).W)
   //  val data = Vec(num_thread, UInt(xLen.W))
-  val activeMask = Vec(numgroupentry, Bool())//UInt(NLanes.W)
+  val activeMask = Vec(numgroupshared, Bool())//UInt(NLanes.W)
 }
 
 class TMATag extends Bundle{
   val copysize = UInt(log2Up(maxcopysize).W)
-  val l2cachetag = Vec((numgroupentry), UInt(addr_tag_bits.W))
-  val addrinit = Vec((numgroupentry), UInt((xLen - addr_tag_bits).W))
-  val addrlast = Vec((numgroupentry), UInt((xLen - addr_tag_bits).W))
+  val l2cachetag = Vec((num_tag_max), UInt(addr_tag_bits.W))
+  val addrinit = Vec((num_tag_max), UInt((xLen - addr_tag_bits).W))
+  val addrlast = Vec((num_tag_max), UInt((xLen - addr_tag_bits).W))
   val instruinfo = new vExeDataTMA()
 }
 class TempOutput extends Bundle{
@@ -81,7 +87,8 @@ class shared2temp extends Module {
   io.sm2temp.valid := io.from_shared.valid
   io.from_shared.ready := io.sm2temp.ready
 //  io.sm2temp.bits.data := io.from_shared.bits.data
-  (0 until(numgroupentry)).foreach( x=> {
+  (0 until(numgroupentry) by (xLen / 8 / tma_aligned
+    )).foreach( x=> {
     when((x+1) * tma_aligned - 1 <= num_thread.asUInt){
       io.sm2temp.bits.activeMask(x) := io.from_shared.bits.activeMask.asUInt((x+1) * tma_aligned - 1, x * tma_aligned).orR
     }.otherwise{
