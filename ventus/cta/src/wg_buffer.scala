@@ -16,6 +16,16 @@ class io_buffer2alloc(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends c
 
 class io_buffer2cuinterface extends Bundle with ctainfo_host_to_cu with ctainfo_host_to_cuinterface
 
+/** WG buffer that receives WG info from host and select proper WG for allocator
+ * Main function:
+ * 1. Write new wg info from host into wgram. Proper address is selected in Round-Robin method.
+ * 2. Select and send wg to allocator. Proper address is selected in Round-Robin method. Only necessary wg info is sent.
+ * 3.1 If allocator accepts a wg, remaining info of that wg is sent to cu-interface.
+ * 3.2 If allocator rejects a wg, that wg is allowed to be sent to allocator in the next turn.
+ * @param NUM_ENTRIES wg buffer depth
+ * @see doc/wg_buffer.md
+ * @note DecoupledIO.ready outputs is not registered
+ */
 class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module {
   val io = IO(new Bundle{
     val host_wg_new = Flipped(DecoupledIO(new io_host2cta))             // Get new wg from host
@@ -53,6 +63,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   val wgram1_rd_act = Wire(Bool())         // Take a read  operation from wg_ram1
 
   // =
+  // Main function 1
   // write new WG into wg_ram, host_wg_new interface
   // =
 
@@ -69,7 +80,8 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   }
 
   // =
-  // read WG info from wg_ram1, send them to allocator, alloc_wg_new interface
+  // Main function 2
+  // read WG info from wgram1, send them to allocator, alloc_wg_new interface
   // =
 
   val alloc_wg_new_valid_r = RegInit(false.B)
@@ -92,7 +104,8 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   io.alloc_wg_new.bits.wg_id := wgram1_rd_data.wg_id
 
   // =
-  // read WG info from wg_ram2 and clear wg_ram when allocator requests
+  // Main function 3
+  // read WG info from wgram2 and clear wgram when allocator requests
   // alloc_result & cuinterface_wg_new interface
   // =
 
@@ -122,27 +135,18 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   // wg_ram_valid set and reset
   // =
 
-  //when(wgram_wr_act && wgram_rd2_clear_act){
-  //  assert(wgram_rd2_clear_addr =/= wgram_wr_next.bits)  // mutually exclusive signals, they should never equal to each other
-  //}
-  //when(wgram_rd2_clear_act) {
-  //  wgram_valid(wgram_rd2_clear_addr) := false.B
-  //}
-  //when(wgram_wr_act) {
-  //  wgram_valid(wgram_wr_next.bits) := true.B
-  //}
   val wgram_valid_setmask = WireInit(Bits(NUM_ENTRIES.W), wgram_wr_act << wgram_wr_next.bits)
   val wgram_valid_rstmask = WireInit(Bits(NUM_ENTRIES.W), wgram_rd2_clear_act << wgram_rd2_clear_addr)
-  assert((wgram_valid_setmask & wgram_valid_rstmask).orR === false.B)
+  // Different set/reset request mustn't act on the same register
+  // Mutual exclusivity of different write operations is guaranteed by wgram_valid and wgram_wr_next
+  assert((wgram_valid_setmask & wgram_valid_rstmask).orR === false.B) // mutually exclusivity check
   wgram_valid := wgram_valid & ~wgram_valid_rstmask | wgram_valid_setmask
 
   val wgram_alloc_rstmask1 = WireInit(Bits(NUM_ENTRIES.W), wgram_wr_act << wgram_wr_next.bits)
   val wgram_alloc_rstmask2 = WireInit(Bits(NUM_ENTRIES.W), wgram_alloc_clear_act << wgram_alloc_clear_addr)
   val wgram_alloc_setmask = WireInit(Bits(NUM_ENTRIES.W), wgram1_rd_act << wgram1_rd_next.bits)
-  assert((wgram_alloc_rstmask1 & wgram_alloc_rstmask2 & wgram_alloc_setmask).orR === false.B)
+  // Different set/reset request mustn't act on the same register
+  // Mutual exclusivity of different write operations is guaranteed by wgram_valid and wgram_alloc
+  assert((wgram_alloc_rstmask1 & wgram_alloc_rstmask2 & wgram_alloc_setmask).orR === false.B) // mutually exclusivity check
   wgram_alloc := wgram_alloc & ~wgram_alloc_rstmask1 & ~wgram_alloc_rstmask2 | wgram_alloc_setmask
-
-  //
-  // TODO
-  //
 }
