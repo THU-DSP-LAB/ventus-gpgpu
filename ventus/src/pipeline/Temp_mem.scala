@@ -28,8 +28,8 @@ def numgroupentry = l2cacheline / num_bank / tma_aligned // max num group per in
 
 def addr_tag_bits = l2cachetagbits + l2cachesetbits
 
-def num_tag_max = maxcopysize / cacheline
-def tma_nMshrEntry = 8// todo just set it to 8, 
+def num_tag_max = maxcopysize / cacheline / 2
+def tma_nMshrEntry = 8// todo just set it to 8, can take 8 inst in a time
 //def num_in_group = tma_aligned / (xLen / 8)
 //Bundles
 class l2cache_transform(params: InclusiveCacheParameters_lite) extends Bundle
