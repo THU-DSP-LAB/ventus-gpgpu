@@ -111,10 +111,12 @@ class io_cu2cuinterface extends Bundle {
 
 /** IO between host and wg-buffer
  */
-//class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to_cuinterface with ctainfo_host_to_cu
-class io_host2cta extends Bundle{
-  val data = UInt(8.W)
+class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to_cuinterface with ctainfo_host_to_cu {
+  val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
 }
+//class io_host2cta extends Bundle{
+//  val data = UInt(8.W)
+//}
 class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
 }
@@ -132,7 +134,6 @@ class cta_scheduler(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 
   val wg_buffer_inst = new wg_buffer
   io.host_wg_new <> wg_buffer_inst.io.host_wg_new
-  io.host_wg_done <> wg_buffer_inst.io.host_wg_done
 
   for(i <- 0 until NUM_CU){
     io.cu_wf_new(i).valid := false.B

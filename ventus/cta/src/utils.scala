@@ -7,13 +7,15 @@ import chisel3.util._
  * @param n: length of the input Bool-Vector
  * @IO out.fire: A valid encoding result is accepted by outer module, and prioriy should be updated in RR method
  */
-class RRPriorityEncoder(n: Int) extends Module {
+class RRPriorityEncoder(n: Int, initsel: UInt = 0.U) extends Module {
   val io = IO(new Bundle {
     val in = Input(Vec(n, Bool()))
     val out = DecoupledIO(Output(UInt(log2Ceil(n).W)))
   })
+  assert(initsel < n.U)
+  val addrWidth = log2Ceil(n).W
 
-  val last = RegInit(0.U(log2Ceil(n).W))
+  val last = RegInit(UInt(addrWidth), initsel - 1.U(addrWidth))
   val in, in_RR = Wire(UInt(n.W))
   in := io.in.asUInt
 
@@ -28,12 +30,90 @@ class RRPriorityEncoder(n: Int) extends Module {
   }
 }
 
-/** Round-Robin-Priority Binary Encoder
- */
 object RRPriorityEncoder {
   def apply(in: Vec[Bool]): DecoupledIO[UInt]= {
     val inst = Module(new RRPriorityEncoder(in.size))
     inst.io.in := in
+    inst.io.out
+  }
+  def apply(in: Bits): DecoupledIO[UInt]= {
+    val inst = Module(new RRPriorityEncoder(in.getWidth))
+    inst.io.in := VecInit(in.asBools)
+    inst.io.out
+  }
+}
+
+/** Skid buffer for DecoupledIO.ready
+ *  io.in.ready is registered
+ */
+class skid_ready[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle{
+    val in = Flipped(DecoupledIO(gen))
+    val out = DecoupledIO(gen)
+  })
+  Queue
+
+  val in_ready = RegInit(true.B)          // Initially, skidReg is empty, so at least 1 data can be received
+  val dataValid = WireInit(!in_ready)
+
+  val skid = io.in.fire && !io.out.ready  // new data received && downstream refuse to get new data <=> skid
+  val data = RegEnable(io.in.bits, skid)  // skid => skidReg updated
+
+  // @posedge(clk) in_ready := true   <=>   (it is newly set to true) || (it keeps its original true value)
+  // original true kept <=> skidReg keeps clean <=> skidReg was clean && no data is written(!skid)
+  // new true <=> skidReg cleared <=> skidReg wasn't clean && downstream is ok to accept new data
+  in_ready := (in_ready && !skid) || (!in_ready && io.out.ready)
+
+  io.in.ready := in_ready
+  io.out.valid := dataValid || io.in.valid
+  io.out.bits := Mux(dataValid, data, io.in.bits)   // bypass
+}
+
+object skid_ready {
+  def apply[T <: Data](in: DecoupledIO[T]) : DecoupledIO[T] = {
+    val inst = Module(new skid_ready(chiselTypeOf(in.bits)))
+    inst.io.in := in
+    inst.io.out
+  }
+}
+
+/** Skid buffer for DecoupledIO.valid and DecoupledIO.bits
+ */
+class skid_valid[T <: Data](gen: T) extends Module {
+  val io = IO(new Bundle() {
+    val in = Flipped(DecoupledIO(gen))
+    val out = DecoupledIO(gen)
+    val in_en = Input(Bool())
+  })
+  val data = RegEnable(io.in.bits, io.in.fire)  // Newly received data is stored to dataReg
+
+  val dataValid = RegInit(false.B)              // dataReg is empty initially
+
+  //when(io.in.valid && io.in_en) { // upstream new data available
+  //  dataValid := true.B
+  //} .elsewhen(!io.out.ready) {    // upstream unavailable && downstream unready
+  //  dataValid := dataValid
+  //} .otherwise {                  // upstream unavailable && downstream ready
+  //  dataValid := false.B
+  //}
+  dataValid := (io.in.valid && io.in_en) || (!io.out.ready && dataValid) // equivalent logic
+
+  io.in.ready := !dataValid || io.out.ready  // dataReg is empty || downstream is ok to take data out of dataReg
+  io.out.valid := dataValid
+  io.out.bits := data
+}
+
+object skid_valid {
+  /** skid buffer for DecoupledIO valid and data
+   *
+   * @param in: upstream DecoupledIO interface
+   * @param in_en: external control logic which allows getting new data from upstream
+   * @return downstream DecoupledIO interface
+   */
+  def apply[T <: Data](in: DecoupledIO[T], in_en: Bool = true.B): DecoupledIO[T] = {
+    val inst = Module(new skid_valid(chiselTypeOf(in.bits)))
+    inst.io.in := in
+    inst.io.in_en := in_en
     inst.io.out
   }
 }

@@ -2,35 +2,55 @@ package cta_scheduler
 
 import chisel3._
 import chisel3.util._
+import chisel3.experimental.dataview._
 
-trait ctrlinfo_alloc_to_wgbuffer extends Bundle {
+class io_alloc2buffer(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Bundle {
   val accept = Bool()   // true.B: it is ok to send this wg to CU.      false.B: rejected
-  val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  val wgram_addr = UInt(log2Ceil(NUM_EXTRIES).W)
 }
+
+class io_buffer2alloc(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends ctainfo_host_to_alloc {
+  val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  val wgram_addr = UInt(log2Ceil(NUM_EXTRIES).W)
+}
+
+class io_buffer2cuinterface extends Bundle with ctainfo_host_to_cu with ctainfo_host_to_cuinterface
 
 class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module {
   val io = IO(new Bundle{
-    val host_wg_new = Flipped(DecoupledIO(new io_host2cta))                     // Get new wg from host
-    val host_wg_done = DecoupledIO(new io_cta2host)                             // Tell host that a wg finished its execution
-    val alloc_wg_new = DecoupledIO(new ctainfo_host_to_alloc {})                // Request allocator to determine if the given wg is ok to allocate
-    val alloc_result = Flipped(DecoupledIO(new ctrlinfo_alloc_to_wgbuffer {}))  // Determination result from allocator
+    val host_wg_new = Flipped(DecoupledIO(new io_host2cta))             // Get new wg from host
+    val alloc_wg_new = DecoupledIO(new io_buffer2alloc(NUM_ENTRIES))    // Request allocator to determine if the given wg is ok to allocate
+    val alloc_result = Flipped(DecoupledIO(new io_alloc2buffer()))      // Determination result from allocator
+    val cuinterface_wg_new = DecoupledIO(new io_buffer2cuinterface)
   })
 
   // =
-  // wg_ram(addr) stores wg information sent by host
-  // wg_ram_valid(addr) stores if wg_ram(addr) is valid information
+  // wgram1(addr) stores wg information which is used by allocator
+  // wgram2(addr) stores wg information which is used by CU-interface or CU
+  //  wgram(addr) refers to the set of {wgram1(addr), wgram2(addr)}, not an actual hardware
+  // wgram_valid(addr) stores if wg_ram(addr) is valid information
+  // wgram_alloc(addr) stores if wg in wg_ram(addr) is now being processed by allocator
   // =
-  val wg_ram = Mem(NUM_ENTRIES, new io_host2cta)    // combinational/asynchronous-read memory
-  val wg_ram_valid = RegInit(VecInit(Seq.fill(NUM_ENTRIES)(false.B)))
+  class ram1datatype extends ctainfo_host_to_alloc{
+    val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  }
+
+  val wgram1 = Mem(NUM_ENTRIES, new ram1datatype)              // combinational/asynchronous-read memory
+  val wgram2 = Mem(NUM_ENTRIES, new  io_buffer2cuinterface)    // combinational/asynchronous-read memory
+  val wgram_valid = RegInit(Bits(NUM_ENTRIES.W), 0.U)
+  val wgram_alloc = RegInit(Bits(NUM_ENTRIES.W), 0.U)
+
+  val wgram1_wr_data = Wire(new ram1datatype)
+  val wgram2_wr_data = Wire(new io_buffer2cuinterface)
+  wgram1_wr_data := io.host_wg_new.bits    // TODO: check if the connection is right
+  wgram2_wr_data := io.host_wg_new.bits
 
   // Next preferred writable/readable address of wg_ram
-  val wg_ram_wr_next = cta_util.RRPriorityEncoder(VecInit(wg_ram_valid.map(~_)))
-  val wg_ram_rd_next = cta_util.RRPriorityEncoder(wg_ram_valid)
+  val wgram_wr_next = cta_util.RRPriorityEncoder(~wgram_valid)
+  val wgram1_rd_next = cta_util.RRPriorityEncoder(wgram_valid & ~wgram_alloc)
 
-  val wg_ram_wr_act = Wire(Bool())           // Take a write operation to   wg_ram and wg_ram_valid
-  val wg_ram_rd_act = Wire(Bool())           // Take a read  operation from wg_ram
-  val wg_ram_clear_act = Wire(Bool())        // Take a clear operation to   wg_ram_valid
-  val wg_ram_clear_addr = RegEnable(wg_ram_rd_next.bits, 0.U(log2Ceil(NUM_ENTRIES).W), wg_ram_rd_act)
+  val wgram_wr_act = Wire(Bool())          // Take a write operation to   wg_ram and wg_ram_valid
+  val wgram1_rd_act = Wire(Bool())         // Take a read  operation from wg_ram1
 
   // =
   // write new WG into wg_ram, host_wg_new interface
@@ -38,57 +58,91 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
 
   // new wg from host is accepted  <=>  wg info written into wg_ram(next_valid_wr_addr)
   //                               <=>  privious found valid writable address is consumed
-  io.host_wg_new.ready := wg_ram_wr_next.valid // new wg from host is accepted  <=>  found a valid writable address in wg_ram
-  wg_ram_wr_next.ready := io.host_wg_new.valid // privious found writable address is consumed  <=>  new wg from host available
+  io.host_wg_new.ready := wgram_wr_next.valid // new wg from host is accepted  <=>  found a valid writable address in wg_ram
+  wgram_wr_next.ready := io.host_wg_new.valid // previous found writable address is consumed  <=>  new wg from host available
 
   // new wg available && writable address in wg_ram found  =>  write operation takes effect
-  wg_ram_wr_act := wg_ram_wr_next.fire
-  when(wg_ram_wr_act){
-    wg_ram.write(wg_ram_wr_next.bits, io.host_wg_new.bits)
+  wgram_wr_act := wgram_wr_next.fire
+  when(wgram_wr_act){
+    wgram1.write(wgram_wr_next.bits, wgram1_wr_data)
+    wgram2.write(wgram_wr_next.bits, wgram2_wr_data)
   }
 
   // =
-  // read WG info from wg_ram, send them to allocator, alloc_wg_new interface
+  // read WG info from wg_ram1, send them to allocator, alloc_wg_new interface
   // =
 
   val alloc_wg_new_valid_r = RegInit(false.B)
   io.alloc_wg_new.valid := alloc_wg_new_valid_r
-  alloc_wg_new_valid_r := Mux(wg_ram_rd_act, true.B,
+  alloc_wg_new_valid_r := Mux(wgram1_rd_act, true.B,
                           Mux(io.alloc_wg_new.ready, false.B, alloc_wg_new_valid_r))
 
-  // When to read new wg info? (valid == false) || (valid == ready == true)
+  // When to read new wg info for allocator? (valid == false) || (valid == ready == true)
   // No wg is waiting for being sent to allocator, or the only waiting wg is currently being sent to allocator
-  wg_ram_rd_next.ready := (~alloc_wg_new_valid_r || io.alloc_wg_new.ready)   // read operation is allowed
-  wg_ram_rd_act := wg_ram_rd_next.fire                                       // read operation takes effect
+  wgram1_rd_next.ready := (~alloc_wg_new_valid_r || io.alloc_wg_new.ready)   // read operation is allowed
+  wgram1_rd_act := wgram1_rd_next.fire                                      // read operation takes effect
 
-  val wg_ram_rd_data = RegEnable(wg_ram.read(wg_ram_rd_next.bits), wg_ram_rd_act)
-  io.alloc_wg_new.bits <> wg_ram_rd_data    // Is it right? ctainfo_host_to_alloc <> io_host2cta // TODO: check
+  val wgram1_rd_data = Wire(new ram1datatype)
+  wgram1_rd_data := RegEnable(wgram1.read(wgram1_rd_next.bits), wgram1_rd_act)
+  val wgram1_rd_data_addr = RegEnable(wgram1_rd_next.bits, wgram1_rd_act)
 
-  val allocating = RegInit(false.B)   // wg was already sent to allocator, waiting for alloc_result from allocator
-  val allocating_ctainfo = RegEnable(wg_ram_rd_data, io.alloc_wg_new.fire)
+  io.alloc_wg_new.bits.viewAsSupertype(new ctainfo_host_to_alloc {}) :=
+    wgram1_rd_data.viewAsSupertype(new ctainfo_host_to_alloc {})    // TODO: check if the connection is right
+  io.alloc_wg_new.bits.wgram_addr := wgram1_rd_data_addr
+  io.alloc_wg_new.bits.wg_id := wgram1_rd_data.wg_id
 
+  // =
+  // read WG info from wg_ram2 and clear wg_ram when allocator requests
+  // alloc_result & cuinterface_wg_new interface
+  // =
 
+  val wgram_rd2_clear_act = Wire(Bool())
+  val wgram_rd2_clear_addr = WireInit(io.alloc_result.bits.wgram_addr)
 
+  val cuinterface_new_wg_valid_r = RegInit(false.B)
+  io.cuinterface_wg_new.valid := cuinterface_new_wg_valid_r
+  cuinterface_new_wg_valid_r := Mux(wgram_rd2_clear_act, true.B,
+                                Mux(io.cuinterface_wg_new.ready, false.B, cuinterface_new_wg_valid_r))
+  val wgram2_rd_data = RegEnable(wgram2.read(wgram_rd2_clear_addr), wgram_rd2_clear_act)
+  io.cuinterface_wg_new.bits := wgram2_rd_data
+
+  // operation is allowed by internal of this Module when downstream datapath is not blocked: (valid == false) || (valid == ready == true)
+  // operation is requested by external Module when (valid && allocation accepted)
+  // operation takes effect <=> (allowed && requested)
+  val wgram_rd2_clear_ready = ~cuinterface_new_wg_valid_r || io.cuinterface_wg_new.ready   // clear is always allowed, just consider read wg_ram2
+  wgram_rd2_clear_act := (io.alloc_result.fire && io.alloc_result.bits.accept) && wgram_rd2_clear_ready
+
+  val wgram_alloc_clear_ready = true.B
+  val wgram_alloc_clear_act = io.alloc_result.fire && !io.alloc_result.bits.accept && wgram_alloc_clear_ready
+  val wgram_alloc_clear_addr = WireInit(io.alloc_result.bits.wgram_addr)
+
+  io.alloc_result.ready := Mux(io.alloc_result.bits.accept, wgram_rd2_clear_ready, wgram_alloc_clear_ready)
 
   // =
   // wg_ram_valid set and reset
   // =
 
-  when(wg_ram_wr_act && wg_ram_clear_act){
-    assert(wg_ram_clear_addr =/= wg_ram_wr_next.bits)  // mutually exclusive signals, they should never equal to each other
-  }
-  when(wg_ram_clear_act) {
-    wg_ram_valid(wg_ram_clear_addr) := false.B
-  }
-  when(wg_ram_wr_act) {
-    wg_ram_valid(wg_ram_wr_next.bits) := true.B
-  }
+  //when(wgram_wr_act && wgram_rd2_clear_act){
+  //  assert(wgram_rd2_clear_addr =/= wgram_wr_next.bits)  // mutually exclusive signals, they should never equal to each other
+  //}
+  //when(wgram_rd2_clear_act) {
+  //  wgram_valid(wgram_rd2_clear_addr) := false.B
+  //}
+  //when(wgram_wr_act) {
+  //  wgram_valid(wgram_wr_next.bits) := true.B
+  //}
+  val wgram_valid_setmask = WireInit(Bits(NUM_ENTRIES.W), wgram_wr_act << wgram_wr_next.bits)
+  val wgram_valid_rstmask = WireInit(Bits(NUM_ENTRIES.W), wgram_rd2_clear_act << wgram_rd2_clear_addr)
+  assert((wgram_valid_setmask & wgram_valid_rstmask).orR === false.B)
+  wgram_valid := wgram_valid & ~wgram_valid_rstmask | wgram_valid_setmask
 
+  val wgram_alloc_rstmask1 = WireInit(Bits(NUM_ENTRIES.W), wgram_wr_act << wgram_wr_next.bits)
+  val wgram_alloc_rstmask2 = WireInit(Bits(NUM_ENTRIES.W), wgram_alloc_clear_act << wgram_alloc_clear_addr)
+  val wgram_alloc_setmask = WireInit(Bits(NUM_ENTRIES.W), wgram1_rd_act << wgram1_rd_next.bits)
+  assert((wgram_alloc_rstmask1 & wgram_alloc_rstmask2 & wgram_alloc_setmask).orR === false.B)
+  wgram_alloc := wgram_alloc & ~wgram_alloc_rstmask1 & ~wgram_alloc_rstmask2 | wgram_alloc_setmask
 
   //
   // TODO
   //
-  io.host_wg_done.bits.wg_id := wg_ram_rd_data
-  io.host_wg_done.valid := alloc_wg_new_valid_r
-
 }
