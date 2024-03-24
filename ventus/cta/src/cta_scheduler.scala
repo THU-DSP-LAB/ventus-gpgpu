@@ -119,32 +119,42 @@ class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to
 //}
 class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  // Added for test
+  val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                    // Meta-data base address
+  val lds_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)             // lds  base address (initial WG, later WF)
 }
 
-class cta_scheduler(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
+class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   val io = IO(new Bundle{
     val host_wg_new = Flipped(DecoupledIO(new io_host2cta))     // From Host, New wg info
     val host_wg_done = DecoupledIO(new io_cta2host)             // To host, ID of wg which finished its execution
 
     // From CU(i), tag of wf which finished its execution
-    val cu_wf_done = Vec(NUM_CU, Flipped(DecoupledIO(new io_cu2cuinterface)))
+    //val cu_wf_done = Vec(NUM_CU, Flipped(DecoupledIO(new io_cu2cuinterface)))
     // To CU(i), new wf info
-    val cu_wf_new = Vec(NUM_CU, DecoupledIO(new io_cuinterface2cu))
+    //val cu_wf_new = Vec(NUM_CU, DecoupledIO(new io_cuinterface2cu))
   })
 
-  val wg_buffer_inst = new wg_buffer
+  val wg_buffer_inst = Module(new wg_buffer)
+  val allocator_inst = Module(new allocator)
+  val cu_interface_inst = Module(new cu_interface)
   io.host_wg_new <> wg_buffer_inst.io.host_wg_new
+  wg_buffer_inst.io.alloc_wg_new <> allocator_inst.io.wgbuffer_wg_new
+  allocator_inst.io.wgbuffer_result <> wg_buffer_inst.io.alloc_result
+  wg_buffer_inst.io.cuinterface_wg_new <> cu_interface_inst.io.wgbuffer_wg_new
+  allocator_inst.io.cuinterface_wg_new <> cu_interface_inst.io.alloc_wg_new
+  cu_interface_inst.io.host_wg_done <> io.host_wg_done
 
-  for(i <- 0 until NUM_CU){
-    io.cu_wf_new(i).valid := false.B
-    io.cu_wf_new(i).bits := 0.U.asTypeOf(new io_cuinterface2cu)
-    io.cu_wf_done(i).ready := false.B
-  }
+  //for(i <- 0 until NUM_CU){
+  //  io.cu_wf_new(i).valid := false.B
+  //  io.cu_wf_new(i).bits := 0.U.asTypeOf(new io_cuinterface2cu)
+  //  io.cu_wf_done(i).ready := false.B
+  //}
 }
 
 object emitVerilog extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(
-    //new cta_scheduler(CONFIG.GPU.NUM_CU),
+    //new cta_scheduler_top(CONFIG.GPU.NUM_CU),
     //new cta_util.RRPriorityEncoder(4),
     new wg_buffer(),
     Array("--target-dir", "generated/")

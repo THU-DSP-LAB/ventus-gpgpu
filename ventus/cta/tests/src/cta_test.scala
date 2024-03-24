@@ -48,8 +48,10 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
     io.cuinterface_wg_new_r.bits  := RegNext(io.cuinterface_wg_new.bits )
     io.cuinterface_wg_new_r.ready := RegNext(io.cuinterface_wg_new.ready)
   }
+
+
   "Test1: wg_buffer" in {
-    test(new wg_buffer_wrapper).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
+    test(new wg_buffer_wrapper).withAnnotations(Seq()) { dut =>
 
       dut.io.host_wg_new.initSource().setSourceClock(dut.clock)
       dut.io.alloc_wg_new.initSink().setSinkClock(dut.clock)
@@ -143,6 +145,62 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
           testOut(wg_id) = (dut.io.cuinterface_wg_new_r.bits.csr_kernel.peek.litValue, data)
         }
       }.join()
+
+      for(i <- 0 until testlen){
+        assert(testOut(i)._1 == testIn(i)._1)
+        assert(testOut(i)._2 == testIn(i)._2)
+      }
+    }
+  }
+
+  "Test2: CTA_scheduler" in {
+    test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)) { dut =>
+      dut.clock.setTimeout(1000)
+      dut.io.host_wg_new.initSource().setSourceClock(dut.clock)
+      dut.io.host_wg_done.initSink().setSinkClock(dut.clock)
+
+      val testlen = 500
+      val testIn = Seq.tabulate(testlen){i => (Random.nextInt().abs, Random.nextInt(1024))}
+      //val testIn = Seq.tabulate(testlen){i => (i, i)}
+      val testOut = new Array[(Int,Int)](testlen)
+      val testSeqIn = Seq.tabulate(testlen){i => (new io_host2cta).Lit(
+        _.wg_id -> i.U,
+        _.csr_kernel-> testIn(i)._1.U(32.W),
+        _.num_lds -> testIn(i)._2.U(10.W),
+        _.gds_base -> 0.U,
+        _.num_wf -> 0.U,
+        _.num_sgpr -> 0.U,
+        _.num_vpgr -> 0.U,
+        _.num_sgpr_per_wf -> 0.U,
+        _.num_vpgr_per_wf -> 0.U,
+        _.num_thread_per_wf -> 0.U,
+        _.num_gds -> 0.U,
+        _.pds_base -> 0.U,
+        _.start_pc -> 0.U,
+        _.num_wg_x -> 0.U,
+        _.num_wg_y -> 0.U,
+        _.num_wg_z -> 0.U,
+      ) }
+
+      dut.io.host_wg_done.ready.poke(false.B)
+      dut.io.host_wg_new.valid.poke(false.B)
+      dut.clock.step(5)
+
+      var cnt = 0
+      fork{
+        dut.io.host_wg_new.enqueueSeq(testSeqIn)
+      } .fork {
+        while(cnt < testlen){
+          dut.io.host_wg_done.ready.poke(scala.util.Random.nextBoolean().B)
+          if(dut.io.host_wg_done.valid.peek.litToBoolean && dut.io.host_wg_done.ready.peek.litToBoolean) {
+            testOut(dut.io.host_wg_done.bits.wg_id.peek.litValue.toInt) =
+              (dut.io.host_wg_done.bits.csr_kernel.peek.litValue.toInt, dut.io.host_wg_done.bits.lds_base.peek.litValue.toInt)
+            cnt = cnt + 1
+            //println(s"WG finished: id = ${dut.io.host_wg_done.bits.wg_id.peek.litValue}")
+          }
+          dut.clock.step()
+        }
+      }.join
 
       for(i <- 0 until testlen){
         assert(testOut(i)._1 == testIn(i)._1)

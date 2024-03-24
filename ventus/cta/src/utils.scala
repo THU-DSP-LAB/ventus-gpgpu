@@ -98,7 +98,7 @@ class skid_valid[T <: Data](gen: T) extends Module {
   //}
   dataValid := (io.in.valid && io.in_en) || (!io.out.ready && dataValid) // equivalent logic
 
-  io.in.ready := !dataValid || io.out.ready  // dataReg is empty || downstream is ok to take data out of dataReg
+  io.in.ready := !dataValid || io.out.ready && io.in_en  // dataReg is empty || downstream is ok to take data out of dataReg
   io.out.valid := dataValid
   io.out.bits := data
 }
