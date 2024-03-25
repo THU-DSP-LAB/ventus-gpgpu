@@ -110,7 +110,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
     bypassWrite = false
   ))
   val ASIDAccessRArb = Module(new Arbiter(new SRAMBundleA(set),2))
-   ASIDAccess.io.r.req.valid <> ASIDAccessRArb.io.out//io.probeRead
+   ASIDAccess.io.r.req <> ASIDAccessRArb.io.out//io.probeRead
   ASIDAccessRArb.io.in(0) <> io.probeRead
   ASIDAccessRArb.io.in(1).valid := !io.probeRead.valid && !io.allocateWrite.valid
   ASIDAccessRArb.io.in(1).bits.setIdx := choosenDirtySetIdx_st0

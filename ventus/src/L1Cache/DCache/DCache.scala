@@ -16,7 +16,7 @@ import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import top.parameters.{NUMBER_CU, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, num_thread}
+import top.parameters.{NUMBER_CU, dcache_BlockOffsetBits, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, dcache_WordOffsetBits, num_thread}
 import mmu.SV32.{asidLen, paLen, vaLen}
 //import pipeline.parameters._
 
@@ -169,7 +169,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
     val coreRsp = DecoupledIO(new DCacheCoreRsp)
     val memRsp = Flipped(DecoupledIO(new DCacheMemRsp))
-    val memReq = DecoupledIO(new DCacheMemReq)
+    val memReq = DecoupledIO(new DCacheMemReq_p)
     val TLBRsp = Flipped(DecoupledIO(new Bundle{   // paddr from TLB
       val paddr = UInt(paLen.W)}))
     val TLBReq = DecoupledIO(new Bundle {     // req of vaddr for TLB
@@ -262,12 +262,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeRead.valid := io.coreReq.fire || injectTagProbe
   TagAccess.io.probeRead.bits.setIdx := Mux(injectTagProbe,coreReq_st1.setIdx,io.coreReq.bits.setIdx)
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
+  TagAccess.io.asidFromCore_st1 := coreReq_st1.ASID
   TagAccess.io.tagready_st1 := coreReq_st1_ready//coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready
 
 
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready
   MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
+  MshrAccess.io.probe.bits.ASID := io.coreReq.bits.ASID
   MshrAccess.io.stage1_ready := coreReq_st1_ready
 
   val genCtrl = Module(new genControl)
@@ -313,6 +315,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
   MshrAccess.io.missReq.bits.blockAddr := Cat(coreReq_st1.tag, coreReq_st1.setIdx)
   MshrAccess.io.missReq.bits.targetInfo := mshrMissReqTI.asUInt
+  MshrAccess.io.missReq.bits.ASID := coreReq_st1.ASID
   MshrAccess.io.stage2_ready := MemReqArb.io.in(1).ready
 
   // ******      memReq_Q enq      ******
@@ -473,6 +476,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   InvOrFluMemReq.a_source := DontCare //wait for WSHR
   InvOrFluMemReq.a_addr := Cat(TagAccess.io.dirtyTag_st1.get,
     RegNext(TagAccess.io.dirtySetIdx_st0.get), 0.U((WordLength - TagBits - SetIdxBits).W))
+  InvOrFluMemReq.Asid := TagAccess.io.dirtyASID_st1.get
   InvOrFluMemReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   //InvOrFluMemReq.a_data :=
   InvOrFluMemReq.hasCoreRsp := waitforL2flush_st2
@@ -484,6 +488,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   L2flush.a_addr := Cat(TagAccess.io.dirtyTag_st1.get,
     RegNext(TagAccess.io.dirtySetIdx_st0.get), 0.U((WordLength - TagBits - SetIdxBits).W))
   L2flush.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
+  L2flush.Asid := TagAccess.io.dirtyASID_st1.get
   L2flush.hasCoreRsp := true.B
   L2flush.coreRspInstrId := coreReq_st1.instrId
   L2flush.a_data := DontCare
@@ -593,6 +598,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val missRspBA_st1 = MshrAccess.io.missRspOut.bits.blockAddr
 
   TagAccess.io.allocateWriteData_st1 := get_tag(MshrAccess.io.missRspOut.bits.blockAddr)
+  TagAccess.io.allocateWriteAsid_st1 := MshrAccess.io.missRspOut.bits.ASID
   TagAccess.io.allocateWriteTagSRAMWValid_st1 := RegNext(TagAccess.io.allocateWrite.valid) && tagAllocateWriteReady
 
   // ******     DataAccess      ******
@@ -739,8 +745,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MemReqArb.io.in(2).bits := InvOrFluMemReq
 
   // ******      l1_data_cache::memReq_pipe2_cycle      ******
+  val waitTLB = RegInit(0.U(2.W))
+  val waitTLBnext = Wire(UInt(2.W))
   val memReq_st3 = Reg(new DCacheMemReq)
-  val a_op_st3 = memReq_Q.io.deq.bits.a_opcode
+  val memReq_st3_ready_tlb = Wire(Bool())
+  val memReq_st3_valid_tlb = Wire(Bool())
+
+  val memReq_st3_paddr = Reg(UInt(paLen.W))
+  val a_op_st3 = memReq_Q.io.deq.bits.a_opcode//memReq_Q.io.deq.bits.a_opcode
   val memReqIsWrite_st3 = (a_op_st3 === TLAOp_PutFull) || ((a_op_st3 === TLAOp_PutPart) && memReq_Q.io.deq.bits.a_param === 0.U)
   val memReqIsRead_st3 = (a_op_st3 === TLAOp_Get) && memReq_Q.io.deq.bits.a_param === 0.U
 
@@ -752,52 +764,62 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val PushWshrValid = wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
   // val WshrPushPopConflict = PushWshrValid && WshrAccess.io.popReq.valid
   // val wshrPushPopConflictReg = RegNext(WshrPushPopConflict)
-  val pushReqbA = memReq_Q.io.deq.bits.a_addr >> (WordLength - TagBits - SetIdxBits)
+  val pushReqbA = memReq_st3_paddr >> (dcache_WordOffsetBits+dcache_BlockOffsetBits)
   // val pushReqbAReg = RegNext(pushReqbA)
   WshrAccess.io.pushReq.bits.blockAddr := pushReqbA//Mux(wshrPushPopConflictReg, pushReqbAReg, pushReqbA)
 
   WshrAccess.io.pushReq.valid := PushWshrValid//Mux(wshrPushPopConflictReg,true.B,Mux(WshrPushPopConflict,false.B,PushWshrValid))//wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
   coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp && !coreRsp_st2_valid_from_memRsp
 
-  memReq_Q.io.deq.ready := wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp
+  memReq_Q.io.deq.ready := (waitTLB === 2.U) && (waitTLBnext === 0.U)//wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp
 
-  //FSM for TLB req
-  // 0-idle 1-req sent 2-req ack 3-get resp
-  val waitTLB = RegInit(0.U(2.W))
-  val waitTLBnext = Wire(UInt(2.W))
+  // FSM for TLB handle and memreq transmit
+  // 0-idle 1-wait TLB resp 2-issue memreq
+
   waitTLBnext := waitTLB
+  waitTLB := waitTLBnext
   when(waitTLB === 0.U){
-    when(memReq_Q.io.deq.valid){
+
+    when(memReq_Q.io.deq.valid && io.TLBReq.ready){
       waitTLBnext := 1.U
     }.otherwise{
       waitTLBnext := waitTLB
     }
   }.elsewhen(waitTLB === 1.U){
-    when(io.TLBReq.ready){
+    when(io.TLBRsp.valid){
       waitTLBnext := 2.U
     }.otherwise{
       waitTLBnext := waitTLB
     }
   }.elsewhen(waitTLB === 2.U){
-    when(io.TLBRsp.valid){
-      waitTLBnext := 3.U
+    when(wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp){
+      waitTLBnext := 0.U
     }.otherwise{
       waitTLBnext := waitTLB
     }
-  }.elsewhen(waitTLB === 3.U){
-
+  }.otherwise{
+    waitTLBnext := 0.U
   }
+  io.TLBRsp.ready := waitTLB === 1.U
+  io.TLBReq.valid := memReq_Q.io.deq.valid && waitTLB === 0.U
+  io.TLBReq.bits.vaddr := memReq_Q.io.deq.bits.a_addr
+  io.TLBReq.bits.asid := memReq_Q.io.deq.bits.Asid
+  memReq_st3_ready_tlb := io.TLBReq.ready && waitTLB === 0.U
+  memReq_st3_valid_tlb := io.TLBRsp.valid && waitTLB === 1.U
 
-  when(wshrPass && memReq_Q.io.deq.fire()) {
+  when(memReq_Q.io.deq.valid && memReq_st3_ready_tlb) {
     memReq_st3 := memReq_Q.io.deq.bits
+  }
+  when(memReq_st3_valid_tlb){
+    memReq_st3_paddr := io.TLBRsp.bits.paddr
   }
 
   assert(NMshrEntry >= NWshrEntry,"MshrEntry should be more than NWshrEntry")
   val memReqSetIdx_st2 = memReq_Q.io.deq.bits.a_addr(WordLength - TagBits -1,WordLength - TagBits - SetIdxBits)
-  when(memReqIsWrite_st3 && memReq_Q.io.deq.fire()){
+   when(memReqIsWrite_st3 && memReq_Q.io.deq.fire()){
     memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
     //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
-  }
+    }
   val coreRspFromMemReqMask_st1 = coreReq_st1.perLaneAddr.map(_.activeMask)
   val coreReqMask_Q = Module(new Queue(Vec(NLanes, Bool()),8,false ,false))
   coreReqMask_Q.io.enq.bits := coreRspFromMemReqMask_st1
@@ -811,6 +833,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRspFromMemReq.activeMask := coreReqMask_Q.io.deq.bits//coreRsp_st2.io.deq.bits.activeMask//VecInit(Seq.fill(NLanes)(true.B))
   // memReq(st3)
   io.memReq.bits := memReq_st3
+  io.memReq.bits.a_addr := memReq_st3_paddr
 
   val memReq_valid = RegInit(false.B)
   when(memReq_Q.io.deq.fire ^ io.memReq.fire){

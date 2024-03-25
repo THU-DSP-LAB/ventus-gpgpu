@@ -79,6 +79,10 @@ class DCacheMemReq extends L1CacheMemReq{
   override val a_source = UInt((3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
 }
 
+class DCacheMemReq_p extends DCacheMemReq{
+  override val a_addr = UInt(paLen.W)
+}
+
 class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)

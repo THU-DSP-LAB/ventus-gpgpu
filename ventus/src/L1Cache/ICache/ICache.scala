@@ -15,6 +15,7 @@ import L1Cache.{L1TagAccess, L1TagAccess_ICache, RVGParameters}
 import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
 import chisel3._
 import chisel3.util._
+import mmu.SV32.asidLen
 import top.parameters._
 
 class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
@@ -61,7 +62,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val io = IO(new ICacheExtInf)
 
   // ****** submodules ******
-  val tagAccess = Module(new L1TagAccess_ICache(set=NSets, way=NWays, tagBits=TagBits))
+  val tagAccess = Module(new L1TagAccess_ICache(set=NSets, way=NWays, tagBits=TagBits, AsidBits = asidLen))
   val dataAccess = Module(new SRAMTemplate(
     gen=UInt(BlockBits.W),
     set=NSets,
