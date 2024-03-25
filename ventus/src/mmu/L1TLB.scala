@@ -25,14 +25,14 @@ class L1TlbEntry(SV: SVParam) extends Bundle with L1TlbParam {
 abstract class L1TlbIO(SV: SVParam) extends Module{
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new Bundle {
-      val asid = UInt(SV.asidLen.W)
-      val vaddr = UInt(SV.vaLen.W)
+      val asid = UInt(SV.asidLen.W)// mem space
+      val vaddr = UInt(SV.vaLen.W) // virtual address, currently 32bits
     }))
     val invalidate = Flipped(ValidIO(new Bundle {
       val asid = UInt(SV.asidLen.W)
     }))
     val out = DecoupledIO(new Bundle{
-      val paddr = UInt(SV.paLen.W)
+      val paddr = UInt(SV.paLen.W) // real address resp 2 L1, currently 32 bits
     })
     val l2_req = DecoupledIO(new Bundle{
       val asid = UInt(SV.asidLen.W)

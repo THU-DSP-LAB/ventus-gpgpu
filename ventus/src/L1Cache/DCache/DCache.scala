@@ -17,6 +17,7 @@ import chisel3._
 import chisel3.util._
 import config.config.Parameters
 import top.parameters.{NUMBER_CU, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, num_thread}
+import mmu.SV32.{asidLen, paLen, vaLen}
 //import pipeline.parameters._
 
 class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
@@ -155,6 +156,7 @@ class relocateDataByte(numdata:Int, NLanes:Int) extends Module{
 class WshrMemReq extends DCacheMemReq{
   val hasCoreRsp = Bool()
   val coreRspInstrId = UInt(32.W)
+  val Asid = UInt(asidLen.W)
 }
 
 class WshrMemReq_withMask(NLanes: Int) extends DCacheMemReq{
@@ -167,16 +169,23 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
     val coreRsp = DecoupledIO(new DCacheCoreRsp)
     val memRsp = Flipped(DecoupledIO(new DCacheMemRsp))
-    val memReq = DecoupledIO(new DCacheMemReq)})
+    val memReq = DecoupledIO(new DCacheMemReq)
+    val TLBRsp = Flipped(DecoupledIO(new Bundle{   // paddr from TLB
+      val paddr = UInt(paLen.W)}))
+    val TLBReq = DecoupledIO(new Bundle {     // req of vaddr for TLB
+      val asid = UInt(asidLen.W)
+      val vaddr = UInt(vaLen.W)
+    })
+  })
 
   // ******     important submodules     ******
-  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry))
+  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry, asidLen))
   //val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val readmiss_sameadd = Wire(Bool())
   val coreReq_st1_ready = Wire(Bool())
 
-  val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,readOnly=false))
+  val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,AsidBits = asidLen,readOnly=false))
   val WshrAccess = Module(new DCacheWSHR(Depth = NWshrEntry))
   val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
   // ******     queues     ******
@@ -335,6 +344,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
   writeMissReq.a_source := DontCare//wait for WSHR
+  writeMissReq.Asid := coreReq_st1.ASID
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   //writeMissReq.a_mask := blockaddr_1.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   for(j<-0 until dcache_BlockWords) {
@@ -358,6 +368,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_param := 0.U //regular read
   readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//setIdx for memRsp tag access in 1st stage
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
+  readMissReq.Asid := coreReq_st1.ASID
   readMissReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))//lockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B
@@ -405,6 +416,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(inflightReadWriteMiss && MshrAccess.io.mshrStatus_st0 === 0.U ){
     inflightReadWriteMiss := false.B
   }
+  val tagReplaceStatus = RegInit(0.U(1.W))
 
   coreReq_st1_ready := false.B
   when(coreReqControl_st1_Q.io.deq.bits.isRead || coreReqControl_st1_Q.io.deq.bits.isWrite){
@@ -415,12 +427,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
     }.otherwise{//Miss
       when(coreReqControl_st1_Q.io.deq.bits.isRead){
         when(MshrAccess.io.missReq.ready && MemReqArb.io.in(1).ready && (mshrProbeStatus === 0.U || mshrProbeStatus === 2.U)//即memReq_Q.io.enq.ready
-          && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)){
+          && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn) ){
           coreReq_st1_ready := true.B
         }
       }.otherwise{//isWrite
         //TODO before 7.30: add hit in-flight miss
-        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& !inflightreadwritemiss_w){//memReq_Q.io.enq.ready
+        when(coreRsp_Q.io.enq.ready && MemReqArb.io.in(1).ready && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)&& !inflightreadwritemiss_w
+          ){//memReq_Q.io.enq.ready
           coreReq_st1_ready := true.B
         }
       }
@@ -515,7 +528,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   //  memRsp_st1_valid := memRsp_Q.io.deq.fire
   //}
   //1-bit FSM
-  val tagReplaceStatus = RegInit(false.B)
+
   when(tagReplaceStatus === false.B){
     when(TagAccess.io.needReplace.get){
       tagReplaceStatus := true.B
@@ -555,6 +568,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   dirtyReplace_st1.a_param := 0.U//regular write
   dirtyReplace_st1.a_source := DontCare//wait for WSHR in next next cycle
   dirtyReplace_st1.a_addr := RegNext(TagAccess.io.a_addrReplacement_st1.get)
+  dirtyReplace_st1.Asid := RegNext(TagAccess.io.asidReplacement_st1)
   dirtyReplace_st1.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
   dirtyReplace_st1.hasCoreRsp := false.B
@@ -746,6 +760,33 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp && !coreRsp_st2_valid_from_memRsp
 
   memReq_Q.io.deq.ready := wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp
+
+  //FSM for TLB req
+  // 0-idle 1-req sent 2-req ack 3-get resp
+  val waitTLB = RegInit(0.U(2.W))
+  val waitTLBnext = Wire(UInt(2.W))
+  waitTLBnext := waitTLB
+  when(waitTLB === 0.U){
+    when(memReq_Q.io.deq.valid){
+      waitTLBnext := 1.U
+    }.otherwise{
+      waitTLBnext := waitTLB
+    }
+  }.elsewhen(waitTLB === 1.U){
+    when(io.TLBReq.ready){
+      waitTLBnext := 2.U
+    }.otherwise{
+      waitTLBnext := waitTLB
+    }
+  }.elsewhen(waitTLB === 2.U){
+    when(io.TLBRsp.valid){
+      waitTLBnext := 3.U
+    }.otherwise{
+      waitTLBnext := waitTLB
+    }
+  }.elsewhen(waitTLB === 3.U){
+
+  }
 
   when(wshrPass && memReq_Q.io.deq.fire()) {
     memReq_st3 := memReq_Q.io.deq.bits
