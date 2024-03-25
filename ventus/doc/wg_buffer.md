@@ -4,7 +4,7 @@ wg_buffer整体架构如下图所示，图中黑色框内的半透明虚线代�
 
 模块DecoupledIO中所有valid与bits信号均为reg输出，而ready信号可能是组合逻辑输出。若需要ready也为reg输出，后续可添加skid buffer。
 
-​![wg_buffer整体架构图](assets/wg_buffer-20240323185844-u79ow1v.svg)​
+​![wg_buffer](assets/wg_buffer-20240325110234-qaoapvf.svg)​
 
 本模块中各部分的作用：
 
@@ -27,3 +27,4 @@ wg_buffer整体架构如下图所示，图中黑色框内的半透明虚线代�
 进一步改进：
 
 * 图中`wgram1_rd for allocator`​与`wgram_rd2_clear`​两个模块中驱动输出DecoupledIO的逻辑部分可以改用skid_buffer_valid
+* 优化选择wgram1中的wg并发送到allocator的选择算法

@@ -3,13 +3,13 @@
 
 <svg
    width="180.39005mm"
-   height="80.449989mm"
-   viewBox="0 0 180.39005 80.449989"
+   height="83.430122mm"
+   viewBox="0 0 180.39005 83.430122"
    version="1.1"
    id="svg10825"
    inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
    sodipodi:docname="wg_buffer.svg"
-   inkscape:export-filename="../../../Downloads/wg_buffer.svg"
+   inkscape:export-filename="../../../cta_sche/doc/assets/wg_buffer.svg"
    inkscape:export-xdpi="96"
    inkscape:export-ydpi="96"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
@@ -28,8 +28,8 @@
      inkscape:document-units="mm"
      showgrid="true"
      inkscape:zoom="2.1820712"
-     inkscape:cx="390.22558"
-     inkscape:cy="324.92065"
+     inkscape:cx="397.55806"
+     inkscape:cy="345.08498"
      inkscape:window-width="1920"
      inkscape:window-height="1011"
      inkscape:window-x="0"
@@ -69,7 +69,7 @@
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
      id="layer1"
-     transform="translate(-9.9999997,-49.85)">
+     transform="translate(-9.9999997,-46.869866)">
     <path
        style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="M 135,100 V 89.999999"
@@ -169,10 +169,10 @@
        transform="translate(0.83862141,38.209362)"><tspan
          x="122"
          y="75.999992"
-         id="tspan13928">find next available </tspan><tspan
+         id="tspan2095">find next available </tspan><tspan
          x="122"
          y="79.527768"
-         id="tspan13930">writable address</tspan></text>
+         id="tspan2097">writable address</tspan></text>
     <text
        xml:space="preserve"
        style="font-size:2.82222px;writing-mode:lr-tb;white-space:pre;inline-size:28;display:inline;fill:#000000;stroke:none;stroke-width:0.3"
@@ -182,12 +182,12 @@
        transform="translate(1.5512319,28.209362)"><tspan
          x="122"
          y="75.999992"
-         id="tspan13932">find next valid </tspan><tspan
+         id="tspan2099">find next valid </tspan><tspan
          x="122"
          y="79.527768"
-         id="tspan13934">readable address</tspan></text>
+         id="tspan2101">readable address</tspan></text>
     <path
-       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       style="fill:none;fill-rule:evenodd;stroke:#008000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
        d="M 100.3,115.14999 120,115"
        id="path11351"
        inkscape:connector-type="polyline"
@@ -228,38 +228,38 @@
          y="92.552704"
          id="tspan12336">wgram_wr</tspan></text>
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
+       style="fill:none;stroke:#008000;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="m 50,89.999999 h 9.999998 l 0.0097,15.000011 h 9.990357"
        id="path11668" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
+       style="fill:none;stroke:#008000;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="m 50,89.999999 h 9.999998 l 2.9e-5,25.010481 h 9.999972"
        id="path11672" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
+       style="fill:none;stroke:#008000;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="m 50,89.999999 h 9.999998 v -20 h 10.000001"
        id="path11722" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
+       style="fill:none;stroke:#008000;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="M 50,89.999999 H 69.999999"
        id="path11742" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
+       style="fill:none;stroke:#008000;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="M 10,89.999999 H 30"
        id="path11762" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;marker-end:url(#Arrow2)"
+       style="fill:none;stroke:#008000;stroke-width:0.3;marker-end:url(#Arrow2)"
        d="m 150,115 h 10.27248 v 15.15 H 40.149999 v -30"
        id="path11764" />
     <text
        xml:space="preserve"
-       style="font-size:2.82223px;writing-mode:lr-tb;fill:#0000ff;stroke:none;stroke-width:0.3"
+       style="font-size:2.82223px;writing-mode:lr-tb;fill:#008000;stroke:none;stroke-width:0.3"
        x="9.7403545"
        y="88.454445"
        id="text11804"><tspan
          sodipodi:role="line"
          id="tspan11802"
-         style="fill:#0000ff;stroke:none;stroke-width:0.3"
+         style="fill:#008000;stroke:none;stroke-width:0.3"
          x="9.7403545"
          y="88.454445">host_wg_new</tspan></text>
     <rect
@@ -340,24 +340,24 @@
          id="tspan11972" /></text>
     <text
        xml:space="preserve"
-       style="font-size:2.82223px;writing-mode:lr-tb;fill:#0000ff;stroke:none;stroke-width:0.3"
+       style="font-size:2.82223px;writing-mode:lr-tb;fill:#008000;stroke:none;stroke-width:0.3"
        x="66.193962"
        y="107.80428"
        id="text11978"><tspan
          sodipodi:role="line"
          id="tspan11976"
-         style="fill:#0000ff;stroke:none;stroke-width:0.3"
+         style="fill:#008000;stroke:none;stroke-width:0.3"
          x="66.193962"
          y="107.80428">rst</tspan></text>
     <text
        xml:space="preserve"
-       style="font-size:2.82223px;writing-mode:lr-tb;fill:#0000ff;stroke:none;stroke-width:0.3"
+       style="font-size:2.82223px;writing-mode:lr-tb;fill:#008000;stroke:none;stroke-width:0.3"
        x="65.683083"
        y="117.81475"
        id="text11982"><tspan
          sodipodi:role="line"
          id="tspan11980"
-         style="fill:#0000ff;stroke:none;stroke-width:0.3"
+         style="fill:#008000;stroke:none;stroke-width:0.3"
          x="65.683083"
          y="117.81475">set</tspan></text>
     <path
@@ -512,40 +512,51 @@
          x="173.15692"
          y="62.925663">wgram_addr</tspan></text>
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.6, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#008000;stroke-width:0.3;stroke-dasharray:0.6, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="m 120,115 h 30"
        id="path12539" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#008000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="M 30,89.999999 H 50"
        id="path12595" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#008000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="M 39.999999,100 50,89.999999"
        id="path12651" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="m 120,105 15,-5"
        id="path12653" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="M 135,89.999999 120,83.999998"
        id="path12659" />
     <path
-       style="fill:none;stroke:#ff0000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#ff0000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="m 150,65.999999 -30.00001,-1"
        id="path12717" />
     <path
-       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#0000ff;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="m 135,89.999999 -15,-4"
        id="path13617" />
     <path
-       style="fill:none;stroke:#ff0000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#ff0000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="M 150,53.999997 120,55"
        id="path13619" />
     <path
-       style="fill:none;stroke:#ff0000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.3"
+       style="fill:none;stroke:#ff0000;stroke-width:0.3;stroke-dasharray:0.600001, 1.2;stroke-dashoffset:0;stroke-opacity:0.5"
        d="m 150,65.999999 -30,1.999999"
        id="path13623" />
+    <text
+       xml:space="preserve"
+       style="font-size:2.82223px;fill:#ff0000;stroke:none;stroke-width:0.3;stroke-opacity:0.5"
+       x="167.69044"
+       y="49.246185"
+       id="text1005"><tspan
+         sodipodi:role="line"
+         id="tspan1003"
+         style="fill:#ff0000;stroke:none;stroke-width:0.3"
+         x="167.69044"
+         y="49.246185">反向控制路径</tspan></text>
   </g>
 </svg>
