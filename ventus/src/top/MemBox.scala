@@ -154,9 +154,12 @@ class MemBox[T <: BaseSV](SV: T) extends Memory(SV.MaxPhyRange, SV) {
   def loadfile(ptbr: BigInt, metaData: MetaData, datafile: String): MetaData = {
     val file = Source.fromFile(datafile)
     var fileBytes = file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
+    // Temporary fix
+    tryAllocate(ptbr, BigInt("070000000", 16), 8 * SV.PageSize)
     for (i <- metaData.buffer_base.indices) {
       val lower = metaData.buffer_base(i)
-      val real_size = metaData.buffer_size(i).toInt
+      // Temporary fix
+      val real_size = if(lower == BigInt("080000000", 16)) 8 * SV.PageSize else metaData.buffer_size(i).toInt
       val upper = lower + real_size - (lower + real_size) % SV.PageSize
 
       if(real_size > 0){
