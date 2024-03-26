@@ -32,7 +32,7 @@ class parameter{
     var VGPR_ID_WIDTH = log2Ceil(NUMBER_VGPR_SLOTS)
     var SGPR_ID_WIDTH = log2Ceil(NUMBER_SGPR_SLOTS)
     var LDS_ID_WIDTH = log2Ceil(NUMBER_LDS_SLOTS)
-    var WG_SLOT_ID_WIDTH = log2Ceil(NUMBER_WF_SLOTS+2)//var WG_SLOT_ID_WIDTH = log2Ceil(NUMBER_WF_SLOTS)
+    var WG_SLOT_ID_WIDTH = log2Ceil(NUMBER_WF_SLOTS)
     var WF_COUNT_WIDTH = log2Ceil(WF_COUNT_MAX) + 1
     var WF_COUNT_WIDTH_PER_WG = log2Ceil(WF_COUNT_PER_WG_MAX) + 1
     var GDS_ID_WIDTH = log2Ceil(GDS_SIZE)
@@ -41,3 +41,4 @@ class parameter{
     var INIT_MAX_WG_COUNT = NUMBER_WF_SLOTS
     var NUM_SCHEDULER_WIDTH = Math.max(log2Ceil(NUM_SCHEDULER), 1)
 }
+
