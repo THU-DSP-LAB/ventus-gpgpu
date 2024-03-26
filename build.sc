@@ -118,6 +118,11 @@ object myhardfloat extends dependencies.`berkeley-hardfloat`.build.hardfloat {
   def chisel3PluginIvyDeps = Agg(ivys.chisel3Plugin)
 }
 
+object MemboxS extends CommonModule with SbtModule{
+  override def scalaVersion = ivys.sv
+  override def millSourcePath = os.pwd / "dependencies" / "Membox2.Scala"
+}
+
 object ventus extends CommonModule {
 
   override def forkArgs = Seq("-Xmx32G", "-Xss192m")
@@ -132,7 +137,7 @@ object ventus extends CommonModule {
     //"-P:chiselplugin:useBundlePlugin"
   )
   
-  override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache, dependencies.`fpuv2`.build.fpuv2)
+  override def moduleDeps = super.moduleDeps ++ Seq(myrocketchip, inclusivecache, dependencies.`fpuv2`.build.fpuv2, MemboxS)
 
   // add some scala ivy module you like here.
   override def ivyDeps = super.ivyDeps() ++ Agg(
