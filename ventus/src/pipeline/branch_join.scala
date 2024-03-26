@@ -37,7 +37,11 @@ class branch_join_stack(val depth:Int) extends Module{
   val wr_ptr_add1 = Wire(UInt(log2Ceil(depth+1).W))
   val stack_mem = Mem(depth,new stackEntry())
   val is_pop = Wire(Bool())
-  is_pop := stack_mem(rd_ptr).reconPC === io.PCexecute // when TOS reconvergence PC = executing PC, can pop the entry
+  val is_pop_pc = Wire(Bool())
+  val is_pop_underflow = Wire(Bool())
+  is_pop_pc := stack_mem(rd_ptr).reconPC === io.PCexecute //&& (wr_ptr =/= 0.U) //(log2Ceil(depth+1).W)) // when TOS reconvergence PC = executing PC, can pop the entry
+  is_pop_underflow := wr_ptr === 0.U //(log2Ceil(depth+1).W)) // when TOS reconvergence PC = executing PC, can pop the entry
+  is_pop := is_pop_pc && !is_pop_underflow
   io.jump := is_pop && io.pop                          // else when they don't match, do nothing
 
   wr_ptr_add1 := wr_ptr + 1.U
@@ -212,7 +216,7 @@ class branch_join(val depth_stack: Int) extends Module{
         }
       }
       printf(p"\n")
-      }
+    }
     when(branch_ctl_buf.bits.opcode === 1.U && branch_ctl_buf.valid ) {
       printf(p"warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
       printf(p" join    mask and npc:    ")
@@ -222,8 +226,8 @@ class branch_join(val depth_stack: Int) extends Module{
       printf(p"\n")
     }
 
-      //if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
-    }
+    //if_mask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
+  }
 
   //***** thread mask register control******
   //when branch indeed happened, put executing mask into corresponding register
@@ -245,3 +249,4 @@ class branch_join(val depth_stack: Int) extends Module{
   io.PrevSig := 0.U
   io.missTableTrigger := false.B
 }
+
