@@ -22,18 +22,21 @@ class L1TlbEntry(SV: SVParam) extends Bundle with L1TlbParam {
   val flags = UInt(8.W)
 }
 
-abstract class L1TlbIO(SV: SVParam) extends Module{
+class L1TlbReq(SV: SVParam) extends Bundle{
+  val asid = UInt(SV.asidLen.W)
+  val vaddr = UInt(SV.vaLen.W)
+}
+class L1TlbRsp(SV: SVParam) extends Bundle{
+  val paddr = UInt(SV.paLen.W)
+}
+
+abstract class L1TlbIO(SV: SVParam, Debug: Boolean = true) extends Module{
   val io = IO(new Bundle {
-    val in = Flipped(DecoupledIO(new Bundle {
-      val asid = UInt(SV.asidLen.W)
-      val vaddr = UInt(SV.vaLen.W)
-    }))
+    val in = Flipped(DecoupledIO(new L1TlbReq(SV)))
     val invalidate = Flipped(ValidIO(new Bundle {
       val asid = UInt(SV.asidLen.W)
     }))
-    val out = DecoupledIO(new Bundle{
-      val paddr = UInt(SV.paLen.W)
-    })
+    val out = DecoupledIO(new L1TlbRsp(SV))
     val l2_req = DecoupledIO(new Bundle{
       val asid = UInt(SV.asidLen.W)
       val vpn = UInt(SV.vpnLen.W)
@@ -42,10 +45,14 @@ abstract class L1TlbIO(SV: SVParam) extends Module{
       val ppn = UInt(SV.ppnLen.W)
       val flags = UInt(8.W)
     }))
+    val debug = if(Debug) Some(Output(new Bundle{
+      val hit_cnt = UInt(20.W)
+      val miss_cnt = UInt(20.W)
+    })) else None
   })
 }
 
-class L1TlbAutoForward(SV: SVParam) extends L1TlbIO(SV){
+class L1TlbAutoForward(SV: SVParam) extends L1TlbIO(SV, false){
   val tlb_req = RegInit(0.U.asTypeOf(io.in.bits))
   val tlb_rsp = RegInit(0.U(SV.paLen.W))
 
@@ -91,7 +98,7 @@ class L1TlbAutoForward(SV: SVParam) extends L1TlbIO(SV){
   }
 }
 
-class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
+class L1TLB(SV: SVParam, nWays: Int, Debug: Boolean = true) extends L1TlbIO(SV, Debug){
 
   val storage = Reg(Vec(nWays, new L1TlbEntry(SV)))
   val avails = VecInit(storage.map(x => !x.flags(0)))
@@ -114,6 +121,13 @@ class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
   val refillWay = Mux(avails.asUInt.orR, PriorityEncoder(avails), replace.way)
   val refillData = RegInit(0.U.asTypeOf(new L1TlbEntry(SV)))
 
+  val hitCnt = new Counter(200000)
+  val missCnt = new Counter(200000)
+  io.debug.foreach{ x =>
+    dontTouch(x)
+    x.hit_cnt := hitCnt.value
+    x.miss_cnt := missCnt.value
+  }
   when(io.invalidate.valid){
     storage.foreach{ e => when(e.asid === io.invalidate.bits.asid & e.flags(0)){ e := 0.U.asTypeOf(new L1TlbEntry(SV)) } }
   }
@@ -130,8 +144,10 @@ class L1TLB(SV: SVParam, nWays: Int) extends L1TlbIO(SV){
         nState := s_reply
         replace.access(OHToUInt(hitVec))
         tlb_rsp := Cat(storage(OHToUInt(hitVec)).ppn, tlb_req.vaddr(SV.offsetLen-1, 0))
+        hitCnt.inc
       }.otherwise{
         nState := s_l2tlb_req
+        missCnt.inc
       }
     }
     is(s_l2tlb_req){

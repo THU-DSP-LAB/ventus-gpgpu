@@ -26,11 +26,13 @@ object TestUtils {
     val rspPort: DecoupledIO[B]
   ) extends IOTestDriver[A, B] {
     var send_list: Seq[A] = Nil
+    var time_list: scala.collection.mutable.Seq[Int] = scala.collection.mutable.Seq.empty
     val Idle = 0; val SendingReq = 1; val WaitingRsp = 2
     var state = Idle; var next_state = Idle
 
-    def add(req: A): Unit = send_list = send_list :+ req
-    def add(req: Seq[A]): Unit = send_list = send_list ++ req
+    def add(req: A, ttl: Int = 0): Unit = {send_list = send_list :+ req; time_list = time_list :+ ttl}
+    def add(req: Seq[A]): Unit = { send_list = send_list ++ req; time_list = time_list ++ Seq.fill(req.size)(0) }
+    def add(req: Seq[A], time: Seq[Int]): Unit = {send_list = send_list ++ req; time_list = time_list ++ time}
     var pause: Boolean = false
 
     def finishWait(): Boolean = {
@@ -44,16 +46,28 @@ object TestUtils {
         rspPort.ready.poke(false.B)
         return
       }
+      else{
+        time_list = time_list match{
+          case x if x.isEmpty => x
+          case x => {
+            if(x.head > 0) x.map{ i => if(i >= 0) i - 1 else i}
+            else x
+          }
+        }
+      }
       state match {
         case Idle =>
-          send_list match {
+          (send_list zip time_list) match {
             case Nil =>
               reqPort.valid.poke(false.B)
               next_state = Idle
-            case _ =>
+            case x if x.head._2 == 0 =>
               reqPort.valid.poke(true.B)
-              reqPort.bits.poke(send_list.head)
+              reqPort.bits.poke(x.head._1)
               next_state = SendingReq
+            case _ =>
+              reqPort.valid.poke(false.B)
+              next_state = Idle
           }
         case SendingReq =>
           if (checkForReady(reqPort)){
@@ -65,6 +79,7 @@ object TestUtils {
           if (finishWait()){
             rspPort.ready.poke(false.B)
             send_list = send_list.drop(1)
+            time_list = time_list.drop(1)
             next_state = Idle
           }
       }

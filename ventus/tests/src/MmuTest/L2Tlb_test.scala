@@ -94,7 +94,7 @@ class L2Tlb_test extends AnyFreeSpec
         d.clock.step(); clock_cnt += 1
       }
 
-      while(tlb_sender.map{_.send_list.nonEmpty}.reduce(_ && _) && clock_cnt <= 60){
+      while(tlb_sender.map{_.send_list.nonEmpty}.reduce(_ || _) && clock_cnt <= 100){
         tlb_sender.foreach{_.eval()}
         mem_driver.foreach{_.eval()}
         d.clock.step(); clock_cnt += 1;

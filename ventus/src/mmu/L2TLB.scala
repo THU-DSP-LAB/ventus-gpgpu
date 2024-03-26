@@ -10,7 +10,7 @@ trait L2TlbParam{
   def nSets = 16 // total Sets of all banks
   def nWays = 4
   def nSectors = 2
-  def nBanks = 1
+  def nBanks = 2
 
   def vpnL2TlbBundle(SV: SVParam) = new Bundle {
     val tag = UInt((SV.vpnLen - log2Up(nSets) - log2Up(nSectors)).W)
@@ -58,7 +58,7 @@ class L2TlbStorage(SV: SVParam) extends Module with L2TlbParam {
   class AsidVBundle extends Bundle{ val asid = UInt(SV.asidLen.W); val v = Vec(nSectors, Bool()); }
   // Storage2, {nSets * nWays * {asid, nSectors * valid}}
   val AsidV = RegInit(
-    VecInit(Seq.fill(nSets)(
+    VecInit(Seq.fill(nSets/nBanks)(
       VecInit(Seq.fill(nWays)(0.U.asTypeOf(new AsidVBundle)))
     ))
   )
@@ -150,9 +150,9 @@ class L2TlbAccelStorage(SV: SVParam, _nWays: Int, level: Int) extends Module wit
     val invalidate = Flipped(ValidIO(UInt(SV.asidLen.W)))
   })
   val Entries = Reg(Vec(_nWays, new L2TlbEntryA(SV)))
-  val Valids = Reg(Vec(_nWays, Bool()))
+  val Valids = RegInit(VecInit(Seq.fill(_nWays)(false.B)))
   val replace = new RandomReplacement(_nWays)
-  val replaceWay = Mux(Valids.reduce(_ && _), PriorityEncoder(Valids), replace.get_replace_way(0.U))
+  val replaceWay = Mux(Valids.reduce(_ && _), replace.get_replace_way(0.U), PriorityEncoder(Valids.map{!_}))
   (0 until nBanks).foreach{ b =>
     val accelReq_split = vpnSplit(io.accelReq(b).bits.vpn)
     val hitVec = VecInit((Entries zip Valids).map{ case(m, v) => // asid match + vpn match + sector valid
@@ -176,6 +176,7 @@ class L2TlbAccelStorage(SV: SVParam, _nWays: Int, level: Int) extends Module wit
   }.elsewhen(io.refill.valid){
     Entries(replaceWay) := io.refill.bits
     Valids(replaceWay) := true.B
+    replace.get_next_state(0.U, 0.U)
   }
 }
 
@@ -216,7 +217,7 @@ class L2Tlb(
   SV: SVParam,
   debug: Boolean = false,
   L2C: Option[L2cache.InclusiveCacheParameters_lite] = None,
-  accelSize: Int = 8
+  accelSize: Int = 8,
 )(
   implicit val L1C: Option[L1Cache.HasRVGParameters]
 )
@@ -249,9 +250,12 @@ class L2Tlb(
   val accelStorageArray = (1 until SV.levels).map{ i => Module(new L2TlbAccelStorage(SV, accelSize, i))}
   val accelOut_delay = accelStorageArray.map{ a => RegNext(a.io.accelOut) }
   val accelRefillArb = (1 until SV.levels).map{i => Module(new RRArbiter(new L2TlbEntryA(SV), nBanks)) }
-  accelRefillArb.foreach{ a => a.io.out.ready := true.B }
+  accelRefillArb.foreach{ a =>
+    dontTouch(a.io.in)
+    a.io.out.ready := true.B
+  }
 
-  val walker = Module(new PTW(SV, nBanks, debug))
+  val walker = Module(new PTW(SV, nBanks, false))
 
   val replace = Seq.fill(nBanks)(new SetAssocLRU(nSets, nWays, "lru"))
   val refillIndex = RegInit(VecInit(Seq.fill(nBanks)(0.U(log2Up(nSets).W))))
@@ -263,7 +267,13 @@ class L2Tlb(
   val nextState = WireInit(VecInit(Seq.fill(nBanks)(s_idle)))
   val curState = nextState.map(RegNext(_))
 
-  val cnt = new Counter(65535)
+  val cnt = new Counter(200000)
+  val level_cnt = Seq.fill(nBanks)(RegInit(VecInit(Seq.fill(SV.levels+1)(0.U(18.W)))))
+  val level_cnt_next = Wire(Vec(nBanks, Vec(SV.levels+1, UInt(18.W))))
+  level_cnt_next := level_cnt
+  val total_cnt_next = level_cnt_next.reduceLeft[Vec[UInt]]{ case (ls, rs) =>
+    VecInit((ls zip rs).map{ case(l, r) => l + r })
+  }
 
   (0 until nBanks).foreach{ i =>
     val in = io.in(i)
@@ -279,7 +289,7 @@ class L2Tlb(
     in.ready := cState === s_idle && !io.invalidate.valid
 
     val tlb_req = RegInit(0.U.asTypeOf(in.bits))
-    storage.io.rindex := tlb_req.asTypeOf(vpnL2TlbBundle(SV)).setIndex
+    storage.io.rindex := tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).setIndex
     val storage_rsp = storage.io.tlbOut // Bundle{vpn, ppn: Vec(nSectors, UInt), flags: Vec(nSectors, UInt)}
     val tlb_rsp = RegInit(0.U.asTypeOf(out.bits))
 
@@ -364,11 +374,13 @@ class L2Tlb(
           replace(i).access(storage.io.rindex, hitVec)
           tlb_rsp.id := tlb_req.id
           tlb_rsp.ppn := storage_rsp(OHToUInt(hitVec)).ppns(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex)
+          tlb_rsp.flag := storage_rsp(OHToUInt(hitVec)).flags(tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex)
           nState := s_reply
         }.otherwise{
           nState := s_ptw_req
           refillData(i).asid := tlb_req.asid
-          refillData(i).vpn := tlb_req.vpn
+          // aligned vpn:
+          refillData(i).vpn := Cat(tlb_req.vpn(SV.vpnLen-1, log2Up(nSectors)), 0.U(log2Up(nSectors).W))
           refillData(i).level := SV.levels.U
         }
       }
@@ -396,49 +408,69 @@ class L2Tlb(
       }
     }
 
-    if (debug){
-      when(in.fire){
-        printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"REQ | asid: 0x${Hexadecimal(in.bits.asid)} vpn: 0x${Hexadecimal(in.bits.vpn)}\n")
-      }
-      when(cState === s_check){
-        printf(p"[TLB${i} ${cnt.value}] ")
-        when(hit){ printf(p"-| HIT  | ") }
-          .elsewhen(accelLevel_pre =/= SV.levels.U){ printf(p"-| AC ${accelLevel_pre} |") }
-          .otherwise{ printf(p"-| MISS | ") }
-        printf(p"line: ${storage.io.rindex} way: ${Decimal(OHToUInt(hitVec))} sector: ${tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex}\n")
-      }
-      when(ptw_req.fire){
-        printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"- -| >>PTW | ptbr: 0x${Hexadecimal(ptw_req.bits.paddr)} vpn: 0x${Hexadecimal(ptw_req.bits.vpn)}\n")
-      }
-      when(ptw_rsp.fire){
-        printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"- -| PTW>> | ppn+flag:")
-        (0 until nSectors).foreach{ i =>
-          printf(p" 0x${Hexadecimal(ptw_rsp.bits.ppns(i))}+${Hexadecimal(ptw_rsp.bits.flags(i))}")
-        }
-        printf("\n")
-      }
-      when(storage.io.write.valid){
-        printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"- -|REFILL | line: ${storage.io.write.bits.windex} way: ${Decimal(refillWay(i))}\n")
-        printf(p"[TLB${i} ${cnt.value}]            | asid: 0x${Hexadecimal(storage.io.write.bits.wdata.asid)} vpn: 0x${Hexadecimal(storage.io.write.bits.wdata.vpn)} ppn+flag:")
-        (0 until nSectors).foreach{ i =>
-          printf(p" 0x${Hexadecimal(storage.io.write.bits.wdata.ppns(i))}+${Hexadecimal(storage.io.write.bits.wdata.flags(i))}")
-        }
-        printf("\n")
-      }
-      when(out.fire){
-        printf(p"[TLB${i} ${cnt.value}] ")
-        printf(p"RSP | ppn+flag: 0x${Hexadecimal(out.bits.ppn)}+${Hexadecimal(out.bits.flag)}\n")
-      }
-//      when(io.mem_req(i).fire || io.mem_rsp(i).fire){
-//        printf(p"[MEM${i} ${cnt.value}] ")
+//    if (debug){
+//      when(in.fire){
+//        printf(p"[TLB${i} ${cnt.value}] ")
+//        printf(p"REQ | asid: 0x${Hexadecimal(in.bits.asid)} vpn: 0x${Hexadecimal(in.bits.vpn)}\n")
 //      }
+//      when(cState === s_check){
+//        printf(p"[TLB${i} ${cnt.value}] ")
+//        when(hit){ printf(p"-| HIT  | ") }
+//          .elsewhen(accelLevel_pre =/= SV.levels.U){ printf(p"-| AC ${accelLevel_pre} |") }
+//          .otherwise{ printf(p"-| MISS | ") }
+//        printf(p"line: ${storage.io.rindex} way: ${Decimal(OHToUInt(hitVec))} sector: ${tlb_req.vpn.asTypeOf(vpnL2TlbBundle(SV)).sectorIndex}\n")
+//      }
+//      when(ptw_req.fire){
+//        printf(p"[TLB${i} ${cnt.value}] ")
+//        printf(p"- -| >>PTW | ptbr: 0x${Hexadecimal(ptw_req.bits.paddr)} vpn: 0x${Hexadecimal(ptw_req.bits.vpn)}\n")
+//      }
+//      when(ptw_rsp.fire){
+//        printf(p"[TLB${i} ${cnt.value}] ")
+//        printf(p"- -| PTW>> | ppn+flag:")
+//        (0 until nSectors).foreach{ i =>
+//          printf(p" 0x${Hexadecimal(ptw_rsp.bits.ppns(i))}+${Hexadecimal(ptw_rsp.bits.flags(i))}")
+//        }
+//        printf("\n")
+//      }
+//      when(storage.io.write.valid){
+//        printf(p"[TLB${i} ${cnt.value}] ")
+//        printf(p"- -|REFILL | line: ${storage.io.write.bits.windex} way: ${Decimal(refillWay(i))}\n")
+//        printf(p"[TLB${i} ${cnt.value}]            | asid: 0x${Hexadecimal(storage.io.write.bits.wdata.asid)} vpn: 0x${Hexadecimal(storage.io.write.bits.wdata.vpn)} ppn+flag:")
+//        (0 until nSectors).foreach{ i =>
+//          printf(p" 0x${Hexadecimal(storage.io.write.bits.wdata.ppns(i))}+${Hexadecimal(storage.io.write.bits.wdata.flags(i))}")
+//        }
+//        printf("\n")
+//      }
+//      when(out.fire){
+//        printf(p"[TLB${i} ${cnt.value}] ")
+//        printf(p"RSP | ppn+flag: 0x${Hexadecimal(out.bits.ppn)}+${Hexadecimal(out.bits.flag)}\n")
+//      }
+////      when(io.mem_req(i).fire || io.mem_rsp(i).fire){
+////        printf(p"[MEM${i} ${cnt.value}] ")
+////      }
+//    }
+    if (debug){
+      //val level_cnt_next = Wire(Vec(SV.levels+1, UInt(18.W)))
+      when(cState === s_check){
+        level_cnt_next(i)(accelLevel_pre) := level_cnt(i)(accelLevel_pre) + 1.U
+        level_cnt(i) := level_cnt_next(i)
+        printf(p"#${cnt.value} L2#$i MISS ${level_cnt_next(i)(SV.levels)} HIT ${level_cnt_next(i)(0)} AC")
+        level_cnt_next(i).tail.dropRight(1).foreach{ c =>
+          printf(p" $c")
+        }
+        printf("\n")
+      }
     }
   }
   if(debug){
+    //val total_cnt_next = Wire(Vec(SV.levels+1, UInt(18.W)))
+    when(curState.map(_ === s_check).reduce(_ || _)){
+      printf(p"#${cnt.value} L2#T MISS ${total_cnt_next(SV.levels)} HIT ${total_cnt_next(0)} AC")
+      total_cnt_next.tail.dropRight(1).foreach{ c =>
+        printf(p" $c")
+      }
+      printf("\n")
+    }
     cnt.inc()
   }
   io.mem_req <> walker.io.mem_req
@@ -455,7 +487,7 @@ class L1ToL2TlbXBar(SV: SVParam, n_l1: Int = 1)(implicit val L1C: Option[L1Cache
   val io = IO(new Bundle{
     val req_l1 = Flipped(Vec(num_l1, DecoupledIO(new L2TlbReq(SV))))
     val req_l2 = Vec(num_l2, DecoupledIO(new L2TlbReq(SV)))
-    val rsp_l1 = Vec(num_l1, DecoupledIO(new L2TlbReq(SV)))
+    val rsp_l1 = Vec(num_l1, DecoupledIO(new L2TlbRsp(SV)))
     val rsp_l2 = Flipped(Vec(num_l2, DecoupledIO(new L2TlbRsp(SV))))
   })
   if(num_l1 == 1){
@@ -463,7 +495,10 @@ class L1ToL2TlbXBar(SV: SVParam, n_l1: Int = 1)(implicit val L1C: Option[L1Cache
       val req_bank_idx = io.req_l1(0).bits.vpn.asTypeOf(vpnL2TlbBundle(SV)).bankIndex
       io.req_l2(j).valid := io.req_l1(0).valid && req_bank_idx === j.U
       io.req_l2(j).bits := io.req_l1(0).bits
-      io.req_l2(j).bits.id := Cat(req_bank_idx(log2Ceil(nBanks)-1, 0), 1.U(1.W))
+      if(req_bank_idx.getWidth == 0)
+        io.req_l2(j).bits.id := 1.U(1.W)
+      else
+        io.req_l2(j).bits.id := Cat(req_bank_idx(log2Ceil(nBanks)-1, 0), 1.U(1.W))
       io.req_l1(0).ready := (VecInit(io.req_l2.map(_.ready)).asUInt)(req_bank_idx)
     }
   }
@@ -475,7 +510,10 @@ class L1ToL2TlbXBar(SV: SVParam, n_l1: Int = 1)(implicit val L1C: Option[L1Cache
 
       arb_req(j).io.in(i).valid := io.req_l1(i).valid && req_bank_idx === j.U
       arb_req(j).io.in(i).bits := Mux(io.req_l1(i).valid && req_bank_idx === j.U, io.req_l1(i).bits, 0.U.asTypeOf(new L2TlbReq(SV)))
-      arb_req(j).io.in(i).bits.id := Cat(req_bank_idx(log2Ceil(nBanks)-1, 0), i.U(log2Ceil(num_l1).W), 1.U(1.W))
+      if(req_bank_idx.getWidth == 0)
+        arb_req(j).io.in(i).bits.id := Cat(i.U(log2Ceil(num_l1).W), 1.U(1.W))
+      else
+        arb_req(j).io.in(i).bits.id := Cat(req_bank_idx(log2Ceil(nBanks)-1, 0), i.U(log2Ceil(num_l1).W), 1.U(1.W))
       io.req_l1(i).ready := (VecInit(arb_req.map {
         _.io.in(i).ready
       }).asUInt)(req_bank_idx)
