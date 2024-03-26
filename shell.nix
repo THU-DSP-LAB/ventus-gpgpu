@@ -58,7 +58,7 @@ in pkgs.callPackage (
   }:
 
   mkShellNoCC {
-    name = "sequencer-playground";
+    name = "ventus-gpgpu";
     depsBuildBuild = [
       jdk gnumake git mill wget parallel dtc protobuf antlr4
       verilator cmake ninja rcs autoconf automake
