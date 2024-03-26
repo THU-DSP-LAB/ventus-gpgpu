@@ -687,7 +687,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreRsp_st2_valid_from_coreReq := coreRsp_st2_valid_from_coreReq_Reg.io.deq.bits && coreRsp_st2_valid_from_coreReq_Reg.io.deq.fire()
 
   coreRsp_st2_valid_from_memRsp := RegEnable(MshrAccess.io.missRspOut.valid , coreRsp_Q.io.enq.ready)
-  coreRsp_st2.io.deq.ready := coreRsp_Q.io.enq.ready //(coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memReq) && coreRsp_Q.io.enq.ready
+  coreRsp_st2.io.deq.ready := coreRsp_Q.io.enq.ready && !coreRsp_st2_valid_from_memReq//(coreRsp_st2_valid_from_memRsp || coreRsp_st2_valid_from_coreReq || coreRsp_st2_valid_from_memReq) && coreRsp_Q.io.enq.ready
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memRsp), s"cRsp from cReq and mRsp conflict")
   assert (!(coreRsp_st2_valid_from_coreReq && coreRsp_st2_valid_from_memReq), "cRsp from cReq and mReq conflict")
   assert (!(coreRsp_st2_valid_from_memReq && coreRsp_st2_valid_from_memRsp), "cRsp from mRsp and mReq conflict")
