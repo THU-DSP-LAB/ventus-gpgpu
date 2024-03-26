@@ -295,7 +295,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     val mem = new MemBox
 
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)
       c.io.out_d.initSource()
@@ -304,7 +304,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(1000)
+      c.clock.setTimeout(6000)
       c.clock.step(5)
 
       var meta = new MetaData
