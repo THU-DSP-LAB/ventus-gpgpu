@@ -1,12 +1,11 @@
 package play
 
+import L2cache.{TLBundleA_lite, TLBundleD_lite}
 import chisel3._
-import chisel3.util._
 import chisel3.experimental.BundleLiterals._
-import chisel3.experimental.VecLiterals._
+import chisel3.util._
 import chiseltest._
 import top._
-import L2cache.{TLBundleA_lite, TLBundleD_lite}
 
 object TestUtils {
   def checkForValid[T <: Data](port: DecoupledIO[T]): Boolean = port.valid.peek().litToBoolean

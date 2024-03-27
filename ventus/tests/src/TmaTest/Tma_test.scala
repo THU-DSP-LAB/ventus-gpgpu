@@ -1,5 +1,6 @@
 package TmaTest
 
+import top.parameters._
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.BundleLiterals._
@@ -10,6 +11,7 @@ import pipeline._
 import top.DecoupledPipe
 import MemboxS._
 import play.TestUtils._
+import L2cache._
 
 class Tma_test
   extends AnyFreeSpec
@@ -17,17 +19,21 @@ class Tma_test
   "L1TLB Main" in {
     class TmaWrapper() extends Module {
       val io = IO(new Bundle() {
-        val in = Flipped(DecoupledIO(new TmaIn()))
-        val out = DecoupledIO(new TmaOut())
-        val l2_req = DecoupledIO(new TLBundleA_lite())
-        val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite()))
+        val in = Flipped(DecoupledIO(new vExeData()))
+        val l2_req = DecoupledIO(new TLBundleA_lite(l2cache_params))
+        val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
+        val shared_req = DecoupledIO(new ShareMemCoreReq_np())
+        val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
       })
-      val internal = Module(new Tma())
-      internal.io.in <> Queue(io.in, 1)
-      io.out <> Queue(internal.io.out, 1)
+      val internal = Module(new TMA_Copysize())
+      internal.io.tma_req <> Queue(io.in, 1)
+      io.l2_req <> Queue(internal.io.l2cache_req, 1)
+      io.l2_rsp <> Queue(internal.io.l2cache_rsp, 1)
+      io.shared_req <> Queue(internal.io.shared_req, 1)
+      io.shared_rsp <> Queue(internal.io.shared_rsp, 1)
 
       val pipe_l2_req =
-        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, insulate = true))
+        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, inssulate = true))
       val pipe_l2_rsp =
         Module(new DecoupledPipe(io.l2_rsp.bits.cloneType, 0, insulate = true))
       pipe_l2_req.io.enq <> internal.io.l2_req

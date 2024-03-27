@@ -463,7 +463,7 @@ class TMA_Copysize extends Module{
     val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
     val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
     //output
-    val l2ache_req = Decoupled( new TLBundleA_lite(l2cache_params))
+    val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val fence_end_tma = Output(UInt(num_warp.W))
   })
