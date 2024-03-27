@@ -91,6 +91,7 @@ class Temp_mem extends Module {
     val from_l2cache = Flipped(DecoupledIO(new l2cache_transform(l2cache_params)))
     val from_shared = Flipped(DecoupledIO(new ShareMemCoreRsp_np_transform()))
     val to_shared = DecoupledIO(new TempOutput)
+    val inst_complete = DecoupledIO(UInt(32.W))
   })
   val dataFIFO =  Mem(max_l2cacheline, UInt(io.from_l2cache.bits.data.getWidth.W))
   val instMem =   Mem(max_tma_inst, UInt(io.from_addr.bits.tag.getWidth.W))
@@ -118,12 +119,14 @@ class Temp_mem extends Module {
   //  val current_tag_index = PriorityEncoder(reg_req(current_inst_entry_index).l2cachetag.map(_===current_tag))
   val current_mask_l2cache = RegInit(VecInit(Seq.fill(numgroupinstmax)(false.B)))
   val reg_req = Reg(new TMATag)
+  val output_inst = Reg(new TMATag)
   val output_data = RegInit(new l2cache_transform(l2cache_params))
   val s_idle ::s_l2cache :: s_shared :: s_reset :: Nil = Enum(5)
   val state = RegInit(s_idle)
   io.from_l2cache.ready := state === s_idle && !(used_mem.andR)
   io.from_shared.ready := state === s_idle
   io.from_addr.ready := state === s_idle && !(used_inst.andR)
+  io.inst_complete.valid := state === s_reset
   io.idx_entry := Mux(io.from_addr.fire, valid_inst_entry, 0.U)
   when(state===s_idle){
     when(io.to_shared.ready && used_mem.orR){
@@ -167,6 +170,9 @@ class Temp_mem extends Module {
         reg_req := instMem.read(entry_index_reg(PriorityEncoder(used_mem)))
         current_inst_entry_index_reg := entry_index_reg(PriorityEncoder(used_mem))
       }
+      when(complete.orR){
+        output_inst := instMem(PriorityEncoder(complete.asUInt))
+      }
     }
     is(s_l2cache){
       (0 until (numgroupl2cache)).foreach(x => {
@@ -179,7 +185,7 @@ class Temp_mem extends Module {
     }
     is(s_shared){
       when(io.to_shared.fire){
-        shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
+        shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) + PopCount(current_mask_l2cache.asUInt)
 //        dataFIFO.write(0.U,0.U)
         current_mask_l2cache := false.B
         reg_req :=  0.U
@@ -189,6 +195,7 @@ class Temp_mem extends Module {
     }
     is(s_reset){
       used_inst := used_inst.bitSet(output_entry, false.B)
+
 //      instMem.write(output_entry,0.U)
     }
   }
@@ -198,6 +205,7 @@ class Temp_mem extends Module {
   io.to_shared.bits.mask := current_mask_l2cache
   io.to_shared.bits.instinfo := reg_req
   io.to_shared.bits.l2cacheTag := tag_reg
+  io.inst_complete.bits := output_inst.instruinfo.ctrl.pc
 }
 class AddrCalc_l2cache() extends Module{
   val io = IO(new Bundle{
@@ -258,9 +266,9 @@ class AddrCalc_l2cache() extends Module{
         srcsize := 1.U
       }
     }
-  val l2cachetag = Wire(Vec(numgroupinstmax, UInt(l2cachetagbits.W)))
+//  val l2cachetag = Wire(Vec(numgroupinstmax, UInt(l2cachetagbits.W)))
   // assume all data in the same group has the same tag
-  l2cachetag := addr.map(_(xLen-1, xLen - l2cachetagbits))
+//  l2cachetag := addr.map(_(xLen-1, xLen - l2cachetagbits))
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
   io.to_tempmem.bits.tag.copysize := reg_save.ctrl.imm_ext
   io.to_tempmem.bits.tag.instruinfo.in1 := reg_save.in1
@@ -377,6 +385,13 @@ class Addrcalc_shared() extends Module {
       io.to_shared.bits.perLaneAddr(cnt_group).activeMask := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
       io.to_shared.bits.data(cnt_group) := reg_save.data(x)
       cnt_group = cnt_group + 1
+    }.otherwise{
+      when(cnt_group < num_thread.asUInt){
+        io.to_shared.bits.perLaneAddr(cnt_group).blockOffset := 0.U
+        io.to_shared.bits.perLaneAddr(cnt_group).wordOffset1H := 0.U
+        io.to_shared.bits.perLaneAddr(cnt_group).activeMask := 0.U
+        io.to_shared.bits.data(cnt_group) := 0.U
+      }
     }
   })
   io.to_shared.valid := state===s_shared
@@ -465,7 +480,7 @@ class TMA_Copysize extends Module{
     //output
     val l2ache_req = Decoupled( new TLBundleA_lite(l2cache_params))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
-    val fence_end_tma = Output(UInt(num_warp.W))
+    val fence_end_tma = DecoupledIO(UInt(32.W))
   })
   val InputFIFO = Module(new Queue(new vExeData, entries=1, pipe=true))
   InputFIFO.io.enq <> io.tma_req
@@ -480,6 +495,7 @@ class TMA_Copysize extends Module{
   tempmem.io.from_addr <> addrCalc_l2cache.io.to_tempmem
 //  tempmem.io.from_l2cache <> io.l2cache_rsp
   tempmem.io.from_shared <> io.shared_rsp
+  io.fence_end_tma <> tempmem.io.inst_complete
   val addrCalc_shared = Module(new Addrcalc_shared)
   addrCalc_shared.io.from_temp <> tempmem.io.to_shared
   io.shared_req <> addrCalc_shared.io.to_shared
