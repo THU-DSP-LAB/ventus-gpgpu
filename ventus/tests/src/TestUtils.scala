@@ -88,7 +88,7 @@ object TestUtils {
   class MemPortDriverDelay[A <: TLBundleA_lite, B >: TLBundleD_lite <: Data](
                                                                               val reqPort: DecoupledIO[A],
                                                                               val rspPort: DecoupledIO[B],
-                                                                              val mem: MemBox,
+                                                                              val mem: MemBox[_],
                                                                               val latency: Int,
                                                                               val depth: Int
                                                                             ) extends IOTestDriver[A, B] with IOTransform[A, B]{

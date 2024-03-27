@@ -8,15 +8,17 @@ import chisel3.experimental.VecLiterals._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import pipeline._
-import top.DecoupledPipe
+import top.{DecoupledPipe, MemBox}
 import MemboxS._
 import play.TestUtils._
 import L2cache._
+import scala.collection.immutable.Seq
 
 class Tma_test
   extends AnyFreeSpec
     with ChiselScalatestTester {
-  "L1TLB Main" in {
+  "TMA Main" in {
+    class TmaRsp2pipe extends Bundle{}
     class TmaWrapper() extends Module {
       val io = IO(new Bundle() {
         val in = Flipped(DecoupledIO(new vExeData()))
@@ -57,6 +59,10 @@ class Tma_test
       d.io.l2_req.ready.poke(true.B)
     }
 
+    val metaFileDir = "./ventus/txt/DMA_test_temp/kernel1.metadata"
+    val dataFileDir = "./ventus/txt/DMA_test_temp/kernel1.data"
+    val metas = top.MetaData(metaFileDir)
+
     test(new TmaWrapper())
       .withAnnotations(Seq(WriteVcdAnnotation)) { d =>
         d.io.in.setSourceClock(d.clock)
@@ -65,37 +71,50 @@ class Tma_test
         d.io.shared_rsp.setSourceClock(d.clock)
         d.io.shared_req.setSinkClock(d.clock)
 
-        val memory = new Memory(BigInt("10000000", 16))
+        val memory = new MemBox(MemboxS.Bare32)
+        memory.loadfile(0, metas, dataFileDir)
 
         val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 0, 5)
 
-        // 初始化请求发送器和内存驱动
+
+        case class vExeData_Soft(
+                                in1: Seq[BigInt],
+                                in2: Seq[BigInt],
+                                in3: Seq[BigInt],
+                                )
+        def makeData(in: vExeData_Soft): vExeData = {
+          (new vExeData).Lit(
+            _.in1 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in1.zipWithIndex.map{case (d, i) => (i, d.U)}:_*)
+          )
+        }
+//        def f(a: Int, b: Int, c:Int), then f(1,2,3) 等价于 f(Seq(1,2,3):_*)
+//        Seq('a', 'b').zipWithIndex 相当于 Seq(0 -> 'a', 1 -> 'b')
+
         var clock_cnt = 0
+
+        val myData = vExeData_Soft(
+          in1 = Seq(BigInt(1), BigInt(2), BigInt(3), BigInt(4)),
+          in2 = Seq(BigInt(5), BigInt(6), BigInt(7), BigInt(8)),
+          in3 = Seq(BigInt(9), BigInt(10), BigInt(11), BigInt(12))
+        )
+
         val req_list = Seq(
-          new vExeData {
-            in1 := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
-            in2 := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
-            in3 := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
-            mask := VecInit(Seq.fill(num_thread)(false.B))
-
-            ctrl := (new CtrlSigs).Lit(
-
-            )
-          },
+          makeData(myData),
           // 根据需要添加更多 vExeData 实例
         )
-        val tma_sender = new RequestSender(d.io.in, d.io.out)
-
-        tma_sender.add(req_list.map { a =>
+        val tma_sender = new RequestSender[vExeData, TmaRsp2pipe](d.io.in, d.io.out)
+        val temp = req_list.map { a =>
           (new vExeData())
             .Lit(_.in1 -> a.in1, _.in2 -> a.in2, _.in3 -> a.in3, _.ctrl -> a.ctrl, _.mask -> a.mask)
-        })
+        }
+        tma_sender.add(temp)
 
         while (tma_sender.send_list.nonEmpty && clock_cnt <= 1000) {
 
           tma_sender.eval()
 
-          handleL2Req(d, memory)
+//          handleL2Req(d, memory)
+          mem_driver.eval()
           d.clock.step()
           clock_cnt += 1
         }
