@@ -20,6 +20,7 @@ class Tma_test
     class TmaWrapper() extends Module {
       val io = IO(new Bundle() {
         val in = Flipped(DecoupledIO(new vExeData()))
+        val out = DecoupledIO(new TmaRsp2pipe())
         val l2_req = DecoupledIO(new TLBundleA_lite(l2cache_params))
         val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
         val shared_req = DecoupledIO(new ShareMemCoreReq_np())
@@ -27,20 +28,17 @@ class Tma_test
       })
       val internal = Module(new TMA_Copysize())
       internal.io.tma_req <> Queue(io.in, 1)
-      io.l2_req <> Queue(internal.io.l2cache_req, 1)
-      io.l2_rsp <> Queue(internal.io.l2cache_rsp, 1)
       io.shared_req <> Queue(internal.io.shared_req, 1)
       io.shared_rsp <> Queue(internal.io.shared_rsp, 1)
 
       val pipe_l2_req =
-        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, inssulate = true))
+        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0))
       val pipe_l2_rsp =
-        Module(new DecoupledPipe(io.l2_rsp.bits.cloneType, 0, insulate = true))
-      pipe_l2_req.io.enq <> internal.io.l2_req
+        Module(new DecoupledPipe(io.l2_rsp.bits.cloneType, 0))
+      pipe_l2_req.io.enq <> internal.io.l2cache_req
       io.l2_req <> pipe_l2_req.io.deq
       pipe_l2_rsp.io.enq <> io.l2_rsp
-      internal.io.l2_rsp <> pipe_l2_rsp.io.deq
-
+      internal.io.l2cache_rsp <> pipe_l2_rsp.io.deq
     }
 
     def handleL2Req[T <: BaseSV](
@@ -62,28 +60,39 @@ class Tma_test
     test(new TmaWrapper())
       .withAnnotations(Seq(WriteVcdAnnotation)) { d =>
         d.io.in.setSourceClock(d.clock)
-        d.io.out.setSinkClock(d.clock)
         d.io.l2_req.setSinkClock(d.clock)
         d.io.l2_rsp.setSourceClock(d.clock)
+        d.io.shared_rsp.setSourceClock(d.clock)
+        d.io.shared_req.setSinkClock(d.clock)
 
-        val memory = new Memory(BigInt("10000000", 16), SV32.host)
+        val memory = new Memory(BigInt("10000000", 16))
 
         val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 0, 5)
 
         // 初始化请求发送器和内存驱动
         var clock_cnt = 0
         val req_list = Seq(
+          new vExeData {
+            in1 := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
+            in2 := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
+            in3 := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
+            mask := VecInit(Seq.fill(num_thread)(false.B))
 
+            ctrl := (new CtrlSigs).Lit(
+
+            )
+          },
+          // 根据需要添加更多 vExeData 实例
         )
         val tma_sender = new RequestSender(d.io.in, d.io.out)
 
         tma_sender.add(req_list.map { a =>
-          (new TmaIn())
-            .Lit(_.inst -> 1.U, _.source -> 2.U)
+          (new vExeData())
+            .Lit(_.in1 -> a.in1, _.in2 -> a.in2, _.in3 -> a.in3, _.ctrl -> a.ctrl, _.mask -> a.mask)
         })
 
         while (tma_sender.send_list.nonEmpty && clock_cnt <= 1000) {
-          println(s"At cycle $clock_cnt:")
+
           tma_sender.eval()
 
           handleL2Req(d, memory)
