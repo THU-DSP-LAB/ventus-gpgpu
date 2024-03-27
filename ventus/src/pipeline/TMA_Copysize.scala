@@ -487,7 +487,7 @@ class TMA_Copysize extends Module{
   val addrCalc_l2cache = Module(new AddrCalc_l2cache)
   addrCalc_l2cache.io.from_fifo <> InputFIFO.io.deq
   addrCalc_l2cache.io.idx_entry := tempmem.io.idx_entry
-  io.l2ache_req <> addrCalc_l2cache.io.to_l2cache
+  io.l2cache_req <> addrCalc_l2cache.io.to_l2cache
 
 
 
