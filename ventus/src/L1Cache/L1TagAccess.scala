@@ -335,10 +335,13 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends
   //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
   val io = IO(new Bundle {
     val r = Flipped(new SRAMReadBus(UInt(tagBits.W), set, way))
+    val r_asid = Flipped(new SRAMReadBus(UInt(AsidBits.W), set, way))
     val tagFromCore_st1 = Input(UInt(tagBits.W))
+    val asidFromCore_st1 = Input(UInt(AsidBits.W))
     val coreReqReady = Input(Bool())
 
     val w = Flipped(new SRAMWriteBus(UInt(tagBits.W), set, way))
+    val w_asid = Flipped(new SRAMWriteBus(UInt(AsidBits.W), set, way))
 
     val waymaskReplacement = Output(UInt(way.W))//one hot, for SRAMTemplate
     val waymaskHit_st1 = Output(UInt(way.W))
@@ -354,7 +357,17 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends
     singlePort = false,
     bypassWrite = false
   ))
+  val asidAccess = Module(new SRAMTemplate(
+    UInt(AsidBits.W),
+    set = set,
+    way = way,
+    shouldReset = false,
+    holdRead = true,
+    singlePort = false,
+    bypassWrite = false
+  ))
   tagBodyAccess.io.r <> io.r
+  asidAccess.io.r <> io.r_asid
 
   val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
   //val way_valid = Mem(set, UInt(way.W))
@@ -363,6 +376,8 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends
   val iTagChecker = Module(new tagChecker(way = way, tagIdxBits = tagBits, AsidBits = AsidBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data //st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
+  iTagChecker.io.ASID_of_set := asidAccess.io.r.resp.data
+  iTagChecker.io.ASID_from_pipe := io.asidFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.r.req.bits.setIdx, io.coreReqReady)) //st1
   io.waymaskHit_st1 := iTagChecker.io.waymask //st1
   io.hit_st1 := iTagChecker.io.cache_hit
@@ -372,8 +387,12 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends
   Replacement.io.validbits_of_set := Cat(way_valid(io.w.req.bits.setIdx))
   io.waymaskReplacement := Replacement.io.waymask
   tagBodyAccess.io.w.req.valid := io.w.req.valid
+  asidAccess.io.w.req.valid := io.w_asid.req.valid
+  io.w_asid.req.ready := asidAccess.io.w.req.ready
   io.w.req.ready := tagBodyAccess.io.w.req.ready
   tagBodyAccess.io.w.req.bits.apply(data = io.w.req.bits.data, setIdx = io.w.req.bits.setIdx, waymask = Replacement.io.waymask)
+  asidAccess.io.w.req.bits.apply(data = io.w_asid.req.bits.data, setIdx = io.w_asid.req.bits.setIdx, waymask = Replacement.io.waymask)
+
   when(io.w.req.valid && !Replacement.io.Set_is_full) {
     way_valid(io.w.req.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
   }

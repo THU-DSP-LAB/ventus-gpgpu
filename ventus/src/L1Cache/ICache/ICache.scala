@@ -22,6 +22,7 @@ class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
+  val ASID = UInt(asidLen.W)
 }
 class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
   val warpid = UInt(WIdBits.W)
@@ -102,6 +103,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val warpid_st2 = RegNext(warpid_st1)
   val mask_st2 = RegNext(mask_st1)
   val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
+  val ASID_st2 = RegEnable(io.coreReq.bits.ASID, io.coreReq.ready)
   val addr_st2 = RegNext(addr_st1)
 
   // ******     external flushPipeline
@@ -113,6 +115,8 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
   tagAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
   tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
+  tagAccess.io.r_asid.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
+  tagAccess.io.r_asid.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
   tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
