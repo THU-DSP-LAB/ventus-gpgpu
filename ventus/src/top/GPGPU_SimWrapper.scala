@@ -11,7 +11,59 @@ import L2cache._
 import config.config._
 import parameters.num_warp
 
-class DecoupledPipe[T <: Data](dat: T, latency: Int = 1) extends Module {
+//class DecoupledPipe[T <: Data](dat: T, latency: Int = 1) extends Module {
+//  val io = IO(new Bundle {
+//    val enq = Flipped(DecoupledIO(dat))
+//    val deq = DecoupledIO(dat)
+//  })
+//  val valids = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
+//  io.enq.ready := RegNext(io.deq.ready)
+//  for (i <- 1 to latency) {
+//    when(!(!io.deq.ready && valids.drop(i).reduce(_ && _))) {
+//      valids(i) := valids(i - 1)
+//    }
+//  }
+//
+//  def generate: Seq[T] = {
+//    var regs = Seq(RegEnable(io.enq.bits, valids(0) && !(!io.deq.ready && valids.drop(1).reduce(_ && _))))
+//    for (i <- 2 to latency) {
+//      regs = regs :+ RegEnable(regs.last, valids(i - 1) && !(!io.deq.ready && valids.drop(i).reduce(_ && _)))
+//    }
+//    regs
+//  }
+//
+//  val regs = generate
+//  io.enq.ready := !(!io.deq.ready && valids.drop(1).reduce(_ && _))
+//  io.deq.valid := valids.last
+//  io.deq.bits := regs.last
+//}class DecoupledPipe[T <: Data](dat: T, latency: Int = 1) extends Module {
+//  val io = IO(new Bundle {
+//    val enq = Flipped(DecoupledIO(dat))
+//    val deq = DecoupledIO(dat)
+//  })
+//  val valids = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
+//  io.enq.ready := RegNext(io.deq.ready)
+//  for (i <- 1 to latency) {
+//    when(!(!io.deq.ready && valids.drop(i).reduce(_ && _))) {
+//      valids(i) := valids(i - 1)
+//    }
+//  }
+//
+//  def generate: Seq[T] = {
+//    var regs = Seq(RegEnable(io.enq.bits, valids(0) && !(!io.deq.ready && valids.drop(1).reduce(_ && _))))
+//    for (i <- 2 to latency) {
+//      regs = regs :+ RegEnable(regs.last, valids(i - 1) && !(!io.deq.ready && valids.drop(i).reduce(_ && _)))
+//    }
+//    regs
+//  }
+//
+//  val regs = generate
+//  io.enq.ready := !(!io.deq.ready && valids.drop(1).reduce(_ && _))
+//  io.deq.valid := valids.last
+//  io.deq.bits := regs.last
+//}
+
+class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val enq = Flipped(DecoupledIO(dat))
     val deq = DecoupledIO(dat)
@@ -24,18 +76,33 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1) extends Module {
     }
   }
 
+  val out_port = Wire(DecoupledIO(dat))
+  out_port.valid := valids.last
+  out_port.ready := io.deq.ready
+
   def generate: Seq[T] = {
-    var regs = Seq(RegEnable(io.enq.bits, valids(0) && !(!io.deq.ready && valids.drop(1).reduce(_ && _))))
+    if (latency == 0){
+      var regs = Seq(io.enq.bits)
+      return regs
+    }
+    var regs = Seq(RegEnable(io.enq.bits, valids(0) && !(!out_port.ready && valids.drop(1).reduce(_ && _))))
     for (i <- 2 to latency) {
-      regs = regs :+ RegEnable(regs.last, valids(i - 1) && !(!io.deq.ready && valids.drop(i).reduce(_ && _)))
+      regs = regs :+ RegEnable(regs.last, valids(i - 1) && !(!out_port.ready && valids.drop(i).reduce(_ && _)))
     }
     regs
   }
 
   val regs = generate
-  io.enq.ready := !(!io.deq.ready && valids.drop(1).reduce(_ && _))
-  io.deq.valid := valids.last
-  io.deq.bits := regs.last
+  out_port.bits := regs.last
+
+  if (insulate){
+    io.deq <> Queue(out_port, 1, pipe = true)
+  }
+  else{
+    io.deq.bits := out_port.bits
+    io.deq.valid := out_port.valid
+  }
+  io.enq.ready := (if(latency > 0) !(!out_port.ready && valids.drop(1).reduce(_ && _)) else out_port.ready)
 }
 
 class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{

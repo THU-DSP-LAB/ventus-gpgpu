@@ -32,12 +32,12 @@ class Tma_test
       val internal = Module(new TMA_Copysize())
       internal.io.tma_req <> Queue(io.in, 1)
       io.shared_req <> Queue(internal.io.shared_req, 1)
-      io.shared_rsp <> Queue(internal.io.shared_rsp, 1)
+      internal.io.shared_rsp <> Queue(io.shared_rsp, 1)
 
       val pipe_l2_req =
-        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0))
+        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, insulate = true))
       val pipe_l2_rsp =
-        Module(new DecoupledPipe(io.l2_rsp.bits.cloneType, 0))
+        Module(new DecoupledPipe(io.l2_rsp.bits.cloneType, 0, insulate = true))
       pipe_l2_req.io.enq <> internal.io.l2cache_req
       io.l2_req <> pipe_l2_req.io.deq
       pipe_l2_rsp.io.enq <> io.l2_rsp
