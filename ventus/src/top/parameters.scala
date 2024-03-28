@@ -164,7 +164,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   //tma-xrn
   var tma_aligned = 4 // bytes
   var maxcopysize = 128 //bytes  all 5D multiply together
-  var max_tma_inst = 4
+  var max_tma_inst = 8
   var max_l2cacheline = 6
   var cacheline = 128 //bytes
   var l2cacheline = cacheline
