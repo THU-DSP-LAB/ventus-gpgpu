@@ -15,7 +15,7 @@ import L1Cache.{L1TagAccess, L1TagAccess_ICache, RVGParameters}
 import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
 import chisel3._
 import chisel3.util._
-import mmu.SV32.asidLen
+import mmu.SV32.{asidLen, paLen, vaLen}
 import top.parameters._
 
 class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
@@ -42,13 +42,17 @@ class ICachePipeRsp(implicit p: Parameters) extends ICacheBundle{
 *  10  | invalidate coreReq
 * */
 class ICacheMemRsp(implicit p: Parameters) extends ICacheBundle{
-  val d_source = UInt(WIdBits.W)
-  val d_addr = UInt(WordLength.W)
+  val d_source = UInt((WIdBits+log2Up(NMshrEntry)).W)
+  val d_addr = UInt(paLen.W)
   val d_data = Vec(BlockWords, UInt(WordLength.W))
 }
 class ICacheMemReq(implicit p: Parameters) extends ICacheBundle{
   val a_source = UInt(WIdBits.W)
   val a_addr = UInt(WordLength.W)
+}
+class ICacheMemReq_p(implicit p: Parameters) extends ICacheBundle{
+  val a_source = UInt((WIdBits+log2Up(NMshrEntry)).W)
+  val a_addr = UInt(paLen.W)
 }
 
 class ICacheExtInf(implicit p: Parameters) extends ICacheBundle{
@@ -56,7 +60,14 @@ class ICacheExtInf(implicit p: Parameters) extends ICacheBundle{
   val externalFlushPipe = Flipped(ValidIO(new ICachePipeFlush))
   val coreRsp = DecoupledIO(new ICachePipeRsp)
   val memRsp = Flipped(DecoupledIO(new ICacheMemRsp))
-  val memReq = DecoupledIO(new ICacheMemReq)
+  val memReq = DecoupledIO(new ICacheMemReq_p)
+  val TLBRsp = Flipped(DecoupledIO(new Bundle { // paddr from TLB
+    val paddr = UInt(paLen.W)
+  }))
+  val TLBReq = DecoupledIO(new Bundle { // req of vaddr for TLB
+    val asid = UInt(asidLen.W)
+    val vaddr = UInt(vaLen.W)
+  })
 }
 
 class InstructionCache(implicit p: Parameters) extends ICacheModule{
@@ -112,16 +123,20 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   ShouldFlushCoreRsp_st0 := io.coreReq.bits.warpid === io.externalFlushPipe.bits.warpid && io.externalFlushPipe.valid
 
   val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
+  val pipeReqAsid_st1 = RegEnable(io.coreReq.bits.ASID, io.coreReq.ready)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
   tagAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
   tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.r_asid.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
   tagAccess.io.r_asid.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
+  tagAccess.io.asidFromCore_st1 := pipeReqAsid_st1
   tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
   tagAccess.io.w.req.valid := memRsp_Q.io.deq.fire()
   tagAccess.io.w.req.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
+  tagAccess.io.w_asid.req.valid := memRsp_Q.io.deq.fire()
+  tagAccess.io.w_asid.req.bits(data=mshrAccess.io.missRspOut.bits.ASID, setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
 
   // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp
@@ -131,15 +146,18 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   // ******     mshrAccess      ******
   mshrAccess.io.missReq.valid := cacheMiss_st1
   mshrAccess.io.missReq.bits.blockAddr := get_blockAddr(pipeReqAddr_st1)
+  mshrAccess.io.missReq.bits.ASID := pipeReqAsid_st1
   mshrAccess.io.missReq.bits.targetInfo := Cat(warpid_st1,get_offsets(pipeReqAddr_st1))
   //mshrAccess.io.missReq <> mshrMissReq_Q.io.deq
 
   memRsp_Q.io.deq.ready := mshrAccess.io.missRspIn.ready
   mshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid
-  mshrAccess.io.missRspIn.bits.blockAddr := get_blockAddr(memRsp_Q.io.deq.bits.d_addr)
+  mshrAccess.io.missRspIn.bits.EntryIdx := get_EntryIdx(memRsp_Q.io.deq.bits.d_source)
 
   mshrAccess.io.missRspOut.ready := true.B
-  //coreRsp_Q.io.enq.ready TODO 将来版本可能重新启用信号，如果core前端需要MSHR返回信息的话
+  //coreRsp_Q.io.enq.ready TODO 将来版本可能重新启用信号
+  //
+  // ，如果core前端需要MSHR返回信息的话
 
   // ******      data write, to handle mem rsp st2      ******
   dataAccess.io.w.req.valid := memRsp_Q.io.deq.fire()
@@ -190,10 +208,22 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val Status_st2 = Mux(RegNext(ShouldFlushCoreRsp_st1),"b10".U,RegNext(Status_st1))
   io.coreRsp.bits.status := Status_st2//Mux(ShouldFlushCoreRsp_st2,"b10".U,Status_st2)
 
-  io.memReq.valid := mshrAccess.io.miss2mem.valid
-  mshrAccess.io.miss2mem.ready := io.memReq.ready
-  io.memReq.bits.a_addr := Cat(mshrAccess.io.miss2mem.bits.blockAddr,0.U((32-bABits).W))
-  io.memReq.bits.a_source := mshrAccess.io.miss2mem.bits.instrId
+ // io.memReq.valid := mshrAccess.io.miss2mem.valid
+ // mshrAccess.io.miss2mem.ready := io.memReq.ready
+ // io.memReq.bits.a_addr := Cat(mshrAccess.io.miss2mem.bits.blockAddr,0.U((32-bABits).W))
+ // io.memReq.bits.a_source := mshrAccess.io.miss2mem.bits.instrId
+  io.TLBReq.valid := mshrAccess.io.miss2mem.valid
+  io.TLBReq.bits.vaddr := Cat(mshrAccess.io.miss2mem.bits.blockAddr,0.U((32-bABits).W))
+  io.TLBReq.bits.asid := mshrAccess.io.miss2mem.bits.ASID
+  mshrAccess.io.miss2mem.ready := io.TLBReq.ready
+  val a_source_reg = Module(new Queue(UInt((WIdBits+log2Up(NMshrEntry)).W),1,true,false))
+  a_source_reg.io.enq.valid := io.TLBReq.fire()
+  a_source_reg.io.enq.bits := mshrAccess.io.miss2mem.bits.instrId
+  a_source_reg.io.deq.ready := io.memReq.ready && io.TLBRsp.valid
+  io.TLBRsp.ready := io.memReq.ready
+  io.memReq.bits.a_addr := io.TLBRsp.bits.paddr
+  io.memReq.bits.a_source := a_source_reg.io.deq.bits
+  io.memReq.valid := io.TLBRsp.valid && a_source_reg.io.deq.valid
 
   // ******      core req ready
   //val coreRsp_QAlmstFull = coreRsp_Q.io.count === 2.U

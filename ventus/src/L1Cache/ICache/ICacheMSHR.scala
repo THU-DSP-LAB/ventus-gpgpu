@@ -14,6 +14,7 @@ import L1Cache.{HasL1CacheParameters, L1CacheModule, getEntryStatusReq}
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
+import mmu.SV32.asidLen
 
 trait MSHRParameters{
   def bABits: Int// = tagIdxBits+SetIdxBits   // search in this module for abbreviation meaning
@@ -28,23 +29,26 @@ trait HasMshrParameters extends HasL1CacheParameters{
 * 当missReq和missRspIn的blockAddr相同时，在missReq握手之前拉低ready，cache当作reservation fail告知core
 * */
 
-class MSHRmissReq(val bABits: Int, val tIWidth: Int, val WIdBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
+class MSHRmissReq(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val AsidBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
   val blockAddr = UInt(bABits.W)
   //val instrId = UInt(WIdBits.W)//included in targetInfo
   val targetInfo = UInt(tIWidth.W)
+  val ASID = UInt(AsidBits.W)
 }
-class MSHRmissRspIn(val bABits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
-  val blockAddr = UInt(bABits.W)
+class MSHRmissRspIn(val NEntry: Int) extends Bundle {//Use this bundle when a block return from Lower cache
+  val EntryIdx = UInt(log2Up(NEntry).W)
 }
-class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWidth: Int) extends Bundle {//Use this bundle when a block return from Lower cache
+class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWidth: Int, val AsidBits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
   val targetInfo = UInt(tIWidth.W)
   val blockAddr = UInt(bABits.W)
+  val ASID = UInt(AsidBits.W)
   //val busy = Bool()
   //val last = Bool()
 }
-class MSHRmiss2mem(val bABits: Int, val WIdBits: Int) extends Bundle {//Use this bundle when a block return from Lower cache
+class MSHRmiss2mem(val bABits: Int, val WIdBits: Int, val asidBits: Int, val NEntry: Int) extends Bundle {//Use this bundle when a block return from Lower cache
   val blockAddr = UInt(bABits.W)
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt((log2Up(NEntry)+WIdBits).W)
+  val ASID = UInt(asidBits.W)
 }
 /*class MSHRmiss2Mem(val bAWidth: Int) extends Bundle{
   val blockAddr = UInt(bAWidth.W)
@@ -70,13 +74,14 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   val tIWidth = tIgen.getWidth
   //val bAWidth = bABits.getWidth
   val io = IO(new Bundle{
-    val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits)))
+    val missReq = Flipped(Decoupled(new MSHRmissReq(bABits,tIWidth,WIdBits,asidLen)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(bABits)))
-    val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth))
-    val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits))
+    val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,asidLen))
+    val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits,asidLen,NMshrEntry))
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
+  val ASID_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(asidLen.W))))
   val targetInfo_Accesss = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(tIWidth.W))))))
 
   /*Structure Diagram
@@ -94,10 +99,10 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   * */
 
   //  ******     decide selected subentries are full or not     ******
-  val entryMatchMissRsp = Wire(UInt(NMshrEntry.W))
+  val entryMatchMissRsp = Wire(UInt(log2Up(NMshrEntry).W))
   val entryMatchMissReq = Wire(UInt(NMshrEntry.W))
   val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(1.W))))))
-  val subentry_selected = subentry_valid(OHToUInt(entryMatchMissRsp))
+  val subentry_selected = subentry_valid(entryMatchMissRsp)
   val subentryStatus = Module(new getEntryStatus(NMshrSubEntry))// Output: alm_full, full, next
   subentryStatus.io.valid_list := Reverse(Cat(subentry_selected))
   val subentry_next2cancel = Wire(UInt(log2Up(NMshrSubEntry).W))
@@ -109,11 +114,11 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   entryStatus.io.valid_list := entry_valid
 
   val missRsqBusy = RegInit(false.B)
-  val missRspInHoldingbA = Wire(UInt(bABits.W))
-  missRspInHoldingbA := Mux(missRsqBusy,RegNext(missRspInHoldingbA),io.missRspIn.bits.blockAddr)
-  entryMatchMissRsp := Reverse(Cat(blockAddr_Access.map(_===missRspInHoldingbA))) & entry_valid
-  assert(PopCount(entryMatchMissRsp) <= 1.U)
-  entryMatchMissReq := Reverse(Cat(blockAddr_Access.map(_===io.missReq.bits.blockAddr))) & entry_valid
+  val missRspInHoldingIdx = Wire(UInt(log2Up(NMshrEntry).W))
+  missRspInHoldingIdx := Mux(missRsqBusy,RegNext(missRspInHoldingIdx),io.missRspIn.bits.EntryIdx)
+  entryMatchMissRsp := missRspInHoldingIdx//Reverse(Cat(blockAddr_Access.map(_===missRspInHoldingbA))) & entry_valid
+  //assert(PopCount(entryMatchMissRsp) <= 1.U)
+  entryMatchMissReq := Reverse(Cat(blockAddr_Access.map(_===io.missReq.bits.blockAddr))) & entry_valid & Reverse(Cat(ASID_Access.map(_===io.missReq.bits.ASID)))//Block addr and asid match indicate same req
   assert(PopCount(entryMatchMissReq) <= 1.U)
   //  ******     decide a primary miss or a secondary miss     ******
   val secondary_miss = entryMatchMissReq.orR
@@ -143,8 +148,9 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   io.missRspIn.ready := !missRsqBusy && io.missRspOut.ready
   io.missRspOut.valid := io.missRspIn.fire() || missRsqBusy
 
-  io.missRspOut.bits.targetInfo := targetInfo_Accesss(OHToUInt(entryMatchMissRsp))(subentry_next2cancel)
-  io.missRspOut.bits.blockAddr := blockAddr_Access(OHToUInt(entryMatchMissRsp))
+  io.missRspOut.bits.targetInfo := targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
+  io.missRspOut.bits.blockAddr := blockAddr_Access(entryMatchMissRsp)
+  io.missRspOut.bits.ASID := ASID_Access(entryMatchMissRsp)
 
   //  ******     maintain subentries    ******
   for (iofEn <- 0 until NMshrEntry){
@@ -157,12 +163,12 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
           iofSubEn.asUInt===subentryStatus.io.next && secondary_miss){
           subentry_valid(iofEn)(iofSubEn) := true.B
         }.elsewhen(io.missRspOut.fire &&
-          iofEn.asUInt === OHToUInt(entryMatchMissRsp) &&
+          iofEn.asUInt === entryMatchMissRsp &&
           iofSubEn.asUInt === subentry_next2cancel){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }
       }.elsewhen(io.missRspOut.fire() &&
-        iofEn.asUInt===OHToUInt(entryMatchMissRsp) &&
+        iofEn.asUInt===entryMatchMissRsp &&
         iofSubEn.asUInt===subentry_next2cancel){
         subentry_valid(iofEn)(iofSubEn) := false.B
       }
@@ -184,16 +190,22 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   for (i <- 0 to NMshrEntry){
     when(miss2mem_fire && i.U === hasSendStatus.io.next){
       has_send2mem(i.U) := true.B
-    }.elsewhen((missRsqBusy || io.missRspIn.fire) && io.missRspOut.fire() && subentryStatus.io.used===1.U && i.U === OHToUInt(entryMatchMissRsp)){
+    }.elsewhen((missRsqBusy || io.missRspIn.fire) && io.missRspOut.fire() && subentryStatus.io.used===1.U && i.U === entryMatchMissRsp){
       has_send2mem(i.U) := false.B//missRsp, L2 to core
     }
   }
   io.miss2mem.bits.blockAddr := blockAddr_Access(hasSendStatus.io.next)
-  io.miss2mem.bits.instrId := targetInfo_Accesss(hasSendStatus.io.next)(0.U)
+  io.miss2mem.bits.instrId := Cat(hasSendStatus.io.next ,targetInfo_Accesss(hasSendStatus.io.next)(0.U))
+  io.miss2mem.bits.ASID := ASID_Access(hasSendStatus.io.next)
+
+  val missRspIn_bA = Wire(UInt(bABits.W))
+  val missRspIn_ASID = Wire(UInt(asidLen.W))
+  missRspIn_bA := blockAddr_Access(io.missRspIn.bits.EntryIdx)
+  missRspIn_ASID := ASID_Access(io.missRspIn.bits.EntryIdx)
 
   //  ******    ReqConflictWithRsp
   //missRspIn fire或者busy时，missReq来了block addr相同的请求，置高此信号
   ReqConflictWithRsp := io.missReq.valid &&
-    ((io.missRspIn.fire() && io.missRspIn.bits.blockAddr === io.missReq.bits.blockAddr) ||
+    ((io.missRspIn.fire() && missRspIn_bA === io.missReq.bits.blockAddr && missRspIn_ASID === io.missReq.bits.ASID) ||
       (missRsqBusy && io.missRspOut.bits.blockAddr === io.missReq.bits.blockAddr))
 }
