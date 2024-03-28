@@ -25,7 +25,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = log2Ceil(num_warp)
 
-  var num_thread = 4
+  var num_thread = 32
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -160,4 +160,22 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X)
   var WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y)
   var WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
+
+  //tma-xrn
+  var tma_aligned = 4 // bytes
+  var maxcopysize = 128 //bytes  all 5D multiply together
+  var max_tma_inst = 4
+  var max_l2cacheline = 6
+  var cacheline = 128 //bytes
+  var l2cacheline = cacheline
+  var sharedcacheline = cacheline
+  var l2cachetagbits = 16
+  var l2cachesetbits = 4
+  var sharedsetbits = 16
+  def addr_tag_bits = l2cachetagbits + l2cachesetbits
+  def numgroupl2cache = l2cacheline / tma_aligned
+  def numgroupshared = sharedcacheline / tma_aligned
+  def numgroupinstmax = maxcopysize / tma_aligned
+  def numgroupinstmax_shared = maxcopysize / 4
+  def numgroupsharedmax = maxcopysize / 4
 }
