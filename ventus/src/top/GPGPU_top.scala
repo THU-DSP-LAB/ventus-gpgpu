@@ -147,6 +147,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     val out_a =Vec(NL2Cache,Decoupled(new TLBundleA_lite(l2cache_params)))
     val out_d=Flipped(Vec(NL2Cache,Decoupled(new TLBundleD_lite(l2cache_params))))
     val inst_cnt = if(INST_CNT) Some(Output(Vec(NSms, UInt(32.W)))) else None
+    val cycle_cnt = Input(UInt(20.W))
   })
   val cta = Module(new CTAinterface)
   val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache)).io))
@@ -233,6 +234,15 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   io.host_rsp<>cta.io.CTA2host
   io.host_req<>cta.io.host2CTA
   io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U)})
+
+  for(i <- 0 until NL2Cache){
+    val port = l2cache(i).in_a
+    val cache_id: UInt = port.bits.source(l1cache_sourceBits)
+    val sm_id: UInt = port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
+    when(port.fire){
+      printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
+    }
+  }
 }
 
 class SM_wrapper(FakeCache: Boolean = false) extends Module{
@@ -343,7 +353,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   pipe.io.shared_rsp.bits.data:=sharedmem.io.coreRsp.bits.data
   pipe.io.shared_rsp.bits.instrId:=sharedmem.io.coreRsp.bits.instrId
   pipe.io.shared_rsp.bits.activeMask:=sharedmem.io.coreRsp.bits.activeMask
- // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
+  // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
 }
 
 

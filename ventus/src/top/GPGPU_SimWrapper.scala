@@ -85,6 +85,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   io.cnt := counter.value
 
   val GPU = Module(new GPGPU_top()(L1param, FakeCache))
+  GPU.io.cycle_cnt := counter.value
 
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))
   val pipe_d = Module(new DecoupledPipe(new TLBundleD_lite(l2cache_params), 2))
