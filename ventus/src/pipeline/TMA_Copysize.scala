@@ -31,8 +31,8 @@ class vExeDataTMA extends Bundle {
   val in2 = UInt(xLen.W)
   val in3 = UInt(xLen.W)
   val copysize = UInt(log2Up(maxcopysize).W)
-  val srcsize = UInt(3.W)
-  val interleave = Bool()
+//  val srcsize = UInt(3.W)
+//  val interleave = Bool()
   //  val im2col = Vec(2,)
   val ctrl = new CtrlSigs()
 }
@@ -275,18 +275,18 @@ class AddrCalc_l2cache() extends Module{
       is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
     }
   })
-  val srcsize = Wire(UInt(3.W))
-  switch(reg_save.ctrl.mem_whb){
-      is(MEM_W){
-        srcsize := 4.U
-      }
-      is(MEM_H){
-        srcsize := 2.U
-      }
-      is(MEM_B){
-        srcsize := 1.U
-      }
-    }
+//  val srcsize = Wire(UInt(3.W))
+//  switch(reg_save.ctrl.mem_whb){
+//      is(MEM_W){
+//        srcsize := 4.U
+//      }
+//      is(MEM_H){
+//        srcsize := 2.U
+//      }
+//      is(MEM_B){
+//        srcsize := 1.U
+//      }
+//    }
 //  val l2cachetag = Wire(Vec(numgroupinstmax, UInt(l2cachetagbits.W)))
   // assume all data in the same group has the same tag
 //  l2cachetag := addr.map(_(xLen-1, xLen - l2cachetagbits))
@@ -295,7 +295,7 @@ class AddrCalc_l2cache() extends Module{
   io.to_tempmem.bits.tag.in1 := reg_save.in1
   io.to_tempmem.bits.tag.in2 := reg_save.in2
   io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
-  io.to_tempmem.bits.tag.srcsize := srcsize
+//  io.to_tempmem.bits.tag.srcsize := srcsize
   io.to_tempmem.bits.tag.copysize := reg_save.in3
 //  io.to_tempmem.bits.tag.addrinit := addrinit
 //  io.to_tempmem.bits.tag.addrlast := addrlast
@@ -374,10 +374,11 @@ class Addrcalc_shared() extends Module {
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
 //  val s_idle :: s_save :: s_shared :: Nil = Enum(3)
-  val s_idle :: s_shared :: Nil = Enum(2)
+  val s_idle :: s_shared1 ::s_shared2:: s_shared3::Nil = Enum(4)
   val state = RegInit(init = s_idle)
   val reg_save = Reg(new TempOutput)
   val current_numgroup = PopCount(reg_save.mask)
+  val output_reg = Reg(new ShareMemCoreReq_np)
   val cnt = new Counter(n = numgroupinstmax_shared)
 //  val reg_entryID = RegInit(0.U(log2Up(max_tma_inst).W))
   val addr = Wire(Vec(numgroupsharedmax,UInt(xLen.W)))
@@ -397,53 +398,66 @@ class Addrcalc_shared() extends Module {
   val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-l2cachetagbits+1), 0.U(l2cachetagbits.W))
   val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
   val blockOffset = Wire(Vec(numgroupinstmax, UInt(dcache_BlockOffsetBits.W)))
-
   (0 until numgroupinstmax).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(numgroupinstmax, UInt(BytesOfWord.W)))
+  (0 until numgroupinstmax).foreach( x => {
+    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
+    wordOffset1H(x) := 15.U(4.W)
+//    switch(reg_save.ctrl.mem_whb){
+//      is(MEM_W) { wordOffset1H(x) := 15.U }
+//      is(MEM_H) { wordOffset1H(x) :=
+//        Mux(addr(x)(1)===0.U,
+//          3.U,
+//          12.U
+//        )
+//      }
+//      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+//    }
+  })
+  val current_mask = Wire(Vec(numgroupinstmax, Bool()))
+  (0 until numgroupinstmax).foreach(x => {
+    current_mask(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1)===setIdx)
+  })
   val mask_next = Wire(Vec(numgroupinstmax, Bool()))
-  (0 until numgroupinstmax).foreach( x => {                          // update mask
+  (0 until numgroupinstmax).foreach( x => {
     mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1)===setIdx
       )})
-  var cnt_group = 0
-  (0 until(numgroupinstmax)).foreach(x =>{
-    when(cnt_group.asUInt < num_thread.asUInt ){
-      io.to_shared.bits.perLaneAddr(cnt_group).blockOffset := 0.U
-      io.to_shared.bits.perLaneAddr(cnt_group).wordOffset1H := 0.U
-      io.to_shared.bits.perLaneAddr(cnt_group).activeMask := 0.U
-      io.to_shared.bits.data(cnt_group) := 0.U
-    }
-    when(reg_save.mask(x)){
-      io.to_shared.bits.perLaneAddr(cnt_group).blockOffset := blockOffset(x)
-      io.to_shared.bits.perLaneAddr(cnt_group).wordOffset1H := wordOffset1H(x)
-      io.to_shared.bits.perLaneAddr(cnt_group).activeMask := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
-      io.to_shared.bits.data(cnt_group) := reg_save.data(x)
-      cnt_group = cnt_group + 1
-    }
-  })
-  io.to_shared.valid := state===s_shared
-  io.to_shared.bits.instrId := reg_save.entry_index
+  //找到current_mask的全部索引，只使用前16个，提取l2cacheline的数据
+  val current_mask_index = Reg(Vec(numgroupinstmax, UInt(log2Up(numgroupinstmax).W)))
 
+  io.to_shared.bits := output_reg
+  io.to_shared.valid := state===s_shared2
 
   io.from_temp.ready := state === s_idle
 
   // FSM State Transfer
   switch(state){
     is(s_idle){
-      when(io.from_temp.valid){ state := s_shared}.otherwise{state := state}
+      when(io.from_temp.valid){ state := s_shared1}.otherwise{state := state}
       cnt.reset()
     }
 //    is(s_save){
 //      when(io.to_shared.fire){state := s_shared}.otherwise{state := s_save}
 //    }
-    is(s_shared){
+    is(s_shared1){
+      when(io.to_shared.ready){
+        state := s_shared2
+      }.otherwise{
+        state := s_shared1
+      }
+    }
+    is(s_shared2){
+      state := s_shared3
+    }
+    is(s_shared3){
       when(io.to_shared.fire){
         when(cnt.value >= current_numgroup || mask_next.asUInt === 0.U){
           cnt.reset()
           state := s_idle
         }.otherwise{
-          cnt.inc();state := s_shared
+          cnt.inc();state := s_shared1
         }
-      }.otherwise{state := s_shared}
+      }.otherwise{state := s_shared3}
     }
   }
 
@@ -452,9 +466,48 @@ class Addrcalc_shared() extends Module {
       when(io.from_temp.fire){
         reg_save := io.from_temp.bits
 //        reg_save.mask :=  io.from_temp.bits.mask
+        output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
+        current_mask_index := RegInit(VecInit(Seq.fill(numgroupinstmax)(0.U(log2Up(numgroupinstmax).W))))
       }.otherwise{ reg_save := RegInit(0.U.asTypeOf((new TempOutput)))}
     }
-    is(s_shared){
+    is(s_shared1){
+      var cnt_mask = 0
+      (0 until numgroupinstmax).foreach( x => {
+        when(current_mask(x)){
+          current_mask_index(cnt_mask) := x.asUInt
+        }
+      })
+    }
+    is(s_shared2){
+//      var cnt_group = 0
+      (0 until(num_thread)).foreach(x =>{
+        when(current_mask_index(x).asUInt =/= 0.U){
+          when(x.asUInt === 0.U){
+            output_reg.perLaneAddr(x).blockOffset := blockOffset(current_mask_index(x))
+            output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(current_mask_index(x))
+            output_reg.perLaneAddr(x).activeMask := true.B
+            output_reg.data(x) := reg_save.data(current_mask_index(x))
+//            cnt_group = cnt_group + 1
+          }.otherwise{
+            output_reg.perLaneAddr(x).blockOffset := 0.U
+            output_reg.perLaneAddr(x).wordOffset1H := 0.U
+            output_reg.perLaneAddr(x).activeMask := false.B
+            output_reg.data(x) := 0.U
+          }
+        }.otherwise{
+          output_reg.perLaneAddr(x).blockOffset := blockOffset(current_mask_index(x))
+          output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(current_mask_index(x))
+          output_reg.perLaneAddr(x).activeMask := true.B
+          output_reg.data(x) := reg_save.data(current_mask_index(x))
+        }
+
+      })
+
+      output_reg.instrId := reg_save.entry_index
+      output_reg.isWrite := true.B
+      output_reg.setIdx := setIdx
+    }
+    is(s_shared3){
       when(io.to_shared.fire){
         reg_save.mask := mask_next
       }.otherwise{
@@ -508,6 +561,15 @@ class TMA_Copysize extends Module{
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val fence_end_tma = DecoupledIO(UInt(32.W))
   })
+  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+
+
+
   val InputFIFO = Module(new Queue(new vExeData, entries=1, pipe=true))
   InputFIFO.io.enq <> io.tma_req
   val addrCalc_l2cache = Module(new AddrCalc_l2cache)

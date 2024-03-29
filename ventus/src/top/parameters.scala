@@ -69,7 +69,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_BlockWords: Int = 2//num_thread
   def dcache_wshr_entry: Int = 4
 
-  def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
+  def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets) // 5
 
   def BytesOfWord = 32 / 8
 
@@ -78,6 +78,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_BlockOffsetBits = log2Ceil(dcache_BlockWords) // select word in block
 
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
+  // 32 - (5 + 1 + 2)
 
   def dcache_MshrEntry: Int = 4
 
@@ -94,7 +95,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_NWays: Int = 4
 
-  def l2cache_BlockWords: Int = dcache_BlockWords
+//  def l2cache_BlockWords: Int = dcache_BlockWords
+  def l2cache_BlockWords: Int = 32 //tma
 
   def l2cache_writeBytes: Int = 1
 
@@ -169,8 +171,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var cacheline = 128 //bytes
   var l2cacheline = cacheline
   var sharedcacheline = cacheline
-  var l2cachetagbits = 16
-  var l2cachesetbits = 4
+  var l2cachetagbits = 26
+  var l2cachesetbits = 1
   var sharedsetbits = 16
   def addr_tag_bits = l2cachetagbits + l2cachesetbits
   def numgroupl2cache = l2cacheline / tma_aligned
