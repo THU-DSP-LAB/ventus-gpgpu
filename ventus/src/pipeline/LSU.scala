@@ -14,6 +14,7 @@ import top.parameters._
 import chisel3._
 import chisel3.util._
 import IDecode._
+import mmu.SV32.asidLen
 
 class toShared extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
@@ -37,6 +38,7 @@ class DCacheCoreReq_np extends Bundle{
 //  val isWrite = Bool()
   val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(dcache_SetIdxBits.W)
+  val ASID = UInt(asidLen.W)
   val perLaneAddr = Vec(num_thread, new DCachePerLaneAddr)
   val data = Vec(num_thread, UInt(xLen.W))
   val opcode = UInt(3.W)

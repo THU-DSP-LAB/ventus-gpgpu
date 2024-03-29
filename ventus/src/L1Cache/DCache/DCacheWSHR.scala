@@ -3,10 +3,11 @@ package L1Cache.DCache
 import L1Cache._
 import chisel3._
 import chisel3.util._
+import mmu.SV32.paLen
 import top.parameters._
 
 class WSHRreq extends Bundle{
-  val blockAddr = UInt((dcache_SetIdxBits+dcache_TagBits).W)
+  val blockAddr = UInt((paLen - dcache_BlockOffsetBits - dcache_WordOffsetBits).W)//UInt((dcache_SetIdxBits+dcache_TagBits).W)
 }
 class DCacheWSHR(Depth:Int) extends Module{
   val io = IO(new Bundle{
@@ -21,7 +22,7 @@ class DCacheWSHR(Depth:Int) extends Module{
   })
  // assert(!(io.pushReq.valid && io.popReq.valid),"WSHR cant pop and push in same cycle")
 
-  val blockAddrEntries = RegInit(VecInit(Seq.fill(Depth)(0.U((dcache_SetIdxBits+dcache_TagBits).W))))
+  val blockAddrEntries = RegInit(VecInit(Seq.fill(Depth)(0.U((paLen - dcache_BlockOffsetBits - dcache_WordOffsetBits).W))))
   val valid: Vec[Bool] = RegInit(VecInit(Seq.fill(Depth)(false.B)))
   io.empty := !valid.reduceTree(_|_)
 

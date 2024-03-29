@@ -13,17 +13,19 @@ package L1Cache
 import SRAMTemplate._
 import chisel3._
 import chisel3.util._
+import freechips.rocketchip.rocket.ASIdBits
 import top.parameters._
 class tagCheckerResult(way: Int) extends Bundle{
   val waymask = UInt(way.W)
   val hit = Bool()
 }
 //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
-class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Module{
+class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boolean)extends Module{
   val io = IO(new Bundle {
     //From coreReq_pipe0
     val probeRead = Flipped(Decoupled(new SRAMBundleA(set)))//Probe Channel
     val tagFromCore_st1 = Input(UInt(tagBits.W))
+    val asidFromCore_st1 = Input(UInt(AsidBits.W))
     val probeIsWrite_st1 = if(!readOnly){Some(Input(Bool()))} else None
     //val coreReqReady = Input(Bool())//TODO try to replace with probeRead.fire
     //To coreReq_pipe1
@@ -32,6 +34,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //From memRsp_pipe0
     val allocateWrite = Flipped(ValidIO(new SRAMBundleA(set)))//Allocate Channel
     val allocateWriteData_st1 = Input(UInt(tagBits.W))
+    val allocateWriteAsid_st1 = Input(UInt(AsidBits.W))
     //From memRsp_pipe1
     val allocateWriteTagSRAMWValid_st1 = Input(Bool())
     //To memRsp_pipe1
@@ -42,11 +45,13 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val a_addrReplacement_st1 = if (!readOnly) {
       Some(Output(UInt(xLen.W)))
     } else None
+    val asidReplacement_st1 = Output(UInt(AsidBits.W))
     //For InvOrFlu
     val hasDirty_st0 = if (!readOnly) {Some(Output(Bool()))} else None
     val dirtySetIdx_st0 = if (!readOnly) {Some(Output(UInt(log2Up(set).W)))} else None
     val dirtyWayMask_st0 = if (!readOnly) {Some(Output(UInt(way.W)))} else None
     val dirtyTag_st1 = if (!readOnly) {Some(Output(UInt(tagBits.W)))} else None
+    val dirtyASID_st1 = if (!readOnly) {Some(Output(UInt(AsidBits.W)))} else None
     //For InvOrFlu and LRSC
     val flushChoosen = if (!readOnly) {Some(Flipped(ValidIO(UInt((log2Up(set)+way).W))))} else None
     //For Inv
@@ -93,6 +98,22 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     //io.allocateWrite.ready := tagAccessRArb.io.in(0).ready
   }
 
+  // SRAM for storing ASID tag
+
+  val ASIDAccess = Module(new SRAMTemplate(
+    UInt(AsidBits.W),
+    set=set,
+    way=way,
+    shouldReset = false,
+    holdRead = true,
+    singlePort = false,
+    bypassWrite = false
+  ))
+  val ASIDAccessRArb = Module(new Arbiter(new SRAMBundleA(set),2))
+   ASIDAccess.io.r.req <> ASIDAccessRArb.io.out//io.probeRead
+  ASIDAccessRArb.io.in(0) <> io.probeRead
+  ASIDAccessRArb.io.in(1).valid := !io.probeRead.valid && !io.allocateWrite.valid
+  ASIDAccessRArb.io.in(1).bits.setIdx := choosenDirtySetIdx_st0
   //SRAM for replacement policy
   //store last_access_time for LRU, or last_fill_time for FIFO
   val timeAccess = Module(new SRAMTemplate(
@@ -139,10 +160,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
 
   val allocateWrite_st1 = RegEnable(io.allocateWrite.bits, io.allocateWrite.fire)
   // ******      tag_array::probe    ******
-  val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits))
+  val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits, AsidBits = AsidBits))
   val cachehit_hold = Module(new Queue(new tagCheckerResult(way),1))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
+  iTagChecker.io.ASID_of_set := ASIDAccess.io.r.resp.data
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
+  iTagChecker.io.ASID_from_pipe := io.asidFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.probeRead.bits.setIdx,io.probeRead.fire))//st1
   ////st1
 
@@ -152,7 +175,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   cachehit_hold.io.deq.ready := probeReadBuf.ready
   //val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
   io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold.io.deq.bits.hit && cachehit_hold.io.deq.valid) && probeReadBuf.valid//RegNext(io.probeRead.fire)
-  io.waymaskHit_st1 := Mux(cachehit_hold.io.deq.valid && cachehit_hold.io.deq.bits.hit,cachehit_hold.io.deq.bits.waymask,iTagChecker.io.waymask)
+  io.waymaskHit_st1 := Mux(cachehit_hold.io.deq.valid & cachehit_hold.io.deq.bits.hit,cachehit_hold.io.deq.bits.waymask,iTagChecker.io.waymask)
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
@@ -176,12 +199,17 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
   io.waymaskReplacement_st1 := Replacement.io.waymask_st1//tag_array::replace_choice
   val tagnset = Cat(tagBodyAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1)), //tag
     allocateWrite_st1.setIdx)
+  val asidReplacement_st1 = ASIDAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1))
   if (!readOnly) {
     io.a_addrReplacement_st1.get := Cat(tagnset, //setIdx
       0.U((dcache_BlockOffsetBits + dcache_WordOffsetBits).W)) //blockOffset+wordOffset
   }
+  io.asidReplacement_st1 := asidReplacement_st1
   tagBodyAccess.io.w.req.valid := io.allocateWriteTagSRAMWValid_st1//meta_entry_t::allocate
   tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
+  ASIDAccess.io.w.req.valid := io.allocateWriteTagSRAMWValid_st1
+  ASIDAccess.io.w.req.bits.apply(data = io.allocateWriteAsid_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
+
   when(RegNext(io.allocateWrite.fire) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
     way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
   }.elsewhen(io.invalidateAll){//tag_array::invalidate_all()
@@ -198,6 +226,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     val choosenDirtySetValid = Wire(Vec(way, Bool()))
     val choosenDirtyWayMask_st0 = Wire(UInt(way.W))//OH
     val choosenDirtyTag_st1 = Wire(UInt(tagBits.W))
+    val choosenDirtyASID_st1 = Wire(UInt(AsidBits.W))
     //set一般值为128。
     //评估后，每set配priority mux的成本约为所有set普通mux后共用priority mux的5-6倍，
     //代价是普通 mux 7个2in1 mux的延迟。
@@ -210,10 +239,12 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     choosenDirtySetValid := way_dirtyAfterValid(choosenDirtySetIdx_st0)
     choosenDirtyWayMask_st0 := VecInit(PriorityEncoderOH(choosenDirtySetValid)).asUInt
     choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(choosenDirtyWayMask_st0)
+    choosenDirtyASID_st1 := ASIDAccess.io.r.resp.data(choosenDirtyWayMask_st0)
     //val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
     //val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
     io.dirtyTag_st1.get := choosenDirtyTag_st1
     io.dirtySetIdx_st0.get := choosenDirtySetIdx_st0
+    io.dirtyASID_st1.get := choosenDirtyASID_st1
     io.dirtyWayMask_st0.get := choosenDirtyWayMask_st0
     io.hasDirty_st0.get := hasDirty_st0//RegNext(hasDirty_st0)
   }
@@ -255,11 +286,13 @@ class ReplacementUnit(timeLength:Int, way: Int, debug:Boolean=false) extends Mod
     }
   }
 }
-class tagChecker(way: Int, tagIdxBits: Int) extends Module{
+class tagChecker(way: Int, tagIdxBits: Int, AsidBits: Int) extends Module{
   val io = IO(new Bundle {
     val tag_of_set = Input(Vec(way,UInt(tagIdxBits.W)))//MSB the valid bit
+    val ASID_of_set = Input(Vec(way,UInt(AsidBits.W)))
     //val valid_of_set = Input(Vec(way,Bool()))
     val tag_from_pipe = Input(UInt(tagIdxBits.W))
+    val ASID_from_pipe = Input(UInt(AsidBits.W))
     val way_valid = Input(Vec(way,Bool()))
 
     val waymask = Output(UInt(way.W))//one hot
@@ -267,8 +300,12 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
   })
 
   //io.waymask := Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid})
+  val tagMatch = Wire(UInt(way.W))
+  val ASIDMatch = Wire(UInt(way.W))
+  tagMatch :=   Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
+  ASIDMatch := Reverse(Cat(io.ASID_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.ASID_from_pipe) && valid}))
 
-  io.waymask := Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
+  io.waymask := tagMatch & ASIDMatch //Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
   //io.waymask := Reverse(Cat(io.tag_of_set.map{ tag => (tag(tagIdxBits-1,0) === io.tag_from_pipe) && tag(tagIdxBits)}))
   assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
   io.cache_hit := io.waymask.orR
@@ -294,14 +331,17 @@ class minIdxTree(width: Int, numInput: Int) extends Module{
 
   io.idxOfMin := candVec.reduceTree(minWithIdx(_,_)).index
 }
-class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int)extends Module{
+class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends Module{
   //This module contain Tag memory, its valid bits, tag comparator, and Replacement Unit
   val io = IO(new Bundle {
     val r = Flipped(new SRAMReadBus(UInt(tagBits.W), set, way))
+    val r_asid = Flipped(new SRAMReadBus(UInt(AsidBits.W), set, way))
     val tagFromCore_st1 = Input(UInt(tagBits.W))
+    val asidFromCore_st1 = Input(UInt(AsidBits.W))
     val coreReqReady = Input(Bool())
 
     val w = Flipped(new SRAMWriteBus(UInt(tagBits.W), set, way))
+    val w_asid = Flipped(new SRAMWriteBus(UInt(AsidBits.W), set, way))
 
     val waymaskReplacement = Output(UInt(way.W))//one hot, for SRAMTemplate
     val waymaskHit_st1 = Output(UInt(way.W))
@@ -317,15 +357,27 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int)extends Module{
     singlePort = false,
     bypassWrite = false
   ))
+  val asidAccess = Module(new SRAMTemplate(
+    UInt(AsidBits.W),
+    set = set,
+    way = way,
+    shouldReset = false,
+    holdRead = true,
+    singlePort = false,
+    bypassWrite = false
+  ))
   tagBodyAccess.io.r <> io.r
+  asidAccess.io.r <> io.r_asid
 
   val way_valid = RegInit(VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(0.U(1.W))))))
   //val way_valid = Mem(set, UInt(way.W))
 
   // ******      TagChecker    ******
-  val iTagChecker = Module(new tagChecker(way = way, tagIdxBits = tagBits))
+  val iTagChecker = Module(new tagChecker(way = way, tagIdxBits = tagBits, AsidBits = AsidBits))
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data //st1
   iTagChecker.io.tag_from_pipe := io.tagFromCore_st1
+  iTagChecker.io.ASID_of_set := asidAccess.io.r.resp.data
+  iTagChecker.io.ASID_from_pipe := io.asidFromCore_st1
   iTagChecker.io.way_valid := way_valid(RegEnable(io.r.req.bits.setIdx, io.coreReqReady)) //st1
   io.waymaskHit_st1 := iTagChecker.io.waymask //st1
   io.hit_st1 := iTagChecker.io.cache_hit
@@ -335,8 +387,12 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int)extends Module{
   Replacement.io.validbits_of_set := Cat(way_valid(io.w.req.bits.setIdx))
   io.waymaskReplacement := Replacement.io.waymask
   tagBodyAccess.io.w.req.valid := io.w.req.valid
+  asidAccess.io.w.req.valid := io.w_asid.req.valid
+  io.w_asid.req.ready := asidAccess.io.w.req.ready
   io.w.req.ready := tagBodyAccess.io.w.req.ready
   tagBodyAccess.io.w.req.bits.apply(data = io.w.req.bits.data, setIdx = io.w.req.bits.setIdx, waymask = Replacement.io.waymask)
+  asidAccess.io.w.req.bits.apply(data = io.w_asid.req.bits.data, setIdx = io.w_asid.req.bits.setIdx, waymask = Replacement.io.waymask)
+
   when(io.w.req.valid && !Replacement.io.Set_is_full) {
     way_valid(io.w.req.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
   }
