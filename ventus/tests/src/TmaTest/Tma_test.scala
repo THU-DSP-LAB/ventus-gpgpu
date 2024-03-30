@@ -111,7 +111,8 @@ class Tma_test
 //          in3 = Seq(BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16)),
 //          mask = Seq(false.B,false.B,false.B,false.B)
 //        )
-      def genBundle_zero(): CtrlSigs = (new CtrlSigs).Lit(
+      def genBundle_zero(): CtrlSigs = {
+        val ctrlsigs = (new CtrlSigs).Lit(
         _.inst -> 0.U,
         _.wid -> 0.U,
         _.fp -> false.B,
@@ -151,11 +152,19 @@ class Tma_test
         _.wxd -> false.B,
         _.pc -> 0.U,
         _.imm_ext -> 0.U,
-        _.spike_info -> None,
         _.atomic -> false.B,
         _.aq -> false.B,
         _.rl -> false.B
       )
+      ctrlsigs.spike_info match {
+        case Some(spikeInfo) =>
+          spikeInfo.pc := 0.U
+          spikeInfo.inst := 0.U
+        case None => {}
+      }
+      ctrlsigs
+
+      }
         val myData = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90000000",16)),
           in2 = Seq.fill(num_thread)(BigInt("70000000",16)),
