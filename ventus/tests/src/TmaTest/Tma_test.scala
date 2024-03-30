@@ -30,6 +30,7 @@ class Tma_test
         val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
 //        val fence_end_tma = DecoupledIO(UInt(32.W))
       })
+
       val internal = Module(new TMA_Copysize())
       internal.io.tma_req <> Queue(io.in, 1)
       io.out <> Queue( internal.io.fence_end_tma, 1)
@@ -87,14 +88,16 @@ class Tma_test
                                 in1: Seq[BigInt],
                                 in2: Seq[BigInt],
                                 in3: Seq[BigInt],
-                                mask:Seq[Bool]
+                                mask:Seq[Bool],
+                                ctrl:CtrlSigs
                                 )
         def makeData(in: vExeData_Soft): vExeData = {
           (new vExeData).Lit(
             _.in1 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in1.zipWithIndex.map{case (d, i) => (i, d.U)}:_*),
               _.in2 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in2.zipWithIndex.map{case (d, i) => (i, d.U)}:_*),
               _.in3 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in3.zipWithIndex.map{case (d, i) => (i, d.U)}:_*),
-              _.mask -> Vec(num_thread,Bool()).Lit(in.mask.zipWithIndex.map{case (d, i) => (i, d)}:_*)
+              _.mask -> Vec(num_thread,Bool()).Lit(in.mask.zipWithIndex.map{case (d, i) => (i, d)}:_*),
+            _.ctrl -> in.ctrl
           )
         }
 //        def f(a: Int, b: Int, c:Int), then f(1,2,3) 等价于 f(Seq(1,2,3):_*)
@@ -108,16 +111,69 @@ class Tma_test
 //          in3 = Seq(BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16)),
 //          mask = Seq(false.B,false.B,false.B,false.B)
 //        )
+      def genBundle_zero(): CtrlSigs = (new CtrlSigs).Lit(
+        _.inst -> 0.U,
+        _.wid -> 0.U,
+        _.fp -> false.B,
+        _.branch -> 0.U,
+        _.simt_stack -> false.B,
+        _.simt_stack_op -> false.B,
+        _.barrier -> false.B,
+        _.csr -> 0.U,
+        _.reverse -> false.B,
+        _.sel_alu2 -> 0.U,
+        _.sel_alu1 -> 0.U,
+        _.isvec -> false.B,
+        _.sel_alu3 -> 0.U,
+        _.mask -> false.B,
+        _.sel_imm -> 0.U,
+        _.mem_whb -> 0.U,
+        _.mem_unsigned -> false.B,
+        _.alu_fn -> 0.U,
+        _.force_rm_rtz -> false.B,
+        _.is_vls12 -> false.B,
+        _.mem -> false.B,
+        _.mul -> false.B,
+        _.tc -> false.B,
+        _.disable_mask -> false.B,
+        _.custom_signal_0 -> false.B,
+        _.mem_cmd -> 0.U,
+        _.mop -> 0.U,
+        _.reg_idx1 -> 0.U,
+        _.reg_idx2 -> 0.U,
+        _.reg_idx3 -> 0.U,
+        _.reg_idxw -> 0.U,
+        _.wvd -> false.B,
+        _.fence -> false.B,
+        _.sfu -> false.B,
+        _.readmask -> false.B,
+        _.writemask -> false.B,
+        _.wxd -> false.B,
+        _.pc -> 0.U,
+        _.imm_ext -> 0.U,
+        _.spike_info -> None,
+        _.atomic -> false.B,
+        _.aq -> false.B,
+        _.rl -> false.B
+      )
         val myData = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90000000",16)),
           in2 = Seq.fill(num_thread)(BigInt("70000000",16)),
           in3 = Seq.fill(num_thread)(BigInt("00000010",16)),
-          mask = Seq.fill(num_thread)(true.B)
+          mask = Seq.fill(num_thread)(true.B),
+          ctrl = genBundle_zero()
         )
+//        val myData2 = vExeData_Soft(
+//          in1 = Seq.fill(num_thread)(BigInt("90000000",16)),
+//          in2 = Seq.fill(num_thread)(BigInt("70000000",16)),
+//          in3 = Seq.fill(num_thread)(BigInt("00000010",16)),
+//          mask = Seq.fill(num_thread)(true.B)
+//        )
 
 
         val req_list = Seq(
           makeData(myData),
+//          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
         val tma_sender = new RequestSender[vExeData, UInt](d.io.in, d.io.out)
@@ -127,7 +183,8 @@ class Tma_test
 //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty && clock_cnt <= 1000) {
+        while (tma_sender.send_list.nonEmpty && clock_cnt <= 100000) {
+//        while (clock_cnt <= 100000) {
 
           tma_sender.eval()
 
