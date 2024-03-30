@@ -73,7 +73,7 @@ class TempOutput extends Bundle{
 //}
 class l2cache2temp extends Module {
   val io = IO(new Bundle{
-    val from_l2cache = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
+    val from_l2cache = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
     val l22temp = DecoupledIO(new l2cache_transform(l2cache_params))
   })
   io.l22temp.valid := io.from_l2cache.valid
@@ -554,19 +554,16 @@ class TMA_Copysize extends Module{
                            maybe 4*4*2 byte one cp.async
     vExeData.ctrl.memw/h/b: data type : determine the mask sent to L1 cache
     */
-    val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
+    val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
     val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
     //output
     val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val fence_end_tma = DecoupledIO(UInt(32.W))
   })
-  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
-  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
-  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
-  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
-  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
-  printf("dut: %d \n",io.tma_req.bits.in1(0).asUInt)
+  printf("l2req: %d \n",io.l2cache_req.bits.address.asUInt)
+  printf("l2req.valid: %b \n",io.l2cache_req.valid.asUInt)
+  printf("l2rsp: %d \n",io.l2cache_rsp.bits.data.asUInt)
 
 
 

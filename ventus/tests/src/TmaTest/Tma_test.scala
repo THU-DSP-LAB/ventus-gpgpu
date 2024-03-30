@@ -25,7 +25,7 @@ class Tma_test
         //        val out = DecoupledIO(new TmaRsp2pipe())
         val out = DecoupledIO(UInt(32.W))
         val l2_req = DecoupledIO(new TLBundleA_lite(l2cache_params))
-        val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
+        val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
         val shared_req = DecoupledIO(new ShareMemCoreReq_np())
         val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
         //        val fence_end_tma = DecoupledIO(UInt(32.W))
@@ -185,7 +185,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty && clock_cnt <= 100000) {
+        while (tma_sender.send_list.nonEmpty) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()
