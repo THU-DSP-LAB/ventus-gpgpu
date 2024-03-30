@@ -157,9 +157,9 @@ class Tma_test
         _.rl -> false.B
       )
       ctrlsigs.spike_info match {
-        case Some(spikeInfo) =>
-          spikeInfo.pc := 0.U
-          spikeInfo.inst := 0.U
+        case Some(spikeInfo: InstWriteBack) =>
+          spikeInfo.pc -> 0.U
+          spikeInfo.inst -> 0.U
         case None => {}
       }
       ctrlsigs

@@ -62,7 +62,7 @@ object TestUtils {
               next_state = Idle
             case x if x.head._2 == 0 =>
               reqPort.valid.poke(true.B)
-//              println(x.head._1)
+              println(x.head._1)
               reqPort.bits.poke(x.head._1)
               next_state = SendingReq
             case _ =>
