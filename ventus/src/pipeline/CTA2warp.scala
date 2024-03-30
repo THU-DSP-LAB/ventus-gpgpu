@@ -22,6 +22,7 @@ class CTAreqData extends Bundle{
   val dispatch2cu_wf_tag_dispatch    = (UInt(TAG_WIDTH.W))
   val dispatch2cu_lds_base_dispatch  = (UInt((LDS_ID_WIDTH + 1).W))
   val dispatch2cu_start_pc_dispatch  = (UInt(MEM_ADDR_WIDTH.W))
+  val dispatch2cu_knl_asid_dispatch  = (UInt(KNL_ASID_WIDTH.W))
   val dispatch2cu_pds_base_dispatch = UInt(MEM_ADDR_WIDTH.W)
   val dispatch2cu_gds_base_dispatch = UInt(MEM_ADDR_WIDTH.W)
   val dispatch2cu_csr_knl_dispatch = UInt(MEM_ADDR_WIDTH.W)
@@ -39,6 +40,7 @@ class warpReqData extends Bundle{
 }
 class warpRspData extends Bundle{
   val wid = UInt(depth_warp.W)
+  val asid = UInt(KNL_ASID_WIDTH.W)
 }
 
 class CTA2warp extends Module{

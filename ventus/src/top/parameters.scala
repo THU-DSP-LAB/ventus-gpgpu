@@ -154,6 +154,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var TAG_WIDTH = WG_SLOT_ID_WIDTH + WF_COUNT_WIDTH_PER_WG
   var INIT_MAX_WG_COUNT = NUMBER_WF_SLOTS
   var NUM_SCHEDULER_WIDTH = log2Ceil(NUM_SCHEDULER)
+  var KNL_ASID_WIDTH = mmu.SV32.asidLen
 
   val NUM_WG_X=1024 // max wg num in kernel
   val NUM_WG_Y=1024

@@ -32,6 +32,7 @@ class host2CTA_data extends Bundle{
   val host_num_wf           = (UInt(WF_COUNT_WIDTH.W))
   val host_wf_size          = (UInt(WAVE_ITEM_WIDTH.W))
   val host_start_pc         = (UInt(MEM_ADDR_WIDTH.W))
+  val host_kernel_asid      = (UInt(KNL_ASID_WIDTH.W))
   val host_kernel_size_3d   = Vec(3, UInt(WG_SIZE_X_WIDTH.W))
   val host_pds_baseaddr     = (UInt(MEM_ADDR_WIDTH.W))
   val host_csr_knl          = (UInt(MEM_ADDR_WIDTH.W))
@@ -59,6 +60,7 @@ class CTAinterface extends Module{
   cta_sche.io.host_num_wf           := io.host2CTA.bits.host_num_wf
   cta_sche.io.host_wf_size          := io.host2CTA.bits.host_wf_size
   cta_sche.io.host_start_pc         := io.host2CTA.bits.host_start_pc
+  cta_sche.io.host_kernel_asid      := io.host2CTA.bits.host_kernel_asid
   cta_sche.io.host_kernel_size_3d   := io.host2CTA.bits.host_kernel_size_3d
   cta_sche.io.host_pds_baseaddr     := io.host2CTA.bits.host_pds_baseaddr
   cta_sche.io.host_csr_knl          := io.host2CTA.bits.host_csr_knl
@@ -89,6 +91,7 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_wf_tag_dispatch    := cta_sche.io.dispatch2cu_wf_tag_dispatch
     io.CTA2warp(i).bits.dispatch2cu_lds_base_dispatch  := cta_sche.io.dispatch2cu_lds_base_dispatch
     io.CTA2warp(i).bits.dispatch2cu_start_pc_dispatch  := cta_sche.io.dispatch2cu_start_pc_dispatch
+    io.CTA2warp(i).bits.dispatch2cu_knl_asid_dispatch  := cta_sche.io.dispatch2cu_kernel_asid_dispatch
     io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch := cta_sche.io.dispatch2cu_gds_base_dispatch
     io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch := cta_sche.io.dispatch2cu_pds_baseaddr_dispatch
     io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch := cta_sche.io.dispatch2cu_csr_knl_dispatch
