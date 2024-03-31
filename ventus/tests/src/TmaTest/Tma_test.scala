@@ -94,7 +94,7 @@ class Tma_test
 
         def makeData(in: vExeData_Soft): vExeData = {
           (new vExeData).Lit(
-            _.in1 -> (Vec(num_thread, UInt(xLen.W)).Lit(in.in1.zipWithIndex.map { case (d, i) => (i, d.U) }: _*)),
+            _.in1 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in1.zipWithIndex.map { case (d, i) => (i, d.U) }: _*),
             _.in2 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in2.zipWithIndex.map { case (d, i) => (i, d.U) }: _*),
             _.in3 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in3.zipWithIndex.map { case (d, i) => (i, d.U) }: _*),
             _.mask -> Vec(num_thread, Bool()).Lit(in.mask.zipWithIndex.map { case (d, i) => (i, d) }: _*),
@@ -155,14 +155,9 @@ class Tma_test
             _.imm_ext -> 0.U,
             _.atomic -> false.B,
             _.aq -> false.B,
-            _.rl -> false.B
+            _.rl -> false.B,
+            _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U)
           )
-          ctrlsigs.spike_info match {
-            case Some(spikeInfo: InstWriteBack) =>
-              spikeInfo.pc -> 0.U
-              spikeInfo.inst -> 0.U
-            case None => {}
-          }
           ctrlsigs
 
         }

@@ -7,6 +7,7 @@ import chisel3.util._
 import chiseltest._
 import pipeline.vExeData
 import top._
+import top.parameters.num_thread
 
 object TestUtils {
   def checkForValid[T <: Data](port: DecoupledIO[T]): Boolean = port.valid.peek().litToBoolean
@@ -21,7 +22,7 @@ object TestUtils {
     def transform(in: A): B
   }
 
-  class RequestSender[A <: Data, B <: Data](
+  class RequestSender[A <: vExeData, B <: Data](
                                              val reqPort: DecoupledIO[A],
                                              val rspPort: DecoupledIO[B]
                                            ) extends IOTestDriver[A, B] {
@@ -63,20 +64,27 @@ object TestUtils {
               next_state = Idle
             case x if x.head._2 == 0 =>
               reqPort.valid.poke(true.B)
-
-              x.head._1 match {
-                case data: vExeData =>
-//                  printf(p"myData.in1: ${data.in1}\n")
-//                  printf(p"myData.in2: ${data.in2}\n")
-//                  printf(p"myData.in3: ${data.in3}\n")
-//                  printf(p"myData.mask: ${data.mask}\n")
-//                  printf(p"myData.ctrl.inst: ${data.ctrl.inst}\n")
-                  println(x.head._1)
-                case _ => // 不是vExeData_Soft类型或无法判断类型
-                // 不执行任何操作或处理其他类型
-              }
-
+//              x.head._1 match {
+//                case data: vExeData =>
+////                  printf(p"myData.in1: ${data.in1}\n")
+////                  printf(p"myData.in2: ${data.in2}\n")
+////                  printf(p"myData.in3: ${data.in3}\n")
+////                  printf(p"myData.mask: ${data.mask}\n")
+////                  printf(p"myData.ctrl.inst: ${data.ctrl.inst}\n")
+//                  println(x.head._1)
+//
+//                  reqPort.bits.in1.poke(data.in1)
+//                  reqPort.bits.in2.poke(data.in2)
+//                  reqPort.bits.in3.poke(data.in3)
+//                  reqPort.bits.mask.poke(data.mask)
+//                  reqPort.bits.ctrl.poke(data.ctrl)
+//
+//                case _ => // 不是vExeData_Soft类型或无法判断类型
+//                  reqPort.bits.poke(x.head._1)
+//              }
               reqPort.bits.poke(x.head._1)
+              
+
               next_state = SendingReq
             case _ =>
               reqPort.valid.poke(false.B)
