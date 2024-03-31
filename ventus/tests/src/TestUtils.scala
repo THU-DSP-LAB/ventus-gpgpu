@@ -5,6 +5,7 @@ import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import chiseltest._
+import pipeline.vExeData
 import top._
 
 object TestUtils {
@@ -62,7 +63,19 @@ object TestUtils {
               next_state = Idle
             case x if x.head._2 == 0 =>
               reqPort.valid.poke(true.B)
-              println(x.head._1)
+
+              x.head._1 match {
+                case data: vExeData =>
+//                  printf(p"myData.in1: ${data.in1}\n")
+//                  printf(p"myData.in2: ${data.in2}\n")
+//                  printf(p"myData.in3: ${data.in3}\n")
+//                  printf(p"myData.mask: ${data.mask}\n")
+//                  printf(p"myData.ctrl.inst: ${data.ctrl.inst}\n")
+                  println(x.head._1)
+                case _ => // 不是vExeData_Soft类型或无法判断类型
+                // 不执行任何操作或处理其他类型
+              }
+
               reqPort.bits.poke(x.head._1)
               next_state = SendingReq
             case _ =>

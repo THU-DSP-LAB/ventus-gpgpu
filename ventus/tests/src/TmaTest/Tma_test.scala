@@ -18,26 +18,26 @@ class Tma_test
   extends AnyFreeSpec
     with ChiselScalatestTester {
   "TMA Main" in {
-    class TmaRsp2pipe extends Bundle{}
+    class TmaRsp2pipe extends Bundle {}
     class TmaWrapper() extends Module {
       val io = IO(new Bundle() {
         val in = Flipped(DecoupledIO(new vExeData()))
-//        val out = DecoupledIO(new TmaRsp2pipe())
+        //        val out = DecoupledIO(new TmaRsp2pipe())
         val out = DecoupledIO(UInt(32.W))
         val l2_req = DecoupledIO(new TLBundleA_lite(l2cache_params))
         val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite_plus(l2cache_params)))
         val shared_req = DecoupledIO(new ShareMemCoreReq_np())
         val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
-//        val fence_end_tma = DecoupledIO(UInt(32.W))
+        //        val fence_end_tma = DecoupledIO(UInt(32.W))
       })
 
       val internal = Module(new TMA_Copysize())
       internal.io.tma_req <> Queue(io.in, 1)
-      io.out <> Queue( internal.io.fence_end_tma, 1)
+      io.out <> Queue(internal.io.fence_end_tma, 1)
       io.shared_req <> Queue(internal.io.shared_req, 1)
       internal.io.shared_rsp <> Queue(io.shared_rsp, 1)
 
-//      Queue(internal.io.shared_rsp, 1) <> io.shared_rsp
+      //      Queue(internal.io.shared_rsp, 1) <> io.shared_rsp
 
       val pipe_l2_req =
         Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, insulate = true))
@@ -85,119 +85,117 @@ class Tma_test
 
 
         case class vExeData_Soft(
-                                in1: Seq[BigInt],
-                                in2: Seq[BigInt],
-                                in3: Seq[BigInt],
-                                mask:Seq[Bool],
-                                ctrl:CtrlSigs
+                                  in1: Seq[BigInt],
+                                  in2: Seq[BigInt],
+                                  in3: Seq[BigInt],
+                                  mask: Seq[Bool],
+                                  ctrl: CtrlSigs
                                 )
+
         def makeData(in: vExeData_Soft): vExeData = {
           (new vExeData).Lit(
-            _.in1 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in1.zipWithIndex.map{case (d, i) => (i, d.U)}:_*),
-              _.in2 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in2.zipWithIndex.map{case (d, i) => (i, d.U)}:_*),
-              _.in3 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in3.zipWithIndex.map{case (d, i) => (i, d.U)}:_*),
-              _.mask -> Vec(num_thread,Bool()).Lit(in.mask.zipWithIndex.map{case (d, i) => (i, d)}:_*),
+            _.in1 -> (Vec(num_thread, UInt(xLen.W)).Lit(in.in1.zipWithIndex.map { case (d, i) => (i, d.U) }: _*)),
+            _.in2 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in2.zipWithIndex.map { case (d, i) => (i, d.U) }: _*),
+            _.in3 -> Vec(num_thread, UInt(xLen.W)).Lit(in.in3.zipWithIndex.map { case (d, i) => (i, d.U) }: _*),
+            _.mask -> Vec(num_thread, Bool()).Lit(in.mask.zipWithIndex.map { case (d, i) => (i, d) }: _*),
             _.ctrl -> in.ctrl
           )
         }
-//        def f(a: Int, b: Int, c:Int), then f(1,2,3) 等价于 f(Seq(1,2,3):_*)
-//        Seq('a', 'b').zipWithIndex 相当于 Seq(0 -> 'a', 1 -> 'b')
+        //        def f(a: Int, b: Int, c:Int), then f(1,2,3) 等价于 f(Seq(1,2,3):_*)
+        //        Seq('a', 'b').zipWithIndex 相当于 Seq(0 -> 'a', 1 -> 'b')
 
         var clock_cnt = 0
 
-//        val myData = vExeData_Soft(
-//          in1 = Seq(BigInt("90000000",16), BigInt("90000000",16), BigInt("90000000",16), BigInt("90000000",16)),
-//          in2 = Seq(BigInt("70000000",16), BigInt("70000000",16), BigInt("70000000",16), BigInt("70000000",16)),
-//          in3 = Seq(BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16)),
-//          mask = Seq(false.B,false.B,false.B,false.B)
-//        )
-      def genBundle_zero(): CtrlSigs = {
-        val ctrlsigs = (new CtrlSigs).Lit(
-        _.inst -> 0.U,
-        _.wid -> 0.U,
-        _.fp -> false.B,
-        _.branch -> 0.U,
-        _.simt_stack -> false.B,
-        _.simt_stack_op -> false.B,
-        _.barrier -> false.B,
-        _.csr -> 0.U,
-        _.reverse -> false.B,
-        _.sel_alu2 -> 0.U,
-        _.sel_alu1 -> 0.U,
-        _.isvec -> false.B,
-        _.sel_alu3 -> 0.U,
-        _.mask -> false.B,
-        _.sel_imm -> 0.U,
-        _.mem_whb -> 0.U,
-        _.mem_unsigned -> false.B,
-        _.alu_fn -> 0.U,
-        _.force_rm_rtz -> false.B,
-        _.is_vls12 -> false.B,
-        _.mem -> false.B,
-        _.mul -> false.B,
-        _.tc -> false.B,
-        _.disable_mask -> false.B,
-        _.custom_signal_0 -> false.B,
-        _.mem_cmd -> 0.U,
-        _.mop -> 0.U,
-        _.reg_idx1 -> 0.U,
-        _.reg_idx2 -> 0.U,
-        _.reg_idx3 -> 0.U,
-        _.reg_idxw -> 0.U,
-        _.wvd -> false.B,
-        _.fence -> false.B,
-        _.sfu -> false.B,
-        _.readmask -> false.B,
-        _.writemask -> false.B,
-        _.wxd -> false.B,
-        _.pc -> 0.U,
-        _.imm_ext -> 0.U,
-        _.atomic -> false.B,
-        _.aq -> false.B,
-        _.rl -> false.B
-      )
-      ctrlsigs.spike_info match {
-        case Some(spikeInfo: InstWriteBack) =>
-          spikeInfo.pc -> 0.U
-          spikeInfo.inst -> 0.U
-        case None => {}
-      }
-      ctrlsigs
+        //        val myData = vExeData_Soft(
+        //          in1 = Seq(BigInt("90000000",16), BigInt("90000000",16), BigInt("90000000",16), BigInt("90000000",16)),
+        //          in2 = Seq(BigInt("70000000",16), BigInt("70000000",16), BigInt("70000000",16), BigInt("70000000",16)),
+        //          in3 = Seq(BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16), BigInt("00000010",16)),
+        //          mask = Seq(false.B,false.B,false.B,false.B)
+        //        )
+        def genBundle_zero(): CtrlSigs = {
+          val ctrlsigs = (new CtrlSigs).Lit(
+            _.inst -> 0.U,
+            _.wid -> 0.U,
+            _.fp -> false.B,
+            _.branch -> 0.U,
+            _.simt_stack -> false.B,
+            _.simt_stack_op -> false.B,
+            _.barrier -> false.B,
+            _.csr -> 0.U,
+            _.reverse -> false.B,
+            _.sel_alu2 -> 0.U,
+            _.sel_alu1 -> 0.U,
+            _.isvec -> false.B,
+            _.sel_alu3 -> 0.U,
+            _.mask -> false.B,
+            _.sel_imm -> 0.U,
+            _.mem_whb -> 0.U,
+            _.mem_unsigned -> false.B,
+            _.alu_fn -> 0.U,
+            _.force_rm_rtz -> false.B,
+            _.is_vls12 -> false.B,
+            _.mem -> false.B,
+            _.mul -> false.B,
+            _.tc -> false.B,
+            _.disable_mask -> false.B,
+            _.custom_signal_0 -> false.B,
+            _.mem_cmd -> 0.U,
+            _.mop -> 0.U,
+            _.reg_idx1 -> 0.U,
+            _.reg_idx2 -> 0.U,
+            _.reg_idx3 -> 0.U,
+            _.reg_idxw -> 0.U,
+            _.wvd -> false.B,
+            _.fence -> false.B,
+            _.sfu -> false.B,
+            _.readmask -> false.B,
+            _.writemask -> false.B,
+            _.wxd -> false.B,
+            _.pc -> 0.U,
+            _.imm_ext -> 0.U,
+            _.atomic -> false.B,
+            _.aq -> false.B,
+            _.rl -> false.B
+          )
+          ctrlsigs.spike_info match {
+            case Some(spikeInfo: InstWriteBack) =>
+              spikeInfo.pc -> 0.U
+              spikeInfo.inst -> 0.U
+            case None => {}
+          }
+          ctrlsigs
 
-      }
+        }
+
         val myData = vExeData_Soft(
-          in1 = Seq.fill(num_thread)(BigInt("90000000",16)),
-          in2 = Seq.fill(num_thread)(BigInt("70000000",16)),
-          in3 = Seq.fill(num_thread)(BigInt("00000010",16)),
+          in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
+          in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000010", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_zero()
         )
-//        val myData2 = vExeData_Soft(
-//          in1 = Seq.fill(num_thread)(BigInt("90000000",16)),
-//          in2 = Seq.fill(num_thread)(BigInt("70000000",16)),
-//          in3 = Seq.fill(num_thread)(BigInt("00000010",16)),
-//          mask = Seq.fill(num_thread)(true.B)
-//        )
 
+        val hw_data = makeData(myData)
 
         val req_list = Seq(
-          makeData(myData),
-//          makeData(myData2),
+          hw_data
+          //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
+
         val tma_sender = new RequestSender[vExeData, UInt](d.io.in, d.io.out)
-//        val temp = req_list.map { a =>
-//          (new vExeData())
-//            .Lit(_.in1 -> a.in1, _.in2 -> a.in2, _.in3 -> a.in3, _.ctrl -> a.ctrl, _.mask -> a.mask)
-//        }
+        //        val temp = req_list.map { a =>
+        //          (new vExeData())
+        //            .Lit(_.in1 -> a.in1, _.in2 -> a.in2, _.in3 -> a.in3, _.ctrl -> a.ctrl, _.mask -> a.mask)
+        //        }
         tma_sender.add(req_list)
 
         while (tma_sender.send_list.nonEmpty && clock_cnt <= 100000) {
-//        while (clock_cnt <= 100000) {
+          //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()
 
-//          handleL2Req(d, memory)
+          //          handleL2Req(d, memory)
           mem_driver.eval()
           d.clock.step()
           clock_cnt += 1
