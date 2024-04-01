@@ -29,8 +29,9 @@ class vExeDataTMA extends Bundle {
   //  val complete = Bool()
   val in1 = UInt(xLen.W)
   val in2 = UInt(xLen.W)
-  val in3 = UInt(xLen.W)
-  val copysize = UInt(log2Up(maxcopysize).W)
+//  val in3 = UInt(xLen.W)
+//  val copysize = UInt(log2Up(maxcopysize).W)
+  val copysize = UInt(xLen.W)
 //  val srcsize = UInt(3.W)
 //  val interleave = Bool()
   //  val im2col = Vec(2,)
@@ -61,7 +62,7 @@ class TempOutput extends Bundle{
   val entry_index = UInt(log2Up(max_tma_inst).W)
   val mask = Vec(numgroupl2cache, Bool())
   val data = Vec(numgroupl2cache, UInt((tma_aligned * 8).W))
-  val l2cacheTag = UInt(l2cachetagbits.W)
+  val l2cacheTag = UInt(xLen.W)
   val instinfo = new vExeDataTMA()
 }
 //class SharedInput extends Bundle{
@@ -85,6 +86,11 @@ class l2cache2temp extends Module {
   io.l22temp.bits.param := io.from_l2cache.bits.param
   io.l22temp.bits.size := io.from_l2cache.bits.size
   io.l22temp.bits.opcode := io.from_l2cache.bits.opcode
+//  printf("l2rsp data: %d \n",io.from_l2cache.bits.data(128,0).asUInt)
+//  printf("l22temp data: %d \n",io.l22temp.bits.data(0).asUInt)
+//  printf("l22temp data: %d \n",io.l22temp.bits.data(1).asUInt)
+//  printf("l22temp data: %d \n",io.l22temp.bits.data(2).asUInt)
+//  printf("l22temp data: %d \n",io.l22temp.bits.data(3).asUInt)
 }
 class shared2temp extends Module {
   val io = IO(new Bundle{
@@ -99,135 +105,6 @@ class shared2temp extends Module {
   io.sm2temp <> io.from_shared
 }
 
-
-class Temp_mem() extends Module {
-  val io = IO(new Bundle {
-    val from_addr = Flipped(DecoupledIO(new Bundle {
-      val tag = Input(new vExeDataTMA)
-    }))
-    val idx_entry = Output(UInt(log2Up(max_tma_inst).W))
-    val from_l2cache = Flipped(DecoupledIO(new l2cache_transform(l2cache_params)))
-    val from_shared = Flipped(DecoupledIO(new ShareMemCoreRsp_np_transform()))
-    val to_shared = DecoupledIO(new TempOutput)
-    val inst_complete = DecoupledIO(UInt(32.W))
-  })
-//  val dataFIFO =  Mem(max_l2cacheline, UInt(io.from_l2cache.bits.getWidth.W))
-  val dataFIFO =  Mem(max_l2cacheline, new l2cache_transform(l2cache_params))
-  val instMem =   Mem(max_tma_inst, new vExeDataTMA)
-  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Up(numgroupinstmax)).W))))
-  val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Up(numgroupinstmax)).W))))
-  val used_inst = RegInit(0.U(max_tma_inst.W))
-  val used_mem = RegInit(0.U(max_l2cacheline.W))
-  val complete = Wire(Vec(max_tma_inst,Bool()))
-  (0 until (max_tma_inst)).foreach(x => {
-    complete(x) := finish_cnt(x) === 0.U
-  })
-  val entry_index_reg = RegInit(VecInit(Seq.fill(max_l2cacheline)(0.U(log2Up(max_tma_inst).W))))
-  val valid_inst_entry = Mux(used_inst.andR, 0.U, PriorityEncoder(~used_inst))
-  val valid_mem_entry = Mux(used_mem.andR, 0.U, PriorityEncoder(~used_mem))
-  val output_entry = Mux(complete.asUInt.orR, PriorityEncoder(complete), 0.U)
-
-  //l2cache logic
-  val current_inst_entry_index = io.from_l2cache.bits.source(log2Up(max_tma_inst) - 1, 0).asUInt
-
-//  val current_inst_entry_index = io.from_l2cache.bits.source(log2Up(max_tma_inst) - 1, 0).asUInt
-  val tag_reg = RegInit(0.U(addr_tag_bits.W))
-  val current_inst_entry_index_reg = RegInit(0.U(log2Up(max_tma_inst).W))
-  //  val current_tag_index = PriorityEncoder(reg_req(current_inst_entry_index).l2cachetag.map(_===current_tag))
-  val current_mask_l2cache = RegInit(VecInit(Seq.fill(numgroupinstmax)(false.B)))
-  val reg_req = Reg(new vExeDataTMA)
-  val output_inst = Reg(new vExeDataTMA)
-  val output_data = Reg(new l2cache_transform(l2cache_params))
-  val source_width = output_data.source.getWidth
-  val current_tag = output_data.source(source_width - 1, source_width - 1 - addr_tag_bits + 1)
-
-  val s_idle ::s_l2cache :: s_shared :: s_reset :: Nil = Enum(4)
-  val state = RegInit(s_idle)
-  io.from_l2cache.ready := state === s_idle && !(used_mem.andR)
-  io.from_shared.ready := state === s_idle
-  io.from_addr.ready := state === s_idle && !(used_inst.andR)
-  io.inst_complete.valid := state === s_reset
-  io.idx_entry := Mux(io.from_addr.fire, valid_inst_entry, 0.U)
-  when(state===s_idle){
-    when(io.to_shared.ready && used_mem.orR){
-      state := s_l2cache
-    }.elsewhen(complete.asUInt.orR){
-      state := s_reset
-    }.otherwise{
-      state := s_idle
-    }
-  }.elsewhen(state===s_reset){
-    state:=s_idle
-  }.elsewhen(state===s_l2cache){
-//    when(io.to_shared.ready){state:=s_shared}.otherwise{state:=s_l2cache}
-    state:=s_shared
-  }.elsewhen(state===s_shared){
-    when(complete.asUInt.orR){state:=s_reset}.otherwise{state:=s_idle}
-  }.otherwise{state:=s_idle}
-
-  switch(state){
-    is(s_idle) {
-      current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
-//      output_data := 0.U
-      when(io.from_addr.fire) {
-        used_inst := used_inst.bitSet(valid_inst_entry, true.B)
-        instMem.write(valid_inst_entry, io.from_addr.bits.tag)
-        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize / tma_aligned.asUInt
-        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize / tma_aligned.asUInt
-      }
-      when(io.from_l2cache.fire) {
-        used_mem := used_mem.bitSet(valid_mem_entry, true.B)
-        dataFIFO.write(valid_mem_entry,io.from_l2cache.bits)
-        entry_index_reg(valid_mem_entry) := current_inst_entry_index
-//        reg_req := instMem.read(current_inst_entry_index)
-//        tag_reg := current_tag
-//        current_inst_entry_index_reg := current_inst_entry_index
-      }
-      when(io.from_shared.fire){
-        finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - PopCount(io.from_shared.bits.activeMask)
-      }
-      when(io.to_shared.ready){
-        output_data := dataFIFO.read(entry_index_reg(PriorityEncoder(used_mem)))
-        reg_req := instMem.read(entry_index_reg(PriorityEncoder(used_mem)))
-        current_inst_entry_index_reg := entry_index_reg(PriorityEncoder(used_mem))
-      }
-      when(complete.asUInt.orR){
-        output_inst := instMem(PriorityEncoder(complete.asUInt))
-      }
-    }
-    is(s_l2cache){
-      (0 until (numgroupl2cache)).foreach(x => {
-        when(Cat(tag_reg, 0.U(xLen - addr_tag_bits)).asUInt + (x.asUInt * tma_aligned.asUInt) >= reg_req.in1 && (Cat(tag_reg, 0.U(xLen - addr_tag_bits)).asUInt + (x.asUInt * tma_aligned.asUInt)) < reg_req.in1 + reg_req.copysize) {
-          current_mask_l2cache(x) := true.B
-        }.otherwise {
-          current_mask_l2cache(x) := false.B
-        }
-      })
-    }
-    is(s_shared){
-      when(io.to_shared.fire){
-        shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) + PopCount(current_mask_l2cache.asUInt)
-//        dataFIFO.write(0.U,0.U)
-        current_mask_l2cache := VecInit(Seq.fill(numgroupinstmax)(false.B))
-        reg_req :=  0.U.asTypeOf(new vExeDataTMA)
-        tag_reg :=  0.U(addr_tag_bits.W)
-        current_inst_entry_index_reg :=  0.U(log2Up(max_tma_inst).W)
-      }
-    }
-    is(s_reset){
-      used_inst := used_inst.bitSet(output_entry, false.B)
-
-//      instMem.write(output_entry,0.U)
-    }
-  }
-  io.to_shared.valid := state === s_shared
-  io.to_shared.bits.entry_index := current_inst_entry_index_reg
-  io.to_shared.bits.mask := current_mask_l2cache
-  io.to_shared.bits.data := output_data.data
-  io.to_shared.bits.l2cacheTag := tag_reg
-  io.to_shared.bits.instinfo := reg_req
-  io.inst_complete.bits := output_inst.ctrl.pc
-}
 class AddrCalc_l2cache() extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
@@ -238,6 +115,7 @@ class AddrCalc_l2cache() extends Module{
     val to_l2cache = DecoupledIO(new TLBundleA_lite(l2cache_params))
     //    val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
+
   //  vExeData.in1(0): Dcache base addr
   //  vExeData.in2(0): Sharedmem base addr
   //  vExeData.in3(0): copysize
@@ -256,7 +134,9 @@ class AddrCalc_l2cache() extends Module{
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
   val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-l2cachetagbits+1), 0.U(l2cachetagbits.W))
-  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
+  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-l2cachesetbits
+    +1), 0.U(l2cachesetbits
+    .W))
   val blockOffset = Wire(Vec(numgroupinstmax, UInt(dcache_BlockOffsetBits.W)))
 
   (0 until numgroupinstmax).foreach( x => blockOffset(x) := addr(x)(10, 2) )
@@ -275,43 +155,44 @@ class AddrCalc_l2cache() extends Module{
       is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
     }
   })
-//  val srcsize = Wire(UInt(3.W))
-//  switch(reg_save.ctrl.mem_whb){
-//      is(MEM_W){
-//        srcsize := 4.U
-//      }
-//      is(MEM_H){
-//        srcsize := 2.U
-//      }
-//      is(MEM_B){
-//        srcsize := 1.U
-//      }
-//    }
-//  val l2cachetag = Wire(Vec(numgroupinstmax, UInt(l2cachetagbits.W)))
+  //  val srcsize = Wire(UInt(3.W))
+  //  switch(reg_save.ctrl.mem_whb){
+  //      is(MEM_W){
+  //        srcsize := 4.U
+  //      }
+  //      is(MEM_H){
+  //        srcsize := 2.U
+  //      }
+  //      is(MEM_B){
+  //        srcsize := 1.U
+  //      }
+  //    }
+  //  val l2cachetag = Wire(Vec(numgroupinstmax, UInt(l2cachetagbits.W)))
   // assume all data in the same group has the same tag
-//  l2cachetag := addr.map(_(xLen-1, xLen - l2cachetagbits))
+  //  l2cachetag := addr.map(_(xLen-1, xLen - l2cachetagbits))
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
-  io.to_tempmem.bits.tag.in3 := reg_save.in3
   io.to_tempmem.bits.tag.in1 := reg_save.in1
   io.to_tempmem.bits.tag.in2 := reg_save.in2
-  io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
-//  io.to_tempmem.bits.tag.srcsize := srcsize
+//  io.to_tempmem.bits.tag.in3 := reg_save.in3
   io.to_tempmem.bits.tag.copysize := reg_save.in3
-//  io.to_tempmem.bits.tag.addrinit := addrinit
-//  io.to_tempmem.bits.tag.addrlast := addrlast
+  io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
+  //  io.to_tempmem.bits.tag.srcsize := srcsize
+  //  io.to_tempmem.bits.tag.addrinit := addrinit
+  //  io.to_tempmem.bits.tag.addrlast := addrlast
   //  io.to_tempmem.bits.tag.instruinfo :=reg_save
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
-  io.to_l2cache.bits.source :=  Cat(current_tag, reg_entryID)
+  io.to_l2cache.bits.source :=  Cat(Cat(current_tag, setIdx),reg_entryID)
   // temporarily set it as reg_entryID, for mshr; cat with wid, for shiftboard; jingguo ceshi hui fangzai hou 6 bit
-  io.to_l2cache.bits.address := Cat(addr_wire(xLen-1, xLen-1-l2cachetagbits-dcache_SetIdxBits+1),0.U((xLen - l2cachetagbits-dcache_SetIdxBits).W))
+  io.to_l2cache.bits.address := Cat(addr_wire(xLen-1, xLen-1-l2cachetagbits-log2Up(l2cache_NSets)+1),0.U((xLen - l2cachetagbits-log2Up(l2cache_NSets)).W))
+
   io.to_l2cache.bits.mask   := 0.U
   io.to_l2cache.bits.data   :=  0.U
   io.to_l2cache.bits.param  :=  0.U
   io.to_l2cache.valid := (state===s_l2cache)
   val mask_next = Wire(Vec(numgroupinstmax, Bool()))
   (0 until numgroupinstmax).foreach( x => {                          // update mask
-    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1)===setIdx
+    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-log2Up(l2cache_NSets)+1)===setIdx
       )})
   // End of Addr Logic
 
@@ -334,9 +215,9 @@ class AddrCalc_l2cache() extends Module{
         when (cnt.value >= current_numgroup || mask_next.asUInt===0.U){
           cnt.reset(); state := s_idle
         }.otherwise{
-          cnt.inc(); state := s_l2cache
+          cnt.inc(); state := state
         }
-      }.otherwise{state := s_l2cache}
+      }.otherwise{state := state}
     }
   }
   // FSM Operation
@@ -346,7 +227,7 @@ class AddrCalc_l2cache() extends Module{
         reg_save.in1 := io.from_fifo.bits.in1(0)
         reg_save.in2 := io.from_fifo.bits.in2(0)
         reg_save.in3 := io.from_fifo.bits.in3(0)
-//        reg_save.mask := ZeroExt(io.from_fifo.bits.mask)
+        //        reg_save.mask := ZeroExt(io.from_fifo.bits.mask)
         reg_save.ctrl := io.from_fifo.bits.ctrl
         (0 until numgroupinstmax).foreach(x => {
           reg_save.mask(x) := Mux((x.asUInt < current_numgroup.asUInt).asBool, true.B, false.B)  //initialize the first copynum bit to 1
@@ -366,7 +247,167 @@ class AddrCalc_l2cache() extends Module{
       }
     }
   }
+  //  printf("state: %b\n",state.asUInt)
+    printf("copysize: %b\n",io.to_tempmem.bits.tag.copysize.asUInt)
+    printf("in3: %d\n",io.from_fifo.bits.in3(0).asUInt)
+    printf("reg_save_in3: %d\n",reg_save.in3.asUInt)
+  //  printf("l2req:address: %b\n",io.to_l2cache.bits.address.asUInt)
 }
+
+class Temp_mem() extends Module {
+  val io = IO(new Bundle {
+    val from_addr = Flipped(DecoupledIO(new Bundle {
+      val tag = Input(new vExeDataTMA)
+    }))
+    val idx_entry = Output(UInt(log2Up(max_tma_inst).W))
+    val from_l2cache = Flipped(DecoupledIO(new l2cache_transform(l2cache_params)))
+    val from_shared = Flipped(DecoupledIO(new ShareMemCoreRsp_np_transform()))
+    val to_shared = DecoupledIO(new TempOutput)
+    val inst_complete = DecoupledIO(UInt(32.W))
+  })
+//  val dataFIFO =  Mem(max_l2cacheline, UInt(io.from_l2cache.bits.getWidth.W))
+  val dataFIFO =  Mem(max_l2cacheline, new l2cache_transform(l2cache_params))
+  val instMem =   Mem(max_tma_inst, new vExeDataTMA)
+//  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Up(numgroupinstmax)).W))))
+//  val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Up(numgroupinstmax)).W))))
+  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
+  val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
+  val used_inst = RegInit(0.U(max_tma_inst.W))
+  val used_mem = RegInit(0.U(max_l2cacheline.W))
+  val complete = Wire(Vec(max_tma_inst,Bool()))
+  (0 until (max_tma_inst)).foreach(x => {
+    complete(x) := finish_cnt(x) === 0.U
+  })
+  val entry_index_reg = RegInit(VecInit(Seq.fill(max_l2cacheline)(0.U(log2Up(max_tma_inst).W))))
+  val valid_inst_entry = Mux(used_inst.andR, 0.U, PriorityEncoder(~used_inst))
+  val valid_mem_entry = Mux(used_mem.andR, 0.U, PriorityEncoder(~used_mem))
+  val output_entry = Mux(complete.asUInt.orR, PriorityEncoder(complete), 0.U)
+
+  //l2cache logic
+  val current_inst_entry_index = io.from_l2cache.bits.source(log2Up(max_tma_inst) - 1, 0).asUInt
+
+//  val current_inst_entry_index = io.from_l2cache.bits.source(log2Up(max_tma_inst) - 1, 0).asUInt
+
+  val current_inst_entry_index_reg = RegInit(0.U(log2Up(max_tma_inst).W))
+  //  val current_tag_index = PriorityEncoder(inst_to_shared(current_inst_entry_index).l2cachetag.map(_===current_tag))
+  val current_mask_l2cache = RegInit(VecInit(Seq.fill(numgroupinstmax)(false.B)))
+  val inst_to_shared = Reg(new vExeDataTMA)
+  val output_inst = Reg(new vExeDataTMA)
+  val output_data = Reg(new l2cache_transform(l2cache_params))
+  val source_width = output_data.source.getWidth
+//  val tag_reg = RegInit(0.U(addr_tag_bits.W))
+  val tag_wire = Wire(UInt(xLen.W))
+  tag_wire := Cat(output_data.source(source_width - 1, source_width - 1 - addr_tag_bits + 1),0.U((xLen - addr_tag_bits).W))
+
+  val s_idle ::s_getdata :: s_shared :: s_reset :: Nil = Enum(4)
+  val state = RegInit(s_idle)
+  io.from_l2cache.ready := state === s_idle && !(used_mem.andR)
+  io.from_shared.ready := state === s_idle
+  io.from_addr.ready := state === s_idle && !(used_inst.andR)
+  io.inst_complete.valid := state === s_reset
+  io.idx_entry := Mux(io.from_addr.fire, valid_inst_entry, 0.U)
+
+  switch(state){
+    is(s_idle){
+      when(io.to_shared.ready && used_mem.orR && !io.from_l2cache.fire){
+        state := s_getdata
+      }.elsewhen(complete.asUInt.orR){
+        state := s_reset
+      }.otherwise{
+        state := s_idle
+      }
+    }
+    is(s_getdata){
+      //    when(io.to_shared.ready){state:=s_shared}.otherwise{state:=s_getdata}
+      state:=s_shared
+    }
+    is(s_shared){
+      when(complete.asUInt.orR){state:=s_reset}.otherwise{state:=s_idle}
+    }
+    is(s_reset){
+      state:=s_idle
+    }
+  }
+
+  switch(state){
+    is(s_idle) {
+      current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
+//      output_data := 0.U
+      when(io.from_addr.fire) {
+        used_inst := used_inst.bitSet(valid_inst_entry, true.B)
+        instMem.write(valid_inst_entry, io.from_addr.bits.tag)
+        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Up(tma_aligned)
+        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Up(tma_aligned)
+      }
+      when(io.from_l2cache.fire) {
+        used_mem := used_mem.bitSet(valid_mem_entry, true.B)
+        dataFIFO.write(valid_mem_entry,io.from_l2cache.bits)
+        entry_index_reg(valid_mem_entry) := current_inst_entry_index
+//        inst_to_shared := instMem.read(current_inst_entry_index)
+//        tag_reg := io.from_l2cache.bits.source(source_width - 1, source_width - 1 - addr_tag_bits + 1)
+//        current_inst_entry_index_reg := current_inst_entry_index
+      }
+      when(io.from_shared.fire){
+        finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - PopCount(io.from_shared.bits.activeMask)
+      }
+      when(io.to_shared.ready){
+        output_data := dataFIFO.read(entry_index_reg(PriorityEncoder(used_mem)))
+        inst_to_shared := instMem.read(entry_index_reg(PriorityEncoder(used_mem)))
+        current_inst_entry_index_reg := entry_index_reg(PriorityEncoder(used_mem))
+      }
+      when(complete.asUInt.orR){
+        output_inst := instMem(PriorityEncoder(complete.asUInt))
+      }
+    }
+    is(s_getdata){
+//      tag_reg := tag_wire
+      (0 until (numgroupl2cache)).foreach(x => {
+        when((tag_wire.asUInt + (x.asUInt * tma_aligned.asUInt) >= inst_to_shared.in1) && (tag_wire.asUInt + (x.asUInt * tma_aligned.asUInt) < inst_to_shared.in1 + inst_to_shared.copysize)) {
+          current_mask_l2cache(x) := true.B
+        }.otherwise {
+          current_mask_l2cache(x) := false.B
+        }
+      })
+    }
+    is(s_shared){
+      when(io.to_shared.fire){
+        shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
+//        dataFIFO.write(0.U,0.U)
+        current_mask_l2cache := VecInit(Seq.fill(numgroupinstmax)(false.B))
+        inst_to_shared :=  0.U.asTypeOf(new vExeDataTMA)
+//        tag_reg :=  0.U(addr_tag_bits.W)
+        current_inst_entry_index_reg :=  0.U(log2Up(max_tma_inst).W)
+      }
+    }
+    is(s_reset){
+      used_inst := used_inst.bitSet(output_entry, false.B)
+
+//      instMem.write(output_entry,0.U)
+    }
+  }
+  io.to_shared.valid := state === s_shared
+  io.to_shared.bits.entry_index := current_inst_entry_index_reg
+  io.to_shared.bits.mask := current_mask_l2cache
+  io.to_shared.bits.data := output_data.data
+  io.to_shared.bits.l2cacheTag := tag_wire
+  io.to_shared.bits.instinfo := inst_to_shared
+  io.inst_complete.bits := output_inst.ctrl.pc
+
+
+//  printf("state: %d \n",state.asUInt)
+//  printf("usedmem: %b \n",used_mem.asUInt)
+//  printf("to_shared: %b \n",io.to_shared.ready.asUInt)
+//  printf("l22temp data: %d \n",io.from_l2cache.bits.data(0).asUInt)
+//  printf("l22temp data: %d \n",io.from_l2cache.bits.data(1).asUInt)
+//  printf("l22temp data: %d \n",io.from_l2cache.bits.data(2).asUInt)
+//  printf("l22temp data: %d \n",io.from_l2cache.bits.data(3).asUInt)
+
+}
+
+
+
+
+
 
 class Addrcalc_shared() extends Module {
   val io = IO(new Bundle {
@@ -395,8 +436,8 @@ class Addrcalc_shared() extends Module {
 
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
-  val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-l2cachetagbits+1), 0.U(l2cachetagbits.W))
-  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
+  val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
+  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-log2Up(l2cache_NSets)+1), 0.U(log2Up(l2cache_NSets).W))
   val blockOffset = Wire(Vec(numgroupinstmax, UInt(dcache_BlockOffsetBits.W)))
   (0 until numgroupinstmax).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(numgroupinstmax, UInt(BytesOfWord.W)))
@@ -416,17 +457,17 @@ class Addrcalc_shared() extends Module {
   })
   val current_mask = Wire(Vec(numgroupinstmax, Bool()))
   (0 until numgroupinstmax).foreach(x => {
-    current_mask(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1)===setIdx)
+    current_mask(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
   })
   val mask_next = Wire(Vec(numgroupinstmax, Bool()))
   (0 until numgroupinstmax).foreach( x => {
-    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-dcache_SetIdxBits+1)===setIdx
-      )})
+    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
+    })
   //找到current_mask的全部索引，只使用前16个，提取l2cacheline的数据
   val current_mask_index = Reg(Vec(numgroupinstmax, UInt(log2Up(numgroupinstmax).W)))
 
   io.to_shared.bits := output_reg
-  io.to_shared.valid := state===s_shared2
+  io.to_shared.valid := state===s_shared3
 
   io.from_temp.ready := state === s_idle
 
@@ -515,6 +556,8 @@ class Addrcalc_shared() extends Module {
       }
     }
   }
+  printf("state: %d \n",state)
+  printf("mask: %b \n",mask_next.asUInt)
 //  (0 until numgroupinstmax).foreach( x => {
 //    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
 //    wordOffset1H(x) := 15.U(4.W)
@@ -561,9 +604,10 @@ class TMA_Copysize extends Module{
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val fence_end_tma = DecoupledIO(UInt(32.W))
   })
-  printf("l2req: %d \n",io.l2cache_req.bits.address.asUInt)
-  printf("l2req.valid: %b \n",io.l2cache_req.valid.asUInt)
-  printf("l2rsp: %d \n",io.l2cache_rsp.bits.data.asUInt)
+//  printf("l2req: %d \n",io.l2cache_req.bits.address.asUInt)
+//  printf("l2req.valid: %b \n",io.l2cache_req.valid.asUInt)
+//  printf("l2rsp data: %d \n",io.l2cache_rsp.bits.data(128,0).asUInt)
+  printf("l2rsp source: %d \n",io.l2cache_rsp.bits.source.asUInt)
 
 
 

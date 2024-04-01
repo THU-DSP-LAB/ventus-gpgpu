@@ -9,6 +9,8 @@ import pipeline.vExeData
 import top._
 import top.parameters.num_thread
 
+import java.util
+
 object TestUtils {
   def checkForValid[T <: Data](port: DecoupledIO[T]): Boolean = port.valid.peek().litToBoolean
   def checkForReady[T <: Data](port: DecoupledIO[T]): Boolean = port.ready.peek().litToBoolean
@@ -120,27 +122,35 @@ object TestUtils {
 
     def eval(): Unit = {
       if(checkForValid(reqPort) && checkForReady(reqPort)){
+        println("Received valid and ready request.")
         rsp_queue :+= (latency, transform(reqPort.bits))
       }
 
       if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
         if(checkForValid(rspPort) && checkForReady(rspPort)){
+          println("Sending response...")
           rspPort.valid.poke(false.B)
           rsp_queue = rsp_queue.drop(1)
         }
         else{
+          println("Response ready but port not valid.")
           rspPort.valid.poke(true.B)
           rspPort.bits.poke(rsp_queue.head._2)
+          println("rsp_queue.head",rsp_queue.head._2)
         }
       }
       else{
         rspPort.valid.poke(false.B)
       }
 
+//      rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
+//        if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)
+//      }
       rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
-        if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)
+        if (e._1 > i && i == 0) (e._1 - 1, e._2) else (e._1, e._2)
       }
       if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
+        println("Response ready but port not valid.")
         rspPort.valid.poke(true.B)
         rspPort.bits.poke(rsp_queue.head._2)
       }
@@ -148,6 +158,8 @@ object TestUtils {
     }
 
     def transform(req: A): B = {
+      println("Response ready but port not valid.")
+      println(req.address.peek().litValue)
       val opcode_req = req.opcode.peek().litValue.toInt
       var opcode_rsp = 0
       val addr = req.address.peek().litValue
@@ -157,6 +169,9 @@ object TestUtils {
       opcode_req match {
         case 4 => { // read
           data = mem.readDataPhysical(addr, data_byte_count)._2
+//          println("Data array content: ",java.util.Arrays.toString(data))
+//          println("data addr:",addr)
+//          println("data data_byte_count:",data_byte_count)
           opcode_rsp = 1
         }
         case 1 => { // write partial
@@ -188,6 +203,9 @@ object TestUtils {
         _.size -> req.size.peek(),
         _.param -> req.param.peek()
       ))
+      println("print: rsp: ")
+      println(rsp.data)
+      println(rsp.source)
       rsp
     }
   }

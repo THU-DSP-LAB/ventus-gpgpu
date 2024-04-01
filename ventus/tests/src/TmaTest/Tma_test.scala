@@ -81,7 +81,7 @@ class Tma_test
         val memory = new MemBox(MemboxS.Bare32)
         memory.loadfile(0, metas, dataFileDir)
 
-        val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 0, 5)
+        val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 8, 5)
 
 
         case class vExeData_Soft(
@@ -165,7 +165,7 @@ class Tma_test
         val myData = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
           in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
-          in3 = Seq.fill(num_thread)(BigInt("00000010", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000100", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_zero()
         )
@@ -185,7 +185,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty) {
+        while (tma_sender.send_list.nonEmpty && clock_cnt <= 100) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()
