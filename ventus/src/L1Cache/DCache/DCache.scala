@@ -164,18 +164,14 @@ class WshrMemReq_withMask(NLanes: Int) extends DCacheMemReq{
   val activeMask = Vec(NLanes, Bool())
 }
 
-class DataCache(implicit p: Parameters) extends DCacheModule{
+class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends DCacheModule{
   val io = IO(new Bundle{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
     val coreRsp = DecoupledIO(new DCacheCoreRsp)
     val memRsp = Flipped(DecoupledIO(new DCacheMemRsp))
     val memReq = DecoupledIO(new DCacheMemReq_p)
-    val TLBRsp = Flipped(DecoupledIO(new Bundle{   // paddr from TLB
-      val paddr = UInt(paLen.W)}))
-    val TLBReq = DecoupledIO(new Bundle {     // req of vaddr for TLB
-      val asid = UInt(asidLen.W)
-      val vaddr = UInt(vaLen.W)
-    })
+    val TLBRsp = Flipped(DecoupledIO(new mmu.L1TlbRsp(SV.getOrElse(mmu.SV32))))
+    val TLBReq = DecoupledIO(new mmu.L1TlbReq(SV.getOrElse(mmu.SV32)))
   })
 
   // ******     important submodules     ******
@@ -262,14 +258,14 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.probeRead.valid := io.coreReq.fire || injectTagProbe
   TagAccess.io.probeRead.bits.setIdx := Mux(injectTagProbe,coreReq_st1.setIdx,io.coreReq.bits.setIdx)
   TagAccess.io.tagFromCore_st1 := coreReq_st1.tag
-  TagAccess.io.asidFromCore_st1 := coreReq_st1.ASID
+  TagAccess.io.asidFromCore_st1 := coreReq_st1.asid
   TagAccess.io.tagready_st1 := coreReq_st1_ready//coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready
 
 
   // ******      mshr probe      ******
   MshrAccess.io.probe.valid := io.coreReq.valid && coreReq_st0_ready
   MshrAccess.io.probe.bits.blockAddr := Cat(io.coreReq.bits.tag,io.coreReq.bits.setIdx)
-  MshrAccess.io.probe.bits.ASID := io.coreReq.bits.ASID
+  MshrAccess.io.probe.bits.ASID := io.coreReq.bits.asid
   MshrAccess.io.stage1_ready := coreReq_st1_ready
 
   val genCtrl = Module(new genControl)
@@ -315,7 +311,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   MshrAccess.io.missReq.bits.instrId := coreReq_st1.instrId
   MshrAccess.io.missReq.bits.blockAddr := Cat(coreReq_st1.tag, coreReq_st1.setIdx)
   MshrAccess.io.missReq.bits.targetInfo := mshrMissReqTI.asUInt
-  MshrAccess.io.missReq.bits.ASID := coreReq_st1.ASID
+  MshrAccess.io.missReq.bits.ASID := coreReq_st1.asid
   MshrAccess.io.stage2_ready := MemReqArb.io.in(1).ready
 
   // ******      memReq_Q enq      ******
@@ -347,7 +343,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   writeMissReq.a_opcode := 1.U //PutPartialData:Get
   writeMissReq.a_param := 0.U //regular write
   writeMissReq.a_source := DontCare//wait for WSHR
-  writeMissReq.Asid := coreReq_st1.ASID
+  writeMissReq.Asid := coreReq_st1.asid
   writeMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
   //writeMissReq.a_mask := blockaddr_1.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   for(j<-0 until dcache_BlockWords) {
@@ -371,7 +367,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   readMissReq.a_param := 0.U //regular read
   readMissReq.a_source := Cat("d1".U, MshrAccess.io.probeOut_st1.a_source, coreReq_st1.setIdx)//setIdx for memRsp tag access in 1st stage
   readMissReq.a_addr := Cat(coreReq_st1.tag, coreReq_st1.setIdx, 0.U((WordLength - TagBits - SetIdxBits).W))
-  readMissReq.Asid := coreReq_st1.ASID
+  readMissReq.Asid := coreReq_st1.asid
   readMissReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))//lockaddr_1H.asTypeOf(writeMissReq.a_mask)//coreReq_st1.perLaneAddr.map(_.activeMask)
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B

@@ -53,7 +53,7 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
   io.enq.ready := (if(latency > 0) !(!out_port.ready && valids.drop(1).reduce(_ && _)) else out_port.ready)
 }
 
-class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
+class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) extends Module{
   val L1param = (new MyConfig).toInstance
   val L2param = InclusiveCacheParameters_lite(
     CacheParameters(
@@ -84,7 +84,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   }
   io.cnt := counter.value
 
-  val GPU = Module(new GPGPU_top()(L1param, FakeCache))
+  val GPU = Module(new GPGPU_top()(L1param, FakeCache, SV))
   GPU.io.cycle_cnt := counter.value
 
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))

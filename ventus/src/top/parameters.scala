@@ -126,6 +126,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def num_l2cache = 1
 
+  def l1tlb_ways = 8
+
   var NUMBER_CU = num_sm
   var NUMBER_RES_TABLE = 1 // <NUMBER_CU
   var NUMBER_VGPR_SLOTS = num_vgpr

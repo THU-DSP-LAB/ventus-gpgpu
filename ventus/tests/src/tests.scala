@@ -294,7 +294,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
-    val mem = new MemBox(MemboxS.Bare32)
+    val mem = new MemBox(MemboxS.SV32)
     mem.loadfile(0, metas.head, dataFileDir.head)
 
     test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>

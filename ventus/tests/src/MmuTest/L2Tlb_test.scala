@@ -33,7 +33,7 @@ class L2Tlb_test extends AnyFreeSpec
         val fill_in = Flipped(ValidIO(new AsidLookupEntry(SV)))
       })
 
-      val internal = Module(new L2Tlb(SV, debug = true))
+      val internal = Module(new L2TLB(SV, Debug = true))
       val lookup = Module(new AsidLookup(SV, nBanks, 16))
       (0 until nBanks).foreach{ i =>
         internal.io.in(i) <> Queue(io.in(i), 1)

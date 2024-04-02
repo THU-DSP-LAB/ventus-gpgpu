@@ -15,6 +15,7 @@ import L1Cache.{L1TagAccess, L1TagAccess_ICache, RVGParameters}
 import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
 import chisel3._
 import chisel3.util._
+import mmu.{L1TlbIO, L1TlbReq}
 import mmu.SV32.{asidLen, paLen, vaLen}
 import top.parameters._
 
@@ -22,7 +23,7 @@ class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
-  val ASID = UInt(asidLen.W)
+  val asid = UInt(asidLen.W)
 }
 class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
   val warpid = UInt(WIdBits.W)
@@ -55,23 +56,18 @@ class ICacheMemReq_p(implicit p: Parameters) extends ICacheBundle{
   val a_addr = UInt(paLen.W)
 }
 
-class ICacheExtInf(implicit p: Parameters) extends ICacheBundle{
+class ICacheExtInf(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheBundle{
   val coreReq = Flipped(DecoupledIO(new ICachePipeReq))
   val externalFlushPipe = Flipped(ValidIO(new ICachePipeFlush))
   val coreRsp = DecoupledIO(new ICachePipeRsp)
   val memRsp = Flipped(DecoupledIO(new ICacheMemRsp))
   val memReq = DecoupledIO(new ICacheMemReq_p)
-  val TLBRsp = Flipped(DecoupledIO(new Bundle { // paddr from TLB
-    val paddr = UInt(paLen.W)
-  }))
-  val TLBReq = DecoupledIO(new Bundle { // req of vaddr for TLB
-    val asid = UInt(asidLen.W)
-    val vaddr = UInt(vaLen.W)
-  })
+  val TLBRsp = Flipped(DecoupledIO(new mmu.L1TlbRsp(SV.getOrElse(mmu.SV32))))
+  val TLBReq = DecoupledIO(new mmu.L1TlbReq(SV.getOrElse(mmu.SV32)))
 }
 
-class InstructionCache(implicit p: Parameters) extends ICacheModule{
-  val io = IO(new ICacheExtInf)
+class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheModule{
+  val io = IO(new ICacheExtInf(SV))
 
   // ****** submodules ******
   val tagAccess = Module(new L1TagAccess_ICache(set=NSets, way=NWays, tagBits=TagBits, AsidBits = asidLen))
@@ -114,7 +110,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   val warpid_st2 = RegNext(warpid_st1)
   val mask_st2 = RegNext(mask_st1)
   val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
-  val ASID_st2 = RegEnable(io.coreReq.bits.ASID, io.coreReq.ready)
+  val ASID_st2 = RegEnable(io.coreReq.bits.asid, io.coreReq.ready)
   val addr_st2 = RegNext(addr_st1)
 
   // ******     external flushPipeline
@@ -123,7 +119,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   ShouldFlushCoreRsp_st0 := io.coreReq.bits.warpid === io.externalFlushPipe.bits.warpid && io.externalFlushPipe.valid
 
   val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
-  val pipeReqAsid_st1 = RegEnable(io.coreReq.bits.ASID, io.coreReq.ready)
+  val pipeReqAsid_st1 = RegEnable(io.coreReq.bits.asid, io.coreReq.ready)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
   tagAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
   tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)

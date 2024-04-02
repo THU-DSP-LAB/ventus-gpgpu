@@ -17,7 +17,7 @@ import scala.io.Source
 
 class MMUSystem(NL1Cache: Int, NL1TlbWays: Int, SV: SVParam) extends Module{
   val l1tlb = Seq.fill(NL1Cache)(Module(new L1TLB(SV, NL1TlbWays)))
-  val l2tlb = Module(new L2Tlb(SV = SV, debug = true, L2C = None, accelSize = 8)(L1C = None))
+  val l2tlb = Module(new L2TLB(SV = SV, Debug = true, L2C = None, accelSize = 8)(L1C = None))
   val lookup = Module(new AsidLookup(SV, l2tlb.nBanks, 4))
 
   val mmu_req = IO(Vec(NL1Cache,
@@ -121,13 +121,11 @@ object TLBRequestList{
 
     val grouped = groupPrefix(lines)
     req_list = grouped.map{ k =>
-      val tmp1 = k.map { str =>
+      k.map { str =>
         pattern.findAllMatchIn(str).toList
-      }
-      val tmp2 = tmp1.collect{
+      }.collect{
         case x if !x.isEmpty => x.head
-      }
-      val tmp3 = tmp2.map{ x =>
+      }.map{ x =>
         TLBRequest(
           x.group(2).toInt,
           x.group(3).toInt,
@@ -135,7 +133,6 @@ object TLBRequestList{
           x.group(1).toInt
         )
       }
-      tmp3
     }
   }
 //  parse("SM 0 CACHE 1 ADDR 8000abcd")

@@ -35,7 +35,7 @@ class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
   val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
   val param = UInt(4.W)
   val tag = UInt(TagBits.W)
-  val ASID = UInt(asidLen.W)
+  val asid = UInt(asidLen.W)
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
   val data = Vec(NLanes, UInt(WordLength.W))

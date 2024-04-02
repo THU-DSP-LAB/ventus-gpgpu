@@ -56,7 +56,7 @@ class multi_cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABL
     io.inflight_wg_buffer_host_wf_done := interface.io.inflight_wg_buffer_host_wf_done
     io.inflight_wg_buffer_host_wf_done_wg_id := interface.io.inflight_wg_buffer_host_wf_done_wg_id
     for(i <- 0 until NUM_SCHEDULER){
-        val scheduler = Module(new cta_scheduler(NUMBER_CU, CU_ID_WIDTH, RES_TABLE_ADDR_WIDTH, VGPR_ID_WIDTH, NUMBER_VGPR_SLOTS, SGPR_ID_WIDTH, NUMBER_SGPR_SLOTS, LDS_ID_WIDTH, NUMBER_LDS_SLOTS, WG_ID_WIDTH, WF_COUNT_WIDTH, WG_SLOT_ID_WIDTH, NUMBER_WF_SLOTS, WF_COUNT_MAX, NUMBER_RES_TABLE, GDS_ID_WIDTH, GDS_SIZE, ENTRY_ADDR_WIDTH, NUMBER_ENTRIES, WAVE_ITEM_WIDTH, MEM_ADDR_WIDTH, TAG_WIDTH, INIT_MAX_WG_COUNT, WF_COUNT_WIDTH_PER_WG))
+        val scheduler = Module(new cta_scheduler(NUMBER_CU, CU_ID_WIDTH, RES_TABLE_ADDR_WIDTH, VGPR_ID_WIDTH, NUMBER_VGPR_SLOTS, SGPR_ID_WIDTH, NUMBER_SGPR_SLOTS, LDS_ID_WIDTH, NUMBER_LDS_SLOTS, WG_ID_WIDTH, WF_COUNT_WIDTH, WG_SLOT_ID_WIDTH, NUMBER_WF_SLOTS, WF_COUNT_MAX, NUMBER_RES_TABLE, GDS_ID_WIDTH, GDS_SIZE, ENTRY_ADDR_WIDTH, NUMBER_ENTRIES, WAVE_ITEM_WIDTH, MEM_ADDR_WIDTH, TAG_WIDTH, INIT_MAX_WG_COUNT, WF_COUNT_WIDTH_PER_WG, mmu.SV32.asidLen))
         scheduler.io.host_wg_valid := interface.io.host_wg_valid_s(i)
         scheduler.io.host_wg_id := interface.io.host_wg_id_s(i)
         scheduler.io.host_num_wf := interface.io.host_num_wf_s(i)

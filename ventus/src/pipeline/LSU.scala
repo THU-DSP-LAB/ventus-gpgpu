@@ -38,7 +38,7 @@ class DCacheCoreReq_np extends Bundle{
 //  val isWrite = Bool()
   val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(dcache_SetIdxBits.W)
-  val ASID = UInt(asidLen.W)
+  val asid = UInt(asidLen.W)
   val perLaneAddr = Vec(num_thread, new DCachePerLaneAddr)
   val data = Vec(num_thread, UInt(xLen.W))
   val opcode = UInt(3.W)
@@ -220,6 +220,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
 
   //val vld_toDCache = Reg(Bool())
   io.to_dcache.bits.instrId := reg_entryID
+  io.to_dcache.bits.asid := reg_save.ctrl.asid
   // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
   io.to_dcache.bits.tag := tag
   io.to_dcache.bits.setIdx := setIdx
