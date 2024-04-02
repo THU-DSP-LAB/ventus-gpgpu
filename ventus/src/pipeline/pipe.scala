@@ -28,7 +28,7 @@ class ICachePipeRsp_np extends Bundle{
   val status = UInt(2.W)
 }
 
-class pipe extends Module{
+class pipe(val sm_id: Int = 0) extends Module{
   val io = IO(new Bundle{
     val icache_req = (DecoupledIO(new ICachePipeReq_np))
     val icache_rsp = Flipped(DecoupledIO(new ICachePipeRsp_np))
@@ -52,6 +52,7 @@ class pipe extends Module{
   val warp_sche=Module(new warp_scheduler)
   //val pcfifo=Module(new PCfifo)
   val control=Module(new InstrDecodeV2)
+  control.io.sm_id := sm_id.U
   val operand_collector=Module(new operandCollector)
   //val issue=Module(new Issue)
   val issueX = Module(new Issue)
@@ -97,7 +98,7 @@ class pipe extends Module{
   lsu.io.csr_tid:=csrfile.io.lsu_tid
   lsu.io.csr_numw:=csrfile.io.lsu_numw
   when(csrfile.io.in.valid && csrfile.io.in.bits.ctrl.custom_signal_0){
-    printf(p"warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
+    printf(p"sm ${sm_id} warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
     printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)}  setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
   }
 
@@ -126,7 +127,7 @@ class pipe extends Module{
   //flush:=(warp_sche.io.branch.fire()&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
 
-
+  control.io.sm_id := sm_id.U(8.W)
   control.io.pc:=io.icache_rsp.bits.addr
   control.io.inst.zipWithIndex.foreach{ case (ins, i) =>
     ins := (io.icache_rsp.bits.data >> (xLen * i))(xLen - 1, 0)
@@ -142,7 +143,7 @@ class pipe extends Module{
 
   (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
     when(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask) {
-      printf(p"warp ${Decimal(ctrl.wid)} ")
+      printf(p"sm ${sm_id} warp ${Decimal(ctrl.wid)} ")
       printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
     assert (!(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask), s"undefined instruction")
