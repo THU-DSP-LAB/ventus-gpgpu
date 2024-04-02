@@ -17,13 +17,13 @@ class SimpleModule extends Module {
   // 初始化输出向量，以避免未定义行为
   io.current_mask_index.foreach(_ := 0.U)
   // 初始cnt_mask为0
-  var cnt_mask = 0.U
+  var cnt_mask = 0
 
   // 遍历current_mask，对于每个为true的位，记录其索引
   for (x <- 0 until numgroup) {
     when(io.current_mask(x)) {
       io.current_mask_index(cnt_mask) := x.U
-      cnt_mask = cnt_mask + 1.U
+      cnt_mask = cnt_mask + 1
     }
   }
 }

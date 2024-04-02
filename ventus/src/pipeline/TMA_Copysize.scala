@@ -533,8 +533,6 @@ class Addrcalc_shared() extends Module {
       }
     }
     is(s_shared1){
-      output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
-      current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Up(numgroupl2cache).W))))
       cnt_mask = 0
       (0 until numgroupl2cache).foreach( x => {
         when(current_mask(x)){
@@ -575,6 +573,9 @@ class Addrcalc_shared() extends Module {
     is(s_shared3){
       when(io.to_shared.fire){
         reg_save.mask := mask_next
+        current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Up(numgroupl2cache).W))))
+        output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
+
       }.otherwise{
         reg_save.mask := reg_save.mask
       }
