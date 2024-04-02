@@ -19,6 +19,7 @@ class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
+  val asid = UInt(KNL_ASID_WIDTH.W)
 }
 class ICachePipeRsp_np extends Bundle{
   val addr = UInt(32.W)
@@ -138,6 +139,9 @@ class pipe extends Module{
   ibuffer.io.in.bits.control := control.io.control
   ibuffer.io.in.bits.control_mask := control.io.control_mask
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
+  for( i <- 0 until num_fetch){
+    ibuffer.io.in.bits.control(i).asid := warp_sche.io.asid
+  }
   ibuffer.io.flush_wid:=warp_sche.io.flush
 
   (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>

@@ -30,6 +30,7 @@ class warp_scheduler extends Module{
     val exe_busy=Input(UInt(num_warp.W)) //exe race
     //val pc_icache_ready=Input(Vec(num_warp,Bool()))
     val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W))) //ibuffer ready
+    val asid =  Output(UInt(KNL_ASID_WIDTH.W)) // 2ibuffer
     val warp_ready=Output(UInt(num_warp.W)) //to issue
     val flush=(ValidIO(UInt(depth_warp.W)))
     val flushCache=(ValidIO(UInt(depth_warp.W)))
@@ -50,6 +51,12 @@ class warp_scheduler extends Module{
 
   io.CTA2csr.bits:=io.warpReq.bits
   io.CTA2csr.valid:=io.warpReq.valid
+  val asidReg = Reg(Vec(num_warp,UInt(KNL_ASID_WIDTH.W)))
+  val new_warpid = io.warpReq.bits.wid
+  when(io.warpReq.fire){
+    asidReg(new_warpid) := io.warpReq.bits.CTAdata.dispatch2cu_knl_asid_dispatch
+  }
+  io.asid := asidReg(io.pc_rsp.bits.warpid)
 
 
   io.flush.valid:=(io.branch.fire()&io.branch.bits.jump) | warp_end//(暂定barrier不flush)
@@ -81,6 +88,7 @@ class warp_scheduler extends Module{
   io.pc_req.bits.addr := pcControl(next_warp).PC_next
   io.pc_req.bits.warpid := next_warp
   io.pc_req.bits.mask := pcControl(next_warp).mask_o
+  io.pc_req.bits.asid := asidReg(next_warp)
 
   io.wg_id_lookup:=Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
 
