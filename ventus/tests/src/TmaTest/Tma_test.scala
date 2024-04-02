@@ -12,6 +12,8 @@ import top.{DecoupledPipe, MemBox}
 import MemboxS._
 import play.TestUtils._
 import L2cache._
+import play.MemPortDriverDelay_shared
+
 import scala.collection.immutable.Seq
 
 class Tma_test
@@ -81,8 +83,8 @@ class Tma_test
         val memory = new MemBox(MemboxS.Bare32)
         memory.loadfile(0, metas, dataFileDir)
 
-        val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 8, 5)
-
+        val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 16, 5)
+        val mem_driver_shared = new MemPortDriverDelay_shared(d.io.shared_req, d.io.shared_rsp, memory, 8, 5)
 
         case class vExeData_Soft(
                                   in1: Seq[BigInt],
@@ -151,7 +153,7 @@ class Tma_test
             _.readmask -> false.B,
             _.writemask -> false.B,
             _.wxd -> false.B,
-            _.pc -> 0.U,
+            _.pc -> 4096.U,
             _.imm_ext -> 0.U,
             _.atomic -> false.B,
             _.aq -> false.B,
@@ -192,6 +194,7 @@ class Tma_test
 
           //          handleL2Req(d, memory)
           mem_driver.eval()
+          mem_driver_shared.eval()
           d.clock.step()
           clock_cnt += 1
         }

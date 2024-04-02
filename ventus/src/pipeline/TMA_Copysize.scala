@@ -381,7 +381,7 @@ class Temp_mem() extends Module {
     }
     is(s_reset){
       used_inst := used_inst.bitSet(output_entry, false.B)
-
+      finish_cnt(PriorityEncoder(complete)) := 1.U
 //      instMem.write(output_entry,0.U)
     }
   }

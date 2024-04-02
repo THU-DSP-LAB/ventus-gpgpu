@@ -3,9 +3,11 @@ package play
 import L2cache.{TLBundleA_lite, TLBundleD_lite}
 import chisel3._
 import chisel3.experimental.BundleLiterals._
+import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chisel3.util._
 import chiseltest._
-import pipeline.vExeData
+import pipeline.{ShareMemCoreReq_np, ShareMemCoreRsp_np, vExeData}
+import play.TestUtils.{IOTestDriver, IOTransform, checkForReady, checkForValid}
 import top._
 import top.parameters.num_thread
 
@@ -208,5 +210,104 @@ object TestUtils {
       println(rsp.source)
       rsp
     }
+  }
+}
+
+
+class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np <: Data](
+                                                                            val reqPort: DecoupledIO[A],
+                                                                            val rspPort: DecoupledIO[B],
+                                                                            val mem: MemBox[_],
+                                                                            val latency: Int,
+                                                                            val depth: Int
+                                                                          ) extends IOTestDriver[A, B] with IOTransform[A, B]{
+  val data_byte_count = reqPort.bits.data.getWidth / 2
+
+  var rsp_queue: Seq[(Int, B)] = Seq.empty
+
+  def eval(): Unit = {
+    if(checkForValid(reqPort) && checkForReady(reqPort)){
+      println("Received valid and ready request.")
+      rsp_queue :+= (latency, transform(reqPort.bits))
+    }
+
+    if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
+      if(checkForValid(rspPort) && checkForReady(rspPort)){
+        println("Sending response...")
+        rspPort.valid.poke(false.B)
+        rsp_queue = rsp_queue.drop(1)
+      }
+      else{
+        println("Response ready but port not valid.")
+        rspPort.valid.poke(true.B)
+        rspPort.bits.poke(rsp_queue.head._2)
+        println("rsp_queue.head",rsp_queue.head._2)
+      }
+    }
+    else{
+      rspPort.valid.poke(false.B)
+    }
+
+    //      rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
+    //        if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)
+    //      }
+    rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
+      if (e._1 > i && i == 0) (e._1 - 1, e._2) else (e._1, e._2)
+    }
+    if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
+      println("Response ready but port not valid.")
+      rspPort.valid.poke(true.B)
+      rspPort.bits.poke(rsp_queue.head._2)
+    }
+    reqPort.ready.poke((rsp_queue.size < depth).B)
+  }
+
+  def transform(req: A): B = {
+//    val opcode_req = req.opcode.peek().litValue.toInt
+//    var opcode_rsp = 0
+//    val addr = req.address.peek().litValue
+//    val source = req.source.peek().litValue
+//    var data = new Array[Byte](data_byte_count)
+//
+//    opcode_req match {
+//      case 4 => { // read
+//        data = mem.readDataPhysical(addr, data_byte_count)._2
+//        //          println("Data array content: ",java.util.Arrays.toString(data))
+//        //          println("data addr:",addr)
+//        //          println("data data_byte_count:",data_byte_count)
+//        opcode_rsp = 1
+//      }
+//      case 1 => { // write partial
+//        data = top.helper.BigInt2ByteArray(req.data.peek().litValue, data_byte_count)
+//        val mask = req.mask.peek().litValue.toString(2).reverse.padTo(req.mask.getWidth, '0').map {
+//          case '1' => true
+//          case _ => false
+//        }.flatMap(x => Seq.fill(4)(x)).toArray
+//        mem.writeDataPhysical(addr, data_byte_count, data, mask)
+//        data = Array.fill(data_byte_count)(0.toByte) // write operation
+//        opcode_rsp = 0 // response = 0
+//      }
+//      case 0 => { // write full
+//        data = top.helper.BigInt2ByteArray(req.data.peek().litValue, data_byte_count)
+//        val mask = Array.fill(4 * req.mask.getWidth)(true)
+//        mem.writeDataPhysical(addr, data_byte_count, data, mask) // write operation
+//        data = Array.fill(data_byte_count)(0.toByte) // response = 0
+//        opcode_rsp = 0
+//      }
+//      case _ => {
+//        data = Array.fill(data_byte_count)(0.toByte)
+//      }
+//
+//    }
+    val rsp = (new ShareMemCoreRsp_np().Lit(
+      _.data -> req.data.peek(),
+      _.instrId -> req.instrId.peek(),
+      _.activeMask -> Vec(num_thread, Bool()).Lit(req.perLaneAddr.map(_.activeMask.peek().litToBoolean).zipWithIndex.map { case (d, i) => (i, d.B) }: _*),
+    ))
+    println("print: rsp: ")
+//    println(rsp.data)
+    println(rsp.activeMask)
+    println(rsp.instrId)
+    rsp
   }
 }
