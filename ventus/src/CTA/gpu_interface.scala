@@ -14,11 +14,12 @@ import chisel3._
 import chisel3.util._
 
 //?? Require discussion
-class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_ID_WIDTH: Int, val NUMBER_WF_SLOTS: Int, val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val VGPR_ID_WIDTH: Int, val SGPR_ID_WIDTH: Int, val LDS_ID_WIDTH: Int, val TAG_WIDTH: Int, val MEM_ADDR_WIDTH: Int, val WAVE_ITEM_WIDTH: Int, val WF_COUNT_WIDTH_PER_WG: Int) extends Module{
+class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_ID_WIDTH: Int, val NUMBER_WF_SLOTS: Int, val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val VGPR_ID_WIDTH: Int, val SGPR_ID_WIDTH: Int, val LDS_ID_WIDTH: Int, val TAG_WIDTH: Int, val MEM_ADDR_WIDTH: Int, val WAVE_ITEM_WIDTH: Int, val WF_COUNT_WIDTH_PER_WG: Int, val KNL_ASID_WIDTH: Int) extends Module{
     val io = IO(new Bundle{
         val inflight_wg_buffer_gpu_valid = Input(Bool())
         val inflight_wg_buffer_gpu_wf_size = Input(UInt(WAVE_ITEM_WIDTH.W))
         val inflight_wg_buffer_start_pc = Input(UInt(MEM_ADDR_WIDTH.W))
+        val inflight_wg_buffer_kernel_asid = Input(UInt(KNL_ASID_WIDTH.W))
         val inflight_wg_buffer_kernel_size_3d = Input(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
         val inflight_wg_buffer_pds_baseaddr = Input(UInt(MEM_ADDR_WIDTH.W))
         val inflight_wg_buffer_csr_knl = Input(UInt(MEM_ADDR_WIDTH.W))
@@ -49,6 +50,7 @@ class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_I
         val dispatch2cu_wf_tag_dispatch = Output(UInt(TAG_WIDTH.W))
         val dispatch2cu_lds_base_dispatch = Output(UInt((LDS_ID_WIDTH + 1).W))
         val dispatch2cu_start_pc_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
+        val dispatch2cu_kernel_asid_dispatch = Output(UInt(KNL_ASID_WIDTH.W))
         val dispatch2cu_kernel_size_3d_dispatch = Output(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
         val dispatch2cu_pds_baseaddr_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
         val dispatch2cu_csr_knl_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
@@ -87,6 +89,7 @@ class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_I
     val inflight_wg_buffer_gpu_valid_i = RegInit(false.B)
     val inflight_wg_buffer_gpu_wf_size_i = RegInit(0.U(WAVE_ITEM_WIDTH.W))
     val inflight_wg_buffer_start_pc_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
+    val inflight_wg_buffer_kernel_asid_i = RegInit(0.U(KNL_ASID_WIDTH.W))
     val inflight_wg_buffer_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))
     val inflight_wg_buffer_pds_baseaddr_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     val inflight_wg_buffer_csr_knl = RegInit(0.U(MEM_ADDR_WIDTH.W))
@@ -121,6 +124,7 @@ class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_I
     val dispatch2cu_wf_tag_dispatch_i = RegInit(0.U(TAG_WIDTH.W))
     val dispatch2cu_lds_base_dispatch_i = RegInit(0.U((LDS_ID_WIDTH + 1).W))
     val dispatch2cu_start_pc_dispatch_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
+    val dispatch2cu_kernel_asid_i = RegInit(0.U(KNL_ASID_WIDTH.W))
     val dispatch2cu_kernel_size_3d_dispatch_i = RegInit(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))
     val dispatch2cu_pds_baseaddr_dispatch_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     val dispatch2cu_csr_knl_dispatch_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
@@ -154,6 +158,7 @@ class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_I
     when(io.inflight_wg_buffer_gpu_valid){
         inflight_wg_buffer_gpu_wf_size_i := io.inflight_wg_buffer_gpu_wf_size
         inflight_wg_buffer_start_pc_i := io.inflight_wg_buffer_start_pc
+        inflight_wg_buffer_kernel_asid_i := io.inflight_wg_buffer_kernel_asid
         inflight_wg_buffer_kernel_size_3d_i := io.inflight_wg_buffer_kernel_size_3d
         inflight_wg_buffer_pds_baseaddr_i := io.inflight_wg_buffer_pds_baseaddr
         inflight_wg_buffer_csr_knl := io.inflight_wg_buffer_csr_knl
@@ -210,6 +215,7 @@ class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_I
                 //?? Maybe _i The source code doesn't use _i
                 dispatch2cu_wf_size_dispatch_i := inflight_wg_buffer_gpu_wf_size_i
                 dispatch2cu_start_pc_dispatch_i := inflight_wg_buffer_start_pc_i
+                dispatch2cu_kernel_asid_i := inflight_wg_buffer_kernel_asid_i
                 dispatch2cu_kernel_size_3d_dispatch_i := inflight_wg_buffer_kernel_size_3d_i
                 dispatch2cu_pds_baseaddr_dispatch_i := inflight_wg_buffer_pds_baseaddr_i
                 dispatch2cu_csr_knl_dispatch_i := inflight_wg_buffer_csr_knl
@@ -297,6 +303,7 @@ class gpu_interface(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_I
     io.dispatch2cu_vgpr_base_dispatch := dispatch2cu_vgpr_base_dispatch_i
     io.dispatch2cu_lds_base_dispatch := dispatch2cu_lds_base_dispatch_i
     io.dispatch2cu_start_pc_dispatch := dispatch2cu_start_pc_dispatch_i
+    io.dispatch2cu_kernel_asid_dispatch := dispatch2cu_kernel_asid_i
     io.dispatch2cu_kernel_size_3d_dispatch := dispatch2cu_kernel_size_3d_dispatch_i
     io.dispatch2cu_pds_baseaddr_dispatch := dispatch2cu_pds_baseaddr_dispatch_i
     io.dispatch2cu_csr_knl_dispatch := dispatch2cu_csr_knl_dispatch_i
