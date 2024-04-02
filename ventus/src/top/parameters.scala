@@ -2,7 +2,7 @@ package top
 
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
 import chisel3.util._
-
+import L2cache._
 // TODO: MOVE parameters to `ventus/top'
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
   def num_sm = 2
@@ -66,7 +66,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = 2//num_thread
+//  def dcache_BlockWords: Int = 2//num_thread
+  def dcache_BlockWords: Int = 16//num_thread
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets) // 5
@@ -171,9 +172,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var cacheline = 128 //bytes
   var l2cacheline = cacheline
   var sharedcacheline = cacheline
-  var l2cachetagbits = 26
-  var l2cachesetbits = 1
-  var sharedsetbits = 16
+  val l2wayBits    = log2Ceil(l2cache_NWays)  	//4
+  val l2setBits    = log2Ceil(l2cache_NSets)		//2
+  val l2offsetBits = log2Ceil(l2cache_BlockWords << 2)// 128
+  val l2cBits    = log2Ceil(num_l2cache)				//1
+  var l2cachetagbits = xLen - (l2wayBits+l2setBits+l2offsetBits+l2cBits)
+  // 32 - (2 + 1 + 7) = 22
+  var l2cachesetbits = l2setBits
+  var sharedsetbits = dcache_SetIdxBits
   def addr_tag_bits = l2cachetagbits + l2cachesetbits
   def numgroupl2cache = l2cacheline / tma_aligned
   def numgroupshared = sharedcacheline / tma_aligned

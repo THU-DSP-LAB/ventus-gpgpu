@@ -167,7 +167,7 @@ class Tma_test
         val myData = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
           in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
-          in3 = Seq.fill(num_thread)(BigInt("00000100", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000080", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_zero()
         )
@@ -187,7 +187,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty && clock_cnt <= 100) {
+        while (tma_sender.send_list.nonEmpty && clock_cnt <= 200) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()

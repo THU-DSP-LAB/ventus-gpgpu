@@ -19,8 +19,13 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
 import freechips.rocketchip.util.property.cover
+import top.parameters.{l2cachetagbits, max_tma_inst}
 
 import scala.math.{max, min}
+
+
+//xrn add
+import top.parameters.{l2cachetagbits,l2setBits,max_tma_inst}
 
 case class CacheParameters(
   level:       Int,
@@ -154,7 +159,7 @@ case class InclusiveCacheParameters_lite(
   val op_bits = 3
   val param_bits = 3
 //  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
-  val source_bits= 26 + 1 + 3
+  val source_bits= l2cachetagbits + l2setBits + log2Up(max_tma_inst)
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
