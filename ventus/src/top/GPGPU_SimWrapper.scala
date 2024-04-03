@@ -9,6 +9,7 @@ import pipeline._
 import parameters._
 import L2cache._
 import config.config._
+import mmu.AsidLookupEntry
 import parameters.num_warp
 
 class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = false) extends Module {
@@ -73,9 +74,11 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
     val host_rsp = DecoupledIO(new CTA2host_data)
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
+    val asid_fill = Flipped(ValidIO(new AsidLookupEntry(SV.getOrElse(mmu.SV32))))
     val cnt = Output(UInt(32.W))
     val inst_cnt = Output(Vec(num_sm, UInt(32.W)))
   })
+  GPU.io.asid_fill.foreach{ _ <> io.asid_fill }
 
   val counter = new Counter(200000)
   counter.reset()

@@ -20,7 +20,10 @@ import chiseltest._
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
 import chiseltest.simulator.WriteFstAnnotation
+import mmu.AsidLookupEntry
 import play.TestUtils._
+
+import scala.collection.mutable.ArrayBuffer
 //import chiseltest.simulator.
 import pipeline.pipe
 import top._
@@ -295,9 +298,8 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     print(s"Hardware: num_warp = ${parameters.num_warp}, num_thread = ${parameters.num_thread}\n")
 
     val mem = new MemBox(MemboxS.SV32)
-    mem.loadfile(0, metas.head, dataFileDir.head)
-
-    test(new GPGPU_SimWrapper(FakeCache = false)).withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>
+    //mem.loadfile(0, metas.head, dataFileDir.head)
+    test(new GPGPU_SimWrapper(FakeCache = false, Some(mmu.SV32))).withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)
       c.io.out_d.initSource()
@@ -312,10 +314,16 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       var meta = new MetaData
       var size3d = Array.fill(3)(0)
       var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
+      val ptbr_table = ArrayBuffer.fill(256)(BigInt(-1))
+      var ptbr_pos = 1
+
       var current_kernel = 0
       var clock_cnt = 0
       var timestamp = 0
-
+      object AsidException extends Exception{
+        val message = "Run out of ASID"
+        val cause: Throwable = null
+      }
       class RequestSenderGPU(gap: Int = 5) extends RequestSender(c.io.host_req, c.io.host_rsp){
         override def finishWait(): Boolean = {
           clock_cnt - timestamp > gap
@@ -352,9 +360,23 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       while(clock_cnt <= maxCycle && !wg_list.flatten.reduce(_ && _)){
         if(clock_cnt - timestamp == 0){
           print(s"kernel ${current_kernel} ${dataFileDir(current_kernel)}\n")
-          meta = mem.loadfile(0, metas(current_kernel), dataFileDir(current_kernel))
+
+          if(ptbr_table(ptbr_pos) == -1){
+            ptbr_table(ptbr_pos) = mem.createRootPageTable()
+            c.io.asid_fill.valid.poke(true.B)
+            c.io.asid_fill.bits.poke((new AsidLookupEntry(mmu.SV32)).Lit(
+              _.ptbr -> ptbr_table(ptbr_pos).U,
+              _.asid -> ptbr_pos.U,
+              _.valid -> true.B
+            ))
+          }
+          else{ c.io.asid_fill.valid.poke(false.B) }
+
+          meta = mem.loadfile(ptbr_table(ptbr_pos), metas(current_kernel), dataFileDir(current_kernel))
+          meta.asid = ptbr_pos
           size3d = meta.kernel_size.map(_.toInt)
           wg_list(current_kernel) = Array.fill(size3d(0) * size3d(1) * size3d(2))(false)
+
           host_driver.add(
             for {
               i <- 0 until size3d(0)
@@ -363,6 +385,10 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
             } yield meta.generateHostReq(i, j, k)
           )
         }
+        else c.io.asid_fill.valid.poke(false.B)
+        ptbr_pos += 1
+
+        if(ptbr_pos >= 255) throw AsidException
 
         host_driver.eval()
         mem_driver.eval()
@@ -370,7 +396,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         c.clock.step(1)
         clock_cnt += 1
 
-        if (wg_list(current_kernel).reduce(_ && _)) {
+        if (wg_list(current_kernel).reduce(_ && _) && host_driver.send_list.isEmpty) {
           timestamp = clock_cnt
           current_kernel += 1
         }
