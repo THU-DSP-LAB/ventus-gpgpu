@@ -383,11 +383,10 @@ class Temp_mem() extends Module {
     is(s_shared){
       when(io.to_shared.fire){
         used_mem := used_mem.bitSet(output_data_entry, false.B)
-        printf("output_data_entry : %d",output_data_entry)
         output_data_entry := 0.U
         shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
 //        dataFIFO.write(0.U,0.U)
-        current_mask_l2cache := VecInit(Seq.fill(numgroupinstmax)(false.B))
+        current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
         inst_to_shared :=  0.U.asTypeOf(new vExeDataTMA)
 //        tag_reg :=  0.U(addr_tag_bits.W)
         current_inst_entry_index_reg :=  0.U(log2Up(max_tma_inst).W)
@@ -533,15 +532,31 @@ class Addrcalc_shared() extends Module {
       }
     }
     is(s_shared1){
-      output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
-      current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Up(numgroupl2cache).W))))
-      cnt_mask = 0
-      (0 until numgroupl2cache).foreach( x => {
-        when(current_mask(x)){
-          current_mask_index(cnt_mask) := x.asUInt
-          cnt_mask = cnt_mask + 1
-        }
-      })
+//      cnt_mask = 0
+//      (0 until numgroupl2cache).foreach( x => {
+//        when(current_mask(x)){
+//          current_mask_index(cnt_mask) := x.asUInt
+//          cnt_mask = cnt_mask + 1
+//        }
+//      })
+    val initialMaskIndices = VecInit(Seq.fill(num_thread)(0.U(log2Ceil(num_thread).W)))
+    val (maskIndices, _) = (0 until num_thread).foldLeft((initialMaskIndices, 0.U(log2Ceil(num_thread).W))) {
+      case ((indices, cnt_mask), i) =>
+        val newIndices = Wire(Vec(num_thread, UInt(log2Ceil(num_thread).W)))
+        var newCntMask = Wire(UInt(log2Ceil(num_thread).W))
+
+        // Copy previous indices to newIndices
+        for (j <- 0 until num_thread) { newIndices(j) := indices(j) }
+
+        // Conditionally update the index and count
+        when(current_mask(i) === 1.U) {
+          newIndices(cnt_mask) := i.U
+          newCntMask := cnt_mask + 1.U
+        }.otherwise { newCntMask := cnt_mask }
+
+        (newIndices, newCntMask)
+    }
+      current_mask_index := maskIndices
     }
     is(s_shared2){
 //      var cnt_group = 0
@@ -575,6 +590,9 @@ class Addrcalc_shared() extends Module {
     is(s_shared3){
       when(io.to_shared.fire){
         reg_save.mask := mask_next
+        current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Up(numgroupl2cache).W))))
+        output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
+
       }.otherwise{
         reg_save.mask := reg_save.mask
       }

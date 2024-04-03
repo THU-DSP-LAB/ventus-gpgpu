@@ -83,8 +83,8 @@ class Tma_test
         val memory = new MemBox(MemboxS.Bare32)
         memory.loadfile(0, metas, dataFileDir)
 
-        val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 16, 5)
-        val mem_driver_shared = new MemPortDriverDelay_shared(d.io.shared_req, d.io.shared_rsp, memory, 8, 5)
+        val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 50, 5)
+        val mem_driver_shared = new MemPortDriverDelay_shared(d.io.shared_req, d.io.shared_rsp, memory, 40, 5)
 
         case class vExeData_Soft(
                                   in1: Seq[BigInt],
@@ -164,18 +164,36 @@ class Tma_test
 
         }
 
-        val myData = vExeData_Soft(
+        val myData1 = vExeData_Soft(
+          in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
+          in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000010", 16)),
+          mask = Seq.fill(num_thread)(true.B),
+          ctrl = genBundle_zero()
+        )
+        val myData2 = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
           in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
           in3 = Seq.fill(num_thread)(BigInt("00000080", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_zero()
         )
+        val myData3 = vExeData_Soft(
+          in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
+          in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000100", 16)),
+          mask = Seq.fill(num_thread)(true.B),
+          ctrl = genBundle_zero()
+        )
 
-        val hw_data = makeData(myData)
+        val hw_data1 = makeData(myData1)
+        val hw_data2 = makeData(myData2)
+        val hw_data3 = makeData(myData3)
 
         val req_list = Seq(
-          hw_data
+          hw_data1,
+          hw_data2,
+          hw_data3
           //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
@@ -187,7 +205,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty && clock_cnt <= 200) {
+        while (tma_sender.send_list.nonEmpty && clock_cnt <= 1000) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()

@@ -166,7 +166,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   //tma-xrn
   var tma_aligned = 4 // bytes
-  var maxcopysize = 128 //bytes  all 5D multiply together
+  var maxcopysize = 256 //bytes  all 5D multiply together
   var max_tma_inst = 8
   var max_l2cacheline = 6
   var cacheline = 128 //bytes
@@ -180,7 +180,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   // 32 - (2 + 1 + 7) = 22
   var l2cachesetbits = l2setBits
   var sharedsetbits = dcache_SetIdxBits
-  def addr_tag_bits = l2cachetagbits + l2cachesetbits
+  def addr_tag_bits = l2cachetagbits + l2cachesetbits + l2wayBits
   def numgroupl2cache = l2cacheline / tma_aligned
   def numgroupshared = sharedcacheline / tma_aligned
   def numgroupinstmax = maxcopysize / tma_aligned
