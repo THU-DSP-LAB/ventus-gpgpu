@@ -12,5 +12,5 @@
 	url = git@github.com:ucb-bar/berkeley-hardfloat.git
 [submodule "dependencies/fpuv2"]
 	path = dependencies/fpuv2
-	url = git@github.com:liuxd17thu/fpuv2.git
-	branch = master
+	url = https://github.com/liuweibupt/fpuv2.git
+	branch = dev-lw-tc
