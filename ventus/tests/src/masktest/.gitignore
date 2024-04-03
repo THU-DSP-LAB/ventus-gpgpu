@@ -1,0 +1,4 @@
+/build
+*.fir
+*.out
+*.json
