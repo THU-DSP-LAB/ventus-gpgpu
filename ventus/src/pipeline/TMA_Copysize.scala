@@ -133,28 +133,28 @@ class AddrCalc_l2cache() extends Module{
   })
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
-  val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-l2cachetagbits+1), 0.U(l2cachetagbits.W))
-  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-l2cachesetbits
-    +1), 0.U(l2cachesetbits
-    .W))
-  val blockOffset = Wire(Vec(numgroupinstmax, UInt(dcache_BlockOffsetBits.W)))
-
-  (0 until numgroupinstmax).foreach( x => blockOffset(x) := addr(x)(10, 2) )
-  val wordOffset1H = Wire(Vec(numgroupinstmax, UInt(BytesOfWord.W)))
-  (0 until numgroupinstmax).foreach( x => {
-    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
-    wordOffset1H(x) := 15.U(4.W)
-    switch(reg_save.ctrl.mem_whb){
-      is(MEM_W) { wordOffset1H(x) := 15.U }
-      is(MEM_H) { wordOffset1H(x) :=
-        Mux(addr(x)(1)===0.U,
-          3.U,
-          12.U
-        )
-      }
-      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
-    }
-  })
+//  val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-l2cachetagbits+1), 0.U(l2cachetagbits.W))
+//  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-l2cachesetbits
+//    +1), 0.U(l2cachesetbits.W))
+  val addr_tag = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1, xLen-1-addr_tag_bits +1), 0.U(addr_tag_bits.W))
+//  val blockOffset = Wire(Vec(numgroupinstmax, UInt(dcache_BlockOffsetBits.W)))
+//
+//  (0 until numgroupinstmax).foreach( x => blockOffset(x) := addr(x)(10, 2) )
+//  val wordOffset1H = Wire(Vec(numgroupinstmax, UInt(BytesOfWord.W)))
+//  (0 until numgroupinstmax).foreach( x => {
+//    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
+//    wordOffset1H(x) := 15.U(4.W)
+//    switch(reg_save.ctrl.mem_whb){
+//      is(MEM_W) { wordOffset1H(x) := 15.U }
+//      is(MEM_H) { wordOffset1H(x) :=
+//        Mux(addr(x)(1)===0.U,
+//          3.U,
+//          12.U
+//        )
+//      }
+//      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+//    }
+//  })
   //  val srcsize = Wire(UInt(3.W))
   //  switch(reg_save.ctrl.mem_whb){
   //      is(MEM_W){
@@ -182,9 +182,9 @@ class AddrCalc_l2cache() extends Module{
   //  io.to_tempmem.bits.tag.instruinfo :=reg_save
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
-  io.to_l2cache.bits.source :=  Cat(Cat(current_tag, setIdx),reg_entryID)
+  io.to_l2cache.bits.source :=  Cat(addr_tag,reg_entryID)
   // temporarily set it as reg_entryID, for mshr; cat with wid, for shiftboard; jingguo ceshi hui fangzai hou 6 bit
-  io.to_l2cache.bits.address := Cat(addr_wire(xLen-1, xLen-1-l2cachetagbits-l2cachesetbits+1),0.U((xLen - l2cachetagbits-l2cachesetbits).W))
+  io.to_l2cache.bits.address := Cat(addr_wire(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
 
   io.to_l2cache.bits.mask   := 0.U
   io.to_l2cache.bits.data   :=  0.U
@@ -192,8 +192,9 @@ class AddrCalc_l2cache() extends Module{
   io.to_l2cache.valid := (state===s_l2cache)
   val mask_next = Wire(Vec(numgroupinstmax, Bool()))
   (0 until numgroupinstmax).foreach( x => {                          // update mask
-    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-l2cachesetbits+1)===setIdx
-      )})
+//    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-l2cachetagbits+1)===current_tag && addr(x)(xLen-1-l2cachetagbits, xLen-1-l2cachetagbits-l2cachesetbits+1)===setIdx
+    mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-addr_tag_bits+1)===addr_tag)
+  })
   // End of Addr Logic
 
 
