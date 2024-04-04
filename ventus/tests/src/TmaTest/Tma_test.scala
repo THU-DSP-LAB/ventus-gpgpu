@@ -33,7 +33,7 @@ class Tma_test
         //        val fence_end_tma = DecoupledIO(UInt(32.W))
       })
 
-      val internal = Module(new TMA_Copysize())
+      val internal = Module(new TMA_Bulk())
       internal.io.tma_req <> Queue(io.in, 1)
       io.out <> Queue(internal.io.fence_end_tma, 1)
       io.shared_req <> Queue(internal.io.shared_req, 1)
@@ -179,9 +179,9 @@ class Tma_test
           ctrl = genBundle_zero()
         )
         val myData3 = vExeData_Soft(
-          in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
-          in2 = Seq.fill(num_thread)(BigInt("70000000", 16)),
-          in3 = Seq.fill(num_thread)(BigInt("00000100", 16)),
+          in1 = Seq.fill(num_thread)(BigInt("90002270", 16)),
+          in2 = Seq.fill(num_thread)(BigInt("70001850", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000190", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_zero()
         )

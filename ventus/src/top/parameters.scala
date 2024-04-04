@@ -67,7 +67,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_NWays: Int = 2
 
 //  def dcache_BlockWords: Int = 2//num_thread
-  def dcache_BlockWords: Int = 16//num_thread
+  def dcache_BlockWords: Int = 32//num_thread
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets) // 5
@@ -165,7 +165,10 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
 
   //tma-xrn
-  var tma_aligned = 4 // bytes
+  val shared_aligned = 4 //bytes
+  val shared_aligned_bits = shared_aligned * 8 //bytes
+  var tma_aligned_bulk = 4 // bytes
+  var tma_aligned_bulk_bits = tma_aligned_bulk * 8 // bytes
   var maxcopysize = 256 //bytes  all 5D multiply together
   var max_tma_inst = 8
   var max_l2cacheline = 6
@@ -181,9 +184,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var l2cachesetbits = l2setBits
   var sharedsetbits = dcache_SetIdxBits
   def addr_tag_bits = l2cachetagbits + l2cachesetbits + l2wayBits
-  def numgroupl2cache = l2cacheline / tma_aligned
-  def numgroupshared = sharedcacheline / tma_aligned
-  def numgroupinstmax = maxcopysize / tma_aligned
-  def numgroupinstmax_shared = maxcopysize / 4
-  def numgroupsharedmax = maxcopysize / 4
+  def numgroupl2cache = l2cacheline / tma_aligned_bulk
+  def numgroupshared = sharedcacheline / tma_aligned_bulk
+  def numgroupinstmax = maxcopysize / tma_aligned_bulk
 }
