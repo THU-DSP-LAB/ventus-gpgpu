@@ -7,7 +7,7 @@ object ivys {
   val scalatestplus = ivy"org.scalatestplus::scalacheck-1-14:3.1.1.1"
   val scalacheck = ivy"org.scalacheck::scalacheck:1.14.3"
 
-  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.6"
+  val chisel3 = ivy"edu.berkeley.cs::chisel3:3.5.0"
   val chisel3Plugin = ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0"
   val chiseltest = ivy"edu.berkeley.cs::chiseltest:0.5.0"
   val chiselCirct = ivy"com.sifive::chisel-circt:0.4.0"
@@ -22,7 +22,8 @@ object cta extends ScalaModule {
   override def scalacOptions = Seq(
     "-Xsource:2.11",
     "-language:reflectiveCalls",
-    "-Xcheckinit"//,
+    "-Xcheckinit",
+    "-deprecation"
   )
   override def scalacPluginIvyDeps = Agg(
     ivys.chisel3Plugin

@@ -24,7 +24,7 @@ class io_buffer2cuinterface extends Bundle with ctainfo_host_to_cu with ctainfo_
  * 3.2 If allocator rejects a wg, that wg is allowed to be sent to allocator in the next turn.
  * @param NUM_ENTRIES wg buffer depth
  * @see doc/wg_buffer.md
- * @note DecoupledIO.ready outputs is not registered
+ * @note DecoupledIO.ready outputs are not registered
  */
 class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module {
   val io = IO(new Bundle{

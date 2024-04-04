@@ -21,7 +21,7 @@ class cu_interface(NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   io.alloc_wg_new.ready := io.wgbuffer_wg_new.valid && fifo.io.enq.ready
   fifo.io.enq.valid := io.wgbuffer_wg_new.valid && io.alloc_wg_new.valid
   fifo.io.enq.bits.wg_id := io.alloc_wg_new.bits.wg_id
-  fifo.io.enq.bits.lds_base := io.alloc_wg_new.bits.lds_base
+  //fifo.io.enq.bits.lds_base := io.alloc_wg_new.bits.lds_base
   fifo.io.enq.bits.csr_kernel := io.wgbuffer_wg_new.bits.csr_kernel
 
   io.host_wg_done <> fifo.io.deq

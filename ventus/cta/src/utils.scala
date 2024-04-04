@@ -2,6 +2,7 @@ package cta_scheduler.cta_util
 
 import chisel3._
 import chisel3.util._
+import scala.math.max
 
 /** Round-Robin-Priority Binary Encoder
  * @param n: length of the input Bool-Vector
@@ -40,6 +41,59 @@ object RRPriorityEncoder {
     val inst = Module(new RRPriorityEncoder(in.getWidth))
     inst.io.in := VecInit(in.asBools)
     inst.io.out
+  }
+}
+
+/**
+ * Combinational sort circuit for three UInt
+ * io.out(0) is the biggest, io.out(2) is the smallest
+ * @param WIDTH width of the input/output UInt
+ */
+class sort3(val WIDTH: Int) extends Module {
+  val io = IO(new Bundle{
+    val in = Input(Vec(3, UInt(WIDTH.W)))
+    val out = Output(Vec(3, UInt(WIDTH.W)))
+  })
+  val cmp0 = io.in(0) > io.in(1)
+  val cmp1 = io.in(1) > io.in(2)
+  val cmp2 = io.in(2) > io.in(0)
+  val res = Wire(Vec(3, Vec(2, Bool())))
+  res(0)(0) := cmp0
+  res(0)(1) := !cmp2
+  res(1)(0) := cmp1
+  res(1)(1) := !cmp0
+  res(2)(0) := cmp2
+  res(2)(1) := !cmp1
+  io.out(0) := Mux1H(Seq(
+    res(0).asUInt.andR -> io.in(0),
+    res(1).asUInt.andR -> io.in(1),
+    res(2).asUInt.andR -> io.in(2),
+  ))
+  io.out(1) := Mux1H(Seq(
+    res(0).asUInt.xorR -> io.in(0),
+    res(1).asUInt.xorR -> io.in(1),
+    res(2).asUInt.xorR -> io.in(2),
+  ))
+  io.out(0) := Mux1H(Seq(
+    !res(0).asUInt.orR -> io.in(0),
+    !res(1).asUInt.orR -> io.in(1),
+    !res(2).asUInt.orR -> io.in(2),
+  ))
+}
+
+object sort3 {
+  def apply(in: Vec[UInt]): Vec[UInt] = {
+    val inst = Module(new sort3(in(0).getWidth))
+    inst.io.in := in
+    inst.io.out
+  }
+  def apply(in0: UInt, in1: UInt, in2: UInt): Vec[UInt] = {
+    val width = max(in0.getWidth, max(in1.getWidth, in2.getWidth))
+    val in = Wire(Vec(3, UInt(width.W)))
+    in(0) := in0
+    in(1) := in1
+    in(2) := in2
+    apply(in)
   }
 }
 
