@@ -13,3 +13,4 @@
 [submodule "dependencies/fpuv2"]
 	path = dependencies/fpuv2
 	url = git@github.com:liuweibupt/fpuv2.git
+	branch = dev-lw-tc
