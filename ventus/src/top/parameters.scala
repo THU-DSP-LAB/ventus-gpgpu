@@ -165,14 +165,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
 
   //tma-xrn
+  val maxcopysize = 16 // bytes
   val shared_aligned = 4 //bytes
-  val shared_aligned_bits = shared_aligned * 8 //bytes
-  var tma_aligned_bulk = 4 // bytes
+  var shared_aligned_bits = shared_aligned * 8 //bytes
+  val tma_aligned_bulk = 4 // bytes
   var tma_aligned_bulk_bits = tma_aligned_bulk * 8 // bytes
-  var maxcopysize = 256 //bytes  all 5D multiply together
-  var max_tma_inst = 8
-  var max_l2cacheline = 6
-  var cacheline = 128 //bytes
+  val max_tma_inst = 8
+  val max_l2cacheline = 6
+  val cacheline = 128 //bytes
   var l2cacheline = cacheline
   var sharedcacheline = cacheline
   val l2wayBits    = log2Ceil(l2cache_NWays)  	//4

@@ -27,11 +27,13 @@ class vExeDataTMA extends Bundle {
   //  val mode = Bool()
   //  val used = Bool()
   //  val complete = Bool()
-  val in1 = UInt(xLen.W)
-  val in2 = UInt(xLen.W)
-//  val in3 = UInt(xLen.W)
-//  val copysize = UInt(log2Ceil(maxcopysize).W)
-  val copysize = UInt(xLen.W)
+  val src = UInt(xLen.W)  // src
+  val size = UInt(xLen.W) // srcsize or cpysize in bulk
+  val dst = UInt(xLen.W)  //dst
+
+  val opmode = UInt(4.W)
+  val copysize = UInt(log2Ceil(maxcopysize).W)  // only 4 8 16 , may add 32
+  val srcsize = UInt(xLen.W)
 //  val srcsize = UInt(3.W)
 //  val interleave = Bool()
   //  val im2col = Vec(2,)
@@ -138,14 +140,14 @@ class l2cache2temp extends Module {
 //  })
 //
 //  //  vExeData.in1(0): Dcache base addr
-//  //  vExeData.in2(0): Sharedmem base addr
-//  //  vExeData.in3(0): copysize
+//  //  vExeData.in3(0): Sharedmem base addr
+//  //  vExeData.in2(0): copysize
 //  //  maybe 4*4*2 byte one cp.async
 //  //  vExeData.ctrl.memw/h/b: data type : determine the mask sent to L1 cache
 //  val s_idle :: s_save :: s_l2cache :: Nil = Enum(3)
 //  val state = RegInit(init = s_idle)
 //  val reg_save = Reg(new regSave)
-//  val current_numgroup = io.from_fifo.bits.in3(0).asUInt /tma_aligned_bulk.asUInt
+//  val current_numgroup = io.from_fifo.bits.in2(0).asUInt /tma_aligned_bulk.asUInt
 //  val cnt = new Counter(n = numgroupinstmax)
 //  val reg_entryID = RegInit(0.U(log2Ceil(max_tma_inst).W))
 //  val addr = Wire(Vec(numgroupinstmax,UInt(xLen.W)))
@@ -193,9 +195,9 @@ class l2cache2temp extends Module {
 //  //  l2cachetag := addr.map(_(xLen-1, xLen - l2cachetagbits))
 //  io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
 //  io.to_tempmem.bits.tag.in1 := reg_save.in1
-//  io.to_tempmem.bits.tag.in2 := reg_save.in2
-////  io.to_tempmem.bits.tag.in3 := reg_save.in3
-//  io.to_tempmem.bits.tag.copysize := reg_save.in3
+//  io.to_tempmem.bits.tag.in3 := reg_save.in3
+////  io.to_tempmem.bits.tag.in2 := reg_save.in2
+//  io.to_tempmem.bits.tag.copysize := reg_save.in2
 //  io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
 //  //  io.to_tempmem.bits.tag.srcsize := srcsize
 //  //  io.to_tempmem.bits.tag.addrinit := addrinit
@@ -247,8 +249,8 @@ class l2cache2temp extends Module {
 //    is (s_idle){
 //      when(io.from_fifo.fire){ // Next: s_save
 //        reg_save.in1 := io.from_fifo.bits.in1(0)
-//        reg_save.in2 := io.from_fifo.bits.in2(0)
 //        reg_save.in3 := io.from_fifo.bits.in3(0)
+//        reg_save.in2 := io.from_fifo.bits.in2(0)
 //        //        reg_save.mask := ZeroExt(io.from_fifo.bits.mask)
 //        reg_save.ctrl := io.from_fifo.bits.ctrl
 //        (0 until numgroupinstmax).foreach(x => {
@@ -271,8 +273,8 @@ class l2cache2temp extends Module {
 //  }
 //  //  printf("state: %b\n",state.asUInt)
 ////    printf("copysize: %b\n",io.to_tempmem.bits.tag.copysize.asUInt)
-////    printf("in3: %d\n",io.from_fifo.bits.in3(0).asUInt)
-////    printf("reg_save_in3: %d\n",reg_save.in3.asUInt)
+////    printf("in2: %d\n",io.from_fifo.bits.in2(0).asUInt)
+////    printf("reg_save_in2: %d\n",reg_save.in2.asUInt)
 //  //  printf("l2req:address: %b\n",io.to_l2cache.bits.address.asUInt)
 //}
 class AddrCalc_l2cache() extends Module{
@@ -287,21 +289,47 @@ class AddrCalc_l2cache() extends Module{
   val s_idle :: s_save :: s_l2cache :: Nil = Enum(3)
   val state = RegInit(init = s_idle)
   val reg_save = Reg(new regSave)
-//  val current_numgroup = io.from_fifo.bits.in3(0).asUInt /tma_aligned_bulk.asUInt
+//  val current_numgroup = io.from_fifo.bits.in2(0).asUInt /tma_aligned_bulk.asUInt
 //  val cnt = new Counter(n = numgroupinstmax)
   val reg_entryID = RegInit(0.U(log2Ceil(max_tma_inst).W))
+  val copysize = Wire(UInt(log2Ceil(16).W))
+  switch(reg_save.ctrl.copysize){
+    is(0.U){
+      copysize := 4.U
+    }
+    is(1.U){
+      copysize := 8.U
+    }
+    is(2.U){
+      copysize := 16.U
+    }
+    is(3.U){
+      copysize := 32.U //todo may not good
+    }
+  }
   val address_next = Wire(UInt(xLen.W))
-  address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + reg_save.in3.asUInt,
-                  reg_save.address.asUInt + l2cacheline.asUInt,
-                  0.U(xLen.W))
+  switch(reg_save.ctrl.opmode){
+    is(0.U){
+      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + copysize,
+        reg_save.address.asUInt + l2cacheline.asUInt,
+        0.U(xLen.W))
+    }
+    is(1.U){
+      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + reg_save.in2.asUInt,
+        reg_save.address.asUInt + l2cacheline.asUInt,
+        0.U(xLen.W))
+    }
+  }
+
   val complete_address = Wire(Bool())
-  complete_address := (address_next  >= reg_save.in1.asUInt + reg_save.in3.asUInt)
+  complete_address := (address_next  >= reg_save.in1.asUInt + reg_save.in2.asUInt)
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
-  io.to_tempmem.bits.tag.in1 := reg_save.in1
-  io.to_tempmem.bits.tag.in2 := reg_save.in2
-//  io.to_tempmem.bits.tag.in3 := reg_save.in3
-  io.to_tempmem.bits.tag.copysize := reg_save.in3
+  io.to_tempmem.bits.tag.src := reg_save.in1
+  io.to_tempmem.bits.tag.size := reg_save.in3
+//  io.to_tempmem.bits.tag.in2 := reg_save.in2
+  io.to_tempmem.bits.tag.dst := reg_save.in2
   io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
+  io.to_tempmem.bits.tag.opmode := reg_save.ctrl.alu_fn
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
   io.to_l2cache.bits.source :=  Cat(reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1),reg_entryID)
@@ -337,8 +365,8 @@ class AddrCalc_l2cache() extends Module{
     is (s_idle){
       when(io.from_fifo.fire){ // Next: s_save
         reg_save.in1 := io.from_fifo.bits.in1(0)
-        reg_save.in2 := io.from_fifo.bits.in2(0)
         reg_save.in3 := io.from_fifo.bits.in3(0)
+        reg_save.in2 := io.from_fifo.bits.in2(0)
         reg_save.address := Cat(io.from_fifo.bits.in1(0)(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
         reg_save.ctrl := io.from_fifo.bits.ctrl
       }.otherwise{reg_save := RegInit(0.U.asTypeOf(new regSave))}
@@ -361,8 +389,8 @@ class AddrCalc_l2cache() extends Module{
   }
   //  printf("state: %b\n",state.asUInt)
 //    printf("copysize: %b\n",io.to_tempmem.bits.tag.copysize.asUInt)
-//    printf("in3: %d\n",io.from_fifo.bits.in3(0).asUInt)
-//    printf("reg_save_in3: %d\n",reg_save.in3.asUInt)
+//    printf("in2: %d\n",io.from_fifo.bits.in2(0).asUInt)
+//    printf("reg_save_in2: %d\n",reg_save.in2.asUInt)
   //  printf("l2req:address: %b\n",io.to_l2cache.bits.address.asUInt)
 }
 
@@ -458,8 +486,8 @@ class Temp_mem() extends Module {
       when(io.from_addr.fire) {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
         instMem.write(valid_inst_entry, io.from_addr.bits.tag)
-        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
-        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
+        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.size >> log2Ceil(tma_aligned_bulk)
+        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.size >> log2Ceil(tma_aligned_bulk)
       }
       when(io.from_l2cache.fire) {
         used_mem := used_mem.bitSet(valid_mem_entry, true.B)
@@ -486,7 +514,7 @@ class Temp_mem() extends Module {
 //      tag_reg := tag_wire
 
       (0 until (numgroupl2cache)).foreach(x => {
-        when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.in1) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.in1 + inst_to_shared.copysize)) {
+        when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.size)) {
           current_mask_l2cache(x) := true.B
         }.otherwise {
           current_mask_l2cache(x) := false.B
@@ -550,16 +578,16 @@ class Temp_mem() extends Module {
 ////  val reg_entryID = RegInit(0.U(log2Ceil(max_tma_inst).W))
 //  val addr = Wire(Vec(numgroupl2cache,UInt(xLen.W)))
 //  (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-//    addr(x) := reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in2 + x.asUInt * 4.U
+//    addr(x) := reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3 + x.asUInt * 4.U
 //  })
-////  val addr_init = reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in2
+////  val addr_init = reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3
 ////  when(reg_save.l2cacheTag < reg_save.instinfo.in1){
 ////    (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-////      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.instinfo.in2 + x.asUInt * 4.U, 0.U(xLen.W))
+////      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.instinfo.in3 + x.asUInt * 4.U, 0.U(xLen.W))
 ////    })
 ////  }.otherwise{
 ////    (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-////      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in2 + x.asUInt * 4.U, 0.U(xLen.W))
+////      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3 + x.asUInt * 4.U, 0.U(xLen.W))
 ////    })
 ////  }
 //
@@ -748,7 +776,7 @@ class Addrcalc_shared() extends Module {
   })
   //  val s_idle :: s_save :: s_shared :: Nil = Enum(3)
 //  val s_idle :: s_shared1 ::s_shared2:: s_shared3::Nil = Enum(4)
-  val s_idle :: s_shared1 ::s_shared2::Nil = Enum(3)
+  val s_idle :: s_shared1 ::s_shared2::s_shift ::Nil = Enum(4)
   val state = RegInit(init = s_idle)
   val reg_save = Reg(new TempOutput)
   val current_numgroup = Reg(UInt(log2Ceil(numgroupl2cache).W))
@@ -757,16 +785,16 @@ class Addrcalc_shared() extends Module {
   //  val reg_entryID = RegInit(0.U(log2Ceil(max_tma_inst).W))
   val addr = Wire(Vec(numgroupl2cache,UInt(xLen.W)))
   (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-    addr(x) := reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in2 + x.asUInt * 4.U
+    addr(x) := reg_save.l2cacheTag - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * 4.U
   })
-  //  val addr_init = reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in2
+  //  val addr_init = reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3
   //  when(reg_save.l2cacheTag < reg_save.instinfo.in1){
   //    (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-  //      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.instinfo.in2 + x.asUInt * 4.U, 0.U(xLen.W))
+  //      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.instinfo.in3 + x.asUInt * 4.U, 0.U(xLen.W))
   //    })
   //  }.otherwise{
   //    (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-  //      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in2 + x.asUInt * 4.U, 0.U(xLen.W))
+  //      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3 + x.asUInt * 4.U, 0.U(xLen.W))
   //    })
   //  }
 
@@ -778,8 +806,17 @@ class Addrcalc_shared() extends Module {
   (0 until numgroupl2cache).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(numgroupl2cache, UInt(BytesOfWord.W)))
   (0 until numgroupl2cache).foreach( x => {
-    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
+    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb4
     wordOffset1H(x) := 15.U(4.W)
+    switch(reg_save.instinfo.opmode){
+      is(0.U){
+        wordOffset1H(x) := 1.U << addr(x)(1,0)
+      }
+      is(1.U){
+        wordOffset1H(x) := 15.U(4.W)
+      }
+    }
+
     //    switch(reg_save.ctrl.mem_whb){
     //      is(MEM_W) { wordOffset1H(x) := 15.U }
     //      is(MEM_H) { wordOffset1H(x) :=
@@ -810,7 +847,11 @@ class Addrcalc_shared() extends Module {
   // FSM State Transfer
   switch(state){
     is(s_idle){
-      when(io.from_temp.valid){ state := s_shared1}.otherwise{state := state}
+      when(io.from_temp.valid){
+        state := s_shared1
+      }.otherwise{
+        state := state
+      }
       cnt.reset()
     }
     //    is(s_save){
@@ -881,15 +922,31 @@ class Addrcalc_shared() extends Module {
 //      current_mask_index := maskIndices
 //    }
     is(s_shared1){
-      (0 until(numgroupshared)).foreach(x =>{
-          output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
-          output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
-          output_reg.perLaneAddr(x).activeMask := current_mask(x)
-          output_reg.data(x) := reg_save.data(x)
-    })
-      output_reg.instrId := reg_save.entry_index
-      output_reg.isWrite := true.B
-      output_reg.setIdx := setIdx
+      switch(reg_save.instinfo.opmode){
+        is(0.U){
+          (0 until(numgroupshared)).foreach(x =>{
+            output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
+            output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
+            output_reg.perLaneAddr(x).activeMask := current_mask(x)
+            output_reg.data(x) := reg_save.data(x)
+          })
+          output_reg.instrId := reg_save.entry_index
+          output_reg.isWrite := true.B
+          output_reg.setIdx := setIdx
+        }
+        is(1.U){
+          (0 until(numgroupshared)).foreach(x =>{
+            output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
+            output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
+            output_reg.perLaneAddr(x).activeMask := current_mask(x)
+            output_reg.data(x) := reg_save.data(x)
+          })
+          output_reg.instrId := reg_save.entry_index
+          output_reg.isWrite := true.B
+          output_reg.setIdx := setIdx
+        }
+      }
+
     }
     is(s_shared2){
       when(io.to_shared.fire){
@@ -938,7 +995,7 @@ class TMA_Bulk extends Module{
     val tma_req = Flipped(DecoupledIO(new vExeData()))
     /*usage:
     vExeData.in1: Dcache base addr
-    vExeData.in2: Sharedmem base addr
+    vExeData.in3: Sharedmem base addr
     vExeData.ctrl.imm_ext: copysize
                            maybe 4*4*2 byte one cp.async
     vExeData.ctrl.memw/h/b: data type : determine the mask sent to L1 cache
