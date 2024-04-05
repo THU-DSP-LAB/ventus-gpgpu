@@ -205,7 +205,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty && clock_cnt <= 1000) {
+        while (tma_sender.send_list.nonEmpty && clock_cnt <= 50) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()

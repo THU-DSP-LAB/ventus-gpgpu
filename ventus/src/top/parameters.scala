@@ -165,6 +165,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
 
   //tma-xrn
+  val BitsOfByte = 8
   val maxcopysize = 16 // bytes
   val shared_aligned = 4 //bytes
   var shared_aligned_bits = shared_aligned * 8 //bytes

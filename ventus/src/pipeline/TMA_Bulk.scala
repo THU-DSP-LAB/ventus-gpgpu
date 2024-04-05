@@ -33,7 +33,7 @@ class vExeDataTMA extends Bundle {
 
   val opmode = UInt(4.W)
   val copysize = UInt(log2Ceil(maxcopysize).W)  // only 4 8 16 , may add 32
-  val srcsize = UInt(xLen.W)
+//  val srcsize = UInt(xLen.W)
 //  val srcsize = UInt(3.W)
 //  val interleave = Bool()
   //  val im2col = Vec(2,)
@@ -326,7 +326,7 @@ class AddrCalc_l2cache() extends Module{
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
   io.to_tempmem.bits.tag.src := reg_save.in1
   io.to_tempmem.bits.tag.size := reg_save.in3
-//  io.to_tempmem.bits.tag.in2 := reg_save.in2
+  io.to_tempmem.bits.tag.copysize := 4.U << reg_save.ctrl.copysize
   io.to_tempmem.bits.tag.dst := reg_save.in2
   io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
   io.to_tempmem.bits.tag.opmode := reg_save.ctrl.alu_fn
@@ -787,16 +787,6 @@ class Addrcalc_shared() extends Module {
   (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
     addr(x) := reg_save.l2cacheTag - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * 4.U
   })
-  //  val addr_init = reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3
-  //  when(reg_save.l2cacheTag < reg_save.instinfo.in1){
-  //    (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-  //      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.instinfo.in3 + x.asUInt * 4.U, 0.U(xLen.W))
-  //    })
-  //  }.otherwise{
-  //    (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
-  //      addr(x) := Mux(x.asUInt < current_numgroup, reg_save.l2cacheTag - reg_save.instinfo.in1 + reg_save.instinfo.in3 + x.asUInt * 4.U, 0.U(xLen.W))
-  //    })
-  //  }
 
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
@@ -806,28 +796,21 @@ class Addrcalc_shared() extends Module {
   (0 until numgroupl2cache).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(numgroupl2cache, UInt(BytesOfWord.W)))
   (0 until numgroupl2cache).foreach( x => {
-    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb4
+    // todo
     wordOffset1H(x) := 15.U(4.W)
     switch(reg_save.instinfo.opmode){
       is(0.U){
-        wordOffset1H(x) := 1.U << addr(x)(1,0)
-      }
-      is(1.U){
         wordOffset1H(x) := 15.U(4.W)
       }
+      is(1.U){
+        (0 until numgroupl2cache).foreach( x => {
+          wordOffset1H(x) := 15.U(4.W)
+        })
+      }
     }
-
-    //    switch(reg_save.ctrl.mem_whb){
-    //      is(MEM_W) { wordOffset1H(x) := 15.U }
-    //      is(MEM_H) { wordOffset1H(x) :=
-    //        Mux(addr(x)(1)===0.U,
-    //          3.U,
-    //          12.U
-    //        )
-    //      }
-    //      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
-    //    }
   })
+
+
   val current_mask = Wire(Vec(numgroupl2cache, Bool()))
   (0 until numgroupl2cache).foreach(x => {
     current_mask(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
@@ -839,6 +822,39 @@ class Addrcalc_shared() extends Module {
   //找到current_mask的全部索引，只使用前16个，提取l2cacheline的数据
 //  val current_mask_index = Reg(Vec(numgroupl2cache, UInt(log2Ceil(numgroupl2cache).W)))
 
+  //shift part
+  val high_margin = PriorityEncoder(reg_save.mask.reverse)
+  val low_margin = PriorityEncoder(reg_save.mask)
+  val data_bits = Wire(UInt((l2cacheline * BitsOfByte).W))
+  val mask_bits = Wire(UInt(numgroupl2cache.W))
+//  val left_shift_bytes = Wire(UInt(log2Ceil(2 * tma_aligned_bulk_bits).W))
+//  val right_shift_bytes = Wire(UInt(log2Ceil(2 * tma_aligned_bulk_bits).W))
+  when(reg_save.instinfo.src(1,0).asUInt === reg_save.instinfo.dst(1,0).asUInt){
+  // do not need to shift
+    data_bits := Cat(reg_save.data)
+    mask_bits := Cat(reg_save.mask)
+  }.otherwise{
+    when(reg_save.instinfo.src(1,0).asUInt > reg_save.instinfo.dst(1,0).asUInt){
+      when(high_margin <= low_margin){
+        data_bits := Cat(reg_save.data) >> (reg_save.instinfo.src(1,0).asUInt - reg_save.instinfo.dst(1,0).asUInt) * BitsOfByte.asUInt
+        mask_bits := mask_bits
+      }.otherwise{
+        data_bits := Cat(reg_save.data) << (tma_aligned_bulk.asUInt - reg_save.instinfo.dst(1,0).asUInt + reg_save.instinfo.src(1,0).asUInt) * BitsOfByte.asUInt
+        mask_bits := mask_bits << 1
+      }
+    }.elsewhen(reg_save.instinfo.src(1,0).asUInt < reg_save.instinfo.dst(1,0).asUInt){
+      when(high_margin <= low_margin){
+        data_bits := Cat(reg_save.data) >> (tma_aligned_bulk.asUInt-reg_save.instinfo.src(1,0).asUInt + reg_save.instinfo.dst(1,0).asUInt) * BitsOfByte.asUInt
+        mask_bits := mask_bits >> 1
+      }.otherwise{
+        data_bits := Cat(reg_save.data) << (reg_save.instinfo.dst(1,0).asUInt - reg_save.instinfo.src(1,0).asUInt) * BitsOfByte.asUInt
+        mask_bits := mask_bits
+      }
+    }
+  }
+
+
+
   io.to_shared.bits := output_reg
   io.to_shared.valid := state===s_shared2
 
@@ -847,16 +863,23 @@ class Addrcalc_shared() extends Module {
   // FSM State Transfer
   switch(state){
     is(s_idle){
-      when(io.from_temp.valid){
-        state := s_shared1
+      when(io.from_temp.fire){
+        switch(io.from_temp.bits.instinfo.opmode){
+          is(0.U){
+            state := s_shift
+          }
+          is(1.U){
+            state := s_shared1
+          }
+        }
       }.otherwise{
         state := state
       }
       cnt.reset()
     }
-    //    is(s_save){
-    //      when(io.to_shared.fire){state := s_shared}.otherwise{state := s_save}
-    //    }
+    is(s_shift){
+      state := s_shared1
+    }
     is(s_shared1){
       when(io.to_shared.ready){
         state := s_shared2
@@ -864,9 +887,6 @@ class Addrcalc_shared() extends Module {
         state := s_shared1
       }
     }
-//    is(s_shared2){
-//      state := s_shared3
-//    }
     is(s_shared2){
       when(io.to_shared.fire){
         when(cnt.value >= current_numgroup || mask_next.asUInt === 0.U){
@@ -878,49 +898,24 @@ class Addrcalc_shared() extends Module {
       }.otherwise{state := s_shared2}
     }
   }
-
   switch(state){
     is(s_idle){
       when(io.from_temp.fire){
         reg_save := io.from_temp.bits
-        //        reg_save.mask :=  io.from_temp.bits.mask
         output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
         current_numgroup := PopCount(io.from_temp.bits.mask)
-//        current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Ceil(numgroupl2cache).W))))
       }.otherwise{
         current_numgroup := 0.U(log2Ceil(numgroupl2cache).W)
-        reg_save := RegInit(0.U.asTypeOf((new TempOutput)))
-        output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
-//        current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Ceil(numgroupl2cache).W))))
+        reg_save := RegInit(0.U.asTypeOf(new TempOutput))
+        output_reg := RegInit(0.U.asTypeOf(new ShareMemCoreReq_np))
       }
     }
-//    is(s_shared1){
-      //      cnt_mask = 0
-      //      (0 until numgroupl2cache).foreach( x => {
-      //        when(current_mask(x)){
-      //          current_mask_index(cnt_mask) := x.asUInt
-      //          cnt_mask = cnt_mask + 1
-      //        }
-      //      })
-//      val initialMaskIndices = VecInit(Seq.fill(numgroupshared)(0.U(log2Ceil(numgroupshared).W)))
-//      val (maskIndices, _) = (0 until numgroupshared).foldLeft((initialMaskIndices, 0.U(log2Ceil(numgroupshared).W))) {
-//        case ((indices, cnt_mask), i) =>
-//          val newIndices = Wire(Vec(numgroupshared, UInt(log2Ceil(numgroupshared).W)))
-//          var newCntMask = Wire(UInt(log2Ceil(numgroupshared).W))
-//
-//          // Copy previous indices to newIndices
-//          for (j <- 0 until numgroupshared) { newIndices(j) := indices(j) }
-//
-//          // Conditionally update the index and count
-//          when(current_mask(i) === 1.U) {
-//            newIndices(cnt_mask) := i.U
-//            newCntMask := cnt_mask + 1.U
-//          }.otherwise { newCntMask := cnt_mask }
-//
-//          (newIndices, newCntMask)
-//      }
-//      current_mask_index := maskIndices
-//    }
+    is(s_shift){
+      (0 until(numgroupl2cache)).foreach( x => {
+        reg_save.data(x) := data_bits((x+1) * tma_aligned_bulk_bits - 1, x * tma_aligned_bulk_bits)
+        reg_save.mask(x) := mask_bits(x)
+      })
+    }
     is(s_shared1){
       switch(reg_save.instinfo.opmode){
         is(0.U){

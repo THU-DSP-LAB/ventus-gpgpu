@@ -65,7 +65,6 @@ class CtrlSigs extends Bundle {
   //xrn add
   val opmode = UInt(3.W)
   val copysize = UInt(2.W)  // only 4 8 16 , may add 32
-  val srcsize = UInt(4.W)
 }
 class scoreboardIO extends Bundle{
   val ibuffer_if_ctrl=Input(new CtrlSigs())
