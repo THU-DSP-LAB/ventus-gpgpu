@@ -158,7 +158,9 @@ class Tma_test
             _.atomic -> false.B,
             _.aq -> false.B,
             _.rl -> false.B,
-            _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U)
+            _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U),
+            _.opmode -> 1.U,
+            _.copysize -> 0.U
           )
           ctrlsigs
 
@@ -181,7 +183,7 @@ class Tma_test
         val myData3 = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90002270", 16)),
           in2 = Seq.fill(num_thread)(BigInt("70001850", 16)),
-          in3 = Seq.fill(num_thread)(BigInt("00000190", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("00000160", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_zero()
         )
@@ -191,8 +193,8 @@ class Tma_test
         val hw_data3 = makeData(myData3)
 
         val req_list = Seq(
-          hw_data1,
-//          hw_data2,
+//          hw_data1,
+          hw_data2,
 //          hw_data3
           //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
@@ -205,7 +207,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
 
-        while (tma_sender.send_list.nonEmpty && clock_cnt <= 50) {
+        while (tma_sender.send_list.nonEmpty && clock_cnt <= 1000) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()
