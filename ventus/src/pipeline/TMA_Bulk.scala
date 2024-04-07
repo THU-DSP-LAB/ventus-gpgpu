@@ -413,9 +413,9 @@ class Temp_mem() extends Module {
     val to_shared = DecoupledIO(new TempOutput)
     val inst_complete = DecoupledIO(UInt(32.W))
   })
-//  val dataFIFO =  Mem(max_l2cacheline, UInt(io.from_l2cache.bits.getWidth.W))
-  val dataFIFO =  Mem(max_l2cacheline, new l2cache_transform(l2cache_params))
-  val instMem =   Mem(max_tma_inst, new vExeDataTMA)
+//  val dataFIFO =  SyncReadMem(max_l2cacheline, UInt(io.from_l2cache.bits.getWidth.W))
+  val dataFIFO =  SyncReadMem(max_l2cacheline, new l2cache_transform(l2cache_params))
+  val instMem =   SyncReadMem(max_tma_inst, new vExeDataTMA)
 //  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Ceil(numgroupinstmax)).W))))
 //  val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Ceil(numgroupinstmax)).W))))
   val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
@@ -447,16 +447,19 @@ class Temp_mem() extends Module {
 //  val tag_reg = RegInit(0.U(addr_tag_bits.W))
   val tag_wire = Wire(UInt(xLen.W))
   tag_wire := Cat(output_data.source(source_width - 1, source_width - 1 - addr_tag_bits + 1),0.U((xLen - addr_tag_bits).W))
-
+  when(io.from_l2cache.fire) {
+    used_mem := used_mem.bitSet(valid_mem_entry, true.B)
+    dataFIFO.write(valid_mem_entry,io.from_l2cache.bits)
+    entry_index_reg(valid_mem_entry) := current_inst_entry_index
+  }
   val s_idle ::s_getdata :: s_shared :: s_reset :: Nil = Enum(4)
   val state = RegInit(s_idle)
-  io.from_l2cache.ready := state === s_idle && !(used_mem.andR)
+  io.from_l2cache.ready := !(used_mem.andR)
   io.from_shared.ready := state === s_idle //&& used_mem.orR
   io.from_addr.ready := state === s_idle && !(used_inst.andR)
   io.to_shared.valid := state === s_idle && used_mem.orR
   io.inst_complete.valid := state === s_reset
   io.idx_entry := Mux(io.from_addr.fire, valid_inst_entry, 0.U)
-
   switch(state){
     is(s_idle){
       when(io.to_shared.ready && used_mem.orR && !io.from_l2cache.fire){
@@ -503,14 +506,6 @@ class Temp_mem() extends Module {
         finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
         shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
       }
-      when(io.from_l2cache.fire) {
-        used_mem := used_mem.bitSet(valid_mem_entry, true.B)
-        dataFIFO.write(valid_mem_entry,io.from_l2cache.bits)
-        entry_index_reg(valid_mem_entry) := current_inst_entry_index
-//        inst_to_shared := instMem.read(current_inst_entry_index)
-//        tag_reg := io.from_l2cache.bits.source(source_width - 1, source_width - 1 - addr_tag_bits + 1)
-//        current_inst_entry_index_reg := current_inst_entry_index
-      }
       when(io.from_shared.fire){
         finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(tma_aligned_bulk / 4)).asUInt
       }
@@ -529,8 +524,10 @@ class Temp_mem() extends Module {
 
       (0 until (numgroupl2cache)).foreach(x => {
         when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.copysize)) {
+          printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))}")
           current_mask_l2cache(x) := true.B
         }.otherwise {
+          printf(p"addr_false : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))}")
           current_mask_l2cache(x) := false.B
         }
       })
