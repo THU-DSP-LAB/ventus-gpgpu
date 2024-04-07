@@ -293,7 +293,9 @@ class AddrCalc_l2cache() extends Module{
 //  val cnt = new Counter(n = numgroupinstmax)
   val reg_entryID = RegInit(0.U(log2Ceil(max_tma_inst).W))
   val copysize = Wire(UInt(log2Ceil(16).W))
+  copysize := 4.U
   switch(reg_save.ctrl.copysize){
+//    copysize := 4.U
     is(0.U){
       copysize := 4.U
     }
@@ -308,6 +310,7 @@ class AddrCalc_l2cache() extends Module{
     }
   }
   val address_next = Wire(UInt(xLen.W))
+  address_next := 0.U(xLen.W)
   switch(reg_save.ctrl.opmode){
     is(0.U){
       address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + copysize,
@@ -787,7 +790,6 @@ class Addrcalc_shared() extends Module {
   (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
     addr(x) := reg_save.l2cacheTag - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * 4.U
   })
-
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
   val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
@@ -798,16 +800,17 @@ class Addrcalc_shared() extends Module {
   (0 until numgroupl2cache).foreach( x => {
     // todo
     wordOffset1H(x) := 15.U(4.W)
-    switch(reg_save.instinfo.opmode){
-      is(0.U){
-        wordOffset1H(x) := 15.U(4.W)
-      }
-      is(1.U){
-        (0 until numgroupl2cache).foreach( x => {
-          wordOffset1H(x) := 15.U(4.W)
-        })
-      }
-    }
+//    switch(reg_save.instinfo.opmode){
+//      is(0.U){
+//        //wordOffset1H(x) := 15.U(4.W)
+//        wordOffset1H(x) := 15.U << addr(x).asUInt
+//      }
+//      is(1.U){
+//        (0 until numgroupl2cache).foreach( x => {
+//          wordOffset1H(x) := 15.U(4.W)
+//        })
+//      }
+//    }
   })
 
 
@@ -827,34 +830,50 @@ class Addrcalc_shared() extends Module {
   val low_margin = PriorityEncoder(reg_save.mask)
   val data_bits = Wire(UInt((l2cacheline * BitsOfByte).W))
   val mask_bits = Wire(UInt(numgroupl2cache.W))
+//  val wordoffset_bits = Wire(UInt((numgroupl2cache * 4).W))
+  val l2cacheTag_shift = Wire(UInt(xLen.W))
 //  val left_shift_bytes = Wire(UInt(log2Ceil(2 * tma_aligned_bulk_bits).W))
 //  val right_shift_bytes = Wire(UInt(log2Ceil(2 * tma_aligned_bulk_bits).W))
+  data_bits := Cat(reg_save.data)
+  mask_bits := Cat(reg_save.mask)
+  l2cacheTag_shift := reg_save.l2cacheTag
   when(reg_save.instinfo.src(1,0).asUInt === reg_save.instinfo.dst(1,0).asUInt){
   // do not need to shift
     data_bits := Cat(reg_save.data)
     mask_bits := Cat(reg_save.mask)
+    l2cacheTag_shift := reg_save.l2cacheTag
+//    wordoffset_bits := Cat(wordOffset1H)
   }.otherwise{
     when(reg_save.instinfo.src(1,0).asUInt > reg_save.instinfo.dst(1,0).asUInt){
       when(high_margin <= low_margin){
         data_bits := Cat(reg_save.data) >> (reg_save.instinfo.src(1,0).asUInt - reg_save.instinfo.dst(1,0).asUInt) * BitsOfByte.asUInt
         mask_bits := mask_bits
+        l2cacheTag_shift := reg_save.l2cacheTag + (reg_save.instinfo.src(1,0).asUInt - reg_save.instinfo.dst(1,0).asUInt)
+//        wordoffset_bits := Cat(wordOffset1H)
       }.otherwise{
         data_bits := Cat(reg_save.data) << (tma_aligned_bulk.asUInt - reg_save.instinfo.dst(1,0).asUInt + reg_save.instinfo.src(1,0).asUInt) * BitsOfByte.asUInt
         mask_bits := mask_bits << 1
+        l2cacheTag_shift := reg_save.l2cacheTag - (reg_save.instinfo.src(1,0).asUInt - reg_save.instinfo.dst(1,0).asUInt)
+//        wordoffset_bits := Cat(wordOffset1H)  <<  4.U
       }
     }.elsewhen(reg_save.instinfo.src(1,0).asUInt < reg_save.instinfo.dst(1,0).asUInt){
       when(high_margin <= low_margin){
         data_bits := Cat(reg_save.data) >> (tma_aligned_bulk.asUInt-reg_save.instinfo.src(1,0).asUInt + reg_save.instinfo.dst(1,0).asUInt) * BitsOfByte.asUInt
         mask_bits := mask_bits >> 1
+        l2cacheTag_shift := reg_save.l2cacheTag + (tma_aligned_bulk.asUInt-reg_save.instinfo.src(1,0).asUInt + reg_save.instinfo.dst(1,0).asUInt)
+//        wordoffset_bits := Cat(wordOffset1H)  >>  4.U
       }.otherwise{
         data_bits := Cat(reg_save.data) << (reg_save.instinfo.dst(1,0).asUInt - reg_save.instinfo.src(1,0).asUInt) * BitsOfByte.asUInt
         mask_bits := mask_bits
+        l2cacheTag_shift := reg_save.l2cacheTag - (reg_save.instinfo.dst(1,0).asUInt - reg_save.instinfo.src(1,0).asUInt)
+//        wordoffset_bits := Cat(wordOffset1H)
       }
     }
   }
 
+  (0 until(numgroupl2cache * 4)).foreach( x =>{
 
-
+  })
   io.to_shared.bits := output_reg
   io.to_shared.valid := state===s_shared2
 
@@ -914,6 +933,7 @@ class Addrcalc_shared() extends Module {
       (0 until(numgroupl2cache)).foreach( x => {
         reg_save.data(x) := data_bits((x+1) * tma_aligned_bulk_bits - 1, x * tma_aligned_bulk_bits)
         reg_save.mask(x) := mask_bits(x)
+        reg_save.l2cacheTag := l2cacheTag_shift
       })
     }
     is(s_shared1){
@@ -921,7 +941,8 @@ class Addrcalc_shared() extends Module {
         is(0.U){
           (0 until(numgroupshared)).foreach(x =>{
             output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
-            output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
+//            output_reg.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
+            output_reg.perLaneAddr(x).wordOffset1H := wordoffset_bits(4 * (x + 1) - 1, 4 * x)
             output_reg.perLaneAddr(x).activeMask := current_mask(x)
             output_reg.data(x) := reg_save.data(x)
           })

@@ -191,9 +191,9 @@ class Tma_test
         val hw_data3 = makeData(myData3)
 
         val req_list = Seq(
-//          hw_data1,
+          hw_data1,
 //          hw_data2,
-          hw_data3
+//          hw_data3
           //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
