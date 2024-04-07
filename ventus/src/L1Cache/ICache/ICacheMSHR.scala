@@ -47,7 +47,7 @@ class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWidth: Int, val AsidBits:
 }
 class MSHRmiss2mem(val bABits: Int, val WIdBits: Int, val asidBits: Int, val NEntry: Int) extends Bundle {//Use this bundle when a block return from Lower cache
   val blockAddr = UInt(bABits.W)
-  val instrId = UInt((log2Up(NEntry)+WIdBits).W)
+  val instrId = UInt(log2Up(NEntry).W)
   val ASID = UInt(asidBits.W)
 }
 /*class MSHRmiss2Mem(val bAWidth: Int) extends Bundle{
@@ -178,6 +178,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   //  ******   update blockAddr Reg *****
   when(io.missReq.fire() && primary_miss){
     blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
+    ASID_Access(entryStatus.io.next) := io.missReq.bits.ASID
   }
 
   //  ******    handle miss to lower mem    ******
@@ -195,7 +196,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
     }
   }
   io.miss2mem.bits.blockAddr := blockAddr_Access(hasSendStatus.io.next)
-  io.miss2mem.bits.instrId := Cat(hasSendStatus.io.next ,targetInfo_Accesss(hasSendStatus.io.next)(0.U))
+  io.miss2mem.bits.instrId := hasSendStatus.io.next
   io.miss2mem.bits.ASID := ASID_Access(hasSendStatus.io.next)
 
   val missRspIn_bA = Wire(UInt(bABits.W))

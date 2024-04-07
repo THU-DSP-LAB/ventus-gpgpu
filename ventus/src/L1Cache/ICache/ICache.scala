@@ -152,7 +152,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   memRsp_Q.io.deq.ready := mshrAccess.io.missRspIn.ready
   mshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid
-  mshrAccess.io.missRspIn.bits.EntryIdx := get_EntryIdx(memRsp_Q.io.deq.bits.d_source)
+  mshrAccess.io.missRspIn.bits.EntryIdx := memRsp_Q.io.deq.bits.d_source
 
   mshrAccess.io.missRspOut.ready := true.B
   //coreRsp_Q.io.enq.ready TODO 将来版本可能重新启用信号
@@ -216,7 +216,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   io.TLBReq.bits.vaddr := Cat(mshrAccess.io.miss2mem.bits.blockAddr,0.U((32-bABits).W))
   io.TLBReq.bits.asid := mshrAccess.io.miss2mem.bits.ASID
   mshrAccess.io.miss2mem.ready := io.TLBReq.ready
-  val a_source_reg = Module(new Queue(UInt((WIdBits+log2Up(NMshrEntry)).W),1,true,false))
+  val a_source_reg = Module(new Queue(UInt(2.W),1,true,false))
   a_source_reg.io.enq.valid := io.TLBReq.fire()
   a_source_reg.io.enq.bits := mshrAccess.io.miss2mem.bits.instrId
   a_source_reg.io.deq.ready := io.memReq.ready && io.TLBRsp.valid
