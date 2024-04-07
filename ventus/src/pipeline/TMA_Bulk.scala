@@ -28,16 +28,12 @@ class vExeDataTMA extends Bundle {
   //  val used = Bool()
   //  val complete = Bool()
   val src = UInt(xLen.W)  // src
-  val size = UInt(xLen.W) // srcsize or cpysize in bulk
   val dst = UInt(xLen.W)  //dst
-
   val opmode = UInt(4.W)
-  val copysize = UInt(log2Ceil(maxcopysize).W)  // only 4 8 16 , may add 32
-//  val srcsize = UInt(xLen.W)
-//  val srcsize = UInt(3.W)
-//  val interleave = Bool()
-  //  val im2col = Vec(2,)
-  val ctrl = new CtrlSigs()
+  val copysize = UInt(xLen.W)  // only 4 8 16 , may add 32
+  val srcsize = UInt(xLen.W)  // only 4 8 16 , may add 32
+  val pc = UInt(xLen.W)
+//  val ctrl = new CtrlSigs()
 }
 
 class l2cache_transform(params: InclusiveCacheParameters_lite) extends Bundle
@@ -328,11 +324,19 @@ class AddrCalc_l2cache() extends Module{
   complete_address := (address_next  >= reg_save.in1.asUInt + reg_save.in2.asUInt)
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
   io.to_tempmem.bits.tag.src := reg_save.in1
-  io.to_tempmem.bits.tag.size := reg_save.in3
-  io.to_tempmem.bits.tag.copysize := 4.U << reg_save.ctrl.copysize
-  io.to_tempmem.bits.tag.dst := reg_save.in2
-  io.to_tempmem.bits.tag.ctrl := reg_save.ctrl
-  io.to_tempmem.bits.tag.opmode := reg_save.ctrl.alu_fn
+  io.to_tempmem.bits.tag.srcsize := reg_save.in2
+  io.to_tempmem.bits.tag.copysize := reg_save.in2
+  switch(reg_save.ctrl.opmode){
+    is(0.U){
+      io.to_tempmem.bits.tag.copysize := 4.U << reg_save.ctrl.copysize
+    }
+    is(1.U){
+      io.to_tempmem.bits.tag.copysize := reg_save.in2
+    }
+  }
+  io.to_tempmem.bits.tag.dst := reg_save.in3
+  io.to_tempmem.bits.tag.pc := reg_save.ctrl.pc
+  io.to_tempmem.bits.tag.opmode := reg_save.ctrl.opmode
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
   io.to_l2cache.bits.source :=  Cat(reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1),reg_entryID)
@@ -477,7 +481,13 @@ class Temp_mem() extends Module {
       }
     }
     is(s_reset){
-      state:=s_idle
+      // todo here, can not use the correct code here, for IO
+//      when(io.inst_complete.fire){
+//        state:=s_idle
+//      }.otherwise{
+//        state := s_reset
+//      }
+      state := s_idle
     }
   }
 
@@ -485,12 +495,13 @@ class Temp_mem() extends Module {
     is(s_idle) {
       current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
       output_data_entry := 0.U
-//      output_data := 0.U
+      output_inst := 0.U.asTypeOf(new vExeDataTMA)
+      output_data := 0.U.asTypeOf(new l2cache_transform(l2cache_params))
       when(io.from_addr.fire) {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
         instMem.write(valid_inst_entry, io.from_addr.bits.tag)
-        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.size >> log2Ceil(tma_aligned_bulk)
-        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.size >> log2Ceil(tma_aligned_bulk)
+        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
+        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
       }
       when(io.from_l2cache.fire) {
         used_mem := used_mem.bitSet(valid_mem_entry, true.B)
@@ -517,7 +528,7 @@ class Temp_mem() extends Module {
 //      tag_reg := tag_wire
 
       (0 until (numgroupl2cache)).foreach(x => {
-        when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.size)) {
+        when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.copysize)) {
           current_mask_l2cache(x) := true.B
         }.otherwise {
           current_mask_l2cache(x) := false.B
@@ -548,7 +559,7 @@ class Temp_mem() extends Module {
   io.to_shared.bits.data := output_data.data
   io.to_shared.bits.l2cacheTag := tag_wire
   io.to_shared.bits.instinfo := inst_to_shared
-  io.inst_complete.bits := output_inst.ctrl.pc
+  io.inst_complete.bits := output_inst.pc
 
 
 //  printf("state: %d \n",state.asUInt)
@@ -900,7 +911,7 @@ class Addrcalc_shared() extends Module {
       is(0.U){
         var shared_tag = l2cacheTag_shift - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt
         var shared_last_cp = reg_save.instinfo.dst.asUInt + reg_save.instinfo.copysize
-        var shared_last_src = reg_save.instinfo.dst.asUInt + reg_save.instinfo.size
+        var shared_last_src = reg_save.instinfo.dst.asUInt + reg_save.instinfo.srcsize
         var current_addr = x.asUInt + shared_tag.asUInt
         //wordOffset1H_bytes(x) := 15.U(4.W)
         when(current_addr >= reg_save.instinfo.dst && current_addr < shared_last_cp){
@@ -975,7 +986,7 @@ class Addrcalc_shared() extends Module {
       (0 until(numgroupl2cache * tma_aligned_bulk)).foreach( x => {
         var shared_tag = l2cacheTag_shift - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt
         var shared_last_cp = l2cacheTag_shift - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt + reg_save.instinfo.copysize
-        var shared_last_src = l2cacheTag_shift - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt + reg_save.instinfo.size
+        var shared_last_src = l2cacheTag_shift - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt + reg_save.instinfo.copysize
         var current_addr = x.asUInt + shared_tag.asUInt
 
         val groupIndex = x / tma_aligned_bulk

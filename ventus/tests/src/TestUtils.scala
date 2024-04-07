@@ -1,5 +1,5 @@
 package play
-
+import scala.util.Random
 import L2cache.{TLBundleA_lite, TLBundleD_lite}
 import chisel3._
 import chisel3.experimental.BundleLiterals._
@@ -254,6 +254,15 @@ class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np
     rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
       if (e._1 > i && i == 0) (e._1 - 1, e._2) else (e._1, e._2)
     }
+//    val updated_rsp_queue = rsp_queue.zipWithIndex.map { case (e, i) =>
+//      if (e._1 > i && i == 0) {
+//        // Randomly decide whether to subtract 1 or not
+//        val shouldSubtractOne = Random.nextDouble() < 0.8
+//        if (shouldSubtractOne) (e._1 - 1, e._2) else (e._1, e._2)
+//      } else {
+//        (e._1, e._2)
+//      }
+//    }
     if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
       println("Response ready but port not valid.")
       rspPort.valid.poke(true.B)
