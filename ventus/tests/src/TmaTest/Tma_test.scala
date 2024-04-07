@@ -72,7 +72,7 @@ class Tma_test
     val metas = top.MetaData(metaFileDir)
 
     test(new TmaWrapper())
-      .withAnnotations(Seq(WriteVcdAnnotation)) { d =>
+      .withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)) { d =>
         d.io.in.setSourceClock(d.clock)
         d.io.out.setSinkClock(d.clock)
         d.io.l2_req.setSinkClock(d.clock)
