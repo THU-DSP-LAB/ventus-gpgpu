@@ -9,7 +9,7 @@ import chiseltest._
 import pipeline.{ShareMemCoreReq_np, ShareMemCoreRsp_np, vExeData}
 import play.TestUtils.{IOTestDriver, IOTransform, checkForReady, checkForValid}
 import top._
-import top.parameters.num_thread
+import top.parameters.{l2cache_params, num_thread}
 
 import java.util
 
@@ -41,7 +41,7 @@ object TestUtils {
     var pause: Boolean = false
 
     def finishWait(): Boolean = {
-      state == WaitingRsp && checkForValid(rspPort)
+      state == WaitingRsp // && checkForValid(rspPort)
     }
 
     def eval(): Unit = {
@@ -124,44 +124,56 @@ object TestUtils {
 
     def eval(): Unit = {
       if(checkForValid(reqPort) && checkForReady(reqPort)){
-        println("Received valid and ready request.")
+        println("Memdriver: Received valid and ready request.")
+        val address : Option[UInt] = Some(reqPort.bits.address)
+        address match {
+          case Some(value) =>
+            println("Memdriver: req address: 0x%x".format(value.peek().litValue))
+          case None => println("None")
+        }
+        // IN
         rsp_queue :+= (latency, transform(reqPort.bits))
+        reqPort.ready.poke((rsp_queue.size < depth).B)
       }
 
       if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
         if(checkForValid(rspPort) && checkForReady(rspPort)){
-          println("Sending response...")
+          println("Memdriver: Sending response...")
           rspPort.valid.poke(false.B)
+          // OUT
           rsp_queue = rsp_queue.drop(1)
         }
         else{
-          println("Response ready but port not valid.")
+          println("Memdriver: Response ready but port not valid.")
           rspPort.valid.poke(true.B)
           rspPort.bits.poke(rsp_queue.head._2)
-          println("rsp_queue.head",rsp_queue.head._2)
+//          println("rsp_queue.head",rsp_queue.head._2)
         }
       }
       else{
+        if (rsp_queue.nonEmpty) {
+          println(s"rsp_queue head's latency = ${rsp_queue.head._1}")
+        }
         rspPort.valid.poke(false.B)
       }
 
-//      rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
-//        if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)
-//      }
       rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
-        if (e._1 > i && i == 0) (e._1 - 1, e._2) else (e._1, e._2)
+        if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)
       }
-      if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
-        println("Response ready but port not valid.")
-        rspPort.valid.poke(true.B)
-        rspPort.bits.poke(rsp_queue.head._2)
-      }
+
+//      rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
+//        if (e._1 > i && i == 0) (e._1 - 1, e._2) else (e._1, e._2)
+//      }
+//      if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
+//        println("Response ready but port not valid.")
+//        rspPort.valid.poke(true.B)
+//        rspPort.bits.poke(rsp_queue.head._2)
+//        //println("rsp source : %x".format(rsp_queue.head._2.asTypeOf(new TLBundleD_lite(l2cache_params)).source.litValue))
+//      }
       reqPort.ready.poke((rsp_queue.size < depth).B)
     }
 
     def transform(req: A): B = {
-      println("Response ready but port not valid.")
-      println(req.address.peek().litValue)
       val opcode_req = req.opcode.peek().litValue.toInt
       var opcode_rsp = 0
       val addr = req.address.peek().litValue
@@ -313,10 +325,10 @@ class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np
       _.instrId -> req.instrId.peek(),
       _.activeMask -> Vec(num_thread, Bool()).Lit(req.perLaneAddr.map(_.activeMask.peek().litToBoolean).zipWithIndex.map { case (d, i) => (i, d.B) }: _*),
     ))
-    println("print: rsp: ")
+//    println("print: rsp: ")
 //    println(rsp.data)
-    println(rsp.activeMask)
-    println(rsp.instrId)
+//    println(rsp.activeMask)
+//    println(rsp.instrId)
     rsp
   }
 }

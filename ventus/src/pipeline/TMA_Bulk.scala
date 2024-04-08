@@ -306,22 +306,23 @@ class AddrCalc_l2cache() extends Module{
     }
   }
   val address_next = Wire(UInt(xLen.W))
-  address_next := 0.U(xLen.W)
-  switch(reg_save.ctrl.opmode){
-    is(0.U){
-      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + copysize,
-        reg_save.address.asUInt + l2cacheline.asUInt,
-        0.U(xLen.W))
-    }
-    is(1.U){
-      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + reg_save.in2.asUInt,
-        reg_save.address.asUInt + l2cacheline.asUInt,
-        0.U(xLen.W))
-    }
-  }
+  address_next := reg_save.address.asUInt + l2cacheline.asUInt
+//  switch(reg_save.ctrl.opmode){
+//    is(0.U){
+//      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + copysize,
+//        reg_save.address.asUInt + l2cacheline.asUInt,
+//        0.U(xLen.W))
+//    }
+//    is(1.U){
+//      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + reg_save.in2.asUInt,
+//        reg_save.address.asUInt + l2cacheline.asUInt,
+//        0.U(xLen.W))
+//    }
+//  }
 
   val complete_address = Wire(Bool())
-  complete_address := (address_next  >= reg_save.in1.asUInt + reg_save.in2.asUInt)
+//  complete_address := address_next  >= Cat((reg_save.in1.asUInt + reg_save.in2.asUInt)(xLen - 1, xLen - 1 - addr_tag_bits + 1) + 1.U, 0.U((xLen - addr_tag_bits).W))
+  complete_address := address_next  >= (reg_save.in1.asUInt + reg_save.in2.asUInt)
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
   io.to_tempmem.bits.tag.src := reg_save.in1
   io.to_tempmem.bits.tag.srcsize := reg_save.in2
@@ -346,7 +347,7 @@ class AddrCalc_l2cache() extends Module{
   io.to_l2cache.bits.mask   := 0.U
   io.to_l2cache.bits.data   :=  0.U
   io.to_l2cache.bits.param  :=  0.U
-  io.to_l2cache.valid := (state===s_l2cache)
+  io.to_l2cache.valid := (state===s_l2cache)// && !complete_address
 
   io.from_fifo.ready := state === s_idle
 
@@ -362,9 +363,15 @@ class AddrCalc_l2cache() extends Module{
       //      }.otherwise{ state := s_idle }
     }
     is (s_l2cache){
-      when (complete_address){
-        state := s_idle
-      }.otherwise{state := state}
+      when(io.to_l2cache.fire){
+        when(complete_address) {
+          state := s_idle
+        }.otherwise {
+          state := state
+        }
+      }.otherwise {
+        state := state
+      }
     }
   }
   // FSM Operation
@@ -382,14 +389,10 @@ class AddrCalc_l2cache() extends Module{
       when(io.to_tempmem.fire){reg_entryID := io.idx_entry}  // get entryID from MSHR
     }
     is (s_l2cache){
-      when(!complete_address){
-        when(io.to_l2cache.fire){                                      // request is sent
-          reg_save.address := address_next
-        }.otherwise{
-          reg_save.address := reg_save.address
-        }
+      when(io.to_l2cache.fire){                                      // request is sent
+        reg_save.address := address_next
       }.otherwise{
-        reg_save := RegInit(0.U.asTypeOf(new regSave))
+        reg_save.address := reg_save.address
       }
 
     }
@@ -414,8 +417,8 @@ class Temp_mem() extends Module {
     val inst_complete = DecoupledIO(UInt(32.W))
   })
 //  val dataFIFO =  SyncReadMem(max_l2cacheline, UInt(io.from_l2cache.bits.getWidth.W))
-  val dataFIFO =  SyncReadMem(max_l2cacheline, new l2cache_transform(l2cache_params))
-  val instMem =   SyncReadMem(max_tma_inst, new vExeDataTMA)
+  val dataFIFO =  Mem(max_l2cacheline, new l2cache_transform(l2cache_params))
+  val instMem =   Mem(max_tma_inst, new vExeDataTMA)
 //  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Ceil(numgroupinstmax)).W))))
 //  val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Ceil(numgroupinstmax)).W))))
   val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
@@ -454,7 +457,7 @@ class Temp_mem() extends Module {
   }
   val s_idle ::s_getdata :: s_shared :: s_reset :: Nil = Enum(4)
   val state = RegInit(s_idle)
-  io.from_l2cache.ready := !(used_mem.andR)
+  io.from_l2cache.ready := !(used_mem.andR)// && !(io.to_shared.ready && used_mem.orR) && !(state === s_shared)
   io.from_shared.ready := state === s_idle //&& used_mem.orR
   io.from_addr.ready := state === s_idle && !(used_inst.andR)
   io.to_shared.valid := state === s_idle && used_mem.orR
@@ -509,8 +512,8 @@ class Temp_mem() extends Module {
       when(io.from_shared.fire){
         finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(tma_aligned_bulk / 4)).asUInt
       }
-      when(io.to_shared.ready && used_mem.orR){
-        output_data := dataFIFO.read(PriorityEncoder(used_mem))
+      when(io.to_shared.ready && used_mem.orR && !io.from_l2cache.fire){
+        output_data := dataFIFO.read(PriorityEncoder(used_mem).asUInt).asTypeOf(new l2cache_transform(l2cache_params))
         inst_to_shared := instMem.read(entry_index_reg(PriorityEncoder(used_mem)))
         current_inst_entry_index_reg := entry_index_reg(PriorityEncoder(used_mem))
         output_data_entry := PriorityEncoder(used_mem)
@@ -534,6 +537,7 @@ class Temp_mem() extends Module {
     }
     is(s_shared){
       when(io.to_shared.fire){
+        dataFIFO.write(output_data_entry, 0.U.asTypeOf(new l2cache_transform(l2cache_params)))
         used_mem := used_mem.bitSet(output_data_entry, false.B)
         output_data_entry := 0.U
         shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
