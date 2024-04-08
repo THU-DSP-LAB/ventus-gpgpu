@@ -29,6 +29,7 @@ object CONFIG {
   object RESOURCE_TABLE{
     val NUM_RESULT = 2
   }
+  val DEBUG = true
 }
 
 /** IO Bundle: CTA information
@@ -125,7 +126,12 @@ class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
   // Added for test
   val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                // Meta-data base address
-  val lds_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)         // lds base address (initial WG, later WF)
+  val lds_base  = UInt(log2Ceil(CONFIG.WG.NUM_LDS_MAX).W)         // lds base address (initial WG, later WF)
+  val sgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)        // lds base address (initial WG, later WF)
+  val vgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX).W)        // lds base address (initial WG, later WF)
+  val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
+  val wgslot = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
+  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)
 }
 
 class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
@@ -141,6 +147,7 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 
   val wg_buffer_inst = Module(new wg_buffer)
   val allocator_inst = Module(new allocator)
+  val resource_table_inst = Module(new resource_table_top)
   val cu_interface_inst = Module(new cu_interface)
   io.host_wg_new <> wg_buffer_inst.io.host_wg_new
   wg_buffer_inst.io.alloc_wg_new <> allocator_inst.io.wgbuffer_wg_new
@@ -148,6 +155,14 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   wg_buffer_inst.io.cuinterface_wg_new <> cu_interface_inst.io.wgbuffer_wg_new
   allocator_inst.io.cuinterface_wg_new <> cu_interface_inst.io.alloc_wg_new
   cu_interface_inst.io.host_wg_done <> io.host_wg_done
+
+  allocator_inst.io.rt_alloc <> resource_table_inst.io.alloc
+  allocator_inst.io.rt_result_lds <> resource_table_inst.io.rtcache_lds
+  allocator_inst.io.rt_result_sgpr <> resource_table_inst.io.rtcache_sgpr
+  allocator_inst.io.rt_result_vgpr <> resource_table_inst.io.rtcache_vgpr
+  resource_table_inst.io.dealloc <> cu_interface_inst.io.rt_dealloc
+  resource_table_inst.io.cuinterface_wg_new <> cu_interface_inst.io.rt_wg_new
+  allocator_inst.io.rt_dealloc <> resource_table_inst.io.slot_dealloc
 
   //for(i <- 0 until NUM_CU){
   //  io.cu_wf_new(i).valid := false.B
@@ -158,10 +173,10 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 
 object emitVerilog extends App {
   (new chisel3.stage.ChiselStage).emitVerilog(
-    //new cta_scheduler_top(CONFIG.GPU.NUM_CU),
+    new cta_scheduler_top(CONFIG.GPU.NUM_CU),
     //new cta_util.RRPriorityEncoder(4),
     //new wg_buffer(),
-    new allocator(),
+    //new allocator(),
     Array("--target-dir", "generated/")
   )
 }

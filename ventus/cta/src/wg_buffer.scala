@@ -7,14 +7,17 @@ import chisel3.experimental.dataview._
 class io_alloc2buffer(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Bundle {
   val accept = Bool()   // true.B: it is ok to send this wg to CU.      false.B: rejected
   val wgram_addr = UInt(log2Ceil(NUM_EXTRIES).W)
+  val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 
-class io_buffer2alloc(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends ctainfo_host_to_alloc {
+class io_buffer2alloc(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends ctainfo_host_to_alloc {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
-  val wgram_addr = UInt(log2Ceil(NUM_EXTRIES).W)
+  val wgram_addr = UInt(log2Ceil(NUM_ENTRIES).W)
 }
 
-class io_buffer2cuinterface extends Bundle with ctainfo_host_to_cu with ctainfo_host_to_cuinterface
+class io_buffer2cuinterface extends Bundle with ctainfo_host_to_cu with ctainfo_host_to_cuinterface {
+  val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+}
 
 /** WG buffer that receives WG info from host and select proper WG for allocator
  * Main function:
@@ -91,7 +94,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
 
   // When to read new wg info for allocator? (valid == false) || (valid == ready == true)
   // No wg is waiting for being sent to allocator, or the only waiting wg is currently being sent to allocator
-  wgram1_rd_next.ready := (~alloc_wg_new_valid_r || io.alloc_wg_new.ready)   // read operation is allowed
+  wgram1_rd_next.ready := (!alloc_wg_new_valid_r || io.alloc_wg_new.ready)   // read operation is allowed
   wgram1_rd_act := wgram1_rd_next.fire                                      // read operation takes effect
 
   val wgram1_rd_data = Wire(new ram1datatype)
@@ -119,10 +122,18 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   val wgram2_rd_data = RegEnable(wgram2.read(wgram_rd2_clear_addr), wgram_rd2_clear_act)
   io.cuinterface_wg_new.bits := wgram2_rd_data
 
+  if(CONFIG.DEBUG) {
+    val alloc_result_wgid = RegEnable(io.alloc_result.bits.wg_id.get, wgram_rd2_clear_act)
+    val wgram_rd2_clear_act_r1 = RegNext(wgram_rd2_clear_act, false.B)
+    when(wgram_rd2_clear_act_r1) {
+      assert(wgram2_rd_data.wg_id === alloc_result_wgid)
+    }
+  }
+
   // operation is allowed by internal of this Module when downstream datapath is not blocked: (valid == false) || (valid == ready == true)
   // operation is requested by external Module when (valid && allocation accepted)
   // operation takes effect <=> (allowed && requested)
-  val wgram_rd2_clear_ready = ~cuinterface_new_wg_valid_r || io.cuinterface_wg_new.ready   // clear is always allowed, just consider read wg_ram2
+  val wgram_rd2_clear_ready = !cuinterface_new_wg_valid_r || io.cuinterface_wg_new.ready   // clear is always allowed, just consider read wg_ram2
   wgram_rd2_clear_act := (io.alloc_result.fire && io.alloc_result.bits.accept) && wgram_rd2_clear_ready
 
   val wgram_alloc_clear_ready = true.B

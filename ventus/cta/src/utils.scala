@@ -74,7 +74,7 @@ class sort3(val WIDTH: Int) extends Module {
     res(1).asUInt.xorR -> io.in(1),
     res(2).asUInt.xorR -> io.in(2),
   ))
-  io.out(0) := Mux1H(Seq(
+  io.out(2) := Mux1H(Seq(
     !res(0).asUInt.orR -> io.in(0),
     !res(1).asUInt.orR -> io.in(1),
     !res(2).asUInt.orR -> io.in(2),
@@ -95,6 +95,35 @@ object sort3 {
     in(2) := in2
     apply(in)
   }
+}
+
+/**
+ * DecoupledIO 1-to-3
+ * It's assumed that once in.valid=true, it will keep being true until io.fire
+ */
+class DecoupledIO_3_to_1[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1, gen2: T2) extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new Bundle{
+      val data0 = gen0.cloneType
+      val data1 = gen1.cloneType
+      val data2 = gen2.cloneType
+    }))
+    val out0 = DecoupledIO(gen0.cloneType)
+    val out1 = DecoupledIO(gen1.cloneType)
+    val out2 = DecoupledIO(gen2.cloneType)
+  })
+  io.out0.bits <> io.in.bits.data0
+  io.out1.bits <> io.in.bits.data1
+  io.out2.bits <> io.in.bits.data2
+
+  val fire0, fire1, fire2 = RegInit(false.B)
+  fire0 := Mux(io.in.fire, false.B, fire0 || io.out0.fire)
+  fire1 := Mux(io.in.fire, false.B, fire1 || io.out1.fire)
+  fire2 := Mux(io.in.fire, false.B, fire2 || io.out2.fire)
+  io.in.ready := (fire0 || io.out0.fire) && (fire1 || io.out1.fire) && (fire2 || io.out2.fire)
+  io.out0.valid := io.in.valid && !fire0
+  io.out1.valid := io.in.valid && !fire1
+  io.out2.valid := io.in.valid && !fire2
 }
 
 /** Skid buffer for DecoupledIO.ready
