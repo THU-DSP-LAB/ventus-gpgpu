@@ -233,7 +233,7 @@ class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np
                                                                             val latency: Int,
                                                                             val depth: Int
                                                                           ) extends IOTestDriver[A, B] with IOTransform[A, B]{
-  val data_byte_count = reqPort.bits.data.getWidth / 2
+//  val data_byte_count = reqPort.bits.data.getWidth / 2
 
   var rsp_queue: Seq[(Int, B)] = Seq.empty
 
@@ -275,11 +275,11 @@ class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np
 //        (e._1, e._2)
 //      }
 //    }
-    if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
-      println("Response ready but port not valid.")
-      rspPort.valid.poke(true.B)
-      rspPort.bits.poke(rsp_queue.head._2)
-    }
+//    if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
+//      println("Response ready but port not valid.")
+//      rspPort.valid.poke(true.B)
+//      rspPort.bits.poke(rsp_queue.head._2)
+//    }
     reqPort.ready.poke((rsp_queue.size < depth).B)
   }
 

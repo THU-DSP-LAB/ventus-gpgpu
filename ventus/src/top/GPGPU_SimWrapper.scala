@@ -102,7 +102,7 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
     io.deq.bits := out_port.bits
     io.deq.valid := out_port.valid
   }
-  io.enq.ready := (if(latency > 0) RegNext(!(!out_port.ready && valids.drop(1).reduce(_ && _))) else RegNext(out_port.ready))
+  io.enq.ready := (if(latency > 0) !(!out_port.ready && valids.drop(1).reduce(_ && _)) else out_port.ready)
 }
 
 class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{

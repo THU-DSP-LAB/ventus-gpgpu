@@ -421,7 +421,7 @@ class Temp_mem() extends Module {
   val instMem =   Mem(max_tma_inst, new vExeDataTMA)
 //  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Ceil(numgroupinstmax)).W))))
 //  val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((log2Ceil(numgroupinstmax)).W))))
-  val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
+  //val shared_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
   val finish_cnt = RegInit(VecInit(Seq.fill(max_tma_inst)((numgroupinstmax-1).U((xLen).W))))
   val used_inst = RegInit(0.U(max_tma_inst.W))
   val used_mem = RegInit(0.U(max_l2cacheline.W))
@@ -457,7 +457,7 @@ class Temp_mem() extends Module {
   }
   val s_idle ::s_getdata :: s_shared :: s_reset :: Nil = Enum(4)
   val state = RegInit(s_idle)
-  io.from_l2cache.ready := !(used_mem.andR)// && !(io.to_shared.ready && used_mem.orR) && !(state === s_shared)
+  io.from_l2cache.ready := !(used_mem.andR) && !(io.to_shared.ready && used_mem.orR) && !(state === s_shared)
   io.from_shared.ready := state === s_idle //&& used_mem.orR
   io.from_addr.ready := state === s_idle && !(used_inst.andR)
   io.to_shared.valid := state === s_idle && used_mem.orR
@@ -506,8 +506,17 @@ class Temp_mem() extends Module {
       when(io.from_addr.fire) {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
         instMem.write(valid_inst_entry, io.from_addr.bits.tag)
-        finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
-        shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
+        when(io.from_addr.bits.tag.opmode === 0.U){
+          var tag_start = Cat(io.from_addr.bits.tag.dst(xLen-1,2),0.U(2))
+          var tag_end   = Cat((io.from_addr.bits.tag.dst + io.from_addr.bits.tag.copysize)(xLen-1,2),0.U(2))
+
+          finish_cnt(valid_inst_entry) := 1.U + ((tag_end.asUInt - tag_start.asUInt) << 2.U)
+        }.elsewhen(io.from_addr.bits.tag.opmode === 1.U){
+          finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
+        }.otherwise{
+          finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
+        }
+        //shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
       }
       when(io.from_shared.fire){
         finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(tma_aligned_bulk / 4)).asUInt
@@ -540,7 +549,7 @@ class Temp_mem() extends Module {
         dataFIFO.write(output_data_entry, 0.U.asTypeOf(new l2cache_transform(l2cache_params)))
         used_mem := used_mem.bitSet(output_data_entry, false.B)
         output_data_entry := 0.U
-        shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
+        //shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
 //        dataFIFO.write(0.U,0.U)
         current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
         inst_to_shared :=  0.U.asTypeOf(new vExeDataTMA)

@@ -36,13 +36,21 @@ class Tma_test
       val internal = Module(new TMA_Bulk())
       internal.io.tma_req <> Queue(io.in, 1)
       io.out <> Queue(internal.io.fence_end_tma, 1)
-      io.shared_req <> Queue(internal.io.shared_req, 1)
-      internal.io.shared_rsp <> Queue(io.shared_rsp, 1)
-
-      //      Queue(internal.io.shared_rsp, 1) <> io.shared_rsp
+//      io.shared_req <> Queue(internal.io.shared_req, 1)
+//      internal.io.shared_rsp <> Queue(io.shared_rsp, 1)
+      //shared io
+      val pipe_shared_req =
+        Module(new DecoupledPipe(io.shared_req.bits.cloneType, 0, insulate = true))
+      val pipe_shared_rsp =
+        Module(new DecoupledPipe(io.shared_rsp.bits.cloneType, 0, insulate = true))
+      pipe_shared_req.io.enq <> internal.io.shared_req
+      io.shared_req <> pipe_shared_req.io.deq
+      //      io.l2_req <> Queue(internal.io.l2cache_req, 1)
+      pipe_shared_rsp.io.enq <> io.shared_rsp
+      internal.io.shared_rsp <> pipe_shared_rsp.io.deq
 
       val pipe_l2_req =
-        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, insulate = false))
+        Module(new DecoupledPipe(io.l2_req.bits.cloneType, 0, insulate = true))
       val pipe_l2_rsp =
         Module(new DecoupledPipe(io.l2_rsp.bits.cloneType, 0, insulate = true))
       pipe_l2_req.io.enq <> internal.io.l2cache_req
@@ -240,11 +248,11 @@ class Tma_test
           ctrl = genBundle_bulk()
         )
         val myData4 = vExeData_Soft(
-          in1 = Seq.fill(num_thread)(BigInt("90002271", 16)),
-          in3 = Seq.fill(num_thread)(BigInt("70001859", 16)),
+          in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("70000000", 16)),
           in2 = Seq.fill(num_thread)(BigInt("00000007", 16)),
           mask = Seq.fill(num_thread)(true.B),
-          ctrl = genBundle_copysize()
+          ctrl = genBundle_copysize() // copysize = 8
         )
 
         val hw_data1 = makeData(myData1)
@@ -253,10 +261,10 @@ class Tma_test
         val hw_data4 = makeData(myData4)
 
         val req_list = Seq(
-//          hw_data1,
+          hw_data1,
           hw_data2,
-//          hw_data3,
-//          hw_data4
+          hw_data3,
+          hw_data4
           //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
@@ -268,7 +276,7 @@ class Tma_test
         //        }
         tma_sender.add(req_list)
         d.clock.setTimeout(0)
-        while (clock_cnt <= 100) {
+        while (clock_cnt <= 400) {
           //        while (clock_cnt <= 100000) {
 
           tma_sender.eval()
