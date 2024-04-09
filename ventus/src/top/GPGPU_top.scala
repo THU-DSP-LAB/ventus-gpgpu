@@ -271,8 +271,9 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
         cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
         cluster2l2Arb(i).memRspIn.bits.source := l2cache(i).in_d.bits.source >> 1
 
-        l2cache(i).in_a <> tlb_l2c_xbar.io.req_cache(i)
+        //l2cache(i).in_a <> tlb_l2c_xbar.io.req_cache(i)
         tlb_l2c_xbar.io.rsp_cache(i) <> l2cache(i).in_d
+        l2cache(i).in_d.ready := Mux(l2cache(i).in_d.bits.source(0), tlb_l2c_xbar.io.rsp_cache(i).ready, cluster2l2Arb(i).memRspIn.ready)
 
         for(j <- 0 until NCluster){
           cluster2l2Arb(i).memReqVecIn(j) :<> l2distribute(j).memReqVecOut(i)
