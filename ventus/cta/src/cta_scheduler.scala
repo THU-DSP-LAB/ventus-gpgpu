@@ -132,6 +132,9 @@ class io_cta2host extends Bundle {
   val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
   val wgslot = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
   val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)
+  val lds_dealloc_en = Bool()
+  val sgpr_dealloc_en = Bool()
+  val vgpr_dealloc_en = Bool()
 }
 
 class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {

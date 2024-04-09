@@ -64,21 +64,21 @@ class sort3(val WIDTH: Int) extends Module {
   res(1)(1) := !cmp0
   res(2)(0) := cmp2
   res(2)(1) := !cmp1
-  io.out(0) := Mux1H(Seq(
+  io.out(0) := Mux(res(0)(0) || res(1)(0) || res(2)(0), Mux1H(Seq(
     res(0).asUInt.andR -> io.in(0),
     res(1).asUInt.andR -> io.in(1),
     res(2).asUInt.andR -> io.in(2),
-  ))
+  )), io.in(0))   // in1 == in2 == in3
   io.out(1) := Mux1H(Seq(
     res(0).asUInt.xorR -> io.in(0),
     res(1).asUInt.xorR -> io.in(1),
     res(2).asUInt.xorR -> io.in(2),
   ))
-  io.out(2) := Mux1H(Seq(
+  io.out(2) := Mux(res(0)(0) || res(1)(0) || res(2)(0), Mux1H(Seq(
     !res(0).asUInt.orR -> io.in(0),
     !res(1).asUInt.orR -> io.in(1),
     !res(2).asUInt.orR -> io.in(2),
-  ))
+  )), io.in(0))
 }
 
 object sort3 {
@@ -101,12 +101,15 @@ object sort3 {
  * DecoupledIO 1-to-3
  * It's assumed that once in.valid=true, it will keep being true until io.fire
  */
-class DecoupledIO_3_to_1[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1, gen2: T2) extends Module {
+class DecoupledIO_3_to_1[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1, gen2: T2, IGNORE: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new Bundle{
       val data0 = gen0.cloneType
       val data1 = gen1.cloneType
       val data2 = gen2.cloneType
+      val ign0 = if(IGNORE) Some(Bool()) else None
+      val ign1 = if(IGNORE) Some(Bool()) else None
+      val ign2 = if(IGNORE) Some(Bool()) else None
     }))
     val out0 = DecoupledIO(gen0.cloneType)
     val out1 = DecoupledIO(gen1.cloneType)
@@ -117,13 +120,15 @@ class DecoupledIO_3_to_1[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1,
   io.out2.bits <> io.in.bits.data2
 
   val fire0, fire1, fire2 = RegInit(false.B)
-  fire0 := Mux(io.in.fire, false.B, fire0 || io.out0.fire)
-  fire1 := Mux(io.in.fire, false.B, fire1 || io.out1.fire)
-  fire2 := Mux(io.in.fire, false.B, fire2 || io.out2.fire)
-  io.in.ready := (fire0 || io.out0.fire) && (fire1 || io.out1.fire) && (fire2 || io.out2.fire)
-  io.out0.valid := io.in.valid && !fire0
-  io.out1.valid := io.in.valid && !fire1
-  io.out2.valid := io.in.valid && !fire2
+  fire0 := Mux(io.in.fire, false.B, fire0 || io.out0.fire || (io.in.bits.ign0.getOrElse(false.B) && io.in.valid))
+  fire1 := Mux(io.in.fire, false.B, fire1 || io.out1.fire || (io.in.bits.ign1.getOrElse(false.B) && io.in.valid))
+  fire2 := Mux(io.in.fire, false.B, fire2 || io.out2.fire || (io.in.bits.ign2.getOrElse(false.B) && io.in.valid))
+  io.in.ready := (fire0 || io.out0.fire || io.in.bits.ign0.getOrElse(false.B)) &&
+    (fire1 || io.out1.fire || io.in.bits.ign1.getOrElse(false.B)) &&
+    (fire2 || io.out2.fire || io.in.bits.ign2.getOrElse(false.B))
+  io.out0.valid := io.in.valid && !fire0 && !io.in.bits.ign0.getOrElse(false.B)
+  io.out1.valid := io.in.valid && !fire1 && !io.in.bits.ign1.getOrElse(false.B)
+  io.out2.valid := io.in.valid && !fire2 && !io.in.bits.ign2.getOrElse(false.B)
 }
 
 /** Skid buffer for DecoupledIO.ready

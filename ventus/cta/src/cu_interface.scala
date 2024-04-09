@@ -39,6 +39,9 @@ class cu_interface(NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   fifo.io.enq.bits.csr_kernel := io.wgbuffer_wg_new.bits.csr_kernel
   fifo.io.enq.bits.wg_id := io.wgbuffer_wg_new.bits.wg_id
   fifo.io.enq.bits.num_wf := io.alloc_wg_new.bits.num_wf
+  fifo.io.enq.bits.lds_dealloc_en := io.alloc_wg_new.bits.lds_dealloc_en
+  fifo.io.enq.bits.sgpr_dealloc_en := io.alloc_wg_new.bits.sgpr_dealloc_en
+  fifo.io.enq.bits.vgpr_dealloc_en := io.alloc_wg_new.bits.vgpr_dealloc_en
 
   io.host_wg_done <> fifo.io.deq
 
@@ -47,6 +50,9 @@ class cu_interface(NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   fifo_dealloc_rt.io.enq.bits.wg_slot_id := fifo.io.deq.bits.wgslot
   fifo_dealloc_rt.io.enq.bits.cu_id := fifo.io.deq.bits.cu_id
   fifo_dealloc_rt.io.enq.bits.num_wf := fifo.io.deq.bits.num_wf
+  fifo_dealloc_rt.io.enq.bits.lds_dealloc_en := fifo.io.deq.bits.lds_dealloc_en
+  fifo_dealloc_rt.io.enq.bits.sgpr_dealloc_en := fifo.io.deq.bits.sgpr_dealloc_en
+  fifo_dealloc_rt.io.enq.bits.vgpr_dealloc_en := fifo.io.deq.bits.vgpr_dealloc_en
   if(CONFIG.DEBUG) {fifo_dealloc_rt.io.enq.bits.wg_id.get := fifo.io.deq.bits.wg_id}
 
   io.rt_dealloc <> fifo_dealloc_rt.io.deq

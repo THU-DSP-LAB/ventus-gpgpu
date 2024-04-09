@@ -5,6 +5,7 @@ import chisel3.experimental.ChiselEnum
 import chisel3.util._
 import cta_util.sort3
 import cta_util.DecoupledIO_3_to_1
+import scala.collection.mutable
 
 // =
 // Abbreviations:
@@ -16,42 +17,45 @@ class io_cuinterface2rt extends Bundle {
   val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
   val wg_slot_id = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
   val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX).W)
+  val lds_dealloc_en = Bool()
+  val sgpr_dealloc_en = Bool()
+  val vgpr_dealloc_en = Bool()
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 
-class io_ram(LEN: Int, DATA_WIDTH: Int) extends Bundle {
+class io_ram[T <: Data](LEN: Int, gen: T) extends Bundle {
   val rd = new Bundle {
     val en = Output(Bool())
     val addr = Output(UInt(log2Ceil(LEN).W))        // if LEN==1, this won't be used
-    val data = Input(UInt(DATA_WIDTH.W))
+    val data = Input(gen.cloneType)
   }
   val wr = new Bundle {
     val en = Output(Bool())
     val addr = Output(UInt(log2Ceil(LEN).W))        // if LEN==1, this won't be used
-    val data = Output(UInt(DATA_WIDTH.W))
+    val data = Output(gen.cloneType)
   }
-  def apply(addr: UInt, rd_en: Bool = true.B): UInt = {
+  def apply(addr: UInt, rd_en: Bool = true.B): T= {
     rd.en := rd_en
     rd.addr := addr
     rd.data
   }
 }
 
-class io_reg(LEN: Int, DATA_WIDTH: Int) extends Bundle {
+class io_reg[T <: Data](LEN: Int, gen: T) extends Bundle {
   val rd = new Bundle {
     val addr = Output(UInt(log2Ceil(LEN).W))        // if LEN==1, this won't be used
-    val data = Input(UInt(DATA_WIDTH.W))
+    val data = Input(gen.cloneType)
   }
   val wr = new Bundle {
     val en = Output(Bool())
     val addr = Output(UInt(log2Ceil(LEN).W))        // if LEN==1, this won't be used
-    val data = Output(UInt(DATA_WIDTH.W))
+    val data = Output(gen.cloneType)
   }
-  def apply(addr: UInt): UInt = {
+  def apply(addr: UInt): T = {
     rd.addr := addr
     rd.data
   }
-  def apply(): UInt = {
+  def apply(): T = {
     rd.data
   }
 }
@@ -59,75 +63,76 @@ class io_reg(LEN: Int, DATA_WIDTH: Int) extends Bundle {
 
 class io_rtram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG_SLOT) extends Bundle {
   // SyncReadMem
-  val prev = new io_ram(NUM_WG_SLOT, log2Ceil(NUM_WG_SLOT))   // linked-list pointer to the previous WG, in order of resource address
-  val next = new io_ram(NUM_WG_SLOT, log2Ceil(NUM_WG_SLOT))   // linked-list pointer to the next WG, in order of resource address
-  val addr1 = new io_ram(NUM_WG_SLOT, log2Ceil(NUM_RESOURCE)) // base address of resource used by this WG
-  val addr2 = new io_ram(NUM_WG_SLOT, log2Ceil(NUM_RESOURCE)) // last address of resource used by this WG
+  val prev  = new io_ram(NUM_WG_SLOT, UInt(log2Ceil(NUM_WG_SLOT).W))  // linked-list pointer to the previous WG, in order of resource address
+  val next  = new io_ram(NUM_WG_SLOT, UInt(log2Ceil(NUM_WG_SLOT).W))  // linked-list pointer to the next WG, in order of resource address
+  val addr1 = new io_ram(NUM_WG_SLOT, UInt(log2Ceil(NUM_RESOURCE).W)) // base address of resource used by this WG
+  val addr2 = new io_ram(NUM_WG_SLOT, UInt(log2Ceil(NUM_RESOURCE).W)) // last address of resource used by this WG
   // Reg or Mem
-  val cnt  = new io_reg(1, log2Ceil(NUM_WG_SLOT+1))// number of WG in the linked-list
-  val head = new io_reg(1, log2Ceil(NUM_WG_SLOT))  // the first WG in the linked-list
-  val tail = new io_reg(1, log2Ceil(NUM_WG_SLOT))  // the last  WG in the linked-list
+  val cnt  = new io_reg(1, UInt(log2Ceil(NUM_WG_SLOT+1).W))// number of WG in the linked-list
+  val head = new io_reg(1, UInt(log2Ceil(NUM_WG_SLOT).W))  // the first WG in the linked-list
+  val tail = new io_reg(1, UInt(log2Ceil(NUM_WG_SLOT).W))  // the last  WG in the linked-list
   // For debug
-  val wgid = if(CONFIG.DEBUG) Some(new io_reg(NUM_WG_SLOT, UInt(CONFIG.WG.WG_ID_WIDTH).getWidth)) else None
+  val wgid = if(CONFIG.DEBUG) Some(new io_reg(NUM_WG_SLOT, UInt(CONFIG.WG.WG_ID_WIDTH))) else None
+  val valid = if(CONFIG.DEBUG) Some(new io_reg(NUM_WG_SLOT, Bool())) else None
 }
 
 class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT: Int = CONFIG.RESOURCE_TABLE.NUM_RESULT) extends Module {
+  // Constants
+  val NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT
+  val NUM_CU = CONFIG.GPU.NUM_CU
+  // IO
   val io = IO(new Bundle {
-    val dealloc = Flipped(DecoupledIO(new Bundle {
-      val cu_id_local = UInt(log2Ceil(NUM_CU_LOCAL).W)
-      val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
-      val wg_slot_id = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
+    val dealloc = Flipped(DecoupledIO(new Bundle {          // dealloc request from CU interface
+      val cu_id_local = UInt(log2Ceil(NUM_CU_LOCAL).W)      // CU ID of WG in this handler-rtram group
+      val cu_id = UInt(log2Ceil(NUM_CU).W)                  // Global CU ID of this WG
+      val wg_slot_id = UInt(log2Ceil(NUM_WG_SLOT).W)
       val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
     }))
-    val alloc = Flipped(DecoupledIO(new Bundle {
-      val cu_id_local = UInt(log2Ceil(NUM_CU_LOCAL).W)
-      val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
-      val wg_slot_id = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
+    val alloc = Flipped(DecoupledIO(new Bundle {            // alloc request from Allocator
+      val cu_id_local = UInt(log2Ceil(NUM_CU_LOCAL).W)      // CU ID of WG in this handler-rtram group
+      val cu_id = UInt(log2Ceil(NUM_CU).W)                  // Global CU ID of this WG
+      val wg_slot_id = UInt(log2Ceil(NUM_WG_SLOT).W)
       val num_resource = UInt(log2Ceil(NUM_RESOURCE+1).W)
       val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
     }))
-    val rtcache_update = DecoupledIO(new io_rt2cache(NUM_RESOURCE))
-    val baseaddr = DecoupledIO(new Bundle {
-      val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
-      val addr = UInt(log2Ceil(NUM_RESOURCE).W)
+    val baseaddr = DecoupledIO(new Bundle {                 // result of alloc req, resource base address of the allocating WG
+      val cu_id = UInt(log2Ceil(NUM_CU).W)
+      val addr = UInt(log2Ceil(NUM_RESOURCE).W)             // the found base address
       val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
     })
-    val rtram = DecoupledIO(new Bundle {
-      val sel = UInt(log2Ceil(NUM_CU_LOCAL).W)
+    val rtcache_update = DecoupledIO(new io_rt2cache(NUM_RESOURCE))   // update rtcache in Allocator, result of rtram scan
+    val rtram_sel = DecoupledIO(new Bundle {                // control the Bus-MUX of this handler-rtram group
+      val sel = UInt(log2Ceil(NUM_CU_LOCAL).W)              // cu_id_local
     })
-    val rtram_data = new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT)
+    val rtram_data = new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = NUM_WG_SLOT)   // IO to the selected rtram
   })
-
-  // =
-  // Constants
-  // =
-  val NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT
 
   // =
   // Main FSM - define
   // =
-
   object FSM extends ChiselEnum {
     val IDLE, CONNECT_ALLOC, ALLOC, CONNECT_DEALLOC, DEALLOC, SCAN, OUTPUT = Value
   }
   val fsm_next = Wire(FSM())
   val fsm = RegNext(fsm_next, FSM.IDLE)
 
-  // sub-fsm finish signal
+  // sub-fsm finish signals
   val alloc_ok = Wire(Bool())
   val dealloc_ok = Wire(Bool())
   val scan_ok = Wire(Bool())
   val output_ok = RegInit(false.B)
 
   // =
-  // IO
+  // IO output driver: alloc, dealloc, rtram
   // =
 
+  // rtram select
   val cu_sel = Reg(UInt(log2Ceil(NUM_CU_LOCAL).W))
   val cu_sel_en = RegInit(false.B)
-  io.rtram.valid := cu_sel_en
-  io.rtram.bits.sel := cu_sel
+  io.rtram_sel.valid := cu_sel_en
+  io.rtram_sel.bits.sel := cu_sel
 
+  // alloc/dealloc ready control
   // CU resource table handler can only change its target CU in IDLE state
   // ready to receive a new alloc request <=> IDLE || ( (req CU == current CU) && (able to preempt) )
   // ready to receive a new dealloc request <=> (IDLE && no alloc) || (no_same_cu_alloc && (req CU == current CU) && (able to preempt) )
@@ -142,44 +147,31 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     (fsm === FSM.SCAN)
   ))
 
-  // @note:
-  // io.rtram.bits.data.* may be driven by multiple sub-fsm: alloc, dealloc, scan.
-  // We should have made each of these sub-fsm drive their own group of signals,
-  // ⬑ and finally use MUX to select one out of these three groups of signals, becoming io.rtram.bits.data
-  // But that makes the code too long to read.
-  //                             fsm
-  //                        ┌─────┴─────┐
-  //    fsm_alloc    ─────→ ┤           │
-  //                        │           │
-  //    fsm_dealloc  ─────→ ┤    MUX    ├ ──────→ io.rtram.bits.data (output)
-  //                        │           │
-  //    fsm_scan     ─────→ ┤           │
-  //                        └───────────┘
-  //    fsm_alloc    ←──────┐
-  //                        │ (No need to implement any hardware, just read io.rtram.bits.data)
-  //    fsm_dealloc  ←──────┼────────── io.rtram.bits.data (input)
-  //                        │
-  //    fsm_scan     ←──────┘
-  //
-  // Here, we let this multi-driven problem exist.
-  // Chisel will automatically merge these multiple driven-sources into one, using PriorityMux.
-  // What we really need is Mux1H, since at most one sub-fsm is active, but that's ok
-
+  // rtram data
+  // All these three sub-fsm need to read/write io.rtram during their active time, respectively
+  // The main FSM promises that at most one of these three sub-fsm is active at any moment
+  // To avoid potential multi-driver problem, each sub-fsm drives their own cluster of rtram signals,
+  //  and use MUX to triple-select one cluster of signal to drive io.rtram
+  //                           fsm                        │
+  //                        ┌───┴───┐                     │
+  //    fsm_alloc    ─────→ ┤       │                     │    fsm_alloc    ←──────┐
+  //                        │       │         (output)    │                        │         (input)
+  //    fsm_dealloc  ─────→ ┤  MUX  ├ ──────→ io.rtram    │    fsm_dealloc  ←──────┼─────── io.rtram
+  //                        │       │                     │                        │
+  //    fsm_scan     ─────→ ┤       │                     │    fsm_scan     ←──────┘
+  //                        └───────┘                     │
   // TODO: in chisel3.6, we can use something like this
-  //  io.rtram.bits.data :<= MuxLookup(fsm, DontCare, Seq(
+  //  io.rtram_data :<= MuxLookup(fsm, DontCare, Seq(
   //    FSM.ALLOC -> rtram_alloc,
   //    FSM.DEALLOC -> rtram_dealloc,
   //    FSM.SCAN -> rtram_scan,
   //  ))
-  //  io.rtram.bits.data :>= rtram_alloc
-  //  io.rtram.bits.data :>= rtram_dealloc
-  //  io.rtram.bits.data :>= rtram_scan
-  val rtram_alloc   = Wire(new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT))
-  val rtram_dealloc = Wire(new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT))
-  val rtram_scan    = Wire(new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT))
-  rtram_alloc := DontCare
-  rtram_dealloc := DontCare
-  rtram_scan := DontCare
+  //  io.rtram_data :>= rtram_alloc
+  //  io.rtram_data :>= rtram_dealloc
+  //  io.rtram_data :>= rtram_scan
+  val rtram_alloc   = WireInit(new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = NUM_WG_SLOT), DontCare)
+  val rtram_dealloc = WireInit(new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = NUM_WG_SLOT), DontCare)
+  val rtram_scan    = WireInit(new io_rtram(NUM_RESOURCE = NUM_RESOURCE, NUM_WG_SLOT = NUM_WG_SLOT), DontCare)
   when(fsm === FSM.SCAN) {
     io.rtram_data <> rtram_scan
   } .elsewhen(fsm === FSM.DEALLOC) {
@@ -192,7 +184,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   // Main FSM - actions
   // =
 
-  // get WG info when a new alloc/dealloc request is received
+  // Action 1: get WG info when a new alloc/dealloc request is received
   val wgsize = Reg(UInt(log2Ceil(NUM_RESOURCE+1).W))
   val wgslot = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))
   val wg_cu = Reg(UInt(log2Ceil(CONFIG.GPU.NUM_CU).W))
@@ -219,10 +211,9 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     ))
   }
 
-
-  // get new target CU when a different CU's request is received in IDLE state
-  // But there is no need to check whether fsm===IDLE
-  // Since if (fsm=/=IDLE) && (req.fire), there must be (cu_sel===new_cu_id), new assignment has no effect (see the next assert)
+  // Action 2: get new target CU when a different CU's request is received in IDLE state
+  // But there is no need to check whether fsm===IDLE,
+  //  since if (fsm=/=IDLE) && (req.fire), there must be (cu_sel===new_cu_id), new assignment has no effect (see the next assert)
   cu_sel := Mux1H(Seq(
     io.alloc.fire -> io.alloc.bits.cu_id_local,
     io.dealloc.fire -> io.dealloc.bits.cu_id_local,
@@ -241,7 +232,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   cu_sel_en := cu_sel_en || io.alloc.fire || io.dealloc.fire
 
   // =
-  // Sub FSM ALLOC
+  // Sub FSM ALLOC (Main FSM action 3)
   // =
 
   object FSM_A extends ChiselEnum {
@@ -259,33 +250,33 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   val fsm_a_found_size = Reg(UInt(log2Ceil(NUM_RESOURCE+1).W))// size of the currently selected resource segment
   val fsm_a_found_addr = Reg(UInt(log2Ceil(NUM_RESOURCE).W))  // base address of the currently selected resource segment
   val fsm_a_found_ptr1 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))   // pointer to the WG which locates before the currently selected resource segment
-  val fsm_a_found_ptr2 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))   // pointer to the WG which locates after the currently selected resource segment
-  val fsm_a_ptr1 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))         // pointer to the WG which locate before the currently checked resource segments
-  val fsm_a_ptr2 = Wire(UInt(log2Ceil(NUM_WG_SLOT).W))        // pointer to the WG which locate after  the currently checked resource segments
-  val fsm_a_head_flag, fsm_a_tail_flag = Reg(Bool())          // if the currently selected segment will be the head/tail node of the linked-list
-  val fsm_a_valid_p1 = RegInit(false.B)
-  val fsm_a_init_p1 = RegInit(false.B)
-  val fsm_a_finish_p1 = RegInit(false.B)
+  val fsm_a_found_ptr2 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))   // pointer to the WG which locates after  the currently selected resource segment
+  val fsm_a_ptr1 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))         // pointer to the WG which locates before the currently checked resource segment
+  val fsm_a_ptr2 = Wire(UInt(log2Ceil(NUM_WG_SLOT).W))        // pointer to the WG which locates after  the currently checked resource segment
+  val fsm_a_head_flag, fsm_a_tail_flag = Reg(Bool())          // if the currently selected segment will be the new head/tail node of the linked-list
+  val fsm_a_valid_p1 = RegInit(false.B)                       // valid  signal of pipeline stage 1
+  val fsm_a_init_p1 = RegInit(false.B)                        // init   signal of pipeline stage 1
+  val fsm_a_finish_p1 = RegInit(false.B)                      // finish signal of pipeline stage 1
   // if you want to send control/data signal to io.rtram, use rtram_alloc
-  // if you want to get signal value from io.rtram, use rtram_alloc(recommended) or io.rtram.bits.data, both ok
+  // if you want to get signal value from io.rtram, use rtram_alloc(recommended) or io.rtram, both ok
   fsm_a_ptr2 := DontCare  // switch default
   switch(fsm_a) {
     is(FSM_A.IDLE) {  // prepare for FSM_A.FIND
       // Even before the iteration begins, we have already know that we can successfully find a resource segment which is large enough
       // What we want to find is the smallest segment that can contain the WG (large but not too large)
       // At the beginning, assume we will find the largest segment (the whole resource, NUM_RESOURCE)
-      // ⬑ then, step by step we will find smaller segments
+      //  then, step by step we will find smaller segments
       // In the first iteration step, we will check the resource segment before the first WG, even if it may not exist
       // In the last iteration step, we will check the resource segment after the last WG, even if it may not exist
-      fsm_a_cnt := 0.U                        // Iteration range: 0 to rtram.cnt
-      fsm_a_found_size := NUM_RESOURCE.U      // Initial assumption: assume we select the whole resource.
-      fsm_a_found_addr := 0.U                 // ⬑ This will be changed to the right segment later, unless rtram.cnt==0 and the initial assumption is correct
-      fsm_a_found_ptr1 := DontCare            // In our initial assumption, the linked-list is empty, so we don't care this pointer
+      fsm_a_cnt := 0.U                    // Iteration range: 0 to rtram.cnt
+      fsm_a_found_size := NUM_RESOURCE.U  // Initial assumption: assume we select the whole resource.
+      fsm_a_found_addr := 0.U             // ⬑ This will be changed to the right segment later, unless rtram.cnt==0 and the initial assumption is correct
+      fsm_a_found_ptr1 := DontCare        // In our initial assumption, the linked-list is empty, so we don't care this pointer
       fsm_a_found_ptr2 := DontCare
-      fsm_a_ptr1 := DontCare                  // Before the first resource segment locates nothing
-      fsm_a_ptr2 := rtram_alloc.head()        // After the first resource segment locates the first WG
+      fsm_a_ptr1 := DontCare              // Before the first resource segment locates nothing
+      fsm_a_ptr2 := rtram_alloc.head()    // After the first resource segment locates the first WG
       fsm_a_head_flag := true.B
-      fsm_a_tail_flag := true.B               // In our initial assumption, the linked-list is empty, so the new WG will become head as well as tail
+      fsm_a_tail_flag := true.B           // In our initial assumption, the linked-list is empty, so the new WG will become head as well as tail
       fsm_a_valid_p1 := false.B
       fsm_a_init_p1 := false.B
       fsm_a_finish_p1 := false.B
@@ -307,6 +298,8 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
       fsm_a_init_p1 := (fsm_a_cnt === 0.U)
       fsm_a_finish_p1 := (fsm_a_cnt === rtram_alloc.cnt())
       fsm_a_valid_p1 := (fsm_a_valid_p1 && !fsm_a_finish_p1) || (fsm_a_cnt === 0.U)
+      val fsm_a_ptr1_p1 = RegNext(fsm_a_ptr1)
+      val fsm_a_ptr2_p1 = RegNext(fsm_a_ptr2)
       // pipeline stage 3: resource segment size calc & found result update
       val addr1, addr2 = Wire(UInt(log2Ceil(NUM_RESOURCE+1).W)) // addr1 = this resource segment's start addr - 1, addr2 = resource segment's end addr
       addr1 := Mux(fsm_a_init_p1, (~0.U(log2Ceil(NUM_RESOURCE+1).W)).asUInt, rtram_alloc.addr2.rd.data)
@@ -315,14 +308,22 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
       val result_update = (size >= wgsize) && (size < fsm_a_found_size)
       fsm_a_found_size := Mux(fsm_a_valid_p1 && result_update, size, fsm_a_found_size)
       fsm_a_found_addr := Mux(fsm_a_valid_p1 && result_update, addr1 + 1.U, fsm_a_found_addr)
-      fsm_a_found_ptr1 := Mux(fsm_a_valid_p1 && result_update, fsm_a_ptr1, fsm_a_found_ptr1)
-      fsm_a_found_ptr2 := Mux(fsm_a_valid_p1 && result_update, fsm_a_ptr2, fsm_a_found_ptr2)
+      fsm_a_found_ptr1 := Mux(fsm_a_valid_p1 && result_update, fsm_a_ptr1_p1, fsm_a_found_ptr1)
+      fsm_a_found_ptr2 := Mux(fsm_a_valid_p1 && result_update, fsm_a_ptr2_p1, fsm_a_found_ptr2)
       fsm_a_tail_flag := Mux(fsm_a_valid_p1 && result_update, fsm_a_finish_p1, fsm_a_tail_flag)
       fsm_a_head_flag := Mux(fsm_a_valid_p1 && result_update, fsm_a_init_p1, fsm_a_head_flag)
       // Iteration step
       fsm_a_cnt := fsm_a_cnt + 1.U
       // pipeline will give out the final result in the next cycle, so it's ready to jump to the next state
       fsm_a_found_ok := fsm_a_init_p1
+      if(CONFIG.DEBUG) {
+        val fsm_a_found = RegInit(false.B)
+        fsm_a_found := MuxCase(fsm_a_found, Seq(
+          fsm_a_init_p1 -> result_update,
+          fsm_a_valid_p1 -> (fsm_a_found || result_update),
+        ))
+        assert(!fsm_a_finish_p1 || (fsm_a_found || result_update) || (rtram_alloc.cnt() === 0.U))
+      }
     }
     is(FSM_A.WRITE_OUTPUT) {  // keep useful data for FSM_A.WRITE_OUTPUT, and prepare for FSM_A.FIND
       // Useless for WRITE & OUTPUT, initialize them for next FSM_A.FIND
@@ -349,28 +350,35 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     (fsm_a =/= FSM_A.WRITE_OUTPUT) -> 0.U,
     (fsm_a_write_cnt <= 1.U) -> (fsm_a_write_cnt + 1.U),
   ))
-  rtram_alloc.head.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && fsm_a_head_flag
+  rtram_alloc.head.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && fsm_a_head_flag && !(wgsize === 0.U)
   rtram_alloc.head.wr.data := wgslot
-  rtram_alloc.tail.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && fsm_a_tail_flag
+  rtram_alloc.tail.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && fsm_a_tail_flag && !(wgsize === 0.U)
   rtram_alloc.tail.wr.data := wgslot
-  rtram_alloc.cnt.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U)
+  rtram_alloc.cnt.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
   rtram_alloc.cnt.wr.data := rtram_alloc.cnt() + 1.U
-  rtram_alloc.prev.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt <= 1.U)
+  rtram_alloc.prev.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && ((fsm_a_write_cnt === 0.U && !fsm_a_tail_flag) || fsm_a_write_cnt === 1.U) && !(wgsize === 0.U)
   rtram_alloc.prev.wr.addr := (Mux(fsm_a_write_cnt === 0.U, fsm_a_found_ptr2, wgslot))
   rtram_alloc.prev.wr.data := (Mux(fsm_a_write_cnt === 0.U, wgslot, fsm_a_found_ptr1))
-  rtram_alloc.next.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt <= 1.U)
+  rtram_alloc.next.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && ((fsm_a_write_cnt === 0.U && !fsm_a_head_flag) || fsm_a_write_cnt === 1.U) && !(wgsize === 0.U)
   rtram_alloc.next.wr.addr := (Mux(fsm_a_write_cnt === 0.U, fsm_a_found_ptr1, wgslot))
   rtram_alloc.next.wr.data := (Mux(fsm_a_write_cnt === 0.U, wgslot, fsm_a_found_ptr2))
-  rtram_alloc.addr1.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U)
+  rtram_alloc.addr1.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
   rtram_alloc.addr1.wr.addr := wgslot
   rtram_alloc.addr1.wr.data := fsm_a_found_addr
-  rtram_alloc.addr2.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U)
+  rtram_alloc.addr2.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
   rtram_alloc.addr2.wr.addr := wgslot
   rtram_alloc.addr2.wr.data := fsm_a_found_addr + wgsize - 1.U
   if(CONFIG.DEBUG) {
-    rtram_alloc.wgid.get.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U)
+    rtram_alloc.valid.get.rd.addr := wgslot
+    when(fsm_a === FSM_A.WRITE_OUTPUT && fsm_a_write_cnt === 0.U) {
+      assert(rtram_alloc.valid.get.rd.data === false.B)
+    }
+    rtram_alloc.wgid.get.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
     rtram_alloc.wgid.get.wr.addr := wgslot
     rtram_alloc.wgid.get.wr.data := wg_id.get
+    rtram_alloc.valid.get.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
+    rtram_alloc.valid.get.wr.addr := wgslot
+    rtram_alloc.valid.get.wr.data := true.B
   }
   val fsm_a_write_ok = (fsm_a_write_cnt >= 1.U)
 
@@ -390,7 +398,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   // Sub-FSM ALLOC state transition logic
   fsm_a_next := MuxLookup(fsm_a.asUInt, FSM_A.IDLE, Seq(
     FSM_A.IDLE.asUInt -> Mux(fsm_next === FSM.ALLOC && fsm_next =/= fsm, FSM_A.FIND, fsm_a),
-    FSM_A.FIND.asUInt -> Mux(fsm_a_cnt > io.rtram_data.cnt(), FSM_A.WRITE_OUTPUT, fsm_a),
+    FSM_A.FIND.asUInt -> Mux(wgsize === 0.U || fsm_a_cnt > io.rtram_data.cnt(), FSM_A.WRITE_OUTPUT, fsm_a),
     FSM_A.WRITE_OUTPUT.asUInt -> MuxCase(FSM_A.IDLE, Seq(
       !alloc_ok -> fsm_a,
       io.alloc.fire -> FSM_A.FIND,
@@ -400,7 +408,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   alloc_ok := (fsm_a === FSM_A.WRITE_OUTPUT) && fsm_a_write_ok && fsm_a_output_ok
 
   // =
-  // FSM.DEALLOC action
+  // FSM.DEALLOC action (Main FSM action 4)
   // =
   val fsm_d = RegInit(0.U(2.W))
   fsm_d := Mux(fsm =/= FSM.DEALLOC || io.dealloc.fire, 0.U, Mux(!fsm_d.andR, fsm_d + 1.U, fsm_d))
@@ -417,71 +425,84 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   rtram_dealloc.cnt.wr.data := rtram_dealloc.cnt() - 1.U
   rtram_dealloc.head.wr.en := (fsm_d === 1.U) && (wgslot === rtram_dealloc.head())
   rtram_dealloc.head.wr.data := fsm_d_next
-  rtram_dealloc.head.wr.en := (fsm_d === 1.U) && (wgslot === rtram_dealloc.tail())
-  rtram_dealloc.head.wr.data := fsm_d_prev
+  rtram_dealloc.tail.wr.en := (fsm_d === 1.U) && (wgslot === rtram_dealloc.tail())
+  rtram_dealloc.tail.wr.data := fsm_d_prev
   rtram_dealloc.addr2.wr.en := false.B
   rtram_dealloc.addr2.wr.en := false.B
 
   if(CONFIG.DEBUG) {
     rtram_dealloc.wgid.get.rd.addr := wgslot
+    rtram_dealloc.valid.get.rd.addr := wgslot
     when(fsm === FSM.DEALLOC) {
       assert(rtram_dealloc.wgid.get.rd.data === wg_id.get)
+      assert(rtram_dealloc.valid.get.rd.data)
     }
+    rtram_dealloc.valid.get.wr.en := (fsm_d === 1.U)
+    rtram_dealloc.valid.get.wr.addr := wgslot
+    rtram_dealloc.valid.get.wr.data := false.B
   }
 
   dealloc_ok := (fsm === FSM.DEALLOC) && (fsm_d >= 1.U)
 
   // =
-  // Sub-FSM SCAN
+  // Sub-FSM SCAN (Main FSM action 5)
   // =
-  val fsm_s_ok = RegInit(false.B)
-  val fsm_s_cnt = RegInit(0.U(log2Ceil(NUM_WG_SLOT+2).W))   // you can also reuse fsm_a_cnt
-  fsm_s_cnt := MuxCase(fsm_s_cnt, Seq(
-    (fsm =/= FSM.SCAN) -> 0.U,
-    (!fsm_s_ok) -> (fsm_s_cnt + 1.U),
-  ))
-  val fsm_s_ptr1 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))                 // pointer to the WG which locate before the currently checked resource segments
-  val fsm_s_ptr2 = WireInit(UInt(log2Ceil(NUM_WG_SLOT).W), DontCare)  // pointer to the WG which locate after  the currently checked resource segments
+  val fsm_s_ptr1 = Reg(UInt(log2Ceil(NUM_WG_SLOT).W))   // pointer to the WG which locate before the currently checked resource segments
+  val fsm_s_ptr2 = Wire(UInt(log2Ceil(NUM_WG_SLOT).W))  // pointer to the WG which locate after  the currently checked resource segments
   val fsm_s_init_p1 = RegInit(false.B)
   val fsm_s_finish_p1 = RegInit(false.B)
   val fsm_s_valid_p1 = RegInit(false.B)
-  val rtcache_data = RegInit(VecInit.fill(NUM_RT_RESULT)(0.U(log2Ceil(NUM_RESOURCE+1).W)))
+  val fsm_s_cnt = RegInit(0.U(log2Ceil(NUM_WG_SLOT+2).W))   // you can also reuse fsm_a_cnt
+  fsm_s_cnt := Mux(fsm =/= FSM.SCAN || fsm_next =/= FSM.SCAN, 0.U, fsm_s_cnt + 1.U)
+  val rtcache_data = RegInit(VecInit.fill(NUM_RT_RESULT)(0.U(log2Ceil(NUM_RESOURCE+1).W)))  // scan result, rtcache_data[0] is the largest resource segment
   when(fsm === FSM.SCAN){
-    when(!fsm_s_ok) {
-      // pipeline stage 0: pointer step
-      fsm_s_ptr1 := fsm_s_ptr2
-      rtram_scan.next(fsm_s_ptr2)       // rtram_scan.next.rd.data is a pipeline stage 0 register
-      // pipeline stage 1: rtram data fetch - addr1 & addr2
-      fsm_s_ptr2 := Mux(fsm_s_cnt === 0.U, rtram_scan.head(), rtram_scan.next.rd.data)
-      rtram_scan.addr2(fsm_s_ptr1)      // rtram_scan.addr2.rd.data is a pipeline stage 1 register
-      rtram_scan.addr1(fsm_s_ptr2)      // rtram_scan.addr1.rd.data is a pipeline stage 1 register
-      fsm_s_init_p1 := (fsm_s_cnt === 0.U)
-      fsm_s_finish_p1 := (fsm_s_cnt === rtram_scan.cnt())
-      fsm_s_valid_p1 := (fsm_s_valid_p1 && !fsm_s_finish_p1) || (fsm_s_cnt === 0.U)
-      // pipeline stage 2: resource segment size calc & sort
-      val addr1 = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), Mux(fsm_s_init_p1, (~0.U(log2Ceil(NUM_RESOURCE+1).W)).asUInt, rtram_scan.addr2.rd.data.pad(log2Ceil(NUM_RESOURCE+1))))
-      val addr2 = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), Mux(fsm_s_finish_p1, NUM_RESOURCE.U - 1.U, rtram_scan.addr1.rd.data.pad(log2Ceil(NUM_RESOURCE+1)) - 1.U))
-      val thissize = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), addr2 -& addr1)
-      assert(NUM_RT_RESULT == 2)   // Current implement only support NUM_RT_RESULT=2. Replace `sort3()` to support other values
-      val result = sort3(rtcache_data(0), rtcache_data(1), thissize)
-      rtcache_data(0) := Mux(fsm_s_valid_p1, result(0), rtcache_data(0))
-      rtcache_data(1) := Mux(fsm_s_valid_p1, result(1), rtcache_data(1))
-      fsm_s_ok := fsm_s_finish_p1
-    } .otherwise {
-      fsm_s_init_p1 := false.B
-      fsm_s_finish_p1 := false.B
+    // pipeline stage 0: pointer step
+    fsm_s_ptr1 := fsm_s_ptr2
+    rtram_scan.next(fsm_s_ptr2)       // rtram_scan.next.rd.data is a pipeline stage 0 register
+    // pipeline stage 1: rtram data fetch - addr1 & addr2
+    fsm_s_ptr2 := Mux(fsm_s_cnt === 0.U, rtram_scan.head(), rtram_scan.next.rd.data)
+    rtram_scan.addr2(fsm_s_ptr1)      // rtram_scan.addr2.rd.data is a pipeline stage 1 register
+    rtram_scan.addr1(fsm_s_ptr2)      // rtram_scan.addr1.rd.data is a pipeline stage 1 register
+    fsm_s_init_p1 := (fsm_s_cnt === 0.U)
+    fsm_s_finish_p1 := (fsm_s_cnt === rtram_scan.cnt())
+    fsm_s_valid_p1 := (fsm_s_valid_p1 && !fsm_s_finish_p1) || (fsm_s_cnt === 0.U)
+    // pipeline stage 2: resource segment size calc & sort
+    val addr1 = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), Mux(fsm_s_init_p1, (~0.U(log2Ceil(NUM_RESOURCE+1).W)).asUInt, rtram_scan.addr2.rd.data.pad(log2Ceil(NUM_RESOURCE+1))))
+    val addr2 = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), Mux(fsm_s_finish_p1, NUM_RESOURCE.U - 1.U, rtram_scan.addr1.rd.data.pad(log2Ceil(NUM_RESOURCE+1)) - 1.U))
+    val thissize = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), addr2 - addr1)
+    assert(NUM_RT_RESULT == 2)   // Current implement only support NUM_RT_RESULT=2. Replace `sort3()` to support other values
+    val result = sort3(Mux(fsm_s_init_p1, 0.U, rtcache_data(0)), Mux(fsm_s_init_p1, 0.U, rtcache_data(1)), thissize)
+    rtcache_data(0) := Mux(fsm_s_valid_p1, result(0), rtcache_data(0))
+    rtcache_data(1) := Mux(fsm_s_valid_p1, result(1), rtcache_data(1))
+    if(CONFIG.DEBUG) {
+      rtram_scan.valid.get.rd.addr := fsm_s_ptr1
+      rtram_scan.wgid.get.rd.addr := fsm_s_ptr1
+      val checked_wg_valid = RegInit(0.U(NUM_WG_SLOT.W))
+      val checked_wg = ShiftRegisters(rtram_scan.wgid.get.rd.data, NUM_WG_SLOT)
+      checked_wg_valid := Mux(fsm_s_init_p1, 1.U, (checked_wg_valid << 1).asUInt | (fsm_s_valid_p1 && !fsm_s_finish_p1).asUInt)
+      when(fsm_s_finish_p1) {
+        for(i <- 0 until NUM_WG_SLOT) {
+          when(checked_wg_valid(i)) {
+            for(j <- 0 until NUM_WG_SLOT) {
+              assert(!checked_wg_valid(j) || (i == j).asBool || checked_wg(i) =/= checked_wg(j))
+            }
+          }
+        }
+      }
+      assert(!fsm_s_valid_p1 || fsm_s_finish_p1 || rtram_scan.valid.get.rd.data)
+      assert(!fsm_s_valid_p1 || fsm_s_init_p1 || rtcache_data(0) <= result(0))
+      assert(!fsm_s_valid_p1 || fsm_s_init_p1 || rtcache_data(1) <= result(1))
     }
   } .otherwise { // prepare for FSM.SCAN
     fsm_s_ptr1 := DontCare
-    fsm_s_ptr2 := rtram_scan.cnt()
+    fsm_s_ptr2 := rtram_scan.head()
     fsm_s_init_p1 := false.B
     fsm_s_finish_p1 := false.B
     fsm_s_valid_p1 := false.B
-    rtcache_data(0) := Mux(fsm === FSM.OUTPUT, rtcache_data(0), 0.U)
-    rtcache_data(1) := Mux(fsm === FSM.OUTPUT, rtcache_data(1), 0.U)
-    fsm_s_ok := false.B
+    rtcache_data(0) := rtcache_data(0)
+    rtcache_data(1) := rtcache_data(1)
   }
-  scan_ok := (fsm === FSM.SCAN) && (fsm_s_ok || fsm_s_finish_p1)
+  scan_ok := (fsm === FSM.SCAN) && fsm_s_finish_p1
 
   // =
   // Sub-FSM OUTPUT
@@ -500,13 +521,13 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   switch(fsm) {
     is(FSM.IDLE) {
       fsm_next := MuxCase(fsm, Seq(
-        io.alloc.fire -> Mux(cu_sel === io.alloc.bits.cu_id_local && io.rtram.fire, FSM.ALLOC, FSM.CONNECT_ALLOC),
-        io.dealloc.fire -> Mux(cu_sel === io.dealloc.bits.cu_id_local && io.rtram.fire, FSM.DEALLOC, FSM.CONNECT_DEALLOC),
+        io.alloc.fire -> Mux(cu_sel === io.alloc.bits.cu_id_local && io.rtram_sel.fire, FSM.ALLOC, FSM.CONNECT_ALLOC),
+        io.dealloc.fire -> Mux(cu_sel === io.dealloc.bits.cu_id_local && io.rtram_sel.fire, FSM.DEALLOC, FSM.CONNECT_DEALLOC),
       ))
     }
     is(FSM.CONNECT_ALLOC, FSM.CONNECT_DEALLOC) {
       fsm_next := MuxCase(fsm, Seq(
-        io.rtram.fire -> Mux(fsm === FSM.CONNECT_ALLOC, FSM.ALLOC, FSM.DEALLOC),
+        io.rtram_sel.fire -> Mux(fsm === FSM.CONNECT_ALLOC, FSM.ALLOC, FSM.DEALLOC),
       ))
     }
     is(FSM.ALLOC) {
@@ -571,9 +592,12 @@ class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG
 
   // For debug
   val wgid = if(CONFIG.DEBUG) Some(Reg(Vec(NUM_WG_SLOT, UInt(CONFIG.WG.WG_ID_WIDTH)))) else None
+  val valid = if(CONFIG.DEBUG) Some(RegInit(VecInit.fill(NUM_WG_SLOT)(false.B))) else None
   if(CONFIG.DEBUG) {
     when(io.en && io.data.wgid.get.wr.en) {(wgid.get)(io.data.wgid.get.wr.addr) := io.data.wgid.get.wr.data}
     io.data.wgid.get.rd.data := (wgid.get)(io.data.wgid.get.rd.addr)
+    when(io.en && io.data.valid.get.wr.en) {(valid.get)(io.data.valid.get.wr.addr) := io.data.valid.get.wr.data}
+    io.data.valid.get.rd.data := (valid.get)(io.data.valid.get.rd.addr)
   }
 }
 
@@ -685,27 +709,27 @@ class resource_table_top extends Module {
   //}
   for(i <- 0 until NUM_HANDLER) {
     for(j <- 0 until NUM_CU_PER_HANDLER) {
-      rtram_lds(i)(j).io.en := (handler_lds(i).io.rtram.bits.sel === j.U)
+      rtram_lds(i)(j).io.en := (handler_lds(i).io.rtram_sel.bits.sel === j.U)
       handler_lds(i).io.rtram_data <> rtram_lds_io(i)(j)
     }
-    handler_lds(i).io.rtram_data <> rtram_lds_io(i)(handler_lds(i).io.rtram.bits.sel)
-    handler_lds_io(i).rtram.ready := true.B
+    handler_lds(i).io.rtram_data <> rtram_lds_io(i)(handler_lds(i).io.rtram_sel.bits.sel)
+    handler_lds_io(i).rtram_sel.ready := true.B
   }
   for(i <- 0 until NUM_HANDLER) {
     for(j <- 0 until NUM_CU_PER_HANDLER) {
-      rtram_sgpr(i)(j).io.en := (handler_sgpr(i).io.rtram.bits.sel === j.U)
+      rtram_sgpr(i)(j).io.en := (handler_sgpr(i).io.rtram_sel.bits.sel === j.U)
       handler_sgpr(i).io.rtram_data <> rtram_sgpr_io(i)(j)
     }
-    handler_sgpr(i).io.rtram_data <> rtram_sgpr_io(i)(handler_sgpr(i).io.rtram.bits.sel)
-    handler_sgpr_io(i).rtram.ready := true.B
+    handler_sgpr(i).io.rtram_data <> rtram_sgpr_io(i)(handler_sgpr(i).io.rtram_sel.bits.sel)
+    handler_sgpr_io(i).rtram_sel.ready := true.B
   }
   for(i <- 0 until NUM_HANDLER) {
     for(j <- 0 until NUM_CU_PER_HANDLER) {
-      rtram_vgpr(i)(j).io.en := (handler_vgpr(i).io.rtram.bits.sel === j.U)
+      rtram_vgpr(i)(j).io.en := (handler_vgpr(i).io.rtram_sel.bits.sel === j.U)
       handler_vgpr(i).io.rtram_data <> rtram_vgpr_io(i)(j)
     }
-    handler_vgpr(i).io.rtram_data <> rtram_vgpr_io(i)(handler_vgpr(i).io.rtram.bits.sel)
-    handler_vgpr_io(i).rtram.ready := true.B
+    handler_vgpr(i).io.rtram_data <> rtram_vgpr_io(i)(handler_vgpr(i).io.rtram_sel.bits.sel)
+    handler_vgpr_io(i).rtram_sel.ready := true.B
   }
 
   // =
@@ -764,7 +788,7 @@ class resource_table_top extends Module {
   // 2. WG slot & WF slot dealloc (to allocator)
   // =
 
-  val dealloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds(0).io.dealloc.bits, handler_sgpr(0).io.dealloc.bits, handler_vgpr(0).io.dealloc.bits))
+  val dealloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds(0).io.dealloc.bits, handler_sgpr(0).io.dealloc.bits, handler_vgpr(0).io.dealloc.bits, IGNORE = true))
   val slot_dealloc = Module(new Queue(new io_rt2dealloc, 2))
   // DecoupledIO 2-to-1 valid-ready
   dealloc_decoupledio.io.in.valid := io.dealloc.valid && slot_dealloc.io.enq.ready
@@ -780,14 +804,17 @@ class resource_table_top extends Module {
   dealloc_decoupledio.io.in.bits.data0.cu_id := io.dealloc.bits.cu_id
   dealloc_decoupledio.io.in.bits.data0.wg_slot_id := io.dealloc.bits.wg_slot_id
   dealloc_decoupledio.io.in.bits.data0.cu_id_local := dealloc_cuid_local
+  dealloc_decoupledio.io.in.bits.ign0.get := !io.dealloc.bits.lds_dealloc_en
   // SGPR
   dealloc_decoupledio.io.in.bits.data1.cu_id := io.dealloc.bits.cu_id
   dealloc_decoupledio.io.in.bits.data1.wg_slot_id := io.dealloc.bits.wg_slot_id
   dealloc_decoupledio.io.in.bits.data1.cu_id_local := dealloc_cuid_local
+  dealloc_decoupledio.io.in.bits.ign1.get := !io.dealloc.bits.sgpr_dealloc_en
   // VGPR
   dealloc_decoupledio.io.in.bits.data2.cu_id := io.dealloc.bits.cu_id
   dealloc_decoupledio.io.in.bits.data2.wg_slot_id := io.dealloc.bits.wg_slot_id
   dealloc_decoupledio.io.in.bits.data2.cu_id_local := dealloc_cuid_local
+  dealloc_decoupledio.io.in.bits.ign2.get := !io.dealloc.bits.vgpr_dealloc_en
   // DEBUG
   if(CONFIG.DEBUG) {
     dealloc_decoupledio.io.in.bits.data0.wg_id.get := io.dealloc.bits.wg_id.get

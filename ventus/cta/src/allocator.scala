@@ -15,6 +15,9 @@ import cta_scheduler.cta_util.RRPriorityEncoder
 
 class io_alloc2cuinterface extends Bundle with ctainfo_alloc_to_cuinterface {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  val lds_dealloc_en = Bool()   // if LDS needs dealloc. When num_lds==0, lds do not need dealloc
+  val sgpr_dealloc_en = Bool()
+  val vgpr_dealloc_en = Bool()
 }
 class io_rt2cuinterface extends Bundle with ctainfo_alloc_to_cu {
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
@@ -350,6 +353,9 @@ class allocator() extends Module {
   cuinterface_buf.io.enq.bits.wg_id := wg.wg_id
   cuinterface_buf.io.enq.bits.wg_slot_id := wgslot_id
   cuinterface_buf.io.enq.bits.num_wf := wg.num_wf
+  cuinterface_buf.io.enq.bits.lds_dealloc_en := (wg.num_lds =/= 0.U)
+  cuinterface_buf.io.enq.bits.sgpr_dealloc_en := (wg.num_sgpr =/= 0.U)
+  cuinterface_buf.io.enq.bits.vgpr_dealloc_en := (wg.num_vgpr =/= 0.U)
   alloc_task_cuinterface_reg := Mux(fsm === FSM.ALLOC, alloc_task_cuinterface_reg || (cuinterface_buf.io.enq.fire && !alloc_task_ok), false.B )
   alloc_task_cuinterface := alloc_task_cuinterface_reg || cuinterface_buf.io.enq.fire
   io.cuinterface_wg_new <> cuinterface_buf.io.deq

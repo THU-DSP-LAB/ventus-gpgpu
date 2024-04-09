@@ -161,11 +161,11 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.host_wg_new.initSource().setSourceClock(dut.clock)
       dut.io.host_wg_done.initSink().setSinkClock(dut.clock)
 
-      val testlen = 200
+      val testlen = 2000
       val testIn_csr = Seq.tabulate(testlen){i => Random.nextInt().abs}
-      val testIn_lds = Seq.tabulate(testlen){i =>  Random.nextInt(CONFIG.WG.NUM_LDS_MAX)}
-      val testIn_sgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_SGPR_MAX)}
-      val testIn_vgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_VGPR_MAX)}
+      val testIn_lds = Seq.tabulate(testlen){i =>  Random.nextInt(CONFIG.WG.NUM_LDS_MAX  / 3)}
+      val testIn_sgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_SGPR_MAX / 3)}
+      val testIn_vgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_VGPR_MAX / 3)}
       //val testIn = Seq.tabulate(testlen){i => (i, i)}
       val testOut_cu = new Array[Int](testlen)
       val testOut_csr = new Array[Int](testlen)
@@ -201,7 +201,7 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
       } .fork {
         dut.clock.step(70)
         while(cnt < testlen){
-          dut.io.host_wg_done.ready.poke(scala.util.Random.nextBoolean().B)
+          dut.io.host_wg_done.ready.poke((scala.util.Random.nextBoolean() && scala.util.Random.nextBoolean()).B)
           if(dut.io.host_wg_done.valid.peek.litToBoolean && dut.io.host_wg_done.ready.peek.litToBoolean) {
             val wg_id = dut.io.host_wg_done.bits.wg_id.peek.litValue.toInt
             testOut_cu(wg_id) = dut.io.host_wg_done.bits.cu_id.peek.litValue.toInt
@@ -221,6 +221,8 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
           dut.clock.step()
         }
       }.join
+
+      dut.clock.step(100)
     }
   }
 }
