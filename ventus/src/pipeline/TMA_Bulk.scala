@@ -507,10 +507,13 @@ class Temp_mem() extends Module {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
         instMem.write(valid_inst_entry, io.from_addr.bits.tag)
         when(io.from_addr.bits.tag.opmode === 0.U){
-          var tag_start = Cat(io.from_addr.bits.tag.dst(xLen-1,2),0.U(2))
-          var tag_end   = Cat((io.from_addr.bits.tag.dst + io.from_addr.bits.tag.copysize)(xLen-1,2),0.U(2))
+          var group_start = io.from_addr.bits.tag.dst(xLen-1,2)
+          var group_end   = (io.from_addr.bits.tag.dst + io.from_addr.bits.tag.copysize)(xLen-1,2)
 
-          finish_cnt(valid_inst_entry) := 1.U + ((tag_end.asUInt - tag_start.asUInt) << 2.U)
+          finish_cnt(valid_inst_entry) := 1.U + (group_end.asUInt - group_start.asUInt)
+          printf("group_start : %d\n",group_start.asUInt)
+          printf("group_end : %d\n",group_end.asUInt)
+          printf("finish_cnt : %d\n",finish_cnt(valid_inst_entry).asUInt)
         }.elsewhen(io.from_addr.bits.tag.opmode === 1.U){
           finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(tma_aligned_bulk)
         }.otherwise{
@@ -533,15 +536,36 @@ class Temp_mem() extends Module {
     }
     is(s_getdata){
 //      tag_reg := tag_wire
-
+      printf("copysize : %d",inst_to_shared.copysize)
       (0 until (numgroupl2cache)).foreach(x => {
-        when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.copysize)) {
-          printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))}")
-          current_mask_l2cache(x) := true.B
-        }.otherwise {
-          printf(p"addr_false : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))}")
-          current_mask_l2cache(x) := false.B
+        var condition1 = (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt)) <= inst_to_shared.src && (tag_wire.asUInt + ((x + 1).asUInt * tma_aligned_bulk.asUInt - 1.U)) >= inst_to_shared.src
+        var condition2 = (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.copysize)
+        var condition3 = (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt)) <= inst_to_shared.src + inst_to_shared.copysize && (tag_wire.asUInt + ((x.asUInt + 1.U) * tma_aligned_bulk.asUInt) - 1.U) >= inst_to_shared.src + inst_to_shared.copysize
+//        printf(p"src : 0x${Hexadecimal(inst_to_shared.src.asUInt)} ")
+//        printf(p"src_start : 0x${Hexadecimal((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt)))} ")
+//        printf(p"src_end : 0x${Hexadecimal(tag_wire.asUInt + (x+1).asUInt * tma_aligned_bulk.asUInt - 1.U)} ")
+        switch(inst_to_shared.opmode){
+          is(0.U){
+            when(condition1 || condition2 || condition3) {
+              printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))} ")
+              current_mask_l2cache(x) := true.B
+            }.otherwise {
+              printf(p"addr_false : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))} ")
+              current_mask_l2cache(x) := false.B
+            }
+          }
+          is(1.U){
+//            when((tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) >= inst_to_shared.src) && (tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt) < inst_to_shared.src + inst_to_shared.copysize)) {
+            when(condition2) {
+              printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))} ")
+              current_mask_l2cache(x) := true.B
+            }.otherwise {
+              printf(p"addr_false : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * tma_aligned_bulk.asUInt))} ")
+              current_mask_l2cache(x) := false.B
+            }
+          }
         }
+
       })
     }
     is(s_shared){
@@ -969,7 +993,8 @@ class Addrcalc_shared() extends Module {
     }
     is(s_shared2){
       when(io.to_shared.fire){
-        when(cnt.value >= current_numgroup || mask_next.asUInt === 0.U){
+//        when(cnt.value >= current_numgroup || mask_next.asUInt === 0.U){
+        when(mask_next.asUInt === 0.U){
           cnt.reset()
           state := s_idle
         }.otherwise{

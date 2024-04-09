@@ -221,7 +221,7 @@ class Tma_test
             _.rl -> false.B,
             _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U),
             _.opmode -> 0.U,
-            _.copysize -> 8.U
+            _.copysize -> 2.U
           )
           ctrlsigs
 
@@ -243,16 +243,16 @@ class Tma_test
         val myData3 = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90002270", 16)),
           in3 = Seq.fill(num_thread)(BigInt("70001850", 16)),
-          in2 = Seq.fill(num_thread)(BigInt("00000510", 16)),
+          in2 = Seq.fill(num_thread)(BigInt("00000230", 16)),
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_bulk()
         )
         val myData4 = vExeData_Soft(
-          in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
-          in3 = Seq.fill(num_thread)(BigInt("70000000", 16)),
-          in2 = Seq.fill(num_thread)(BigInt("00000007", 16)),
+          in1 = Seq.fill(num_thread)(BigInt("9000007D", 16)),
+          in3 = Seq.fill(num_thread)(BigInt("70000011", 16)),
+          in2 = Seq.fill(num_thread)(BigInt("0000000F", 16)),
           mask = Seq.fill(num_thread)(true.B),
-          ctrl = genBundle_copysize() // copysize = 8
+          ctrl = genBundle_copysize() // copysize = 16
         )
 
         val hw_data1 = makeData(myData1)
@@ -263,8 +263,8 @@ class Tma_test
         val req_list = Seq(
           hw_data1,
           hw_data2,
+          hw_data4,
           hw_data3,
-          hw_data4
           //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
