@@ -6,7 +6,7 @@ import scala.math.max
 
 /** Round-Robin-Priority Binary Encoder
  * @param n: length of the input Bool-Vector
- * @IO out.fire: A valid encoding result is accepted by outer module, and prioriy should be updated in RR method
+ * @IO out.fire: A valid encoding result is accepted by outer module, and priority should be updated in RR method
  */
 class RRPriorityEncoder(n: Int, initsel: UInt = 0.U) extends Module {
   val io = IO(new Bundle {
@@ -144,7 +144,6 @@ class skid_ready[T <: Data](gen: T) extends Module {
     val in = Flipped(DecoupledIO(gen))
     val out = DecoupledIO(gen)
   })
-  Queue
 
   val in_ready = RegInit(true.B)          // Initially, skidReg is empty, so at least 1 data can be received
   val dataValid = WireInit(!in_ready)

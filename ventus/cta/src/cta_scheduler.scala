@@ -43,7 +43,7 @@ trait ctainfo_host_to_alloc extends Bundle {
   // num_wg_slot = 1 constant, one wg always occupies one slot
   val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)       // Number of wavefront in this cta
   val num_sgpr = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX+1).W)   // Number of sgpr used by this cta
-  val num_vgpr = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX+1).W)   // Number of vpgr used by this cta
+  val num_vgpr = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX+1).W)   // Number of vgpr used by this cta
   val num_lds = UInt(log2Ceil(CONFIG.WG.NUM_LDS_MAX+1).W)     // Number of Local  Data Share used by this cta
 }
 
@@ -55,7 +55,7 @@ trait ctainfo_host_to_alloc extends Bundle {
  */
 trait ctainfo_host_to_cuinterface extends Bundle {
   val num_sgpr_per_wf = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX+1).W)      // Number of sgpr used by each wf in this wg
-  val num_vpgr_per_wf = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX+1).W)      // Number of vpgr used by each wf in this wg
+  val num_vgpr_per_wf = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX+1).W)      // Number of vgpr used by each wf in this wg
 }
 
 /** IO Bundle: CTA information

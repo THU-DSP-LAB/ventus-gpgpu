@@ -5,7 +5,6 @@ import chisel3.experimental.ChiselEnum
 import chisel3.util._
 import cta_util.sort3
 import cta_util.DecoupledIO_3_to_1
-import scala.collection.mutable
 
 // =
 // Abbreviations:
@@ -357,11 +356,11 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   rtram_alloc.cnt.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
   rtram_alloc.cnt.wr.data := rtram_alloc.cnt() + 1.U
   rtram_alloc.prev.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && ((fsm_a_write_cnt === 0.U && !fsm_a_tail_flag) || fsm_a_write_cnt === 1.U) && !(wgsize === 0.U)
-  rtram_alloc.prev.wr.addr := (Mux(fsm_a_write_cnt === 0.U, fsm_a_found_ptr2, wgslot))
-  rtram_alloc.prev.wr.data := (Mux(fsm_a_write_cnt === 0.U, wgslot, fsm_a_found_ptr1))
+  rtram_alloc.prev.wr.addr := Mux(fsm_a_write_cnt === 0.U, fsm_a_found_ptr2, wgslot)
+  rtram_alloc.prev.wr.data := Mux(fsm_a_write_cnt === 0.U, wgslot, fsm_a_found_ptr1)
   rtram_alloc.next.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && ((fsm_a_write_cnt === 0.U && !fsm_a_head_flag) || fsm_a_write_cnt === 1.U) && !(wgsize === 0.U)
-  rtram_alloc.next.wr.addr := (Mux(fsm_a_write_cnt === 0.U, fsm_a_found_ptr1, wgslot))
-  rtram_alloc.next.wr.data := (Mux(fsm_a_write_cnt === 0.U, wgslot, fsm_a_found_ptr2))
+  rtram_alloc.next.wr.addr := Mux(fsm_a_write_cnt === 0.U, fsm_a_found_ptr1, wgslot)
+  rtram_alloc.next.wr.data := Mux(fsm_a_write_cnt === 0.U, wgslot, fsm_a_found_ptr2)
   rtram_alloc.addr1.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && !(wgsize === 0.U)
   rtram_alloc.addr1.wr.addr := wgslot
   rtram_alloc.addr1.wr.data := fsm_a_found_addr
@@ -647,7 +646,7 @@ class resource_table_top extends Module {
   }
 
   // =
-  // Resouce table Handler and its resource table ram
+  // Resource table Handler and its resource table ram
   // =
 
   //val handler_lds = VecInit.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_HANDLER, NUM_LDS, NUM_RT_RESULT)).io)
@@ -794,7 +793,7 @@ class resource_table_top extends Module {
   // 2. WG slot & WF slot dealloc (to allocator)
   // =
 
-  val dealloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds(0).io.dealloc.bits, handler_sgpr(0).io.dealloc.bits, handler_vgpr(0).io.dealloc.bits, IGNORE = true))
+  val dealloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds.head.io.dealloc.bits, handler_sgpr.head.io.dealloc.bits, handler_vgpr.head.io.dealloc.bits, IGNORE = true))
   val slot_dealloc = Module(new Queue(new io_rt2dealloc, 2))
   // DecoupledIO 2-to-1 valid-ready
   dealloc_decoupledio.io.in.valid := io.dealloc.valid && slot_dealloc.io.enq.ready

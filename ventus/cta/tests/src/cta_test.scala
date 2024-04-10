@@ -181,7 +181,7 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
         _.num_wf -> 0.U,
         _.gds_base -> 0.U,
         _.num_sgpr_per_wf -> 0.U,
-        _.num_vpgr_per_wf -> 0.U,
+        _.num_vgpr_per_wf -> 0.U,
         _.num_thread_per_wf -> 0.U,
         _.num_gds -> 0.U,
         _.pds_base -> 0.U,
