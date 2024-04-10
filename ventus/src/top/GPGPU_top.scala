@@ -144,6 +144,7 @@ class GPGPU_axi_adapter_top extends Module{
 
 class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None)
   extends RVGModule{
+  override val desiredName = s"GPU"
   val io = IO(new Bundle{
     val host_req=Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp=DecoupledIO(new CTA2host_data)
@@ -255,24 +256,31 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
       }
 
       // l2tlb <-> l2c
-      val tlb_req_arb = VecInit(Seq.fill(NL2Cache)(Module(new Arbiter(new TLBundleA_lite(l2cache_params), 2)).io))
+      val tlb_req_arb = Seq.fill(NL2Cache)(Module(new Arbiter(new TLBundleA_lite(l2cache_params), 2)))
 
       val tlb_l2c_xbar = Module(new L2TlbToL2CacheXBar(sv, NL2Cache, l2cache_params)(this.asInstanceOf[HasRVGParameters]))
+
       tlb_l2c_xbar.io.req_tlb <> l2tlb.io.mem_req
+      (0 until l2tlb.nBanks).foreach{ i =>
+        val tl_cast: TLBundleA_lite = l2tlb.io.mem_req(i).bits.asTypeOf(new TLBundleA_lite(l2cache_params))
+        tlb_l2c_xbar.io.req_tlb(i).bits.source := Cat(i.U(log2Ceil(l2tlb.nBanks).W), tl_cast.source(log2Ceil(NSms), 0))
+      }
       l2tlb.io.mem_rsp <> tlb_l2c_xbar.io.rsp_tlb
 
       for(i <- 0 until NL2Cache) {
-        tlb_req_arb(i).in(0) :<> tlb_l2c_xbar.io.req_cache(i)
-        tlb_req_arb(i).in(1) :<> cluster2l2Arb(i).memReqOut
-        tlb_req_arb(i).in(1).bits.source := Cat(l2cache(i).in_a.bits.source, 0.U(1.W))
-        l2cache(i).in_a :<> tlb_req_arb(i).out
+        tlb_req_arb(i).io.in(0) :<> tlb_l2c_xbar.io.req_cache(i)
+        tlb_req_arb(i).io.in(1) :<> cluster2l2Arb(i).memReqOut
+        tlb_req_arb(i).io.in(1).bits.source := Cat(cluster2l2Arb(i).memReqOut.bits.source, 0.U(1.W))
+        l2cache(i).in_a :<> tlb_req_arb(i).io.out
 
         cluster2l2Arb(i).memRspIn.valid := l2cache(i).in_d.valid & !l2cache(i).in_d.bits.source(0)
         cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
         cluster2l2Arb(i).memRspIn.bits.source := l2cache(i).in_d.bits.source >> 1
 
-        //l2cache(i).in_a <> tlb_l2c_xbar.io.req_cache(i)
-        tlb_l2c_xbar.io.rsp_cache(i) <> l2cache(i).in_d
+        tlb_l2c_xbar.io.rsp_cache(i).valid := l2cache(i).in_d.valid & l2cache(i).in_d.bits.source(0)
+        tlb_l2c_xbar.io.rsp_cache(i).bits := l2cache(i).in_d.bits
+        // source LSB is already appended by 1.U(1.W) in tlb crossbar system
+
         l2cache(i).in_d.ready := Mux(l2cache(i).in_d.bits.source(0), tlb_l2c_xbar.io.rsp_cache(i).ready, cluster2l2Arb(i).memRspIn.ready)
 
         for(j <- 0 until NCluster){

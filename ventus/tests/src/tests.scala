@@ -384,9 +384,9 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
               k <- 0 until size3d(2)
             } yield meta.generateHostReq(i, j, k)
           )
+          ptbr_pos += 1
         }
         else c.io.asid_fill.valid.poke(false.B)
-        ptbr_pos += 1
 
         if(ptbr_pos >= 255) throw AsidException
 

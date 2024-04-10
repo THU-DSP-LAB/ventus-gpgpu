@@ -78,7 +78,6 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
     val cnt = Output(UInt(32.W))
     val inst_cnt = Output(Vec(num_sm, UInt(32.W)))
   })
-  GPU.io.asid_fill.foreach{ _ <> io.asid_fill }
 
   val counter = new Counter(200000)
   counter.reset()
@@ -88,7 +87,10 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
   io.cnt := counter.value
 
   val GPU = Module(new GPGPU_top()(L1param, FakeCache, SV))
+  GPU.suggestName("GPU")
+
   GPU.io.cycle_cnt := counter.value
+  GPU.io.asid_fill.foreach{ _ <> io.asid_fill }
 
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))
   val pipe_d = Module(new DecoupledPipe(new TLBundleD_lite(l2cache_params), 2))

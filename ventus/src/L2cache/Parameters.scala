@@ -175,7 +175,7 @@ case class InclusiveCacheParameters_lite(
   def bitOffsets(x: BigInt, offset: Int = 0, tail: List[Int] = List.empty[Int]): List[Int] =
     if (x == 0) tail.reverse else bitOffsets(x >> 1, offset + 1, if ((x & 1) == 1) offset :: tail else tail)
 //  val addressMapping = bitOffsets(pickMask)
-  val addressBits = 32
+  val addressBits = 34
 
   // println(s"addresses: ${flatAddresses} => ${pickMask} => ${addressBits}")
 
