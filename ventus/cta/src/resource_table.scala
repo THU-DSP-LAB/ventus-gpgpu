@@ -505,7 +505,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   scan_ok := (fsm === FSM.SCAN) && fsm_s_finish_p1
 
   // =
-  // Sub-FSM OUTPUT
+  // Sub-FSM OUTPUT (Main FSM action 6)
   // =
   output_ok := Mux(fsm === FSM.OUTPUT, output_ok || io.rtcache_update.fire, false.B)
   io.rtcache_update.valid := (fsm === FSM.OUTPUT) && !output_ok
@@ -598,6 +598,8 @@ class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG
     io.data.wgid.get.rd.data := (wgid.get)(io.data.wgid.get.rd.addr)
     when(io.en && io.data.valid.get.wr.en) {(valid.get)(io.data.valid.get.wr.addr) := io.data.valid.get.wr.data}
     io.data.valid.get.rd.data := (valid.get)(io.data.valid.get.rd.addr)
+
+    assert(PopCount(valid.get) === cnt)
   }
 }
 
