@@ -472,8 +472,9 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     val thissize = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), addr2 - addr1)
     assert(NUM_RT_RESULT == 2)   // Current implement only support NUM_RT_RESULT=2. Replace `sort3()` to support other values
     val result = sort3(Mux(fsm_s_init_p1, 0.U, rtcache_data(0)), Mux(fsm_s_init_p1, 0.U, rtcache_data(1)), thissize)
-    rtcache_data(0) := Mux(fsm_s_valid_p1, result(0), rtcache_data(0))
-    rtcache_data(1) := Mux(fsm_s_valid_p1, result(1), rtcache_data(1))
+    rtcache_data(0) := result(0)
+    rtcache_data(1) := result(1)
+    // pipeline debug
     if(CONFIG.DEBUG) {
       rtram_scan.valid.get.rd.addr := fsm_s_ptr1
       rtram_scan.wgid.get.rd.addr := fsm_s_ptr1
@@ -484,18 +485,21 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
         for(i <- 0 until NUM_WG_SLOT) {
           when(checked_wg_valid(i)) {
             for(j <- 0 until NUM_WG_SLOT) {
+              // A same linked-list node should only be visited once
               assert(!checked_wg_valid(j) || (i == j).asBool || checked_wg(i) =/= checked_wg(j))
             }
           }
         }
       }
-      assert(!fsm_s_valid_p1 || fsm_s_finish_p1 || rtram_scan.valid.get.rd.data)
-      assert(!fsm_s_valid_p1 || fsm_s_init_p1 || rtcache_data(0) <= result(0))
-      assert(!fsm_s_valid_p1 || fsm_s_init_p1 || rtcache_data(1) <= result(1))
+      when(fsm_s_valid_p1) {
+        assert(fsm_s_finish_p1 || rtram_scan.valid.get.rd.data) // The linked-list node we are visiting should stores valid data
+        assert(fsm_s_init_p1 || rtcache_data(0) <= result(0))
+        assert(fsm_s_init_p1 || rtcache_data(1) <= result(1))
+      }
     }
   } .otherwise { // prepare for FSM.SCAN
     fsm_s_ptr1 := DontCare
-    fsm_s_ptr2 := rtram_scan.head()
+    fsm_s_ptr2 := DontCare
     fsm_s_init_p1 := false.B
     fsm_s_finish_p1 := false.B
     fsm_s_valid_p1 := false.B

@@ -129,6 +129,11 @@ class DecoupledIO_3_to_1[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1,
   io.out0.valid := io.in.valid && !fire0 && !io.in.bits.ign0.getOrElse(false.B)
   io.out1.valid := io.in.valid && !fire1 && !io.in.bits.ign1.getOrElse(false.B)
   io.out2.valid := io.in.valid && !fire2 && !io.in.bits.ign2.getOrElse(false.B)
+
+  // It's assumed that once in.valid=true, it will keep being true until io.fire
+  val in_fire_r = RegNext(io.in.fire, false.B)
+  val in_valid_r = RegNext(io.in.valid, false.B)
+  assert(in_fire_r || !(in_valid_r && !io.in.valid))
 }
 
 /** Skid buffer for DecoupledIO.ready
