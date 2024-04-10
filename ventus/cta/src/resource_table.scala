@@ -273,7 +273,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
       fsm_a_found_ptr1 := DontCare        // In our initial assumption, the linked-list is empty, so we don't care this pointer
       fsm_a_found_ptr2 := DontCare
       fsm_a_ptr1 := DontCare              // Before the first resource segment locates nothing
-      fsm_a_ptr2 := rtram_alloc.head()    // After the first resource segment locates the first WG
+      fsm_a_ptr2 := DontCare              // After the first resource segment locates the first WG
       fsm_a_head_flag := true.B
       fsm_a_tail_flag := true.B           // In our initial assumption, the linked-list is empty, so the new WG will become head as well as tail
       fsm_a_valid_p1 := false.B
@@ -321,6 +321,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
           fsm_a_init_p1 -> result_update,
           fsm_a_valid_p1 -> (fsm_a_found || result_update),
         ))
+        // After ALLOC scan finishes, a new baseaddr should already be found, unless there are no WG in the linked-list
         assert(!fsm_a_finish_p1 || (fsm_a_found || result_update) || (rtram_alloc.cnt() === 0.U))
       }
     }
@@ -328,7 +329,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
       // Useless for WRITE & OUTPUT, initialize them for next FSM_A.FIND
       fsm_a_cnt := 0.U
       fsm_a_ptr1 := DontCare
-      fsm_a_ptr2 := rtram_alloc.head()
+      fsm_a_ptr2 := DontCare
       fsm_a_valid_p1 := false.B
       fsm_a_init_p1 := false.B
       fsm_a_finish_p1 := false.B
@@ -349,6 +350,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     (fsm_a =/= FSM_A.WRITE_OUTPUT) -> 0.U,
     (fsm_a_write_cnt <= 1.U) -> (fsm_a_write_cnt + 1.U),
   ))
+  // if wgsize==0, this WG will not be inserted to the linked-list
   rtram_alloc.head.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && fsm_a_head_flag && !(wgsize === 0.U)
   rtram_alloc.head.wr.data := wgslot
   rtram_alloc.tail.wr.en := (fsm_a === FSM_A.WRITE_OUTPUT) && (fsm_a_write_cnt === 0.U) && fsm_a_tail_flag && !(wgsize === 0.U)
@@ -397,7 +399,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   // Sub-FSM ALLOC state transition logic
   fsm_a_next := MuxLookup(fsm_a.asUInt, FSM_A.IDLE, Seq(
     FSM_A.IDLE.asUInt -> Mux(fsm_next === FSM.ALLOC && fsm_next =/= fsm, FSM_A.FIND, fsm_a),
-    FSM_A.FIND.asUInt -> Mux(wgsize === 0.U || fsm_a_cnt > io.rtram_data.cnt(), FSM_A.WRITE_OUTPUT, fsm_a),
+    FSM_A.FIND.asUInt -> Mux(wgsize === 0.U || fsm_a_cnt > io.rtram_data.cnt(), FSM_A.WRITE_OUTPUT, fsm_a),   // if wgsize==0, no need to scan the linked-list
     FSM_A.WRITE_OUTPUT.asUInt -> MuxCase(FSM_A.IDLE, Seq(
       !alloc_ok -> fsm_a,
       io.alloc.fire -> FSM_A.FIND,
@@ -514,7 +516,6 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   io.rtcache_update.valid := (fsm === FSM.OUTPUT) && !output_ok
   io.rtcache_update.bits.cu_id := wg_cu
   io.rtcache_update.bits.size := rtcache_data
-  io.rtcache_update.bits.valid := WireInit(VecInit.fill(NUM_RT_RESULT)(true.B))
 
   // =
   // Main FSM - state transition logic
@@ -565,7 +566,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
 
 class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG_SLOT) extends Module {
   val io = IO(new Bundle {
-    val en = Input(Bool())
+    val en = Input(Bool())  // if en==false.B, write operation is prohibited
     val data = Flipped(new io_rtram(NUM_RESOURCE, NUM_WG_SLOT))
   })
 
@@ -610,118 +611,82 @@ class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG
  * It is assumed that once alloc/dealloc.valid = true, it will keep valid until alloc/dealloc.fire
  */
 class resource_table_top extends Module {
-  val io = IO(new Bundle{
-    val alloc = Flipped(DecoupledIO(new io_alloc2rt))
-    val dealloc = Flipped(DecoupledIO(new io_cuinterface2rt))
-    val slot_dealloc = DecoupledIO(new io_rt2dealloc)
-    val rtcache_lds  = DecoupledIO(new io_rt2cache(CONFIG.WG.NUM_LDS_MAX ))
-    val rtcache_sgpr = DecoupledIO(new io_rt2cache(CONFIG.WG.NUM_SGPR_MAX))
-    val rtcache_vgpr = DecoupledIO(new io_rt2cache(CONFIG.WG.NUM_VGPR_MAX))
-    val cuinterface_wg_new = DecoupledIO(new io_rt2cuinterface)
-  })
-
-  // =
-  // Constants
-  // =
-
-  val NUM_CU = CONFIG.GPU.NUM_CU
-  val NUM_CU_PER_HANDLER = 2
-  val NUM_HANDLER = NUM_CU / NUM_CU_PER_HANDLER
-  assert(NUM_CU % NUM_CU_PER_HANDLER == 0)
-
-  val NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT
-  val NUM_RT_RESULT = CONFIG.RESOURCE_TABLE.NUM_RESULT
+  // Constants used in IO
   val NUM_LDS = CONFIG.WG.NUM_LDS_MAX
   val NUM_SGPR = CONFIG.WG.NUM_SGPR_MAX
   val NUM_VGPR = CONFIG.WG.NUM_VGPR_MAX
+  // IO
+  val io = IO(new Bundle{
+    val alloc = Flipped(DecoupledIO(new io_alloc2rt))           // alloc   request from Allocator
+    val dealloc = Flipped(DecoupledIO(new io_cuinterface2rt))   // dealloc request from CU interface
+    val slot_dealloc = DecoupledIO(new io_rt2dealloc)           // dealloc request of WG/WF slot to Allocator
+    val rtcache_lds  = DecoupledIO(new io_rt2cache(NUM_LDS ))   // rtcache update request to Allocator
+    val rtcache_sgpr = DecoupledIO(new io_rt2cache(NUM_SGPR))
+    val rtcache_vgpr = DecoupledIO(new io_rt2cache(NUM_VGPR))
+    val cuinterface_wg_new = DecoupledIO(new io_rt2cuinterface) // The just-allocated WG info (resource baseaddr) to CU interface
+  })
+  // Constants
+  val NUM_CU = CONFIG.GPU.NUM_CU
+  val NUM_CU_PER_GROUP = 2
+  val NUM_HANDLER_PER_GROUP = 1
+  val NUM_HANDLER = NUM_CU / NUM_CU_PER_GROUP * NUM_HANDLER_PER_GROUP
+  assert(NUM_CU % NUM_CU_PER_GROUP == 0)
+  assert(NUM_HANDLER_PER_GROUP == 1)  // This implement (direct mapping from handler to rtram) only supports NUM_HANDLER_PER_CU=1
+  val NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT
+  val NUM_RT_RESULT = CONFIG.RESOURCE_TABLE.NUM_RESULT
 
-  // =
+  // Auxiliary function
   // Convert alloc/dealloc request CU ID to RT_handler group ID and local CU ID
-  // =
   def convert_cu_id(cu_id_global: UInt): (UInt, UInt) = {
     val cu_id_reversed = Reverse(cu_id_global)
-    val cu_id_local = cu_id_reversed(log2Ceil(NUM_CU_PER_HANDLER)-1, 0)
-    val cu_id_group = cu_id_reversed(log2Ceil(NUM_CU)-1, log2Ceil(NUM_CU_PER_HANDLER))
+    val cu_id_local = cu_id_reversed(log2Ceil(NUM_CU_PER_GROUP)-1, 0)
+    val cu_id_group = cu_id_reversed(log2Ceil(NUM_CU)-1, log2Ceil(NUM_CU_PER_GROUP))
     (cu_id_group, cu_id_local)
   }
 
   // =
-  // Resource table Handler and its resource table ram
+  // Hardware: resource table Handler and its resource table ram
   // =
 
-  //val handler_lds = VecInit.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_HANDLER, NUM_LDS, NUM_RT_RESULT)).io)
-  val handler_lds  = Seq.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_HANDLER, NUM_LDS, NUM_RT_RESULT)))
-  val handler_sgpr = Seq.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_HANDLER, NUM_SGPR, NUM_RT_RESULT)))
-  val handler_vgpr = Seq.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_HANDLER, NUM_VGPR, NUM_RT_RESULT)))
+  // hardware instantiate
+  // We cannot index Seq[hardware] dynamically
+  // If that is needed, we have to export hardware IO as Wire(Vec[IO])
+  val handler_lds  = Seq.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_GROUP, NUM_LDS, NUM_RT_RESULT)))
+  val handler_sgpr = Seq.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_GROUP, NUM_SGPR, NUM_RT_RESULT)))
+  val handler_vgpr = Seq.fill(NUM_HANDLER)(Module(new resource_table_handler(NUM_CU_PER_GROUP, NUM_VGPR, NUM_RT_RESULT)))
+  val rtram_lds  = Seq.fill(NUM_HANDLER, NUM_CU_PER_GROUP)(Module(new resource_table_ram(NUM_LDS , NUM_WG_SLOT)))
+  val rtram_sgpr = Seq.fill(NUM_HANDLER, NUM_CU_PER_GROUP)(Module(new resource_table_ram(NUM_SGPR, NUM_WG_SLOT)))
+  val rtram_vgpr = Seq.fill(NUM_HANDLER, NUM_CU_PER_GROUP)(Module(new resource_table_ram(NUM_VGPR, NUM_WG_SLOT)))
+  // export IO signals of Seq[hardware] as Wire(Vec[IO])
+  // these Wires are automatically connected to hardware.io, for example: handler_lds_io(0) <> handler_lds(0).io
   val handler_lds_io  = VecInit(handler_lds.map(_.io))
   val handler_sgpr_io = VecInit(handler_sgpr.map(_.io))
   val handler_vgpr_io = VecInit(handler_vgpr.map(_.io))
-  val rtram_lds  = Seq.fill(NUM_HANDLER, NUM_CU_PER_HANDLER)(Module(new resource_table_ram(NUM_LDS , NUM_WG_SLOT)))
-  val rtram_sgpr = Seq.fill(NUM_HANDLER, NUM_CU_PER_HANDLER)(Module(new resource_table_ram(NUM_SGPR, NUM_WG_SLOT)))
-  val rtram_vgpr = Seq.fill(NUM_HANDLER, NUM_CU_PER_HANDLER)(Module(new resource_table_ram(NUM_VGPR, NUM_WG_SLOT)))
-  val rtram_lds_io  = VecInit.tabulate(NUM_HANDLER, NUM_CU_PER_HANDLER)((x,y) => rtram_lds(x)(y).io.data)
-  val rtram_sgpr_io = VecInit.tabulate(NUM_HANDLER, NUM_CU_PER_HANDLER)((x,y) => rtram_sgpr(x)(y).io.data)
-  val rtram_vgpr_io = VecInit.tabulate(NUM_HANDLER, NUM_CU_PER_HANDLER)((x,y) => rtram_vgpr(x)(y).io.data)
+  val rtram_lds_io  = VecInit.tabulate(NUM_HANDLER, NUM_CU_PER_GROUP)((x, y) => rtram_lds(x)(y).io.data)
+  val rtram_sgpr_io = VecInit.tabulate(NUM_HANDLER, NUM_CU_PER_GROUP)((x, y) => rtram_sgpr(x)(y).io.data)
+  val rtram_vgpr_io = VecInit.tabulate(NUM_HANDLER, NUM_CU_PER_GROUP)((x, y) => rtram_vgpr(x)(y).io.data)
 
-  //def rtram_io_handler2rtram(handler: io_rtram, rtram: io_rtram): Unit = {
-  //  rtram.cnt.wr := handler.cnt.wr
-  //  rtram.cnt.rd.addr := handler.cnt.rd.addr
-  //  rtram.head.wr := handler.head.wr
-  //  rtram.head.rd.addr := handler.head.rd.addr
-  //  rtram.tail.wr := handler.tail.wr
-  //  rtram.tail.rd.addr := handler.tail.rd.addr
-  //  rtram.prev.wr := handler.prev.wr
-  //  rtram.prev.rd.en := handler.prev.rd.en
-  //  rtram.prev.rd.addr := handler.prev.rd.addr
-  //  rtram.next.wr := handler.next.wr
-  //  rtram.next.rd.en := handler.next.rd.en
-  //  rtram.next.rd.addr := handler.next.rd.addr
-  //  rtram.addr1.wr := handler.addr1.wr
-  //  rtram.addr1.rd.en := handler.addr1.rd.en
-  //  rtram.addr1.rd.addr := handler.addr1.rd.addr
-  //  rtram.addr2.wr := handler.addr2.wr
-  //  rtram.addr2.rd.en := handler.addr2.rd.en
-  //  rtram.addr2.rd.addr := handler.addr2.rd.addr
-  //}
-  //def rtram_io_rtram2handler(handler: io_rtram, rtram: io_rtram): Unit = {
-  //  handler.cnt.rd.data   := rtram.cnt.rd.data
-  //  handler.head.rd.data  := rtram.head.rd.data
-  //  handler.tail.rd.data  := rtram.tail.rd.data
-  //  handler.prev.rd.data  := rtram.prev.rd.data
-  //  handler.next.rd.data  := rtram.next.rd.data
-  //  handler.addr1.rd.data := rtram.addr1.rd.data
-  //  handler.addr2.rd.data := rtram.addr2.rd.data
-  //}
-  for(i <- 0 until NUM_HANDLER; j <- 0 until NUM_CU_PER_HANDLER) {
-    //rtram_io_handler2rtram(rtram_lds_io(i)(j) , rtram_lds(i)(j).io.data )
-    //rtram_io_handler2rtram(rtram_sgpr_io(i)(j), rtram_sgpr(i)(j).io.data)
-    //rtram_io_handler2rtram(rtram_vgpr_io(i)(j), rtram_vgpr(i)(j).io.data)
-    //rtram_io_rtram2handler(rtram_lds_io(i)(j) , rtram_lds(i)(j).io.data )
-    //rtram_io_rtram2handler(rtram_sgpr_io(i)(j), rtram_sgpr(i)(j).io.data)
-    //rtram_io_rtram2handler(rtram_vgpr_io(i)(j), rtram_vgpr(i)(j).io.data)
+  for(i <- 0 until NUM_HANDLER; j <- 0 until NUM_CU_PER_GROUP) {
+    // handler_lds_io(i).rtram_data, rtram_lds_io(i)(j) are both internal wires, we cannot use `<>` to connect them
+    // In this implement, there are only 1 handler in a group, dynamic MUX of handler.rtram_data is not necessary
+    // As a result of these two points, we use handler(i).rtram_data instead of handler_io(i).rtram_data
     handler_lds_io(i).rtram_data := DontCare
     handler_sgpr_io(i).rtram_data := DontCare
     handler_vgpr_io(i).rtram_data := DontCare
   }
-  //for(i <- 0 until NUM_HANDLER) {
-  //  for(j <- 0 until NUM_CU_PER_HANDLER) {
-  //    rtram_lds(i)(j).io.en := (handler_lds(i).io.rtram.bits.sel === j.U)
-  //    rtram_io_handler2rtram(handler = handler_lds(i).io.rtram_data, rtram = rtram_lds_io(i)(j))
-  //  }
-  //  rtram_io_rtram2handler(handler_lds(i).io.rtram_data, rtram_lds_io(i)(handler_lds(i).io.rtram.bits.sel))
-  //  //handler_lds(i).io.rtram.ready := true.B
-  //  handler_lds_io(i).rtram.ready := true.B
-  //}
+
+  // Dynamic Mux within a group, between handler and rtram
   for(i <- 0 until NUM_HANDLER) {
-    for(j <- 0 until NUM_CU_PER_HANDLER) {
+    for(j <- 0 until NUM_CU_PER_GROUP) {
       rtram_lds(i)(j).io.en := (handler_lds(i).io.rtram_sel.bits.sel === j.U)
       handler_lds(i).io.rtram_data <> rtram_lds_io(i)(j)
     }
     handler_lds(i).io.rtram_data <> rtram_lds_io(i)(handler_lds(i).io.rtram_sel.bits.sel)
     handler_lds_io(i).rtram_sel.ready := true.B
+    // in this implement, we use MUX to connect handler and the target rtram. Pure combinational logic is always ready
   }
   for(i <- 0 until NUM_HANDLER) {
-    for(j <- 0 until NUM_CU_PER_HANDLER) {
+    for(j <- 0 until NUM_CU_PER_GROUP) {
       rtram_sgpr(i)(j).io.en := (handler_sgpr(i).io.rtram_sel.bits.sel === j.U)
       handler_sgpr(i).io.rtram_data <> rtram_sgpr_io(i)(j)
     }
@@ -729,7 +694,7 @@ class resource_table_top extends Module {
     handler_sgpr_io(i).rtram_sel.ready := true.B
   }
   for(i <- 0 until NUM_HANDLER) {
-    for(j <- 0 until NUM_CU_PER_HANDLER) {
+    for(j <- 0 until NUM_CU_PER_GROUP) {
       rtram_vgpr(i)(j).io.en := (handler_vgpr(i).io.rtram_sel.bits.sel === j.U)
       handler_vgpr(i).io.rtram_data <> rtram_vgpr_io(i)(j)
     }
@@ -776,12 +741,13 @@ class resource_table_top extends Module {
   // resource table handler
   for(i <- 0 until NUM_HANDLER) {
     handler_lds_io(i).alloc.valid := false.B
-    handler_lds_io(i).alloc.bits := DontCare
+    handler_lds_io(i).alloc.bits := DontCare  // default value if it is not connected by MUX
     handler_sgpr_io(i).alloc.valid := false.B
     handler_sgpr_io(i).alloc.bits := DontCare
     handler_vgpr_io(i).alloc.valid := false.B
     handler_vgpr_io(i).alloc.bits := DontCare
   }
+  // Bi-direction MUX
   alloc_decoupledio.io.out0 <> handler_lds_io(alloc_cuid_group).alloc
   alloc_decoupledio.io.out1 <> handler_sgpr_io(alloc_cuid_group).alloc
   alloc_decoupledio.io.out2 <> handler_vgpr_io(alloc_cuid_group).alloc
@@ -795,6 +761,7 @@ class resource_table_top extends Module {
 
   val dealloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds.head.io.dealloc.bits, handler_sgpr.head.io.dealloc.bits, handler_vgpr.head.io.dealloc.bits, IGNORE = true))
   val slot_dealloc = Module(new Queue(new io_rt2dealloc, 2))
+
   // DecoupledIO 2-to-1 valid-ready
   dealloc_decoupledio.io.in.valid := io.dealloc.valid && slot_dealloc.io.enq.ready
   slot_dealloc.io.enq.valid := io.dealloc.valid && dealloc_decoupledio.io.in.ready
@@ -809,7 +776,7 @@ class resource_table_top extends Module {
   dealloc_decoupledio.io.in.bits.data0.cu_id := io.dealloc.bits.cu_id
   dealloc_decoupledio.io.in.bits.data0.wg_slot_id := io.dealloc.bits.wg_slot_id
   dealloc_decoupledio.io.in.bits.data0.cu_id_local := dealloc_cuid_local
-  dealloc_decoupledio.io.in.bits.ign0.get := !io.dealloc.bits.lds_dealloc_en
+  dealloc_decoupledio.io.in.bits.ign0.get := !io.dealloc.bits.lds_dealloc_en  // if num_lds=0, no need to dealloc this WG
   // SGPR
   dealloc_decoupledio.io.in.bits.data1.cu_id := io.dealloc.bits.cu_id
   dealloc_decoupledio.io.in.bits.data1.wg_slot_id := io.dealloc.bits.wg_slot_id
@@ -829,12 +796,13 @@ class resource_table_top extends Module {
   // resource table handler
   for(i <- 0 until NUM_HANDLER) {
     handler_lds_io(i).dealloc.valid := false.B
-    handler_lds_io(i).dealloc.bits := DontCare
+    handler_lds_io(i).dealloc.bits := DontCare  // default value if it is not connected by MUX
     handler_sgpr_io(i).dealloc.valid := false.B
     handler_sgpr_io(i).dealloc.bits := DontCare
     handler_vgpr_io(i).dealloc.valid := false.B
     handler_vgpr_io(i).dealloc.bits := DontCare
   }
+  // Bi-direction MUX
   dealloc_decoupledio.io.out0 <> handler_lds_io(dealloc_cuid_group).dealloc
   dealloc_decoupledio.io.out1 <> handler_sgpr_io(dealloc_cuid_group).dealloc
   dealloc_decoupledio.io.out2 <> handler_vgpr_io(dealloc_cuid_group).dealloc
@@ -895,92 +863,9 @@ class resource_table_top extends Module {
     io.cuinterface_wg_new.bits.wg_id.get := baseaddr_lds_reg.bits.wg_id.get
   }
 
+  // Since at most 1 alloc request is allowed to allowed to stay in resource_table_top,
+  //  there are at most 1 valid baseaddr result
   assert(PopCount(baseaddr_lds_valid)  <= 1.U)
   assert(PopCount(baseaddr_sgpr_valid) <= 1.U)
   assert(PopCount(baseaddr_vgpr_valid) <= 1.U)
-
-  // =
-  // FSM - Router
-  // =
-
-  // FSM-Router define
-  //object ROUTER extends ChiselEnum {
-  //  val IDLE, ALLOC, DEALLOC = Value
-  //}
-  //val router_next = Wire(ROUTER())
-  //val router = RegNext(router_next, init = ROUTER.IDLE)
-
-  //// FSM-Router action 1
-  //val lds_fire, sgpr_fire, vgpr_fire = RegInit(false.B)
-  //val router_ok = lds_fire && sgpr_fire && vgpr_fire
-
-  // FSM-Router action 2: alloc request record
-
-  // FSM-Router state transition
-  //router_next := ROUTER.IDLE // default
-  //switch(router) {
-  //  is(ROUTER.IDLE) {
-  //    router_next := Mux1H(Seq(
-  //      ( io.alloc.valid &&  io.dealloc.valid) -> Mux(io.alloc.bits.cu_id === io.dealloc.bits.cu_id, ROUTER.DEALLOC, ROUTER.ALLOC),
-  //      ( io.alloc.valid && !io.dealloc.valid) -> ROUTER.ALLOC,
-  //      (!io.alloc.valid &&  io.dealloc.valid) -> ROUTER.DEALLOC,
-  //      (!io.alloc.valid && !io.dealloc.valid) -> ROUTER.IDLE
-  //    ))
-  //  }
-  //  is(ROUTER.ALLOC) {
-  //    router_next := MuxCase
-  //  }
-  //}
-
-
-
-
-
 }
-
-
-//trait rt_datatype extends Bundle {
-//  def NUM_RESOURCE: Int
-//  val size = UInt(log2Ceil(NUM_RESOURCE).W)
-//}
-
-//class io_cache2rt(NUM_RESOURCE: Int) extends Bundle with rt_datatype {
-//  override def NUM_RESOURCE: Int = NUM_RESOURCE
-//  val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU-1).W)
-//  val wgslot_id = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT-1).W)
-//}
-
-//class rtcache(NUM_RESOURCE_MAX: Int, NUM_RT_RESULT: Int = CONFIG.RESOURCE_TABLE.NUM_RESULT) extends Module {
-//  val io = IO(new Bundle {
-//    val check = new Bundle{
-//      val size = Input(UInt(log2Ceil(NUM_RESOURCE_MAX).W))
-//      val cu_valid = Output(Vec(CONFIG.GPU.NUM_CU, Bool()))
-//      val
-//    }
-//    val alloc = Flipped(DecoupledIO(new io_cache2rt(NUM_RESOURCE_MAX)))
-//    val rt_alloc = DecoupledIO(new io_cache2rt(NUM_RESOURCE_MAX))
-//    val rt_result = Flipped(DecoupledIO(new io_rt2cache(NUM_RESOURCE_MAX, NUM_RT_RESULT)))
-//  })
-//
-//  val NUM_CU = CONFIG.GPU.NUM_CU
-//
-//  val cache = RegInit(VecInit.fill(NUM_CU, NUM_RT_RESULT)(0.U(log2Ceil(NUM_RESOURCE_MAX-1).W)))
-//  val cacheValid = RegInit(VecInit.tabulate(NUM_CU, NUM_RT_RESULT){ (cu_id, result_id) =>
-//    if(result_id == 0) {true.B}
-//    else {false.B}
-//  })
-//
-//  // =
-//  // Main function 1
-//  // WG resource check, combinational data path
-//  // =
-//
-//  for(i <- 0 until NUM_CU) {
-//    val resource_valid = Wire(Vec(NUM_RT_RESULT, Bool()))
-//    for(j <- 0 until NUM_RT_RESULT) {
-//      resource_valid(i) := cacheValid(i)(j) && (cache(i)(j) >= io.check.size)
-//    }
-//    io.check.cu_valid(i) := resource_valid(i).orR
-//    io.check
-//  }
-//}

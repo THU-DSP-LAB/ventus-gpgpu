@@ -11,7 +11,7 @@ class io_alloc2buffer(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends B
 }
 
 class io_buffer2alloc(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends ctainfo_host_to_alloc {
-  val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
   val wgram_addr = UInt(log2Ceil(NUM_ENTRIES).W)
 }
 
@@ -104,7 +104,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   io.alloc_wg_new.bits.viewAsSupertype(new ctainfo_host_to_alloc {}) :=
     wgram1_rd_data.viewAsSupertype(new ctainfo_host_to_alloc {})    // TODO: check if the connection is right
   io.alloc_wg_new.bits.wgram_addr := wgram1_rd_data_addr
-  io.alloc_wg_new.bits.wg_id := wgram1_rd_data.wg_id
+  io.alloc_wg_new.bits.wg_id.get := wgram1_rd_data.wg_id
 
   // =
   // Main function 3

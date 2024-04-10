@@ -20,8 +20,8 @@ class cu_interface(NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 
   if(CONFIG.DEBUG) {
     when(fifo.io.enq.fire) {
-      assert(io.wgbuffer_wg_new.bits.wg_id === io.alloc_wg_new.bits.wg_id)
-      assert(io.rt_wg_new.bits.wg_id.get === io.alloc_wg_new.bits.wg_id)
+      assert(io.wgbuffer_wg_new.bits.wg_id === io.alloc_wg_new.bits.wg_id.get)
+      assert(io.rt_wg_new.bits.wg_id.get === io.alloc_wg_new.bits.wg_id.get)
     }
   }
 
