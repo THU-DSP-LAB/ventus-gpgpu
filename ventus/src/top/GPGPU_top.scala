@@ -150,7 +150,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     val host_rsp=DecoupledIO(new CTA2host_data)
     val out_a =Vec(NL2Cache,Decoupled(new TLBundleA_lite(l2cache_params)))
     val out_d=Flipped(Vec(NL2Cache,Decoupled(new TLBundleD_lite(l2cache_params))))
-    val inst_cnt = if(INST_CNT) Some(Output(Vec(NSms, UInt(32.W)))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(Vec(NSms, UInt(32.W)))) else if(INST_CNT_2) Some(Output(Vec(NSms, Vec(2, UInt(32.W))))) else None
     val cycle_cnt = Input(UInt(20.W))
     val asid_fill = if(SV.nonEmpty) Some(Input(Flipped(ValidIO(new mmu.AsidLookupEntry(SV.get))))) else None
   })
@@ -296,7 +296,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
 
   io.host_rsp<>cta.io.CTA2host
   io.host_req<>cta.io.host2CTA
-  io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U)})
+  io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U.asTypeOf(l))})
 
   for(i <- 0 until NL2Cache){
     val port = l2cache(i).in_a
@@ -317,7 +317,7 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
     val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
-    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Vec(2, UInt(32.W))) else None
     val l2tlbReq = Vec(num_cache_in_sm, DecoupledIO(new Bundle{
       val asid = UInt(SV.getOrElse(mmu.SV32).asidLen.W)
       val vpn = UInt(SV.getOrElse(mmu.SV32).vpnLen.W)

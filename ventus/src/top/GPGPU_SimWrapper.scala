@@ -76,7 +76,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
     val asid_fill = Flipped(ValidIO(new AsidLookupEntry(SV.getOrElse(mmu.SV32))))
     val cnt = Output(UInt(32.W))
-    val inst_cnt = Output(Vec(num_sm, UInt(32.W)))
+    val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
   })
 
   val counter = new Counter(200000)
