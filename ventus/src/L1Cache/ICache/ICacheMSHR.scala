@@ -156,6 +156,10 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
         }.elsewhen(iofEn.asUInt===OHToUInt(entryMatchMissReq) &&
           iofSubEn.asUInt===subentryStatus.io.next && secondary_miss){
           subentry_valid(iofEn)(iofSubEn) := true.B
+        }.elsewhen(io.missRspOut.fire &&
+          iofEn.asUInt === OHToUInt(entryMatchMissRsp) &&
+          iofSubEn.asUInt === subentry_next2cancel){
+          subentry_valid(iofEn)(iofSubEn) := false.B
         }
       }.elsewhen(io.missRspOut.fire() &&
         iofEn.asUInt===OHToUInt(entryMatchMissRsp) &&

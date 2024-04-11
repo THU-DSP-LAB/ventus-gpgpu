@@ -43,7 +43,7 @@ class L1Cache2L2Arbiter(implicit p: Parameters) extends DCacheModule {
     io.memRspVecOut(i).valid :=
       io.memRspIn.bits.d_source(log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)-1,3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets))===i.asUInt && io.memRspIn.valid
   }
-  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.d_source(log2Up(NCacheInSM)+WIdBits-1,WIdBits)),
+  io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.d_source(log2Up(NCacheInSM)+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)+3-1,log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)+3)),
     Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
   // ****************
 }

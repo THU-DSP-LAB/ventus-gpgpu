@@ -483,7 +483,7 @@ object IDecodeLUT_VC{
     ENDPRG-> List(N,N,Y,B_N,N,Y,CSR.N,N,A3_X,A2_X,A1_X,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
 
     VADD12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
-    //VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
+    VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
     VFTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
     VFEXP_V ->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_EXP,N,M_X,N,N,Y,Y,N,N,N,N,N,N,N)
     //VHTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTH,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
@@ -511,6 +511,7 @@ class InstrDecodeV2 extends Module {
     val inst_mask = Input(Vec(num_fetch, Bool()))
     val pc = Input(UInt(addrLen.W))
     val wid = Input(UInt(depth_warp.W))
+    val sm_id = Input(UInt(8.W))
     val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
     val control = Output(Vec(num_fetch, new CtrlSigs))
     val control_mask = Output(Vec(num_fetch, Bool()))
@@ -618,6 +619,7 @@ class InstrDecodeV2 extends Module {
     c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
     c.imm_ext := Cat(regextInfo(i).isExtI, regextInfo(i).immHigh) // pack exti valid bit at MSB
     if (SPIKE_OUTPUT) {
+      c.spike_info.get.sm_id := io.sm_id
       c.spike_info.get.inst := io.inst(i)
       c.spike_info.get.pc := io.pc+ (i.U << 2.U)
     }

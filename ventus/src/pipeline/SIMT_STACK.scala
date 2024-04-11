@@ -289,7 +289,7 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
   if(SPIKE_OUTPUT){
     fetch_ctl.spike_info.get:=branch_ctl_buf.bits.spike_info.get
     when(io.complete.valid/*&&io.complete.bits===wid_to_check.U*/&& !io.branch_ctl.fire){
-      printf(p"warp ${Decimal(io.complete.bits)} ${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p"sm ${branch_ctl_buf.bits.spike_info.get.sm_id} warp ${Decimal(io.complete.bits)} ${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
       printf(p" simt ")
       if_mask.asTypeOf(Vec(num_thread,Bool())).reverse.foreach(x=>printf(p"${Hexadecimal(x.asUInt)}"))
       printf(p"\n")

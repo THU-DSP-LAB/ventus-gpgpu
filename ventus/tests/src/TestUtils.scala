@@ -12,6 +12,13 @@ import top._
 import top.parameters.{l2cache_params, num_thread}
 
 import java.util
+import chisel3._
+import chisel3.util._
+import chisel3.experimental.BundleLiterals._
+import chisel3.experimental.VecLiterals._
+import chiseltest._
+import top._
+import L2cache.{TLBundleA_lite, TLBundleD_lite}
 
 object TestUtils {
   def checkForValid[T <: Data](port: DecoupledIO[T]): Boolean = port.valid.peek().litToBoolean
@@ -26,22 +33,20 @@ object TestUtils {
     def transform(in: A): B
   }
 
-  class RequestSender[A <: vExeData, B <: Data](
-                                             val reqPort: DecoupledIO[A],
-                                             val rspPort: DecoupledIO[B]
-                                           ) extends IOTestDriver[A, B] {
+  class RequestSender[A <: Data, B <: Data](
+    val reqPort: DecoupledIO[A],
+    val rspPort: DecoupledIO[B]
+  ) extends IOTestDriver[A, B] {
     var send_list: Seq[A] = Nil
-    var time_list: scala.collection.mutable.Seq[Int] = scala.collection.mutable.Seq.empty
     val Idle = 0; val SendingReq = 1; val WaitingRsp = 2
     var state = Idle; var next_state = Idle
 
-    def add(req: A, ttl: Int = 0): Unit = {send_list = send_list :+ req; time_list = time_list :+ ttl}
-    def add(req: Seq[A]): Unit = { send_list = send_list ++ req; time_list = time_list ++ Seq.fill(req.size)(0) }
-    def add(req: Seq[A], time: Seq[Int]): Unit = {send_list = send_list ++ req; time_list = time_list ++ time}
+    def add(req: A): Unit = send_list = send_list :+ req
+    def add(req: Seq[A]): Unit = send_list = send_list ++ req
     var pause: Boolean = false
 
     def finishWait(): Boolean = {
-      state == WaitingRsp // && checkForValid(rspPort)
+      state == WaitingRsp && checkForValid(rspPort)
     }
 
     def eval(): Unit = {
@@ -51,48 +56,16 @@ object TestUtils {
         rspPort.ready.poke(false.B)
         return
       }
-      else{
-        time_list = time_list match{
-          case x if x.isEmpty => x
-          case x => {
-            if(x.head > 0) x.map{ i => if(i >= 0) i - 1 else i}
-            else x
-          }
-        }
-      }
       state match {
         case Idle =>
-          (send_list zip time_list) match {
+          send_list match {
             case Nil =>
               reqPort.valid.poke(false.B)
               next_state = Idle
-            case x if x.head._2 == 0 =>
-              reqPort.valid.poke(true.B)
-//              x.head._1 match {
-//                case data: vExeData =>
-////                  printf(p"myData.in1: ${data.in1}\n")
-////                  printf(p"myData.in2: ${data.in2}\n")
-////                  printf(p"myData.in3: ${data.in3}\n")
-////                  printf(p"myData.mask: ${data.mask}\n")
-////                  printf(p"myData.ctrl.inst: ${data.ctrl.inst}\n")
-//                  println(x.head._1)
-//
-//                  reqPort.bits.in1.poke(data.in1)
-//                  reqPort.bits.in2.poke(data.in2)
-//                  reqPort.bits.in3.poke(data.in3)
-//                  reqPort.bits.mask.poke(data.mask)
-//                  reqPort.bits.ctrl.poke(data.ctrl)
-//
-//                case _ => // 不是vExeData_Soft类型或无法判断类型
-//                  reqPort.bits.poke(x.head._1)
-//              }
-              reqPort.bits.poke(x.head._1)
-              
-
-              next_state = SendingReq
             case _ =>
-              reqPort.valid.poke(false.B)
-              next_state = Idle
+              reqPort.valid.poke(true.B)
+              reqPort.bits.poke(send_list.head)
+              next_state = SendingReq
           }
         case SendingReq =>
           if (checkForReady(reqPort)){
@@ -104,7 +77,6 @@ object TestUtils {
           if (finishWait()){
             rspPort.ready.poke(false.B)
             send_list = send_list.drop(1)
-            time_list = time_list.drop(1)
             next_state = Idle
           }
       }
@@ -112,12 +84,12 @@ object TestUtils {
   }
 
   class MemPortDriverDelay[A <: TLBundleA_lite, B >: TLBundleD_lite <: Data](
-                                                                              val reqPort: DecoupledIO[A],
-                                                                              val rspPort: DecoupledIO[B],
-                                                                              val mem: MemBox[_],
-                                                                              val latency: Int,
-                                                                              val depth: Int
-                                                                            ) extends IOTestDriver[A, B] with IOTransform[A, B]{
+    val reqPort: DecoupledIO[A],
+    val rspPort: DecoupledIO[B],
+    val mem: MemBox,
+    val latency: Int,
+    val depth: Int
+  ) extends IOTestDriver[A, B] with IOTransform[A, B]{
     val data_byte_count = reqPort.bits.data.getWidth / 8
 
     var rsp_queue: Seq[(Int, B)] = Seq.empty
@@ -133,43 +105,29 @@ object TestUtils {
         }
         // IN
         rsp_queue :+= (latency, transform(reqPort.bits))
-        reqPort.ready.poke((rsp_queue.size < depth).B)
       }
 
       if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
         if(checkForValid(rspPort) && checkForReady(rspPort)){
-          println("Memdriver: Sending response...")
           rspPort.valid.poke(false.B)
-          // OUT
           rsp_queue = rsp_queue.drop(1)
         }
         else{
-          println("Memdriver: Response ready but port not valid.")
           rspPort.valid.poke(true.B)
           rspPort.bits.poke(rsp_queue.head._2)
-//          println("rsp_queue.head",rsp_queue.head._2)
         }
       }
       else{
-        if (rsp_queue.nonEmpty) {
-          println(s"rsp_queue head's latency = ${rsp_queue.head._1}")
-        }
         rspPort.valid.poke(false.B)
       }
 
       rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
         if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)
       }
-
-//      rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
-//        if (e._1 > i && i == 0) (e._1 - 1, e._2) else (e._1, e._2)
-//      }
-//      if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
-//        println("Response ready but port not valid.")
-//        rspPort.valid.poke(true.B)
-//        rspPort.bits.poke(rsp_queue.head._2)
-//        //println("rsp source : %x".format(rsp_queue.head._2.asTypeOf(new TLBundleD_lite(l2cache_params)).source.litValue))
-//      }
+      if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
+        rspPort.valid.poke(true.B)
+        rspPort.bits.poke(rsp_queue.head._2)
+      }
       reqPort.ready.poke((rsp_queue.size < depth).B)
     }
 
@@ -182,10 +140,7 @@ object TestUtils {
 
       opcode_req match {
         case 4 => { // read
-          data = mem.readDataPhysical(addr, data_byte_count)._2
-//          println("Data array content: ",java.util.Arrays.toString(data))
-//          println("data addr:",addr)
-//          println("data data_byte_count:",data_byte_count)
+          data = mem.readMem(addr, data_byte_count)
           opcode_rsp = 1
         }
         case 1 => { // write partial
@@ -193,15 +148,15 @@ object TestUtils {
           val mask = req.mask.peek().litValue.toString(2).reverse.padTo(req.mask.getWidth, '0').map {
             case '1' => true
             case _ => false
-          }.flatMap(x => Seq.fill(4)(x)).toArray
-          mem.writeDataPhysical(addr, data_byte_count, data, mask)
+          }.flatMap(x => Seq.fill(4)(x))
+          mem.writeMem(addr, data_byte_count, data, mask)
           data = Array.fill(data_byte_count)(0.toByte) // write operation
           opcode_rsp = 0 // response = 0
         }
         case 0 => { // write full
           data = top.helper.BigInt2ByteArray(req.data.peek().litValue, data_byte_count)
-          val mask = Array.fill(4 * req.mask.getWidth)(true)
-          mem.writeDataPhysical(addr, data_byte_count, data, mask) // write operation
+          val mask = IndexedSeq.fill(4 * req.mask.getWidth)(true)
+          mem.writeMem(addr, data_byte_count, data, mask) // write operation
           data = Array.fill(data_byte_count)(0.toByte) // response = 0
           opcode_rsp = 0
         }
@@ -217,19 +172,17 @@ object TestUtils {
         _.size -> req.size.peek(),
         _.param -> req.param.peek()
       ))
-//      println("print: rsp: ")
-//      println(rsp.data)
-//      println(rsp.source)
       rsp
     }
   }
 }
 
 
+
 class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np <: Data](
                                                                             val reqPort: DecoupledIO[A],
                                                                             val rspPort: DecoupledIO[B],
-                                                                            val mem: MemBox[_],
+                                                                            val mem: MemBox,
                                                                             val latency: Int,
                                                                             val depth: Int
                                                                           ) extends IOTestDriver[A, B] with IOTransform[A, B]{

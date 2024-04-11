@@ -56,7 +56,16 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
 
   val transaction_id = RegInit(0.U(AXI4Lite.idWidth.W))
 
-  io.ctl.r.rdata := regs(addr)
+  val rdata = WireInit(0.U(busWidth.W))
+  val rdata_reg = RegInit(0.U(busWidth.W))
+  rdata_reg := rdata
+  rdata := rdata_reg
+  when(RegNext(io.ctl.r.rready) || !RegNext(rvalid)){
+    rdata := regs(addr)
+  }
+  //  rdata := RegNext(rdata)
+  io.ctl.r.rdata := rdata
+  //  io.ctl.r.rdata := regs(addr)
   io.ctl.r.rid := transaction_id
 
 
@@ -221,3 +230,4 @@ class AXIwrapper_test(val addrWidth:Int, val busWidth:Int) extends Module{
   axiAdapter.io.data<>cta_module.io.in
   axiAdapter.io.rsp<>cta_module.io.out
 }
+

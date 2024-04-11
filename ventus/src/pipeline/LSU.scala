@@ -34,7 +34,7 @@ class DCachePerLaneAddr extends Bundle{
 
 class DCacheCoreReq_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-  //  val isWrite = Bool()
+//  val isWrite = Bool()
   val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(dcache_SetIdxBits.W)
   val perLaneAddr = Vec(num_thread, new DCachePerLaneAddr)
@@ -46,12 +46,12 @@ class DCacheCoreReq_np extends Bundle{
 class DCacheCoreRsp_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val data = Vec(num_thread, UInt(xLen.W))
-  //  val ctrl = new Bundle{
-  //    val mem_cmd = UInt(2.W)
-  //    val mop = UInt(2.W)
-  //  }
+//  val ctrl = new Bundle{
+//    val mem_cmd = UInt(2.W)
+//    val mop = UInt(2.W)
+//  }
   val activeMask = Vec(num_thread, Bool())
-  // val isWrite = Bool()
+ // val isWrite = Bool()
 }
 
 class ShareMemPerLaneAddr_np extends Bundle{
@@ -138,20 +138,20 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
-      Mux(reg_save.ctrl.is_vls12,
-        reg_save.in1(x)+reg_save.in2(x),
-        (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread)
-      ),
-      Mux(reg_save.ctrl.isvec,
-        reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
-          x.asUInt()<<2,
-          Mux(reg_save.ctrl.mop===3.U,
-            reg_save.in2(x),
-            x.asUInt*reg_save.in2(x))
-        ),
-        reg_save.in1(0) + reg_save.in2(0)
-      )
-    )
+                  Mux(reg_save.ctrl.is_vls12,
+                    reg_save.in1(x)+reg_save.in2(x),
+                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+                  ),
+                  Mux(reg_save.ctrl.isvec,
+                    reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
+                      x.asUInt()<<2,
+                      Mux(reg_save.ctrl.mop===3.U,
+                        reg_save.in2(x),
+                        x.asUInt*reg_save.in2(x))
+                    ),
+                    reg_save.in1(0) + reg_save.in2(0)
+                  )
+                )
     is_shared(x) := !reg_save.mask(x) || addr(x)<sharedmemory_addr_max
   })
   all_shared := Mux(reg_save.ctrl.isvec,
@@ -260,7 +260,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
 
   })
   io.to_dcache.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool(), VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
-  // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
+ // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
   io.to_dcache.valid := (state===s_dcache) ||(state===s_dcache_1) ||(state===s_dcache_2)
   val mask_next = Wire(Vec(num_thread, Bool()))
 
@@ -360,7 +360,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
 
   if (SPIKE_OUTPUT){
     when( state===s_save && io.to_mshr.fire && reg_save.ctrl.mem/*&&reg_save.ctrl.wid===wid_to_check.U*/){
-      printf(p"warp ${Decimal(reg_save.ctrl.wid)} ")
+      printf(p"sm ${reg_save.ctrl.spike_info.get.sm_id} warp ${Decimal(reg_save.ctrl.wid)} ")
       printf(p"0x${Hexadecimal(reg_save.ctrl.spike_info.get.pc)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.inst)}")
       when(reg_save.ctrl.mem_cmd === IDecode.M_XRD){
         printf(p" lsu.r ")
@@ -393,7 +393,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
           //(reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread)
         }.otherwise{
           //(reg_save.in1 zip reg_save.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
-          addr.foreach{ x =>
+          addr.reverse.foreach{ x =>
             printf(p" ${Hexadecimal(x)}")
           }
         }
@@ -435,7 +435,7 @@ class LSU2WB extends Module{
     io.lsu_rsp.ready:=io.lsu_rsp.bits.tag.isWrite//true.B // CONNECTION OF io.lsu_rsp.bits.tag.isWrite
     if(SPIKE_OUTPUT) {
       when(io.lsu_rsp.fire && io.lsu_rsp.bits.tag.isWrite){
-        printf(p"warp ${io.lsu_rsp.bits.tag.warp_id} ")
+        printf(p"sm ${io.lsu_rsp.bits.tag.spike_info.get.sm_id} warp ${io.lsu_rsp.bits.tag.warp_id} ")
         printf(p"0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.pc)} 0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.inst)} ")
         printf(p"lsu.w fin\n")
       }
@@ -443,7 +443,7 @@ class LSU2WB extends Module{
   })
 }
 class LSUexe() extends Module{
-  // default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
+// default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
   val io = IO(new Bundle{
     val lsu_req = Flipped(DecoupledIO(new vExeData()))
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np()))
