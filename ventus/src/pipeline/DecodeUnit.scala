@@ -492,6 +492,16 @@ object IDecodeLUT_VC{
   )
 }
 
+// async tma or tensorcore
+object IDecodeLUT_VC {
+  import IDecode._
+  // with code 1011011, 0001011
+  val table = Array(
+    CP_ASYNC_COPYSIZE -> List(N,N,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_RS2,A1_RS1,IMM_S,MEM_X,FN_ADD,N,M_XRD,N,N,N,N,N,N,N,N,N,N,N),
+    CP_ASYNC_BULK     -> List(N,N,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_RS2,A1_RS1,IMM_S,MEM_X,FN_ADD,N,M_XRD,N,N,N,N,N,N,N,N,N,N,N),
+
+  )
+}
 //trait DecodeParameters{}
 
 // NOW: num_fetch = 2, num_issue = 1
@@ -614,6 +624,11 @@ class InstrDecodeV2 extends Module {
     c.atomic :=s(26)
     c.aq :=s(26) & io.inst(i)(26)
     c.rl:=s(26) & io.inst(i)(25)
+    //tma add
+    c.copysize := Mux(io.inst)
   }
   io.control_mask := maskAfterExt
+
+
+
 }
