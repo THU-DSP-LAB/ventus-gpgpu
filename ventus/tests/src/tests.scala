@@ -381,7 +381,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       }
       else if(top.parameters.INST_CNT_2){
         c.io.inst_cnt.zipWithIndex.foreach{ case(x, i) =>
-          print(s" [${i}: X ${x.asTypeOf(Vec(2, UInt(32.W)))(0).peek.litValue.toInt} V ${x.asTypeOf(Vec(2, UInt(32.W)))(1).peek.litValue.toInt}]")
+          print(s" [${i}: X: ${x.peek.litValue & ((BigInt(1) << 32) - 1)} V: ${x.peek.litValue >> 32}]")
         }
       }
       print("\n")

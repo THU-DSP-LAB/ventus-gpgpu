@@ -238,7 +238,7 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0) extends Module{
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
     val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
-    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Vec(2, UInt(32.W))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
