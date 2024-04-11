@@ -1,5 +1,9 @@
 package cta_scheduler.cta_util
 
+/**
+ * @see doc/Utilities.md
+ */
+
 import chisel3._
 import chisel3.util._
 import scala.math.max
@@ -64,21 +68,26 @@ class sort3(val WIDTH: Int) extends Module {
   res(1)(1) := !cmp0
   res(2)(0) := cmp2
   res(2)(1) := !cmp1
-  io.out(0) := Mux(res(0)(0) || res(1)(0) || res(2)(0), Mux1H(Seq(
+  io.out(0) := Mux1H(Seq(
     res(0).asUInt.andR -> io.in(0),
     res(1).asUInt.andR -> io.in(1),
     res(2).asUInt.andR -> io.in(2),
-  )), io.in(0))   // in1 == in2 == in3
-  io.out(1) := Mux1H(Seq(
-    res(0).asUInt.xorR -> io.in(0),
-    res(1).asUInt.xorR -> io.in(1),
-    res(2).asUInt.xorR -> io.in(2),
+    !(res(0)(0) || res(1)(0) || res(2)(0)) -> io.in(0), // in1 == in2 == in3
   ))
-  io.out(2) := Mux(res(0)(0) || res(1)(0) || res(2)(0), Mux1H(Seq(
+  io.out(1) := Mux1H(Seq(             // NOTE: here we assumes that when in(0)==in(1)==in(2)==data,
+    res(0).asUInt.xorR -> io.in(0),   //       as a result of which res(i).xorR==true,
+    res(1).asUInt.xorR -> io.in(1),   //       Mux1H will output `data` instead of something meaningless.
+    res(2).asUInt.xorR -> io.in(2),   //       If it's not the truth, an extra Mux is needed
+  ))
+  io.out(2) := Mux1H(Seq(
     !res(0).asUInt.orR -> io.in(0),
     !res(1).asUInt.orR -> io.in(1),
     !res(2).asUInt.orR -> io.in(2),
-  )), io.in(0))
+    !(res(0)(0) || res(1)(0) || res(2)(0)) -> io.in(0),  // in1 == in2 == in3
+  ))
+
+  assert(io.out(0) >= io.out(1) && io.out(1) >= io.out(2))
+  for(i <- 0 until 3) assert(io.out(i) === io.in(0) || io.out(i) === io.in(1) || io.out(i) === io.in(2) )
 }
 
 object sort3 {

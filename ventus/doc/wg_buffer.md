@@ -4,7 +4,7 @@ wg_buffer整体架构如下图所示，图中黑色框内的半透明虚线代�
 
 模块DecoupledIO中所有valid与bits信号均为reg输出，而ready信号可能是组合逻辑输出。若需要ready也为reg输出，后续可添加skid buffer。
 
-​![wg_buffer](assets/wg_buffer-20240325110234-qaoapvf.svg)​
+​![wg_buffer](assets/wg_buffer-20240411105356-nwhm5gy.png)​
 
 本模块中各部分的作用：
 
@@ -15,7 +15,7 @@ wg_buffer整体架构如下图所示，图中黑色框内的半透明虚线代�
 * 代码中`wgram_wr_next`​用于寻找下一个可写的空RAM位，采用轮询优先级的优先级编码器RRPriorityEncoder
 * 代码中`wgram1_rd_next`​用于寻找下一个可读的RAM项（`valid && !alloc`​），采用轮询优先级的优先级编码器RRPriorityEncoder
 
-本模块在每个周期的操作可分为三部分：
+本模块在每个周期的操作可分为三部分，由于valid与alloc实现的锁机制，三个功能访问的RAM项必定是不同的，三个功能的运行相互独立
 
 1. 依据wgram_valid中的记录寻找一个可写的空RAM位，若此时host发来新wg则将信息写入wgram
 2. 依据wgram_valid与wgram_alloc中的记录需找一个可以发送到allocator的wg记录，将其内容从wgram1中读到reg中准备发送到allocator，同时将wgram_alloc中的对应位置一
@@ -27,4 +27,5 @@ wg_buffer整体架构如下图所示，图中黑色框内的半透明虚线代�
 进一步改进：
 
 * 图中`wgram1_rd for allocator`​与`wgram_rd2_clear`​两个模块中驱动输出DecoupledIO的逻辑部分可以改用skid_buffer_valid
+* 蓝色部分的组合逻辑链路可能过长，也许可以对`find next valid readable address`​的输出结果打一拍（增加一流水级）
 * 优化选择wgram1中的wg并发送到allocator的选择算法
