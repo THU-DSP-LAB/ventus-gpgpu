@@ -317,7 +317,7 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
     val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
-    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Vec(2, UInt(32.W))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
     val l2tlbReq = Vec(num_cache_in_sm, DecoupledIO(new Bundle{
       val asid = UInt(SV.getOrElse(mmu.SV32).asidLen.W)
       val vpn = UInt(SV.getOrElse(mmu.SV32).vpnLen.W)

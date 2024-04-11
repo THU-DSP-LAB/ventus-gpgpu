@@ -70,10 +70,16 @@ class pipe extends Module{
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
     when(issueX.io.in.fire){
-      inst_cnt_xv(0) := inst_cnt_xv(0) + 1.U
+      when(issueV.io.in.fire && !issueV.io.in.bits.ctrl.isvec){
+        inst_cnt_xv(0) := inst_cnt_xv(0) + 2.U
+      }.otherwise{
+        inst_cnt_xv(0) := inst_cnt_xv(0) + 1.U
+      }
     }
     when(issueV.io.in.fire){
-      inst_cnt_xv(1) := inst_cnt_xv(1) + PopCount(issueV.io.in.bits.mask)
+      when(issueV.io.in.bits.ctrl.isvec){
+        inst_cnt_xv(1) := inst_cnt_xv(1) + PopCount(issueV.io.in.bits.mask)
+      }
     }
   }
 
