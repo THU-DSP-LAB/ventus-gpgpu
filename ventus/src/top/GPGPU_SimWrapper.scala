@@ -59,7 +59,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
     val cnt = Output(UInt(32.W))
-    val inst_cnt = Output(Vec(num_sm, UInt(32.W)))
+    val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
   })
 
   val counter = new Counter(200000)
