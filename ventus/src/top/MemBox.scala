@@ -167,14 +167,14 @@ class MemBox[T <: BaseSV](SV: T) extends Memory(SV.MaxPhyRange, SV) {
       if(real_size > 0){
         if (metaData.lds_mem_index.contains(i)) { // dynamic
           tryAllocate(ptbr, lower, real_size)
-          writeDataVirtual(ptbr, lower, real_size, fileBytes.take(real_size))
+          writeDataVirtual(ptbr, lower, metaData.buffer_size(i).toInt, fileBytes.take(metaData.buffer_size(i).toInt))
         }
         else { // static
           val alloc_pa = allocateMemory(ptbr, lower, real_size)
           writeDataPhysical(alloc_pa, real_size, fileBytes.take(real_size))
         }
       }
-      fileBytes = fileBytes.drop(real_size)
+      fileBytes = fileBytes.drop(metaData.buffer_size(i).toInt)
     }
     metaData
   }
