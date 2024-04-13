@@ -4,9 +4,9 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
 
-class io_alloc2buffer(NUM_EXTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Bundle {
+class io_alloc2buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Bundle {
   val accept = Bool()   // true.B: it is ok to send this wg to CU.      false.B: rejected
-  val wgram_addr = UInt(log2Ceil(NUM_EXTRIES).W)
+  val wgram_addr = UInt(log2Ceil(NUM_ENTRIES).W)
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 

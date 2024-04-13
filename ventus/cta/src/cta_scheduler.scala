@@ -68,6 +68,9 @@ trait ctainfo_alloc_to_cuinterface extends Bundle {
   val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
   val wg_slot_id = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
   val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)                 // Number of wavefront in this cta
+  val lds_dealloc_en = Bool()   // if LDS needs dealloc. When num_lds==0, lds do not need dealloc
+  val sgpr_dealloc_en = Bool()
+  val vgpr_dealloc_en = Bool()
 }
 
 /** IO Bundle: CTA information
@@ -112,6 +115,7 @@ class io_cuinterface2cu extends Bundle with ctainfo_host_to_cu with ctainfo_allo
 }
 class io_cu2cuinterface extends Bundle {
   val wf_tag = UInt(CONFIG.WG.WF_TAG_WIDTH)
+  val wg_id = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 
 /** IO between host and wg-buffer
@@ -125,16 +129,16 @@ class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to
 class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
   // Added for test
-  val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                // Meta-data base address
-  val lds_base  = UInt(log2Ceil(CONFIG.WG.NUM_LDS_MAX).W)         // lds base address (initial WG, later WF)
-  val sgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)        // lds base address (initial WG, later WF)
-  val vgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX).W)        // lds base address (initial WG, later WF)
-  val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
-  val wgslot = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
-  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)
-  val lds_dealloc_en = Bool()
-  val sgpr_dealloc_en = Bool()
-  val vgpr_dealloc_en = Bool()
+  //val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                // Meta-data base address
+  //val lds_base  = UInt(log2Ceil(CONFIG.WG.NUM_LDS_MAX).W)         // lds base address (initial WG, later WF)
+  //val sgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)        // lds base address (initial WG, later WF)
+  //val vgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX).W)        // lds base address (initial WG, later WF)
+  //val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
+  //val wgslot = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
+  //val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)
+  //val lds_dealloc_en = Bool()
+  //val sgpr_dealloc_en = Bool()
+  //val vgpr_dealloc_en = Bool()
 }
 
 class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
@@ -143,9 +147,9 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
     val host_wg_done = DecoupledIO(new io_cta2host)             // To host, ID of wg which finished its execution
 
     // From CU(i), tag of wf which finished its execution
-    //val cu_wf_done = Vec(NUM_CU, Flipped(DecoupledIO(new io_cu2cuinterface)))
+    val cu_wf_done = Vec(NUM_CU, Flipped(DecoupledIO(new io_cu2cuinterface)))
     // To CU(i), new wf info
-    //val cu_wf_new = Vec(NUM_CU, DecoupledIO(new io_cuinterface2cu))
+    val cu_wf_new = Vec(NUM_CU, DecoupledIO(new io_cuinterface2cu))
   })
 
   val wg_buffer_inst = Module(new wg_buffer)
@@ -167,11 +171,18 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   resource_table_inst.io.cuinterface_wg_new <> cu_interface_inst.io.rt_wg_new
   allocator_inst.io.rt_dealloc <> resource_table_inst.io.slot_dealloc
 
-  //for(i <- 0 until NUM_CU){
-  //  io.cu_wf_new(i).valid := false.B
-  //  io.cu_wf_new(i).bits := 0.U.asTypeOf(new io_cuinterface2cu)
-  //  io.cu_wf_done(i).ready := false.B
-  //}
+  for(i <- 0 until NUM_CU) {
+    io.cu_wf_new(i) <> cu_interface_inst.io.cu_wf_new(i)
+    io.cu_wf_done(i) <> cu_interface_inst.io.cu_wf_done(i)
+  }
+
+  if(CONFIG.DEBUG) {
+    val init_finish_r0 = RegNext(true.B, false.B)
+    val init_finish_r1 = RegNext(init_finish_r0, false.B)
+    when(init_finish_r0 && !init_finish_r1) {
+      println("===== Simulation start =====")
+    }
+  }
 }
 
 object emitVerilog extends App {

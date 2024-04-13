@@ -8,7 +8,7 @@ import chisel3._
 import chisel3.experimental.ChiselEnum
 import chisel3.util._
 import cta_util.sort3
-import cta_util.DecoupledIO_3_to_1
+import cta_util.DecoupledIO_1_to_3
 
 // =
 // Abbreviations:
@@ -16,13 +16,7 @@ import cta_util.DecoupledIO_3_to_1
 // ⬑ = continuing from above, 接续上文
 // =
 
-class io_cuinterface2rt extends Bundle {
-  val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
-  val wg_slot_id = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
-  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX).W)
-  val lds_dealloc_en = Bool()
-  val sgpr_dealloc_en = Bool()
-  val vgpr_dealloc_en = Bool()
+class io_cuinterface2rt extends Bundle with ctainfo_alloc_to_cuinterface {
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 
@@ -710,7 +704,7 @@ class resource_table_top extends Module {
   // ALLOC Router: At most one alloc request is allowed to stay within the whole resource table
   // =
   val (alloc_cuid_group, alloc_cuid_local) = convert_cu_id(io.alloc.bits.cu_id)
-  val alloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds_io(0).alloc.bits, handler_sgpr_io(0).alloc.bits, handler_vgpr_io(0).alloc.bits))
+  val alloc_decoupledio = Module(new DecoupledIO_1_to_3(handler_lds_io(0).alloc.bits, handler_sgpr_io(0).alloc.bits, handler_vgpr_io(0).alloc.bits))
   // Alloc request recorder
   val alloc_record = RegInit(false.B)
   alloc_record := MuxCase(alloc_record, Seq(
@@ -763,7 +757,7 @@ class resource_table_top extends Module {
   // 2. WG slot & WF slot dealloc (to allocator)
   // =
 
-  val dealloc_decoupledio = Module(new DecoupledIO_3_to_1(handler_lds.head.io.dealloc.bits, handler_sgpr.head.io.dealloc.bits, handler_vgpr.head.io.dealloc.bits, IGNORE = true))
+  val dealloc_decoupledio = Module(new DecoupledIO_1_to_3(handler_lds.head.io.dealloc.bits, handler_sgpr.head.io.dealloc.bits, handler_vgpr.head.io.dealloc.bits, IGNORE = true))
   val slot_dealloc = Module(new Queue(new io_rt2dealloc, 2))
 
   // DecoupledIO 2-to-1 valid-ready

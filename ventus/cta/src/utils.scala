@@ -110,7 +110,7 @@ object sort3 {
  * DecoupledIO 1-to-3
  * It's assumed that once in.valid=true, it will keep being true until io.fire
  */
-class DecoupledIO_3_to_1[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1, gen2: T2, IGNORE: Boolean = false) extends Module {
+class DecoupledIO_1_to_3[T0 <: Data, T1 <: Data, T2 <: Data](gen0: T0, gen1: T1, gen2: T2, IGNORE: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new Bundle{
       val data0 = gen0.cloneType

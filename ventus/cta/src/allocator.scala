@@ -16,9 +16,6 @@ import chisel3.util._
 // =
 
 class io_alloc2cuinterface extends Bundle with ctainfo_alloc_to_cuinterface {
-  val lds_dealloc_en = Bool()   // if LDS needs dealloc. When num_lds==0, lds do not need dealloc
-  val sgpr_dealloc_en = Bool()
-  val vgpr_dealloc_en = Bool()
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 class io_rt2cuinterface extends Bundle with ctainfo_alloc_to_cu {
