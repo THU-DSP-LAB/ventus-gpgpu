@@ -98,7 +98,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def l2cache_NWays: Int = 16
 
 //  def l2cache_BlockWords: Int = dcache_BlockWords
-  def l2cache_BlockWords: Int = 32 //tma
+  def l2cache_BlockWords: Int = 32 //dma
 
   def l2cache_writeBytes: Int = 1
 
@@ -164,28 +164,28 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y)
   def WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
 
-  //tma-xrn
+  //dma-xrn
   def BitsOfByte = 8
   def maxcopysize = 16 // bytes
   def shared_aligned = 4 //bytes
   var shared_aligned_bits = shared_aligned * 8 //bytes
-  def tma_aligned_bulk = 4 // bytes
-  var tma_aligned_bulk_bits = tma_aligned_bulk * 8 // bytes
-  def max_tma_inst = 8
+  def dma_aligned_bulk = 4 // bytes
+  var dma_aligned_bulk_bits = dma_aligned_bulk * 8 // bytes
+  def max_dma_inst = 8
   def max_l2cacheline = 6
-  def cacheline = 128 //bytes
+  def cacheline = 128//todo Math.pow(2, l2cachetagbits).toInt //bytes
   var l2cacheline = cacheline
   var sharedcacheline = cacheline
   def l2wayBits = log2Ceil(l2cache_NWays) //4
-  def l2setBits = log2Ceil(l2cache_NSets) //2
-  def l2offsetBits = log2Ceil(l2cache_BlockWords << 2) // 128
+  def l2setBits = log2Ceil(l2cache_NSets) //5
+  def l2offsetBits = log2Ceil(l2cache_BlockWords << 2) // 7
   def l2cBits = log2Ceil(num_l2cache) //1
   var l2cachetagbits = xLen - (l2wayBits + l2setBits + l2offsetBits + l2cBits)
-  // 32 - (2 + 1 + 7) = 22
+  // 32 - (4 + 5 + 7) = 16
   var l2cachesetbits = l2setBits
-  var sharedsetbits = dcache_SetIdxBits
+//  var sharedsetbits = dcache_SetIdxBits
   def addr_tag_bits = l2cachetagbits + l2cachesetbits + l2wayBits
-  def numgroupl2cache = l2cacheline / tma_aligned_bulk
-  def numgroupshared = sharedcacheline / tma_aligned_bulk
-  def numgroupinstmax = maxcopysize / tma_aligned_bulk
+  def numgroupl2cache = l2cacheline / dma_aligned_bulk
+  def numgroupshared = sharedcacheline / dma_aligned_bulk
+  def numgroupinsdmax = maxcopysize / dma_aligned_bulk
 }

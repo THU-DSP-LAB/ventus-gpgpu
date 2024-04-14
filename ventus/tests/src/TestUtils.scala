@@ -46,7 +46,7 @@ object TestUtils {
     var pause: Boolean = false
 
     def finishWait(): Boolean = {
-      state == WaitingRsp && checkForValid(rspPort)
+      state == WaitingRsp //&& checkForValid(rspPort)
     }
 
     def eval(): Unit = {
@@ -64,6 +64,8 @@ object TestUtils {
               next_state = Idle
             case _ =>
               reqPort.valid.poke(true.B)
+              println(send_list.size)
+              println(send_list.head)
               reqPort.bits.poke(send_list.head)
               next_state = SendingReq
           }

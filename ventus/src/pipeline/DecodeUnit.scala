@@ -493,7 +493,7 @@ object IDecodeLUT_VC{
 }
 
 // async tma or tensorcore
-object IDecodeLUT_VC {
+object IDecodeLUT_ASYNC {
   import IDecode._
   // with code 1011011, 0001011
   val table = Array(
@@ -627,7 +627,9 @@ class InstrDecodeV2 extends Module {
     c.aq :=s(26) & io.inst(i)(26)
     c.rl:=s(26) & io.inst(i)(25)
     //tma add
-    c.copysize := Mux(io.inst)
+    c.copysize := Mux(io.inst(i)(26,25).asUInt === 0.U, 4.U, Mux(io.inst(i)(26,25).asUInt === 1.U, 8.U, 16.U))
+    c.opmode := io.inst(i)(14,12).asUInt
+//    c.dma := Mux(io.inst(i)(6,0) === "b1000001".U.asUInt,true.B,false.B)
   }
   io.control_mask := maskAfterExt
 

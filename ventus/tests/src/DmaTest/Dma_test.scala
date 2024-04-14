@@ -1,4 +1,4 @@
-package TmaTest
+package DmaTest
 
 import top.parameters._
 import chisel3._
@@ -16,26 +16,26 @@ import play.MemPortDriverDelay_shared
 
 import scala.collection.immutable.Seq
 
-class Tma_test
+class Dma_test
   extends AnyFreeSpec
     with ChiselScalatestTester {
-  "TMA Main" in {
-    class TmaRsp2pipe extends Bundle {}
-    class TmaWrapper() extends Module {
+  "DMA Main" in {
+    class dmaRsp2pipe extends Bundle {}
+    class dmaWrapper() extends Module {
       val io = IO(new Bundle() {
         val in = Flipped(DecoupledIO(new vExeData()))
-        //        val out = DecoupledIO(new TmaRsp2pipe())
+        //        val out = DecoupledIO(new dmaRsp2pipe())
         val out = DecoupledIO(UInt(32.W))
         val l2_req = DecoupledIO(new TLBundleA_lite(l2cache_params))
         val l2_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
         val shared_req = DecoupledIO(new ShareMemCoreReq_np())
         val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
-        //        val fence_end_tma = DecoupledIO(UInt(32.W))
+        //        val fence_end_dma = DecoupledIO(UInt(32.W))
       })
 
-      val internal = Module(new TMA_Bulk())
-      internal.io.tma_req <> Queue(io.in, 1)
-      io.out <> Queue(internal.io.fence_end_tma, 1)
+      val internal = Module(new DMA_core())
+      internal.io.dma_req <> Queue(io.in, 1)
+      io.out <> Queue(internal.io.fence_end_dma, 1)
 //      io.shared_req <> Queue(internal.io.shared_req, 1)
 //      internal.io.shared_rsp <> Queue(io.shared_rsp, 1)
       //shared io
@@ -61,7 +61,7 @@ class Tma_test
     }
 
     def handleL2Req[T <: BaseSV](
-                                  d: TmaWrapper,
+                                  d: dmaWrapper,
                                   memory: Memory[T]
                                 ): Unit = {
       if (d.io.l2_req.valid.peek.litToBoolean) {
@@ -80,7 +80,7 @@ class Tma_test
     val dataFileDir = "./ventus/txt/DMA_test_temp/kernel1.data"
     val metas = top.MetaData(metaFileDir)
 
-    test(new TmaWrapper())
+    test(new dmaWrapper())
       .withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)) { d =>
         d.io.in.setSourceClock(d.clock)
         d.io.out.setSinkClock(d.clock)
@@ -89,8 +89,8 @@ class Tma_test
         d.io.shared_rsp.setSourceClock(d.clock)
         d.io.shared_req.setSinkClock(d.clock)
 
-        val memory = new MemBox(MemboxS.Bare32)
-        memory.loadfile(0, metas, dataFileDir)
+        val memory = new MemBox()
+        memory.loadfile(metas, dataFileDir)
 
         val mem_driver = new MemPortDriverDelay(d.io.l2_req, d.io.l2_rsp, memory, 4, 1)
         val mem_driver_shared = new MemPortDriverDelay_shared(d.io.shared_req, d.io.shared_rsp, memory, 6, 1)
@@ -164,12 +164,13 @@ class Tma_test
             _.wxd -> false.B,
             _.pc -> 4096.U,
             _.imm_ext -> 0.U,
+            _.spike_info.get -> (new InstWriteBack).Lit(_.sm_id -> 0.U,_.pc -> 0.U, _.inst -> 0.U),
             _.atomic -> false.B,
             _.aq -> false.B,
             _.rl -> false.B,
-            _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U),
             _.opmode -> 1.U,
-            _.copysize -> 0.U
+            _.copysize -> 0.U,
+            _.dma -> true.B
           )
           ctrlsigs
 
@@ -219,9 +220,10 @@ class Tma_test
             _.atomic -> false.B,
             _.aq -> false.B,
             _.rl -> false.B,
-            _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U),
+            _.spike_info.get -> (new InstWriteBack).Lit(_.sm_id -> 0.U,_.pc -> 0.U, _.inst -> 0.U),
             _.opmode -> 0.U,
-            _.copysize -> 2.U
+            _.copysize -> 2.U,
+            _.dma -> true.B
           )
           ctrlsigs
 
@@ -269,17 +271,17 @@ class Tma_test
           // 根据需要添加更多 vExeData 实例
         )
 
-        val tma_sender = new RequestSender[vExeData, UInt](d.io.in, d.io.out)
+        val dma_sender = new RequestSender[vExeData, UInt](d.io.in, d.io.out)
         //        val temp = req_list.map { a =>
         //          (new vExeData())
         //            .Lit(_.in1 -> a.in1, _.in2 -> a.in2, _.in3 -> a.in3, _.ctrl -> a.ctrl, _.mask -> a.mask)
         //        }
-        tma_sender.add(req_list)
+        dma_sender.add(req_list)
         d.clock.setTimeout(0)
         while (clock_cnt <= 400) {
           //        while (clock_cnt <= 100000) {
 
-          tma_sender.eval()
+          dma_sender.eval()
 
           //          handleL2Req(d, memory)
           mem_driver.eval()

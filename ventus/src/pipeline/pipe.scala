@@ -14,6 +14,7 @@ import L1Cache.ICache._
 import chisel3._
 import chisel3.util._
 import top.parameters._
+import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
@@ -36,7 +37,11 @@ class pipe(val sm_id: Int = 0) extends Module{
     val dcache_req = DecoupledIO(new DCacheCoreReq_np)
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np)
-    val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np))
+    // xrn add dma
+    val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
+    val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
+
     val pc_reset = Input(Bool())
     val warpReq=Flipped(Decoupled(new warpReqData))
     val warpRsp=(Decoupled(new warpRspData))
@@ -70,6 +75,8 @@ class pipe(val sm_id: Int = 0) extends Module{
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
+  // xrn add dma
+  val dma = Module(new DMA_core)
   io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
   //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
   val exe_dataX=Module(new Module{
@@ -317,6 +324,12 @@ class pipe(val sm_id: Int = 0) extends Module{
   issueX.io.out_SIMT.ready := false.B
   issueV.io.out_SFU<>sfu.io.in
   issueX.io.out_SFU.ready := false.B
+
+  // xrn add dma
+  issueX.io.out_DMA <> dma.io.dma_req
+  issueV.io.out_DMA.ready := false.B 
+
+
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
@@ -343,9 +356,14 @@ class pipe(val sm_id: Int = 0) extends Module{
 
   lsu.io.dcache_rsp<>io.dcache_rsp
   lsu.io.dcache_req<>io.dcache_req
-  lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
-  lsu.io.shared_rsp<>io.shared_rsp
-  lsu.io.shared_req<>io.shared_req
+  // xrn add dma and modify
+  // lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
+  // lsu.io.shared_rsp<>io.shared_rsp
+  // lsu.io.shared_req<>io.shared_req
+  val sharedreqArbiter = Module(new Arbiter(new ShareMemCoreRsp_np, 2))
+  sharedreqArbiter.io.in(1) <> dma.io.shared_req
+  sharedreqArbiter.io.in(2) <> lsu.io.shared_req
+
 
   wb.io.in_x(0)<>alu.io.out
   wb.io.in_x(1)<>fpu.io.out_x
