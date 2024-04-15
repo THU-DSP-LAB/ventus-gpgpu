@@ -156,7 +156,12 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   val allocator_inst = Module(new allocator)
   val resource_table_inst = Module(new resource_table_top)
   val cu_interface_inst = Module(new cu_interface)
-  io.host_wg_new <> wg_buffer_inst.io.host_wg_new
+
+  val init_ok = cu_interface_inst.io.init_ok
+  wg_buffer_inst.io.host_wg_new.valid := io.host_wg_new.valid && init_ok
+  io.host_wg_new.ready := wg_buffer_inst.io.host_wg_new.ready && init_ok
+  io.host_wg_new.bits <> wg_buffer_inst.io.host_wg_new.bits
+
   wg_buffer_inst.io.alloc_wg_new <> allocator_inst.io.wgbuffer_wg_new
   allocator_inst.io.wgbuffer_result <> wg_buffer_inst.io.alloc_result
   wg_buffer_inst.io.cuinterface_wg_new <> cu_interface_inst.io.wgbuffer_wg_new
@@ -174,14 +179,6 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
   for(i <- 0 until NUM_CU) {
     io.cu_wf_new(i) <> cu_interface_inst.io.cu_wf_new(i)
     io.cu_wf_done(i) <> cu_interface_inst.io.cu_wf_done(i)
-  }
-
-  if(CONFIG.DEBUG) {
-    val init_finish_r0 = RegNext(true.B, false.B)
-    val init_finish_r1 = RegNext(init_finish_r0, false.B)
-    when(init_finish_r0 && !init_finish_r1) {
-      println("===== Simulation start =====")
-    }
   }
 }
 

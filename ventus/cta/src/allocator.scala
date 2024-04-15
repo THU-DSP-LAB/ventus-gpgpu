@@ -293,7 +293,7 @@ class allocator extends Module {
   val wfslot_dealloc_num = Mux(io.rt_dealloc.fire, io.rt_dealloc.bits.num_wf, 0.U)
   val cu_tmp = Mux(fsm === FSM.ALLOC && fsm =/= fsm_r1, cu, io.rt_dealloc.bits.cu_id)
   wgslot(cu_tmp) := wgslot(cu_tmp) & (~wgslot_dealloc_bitmask).asUInt | wgslot_alloc_bitmask
-  wfslot(cu_tmp) := wfslot(cu_tmp) - wfslot_alloc_num + wfslot_dealloc_num
+  wfslot(cu_tmp) := wfslot(cu_tmp) + wfslot_alloc_num - wfslot_dealloc_num
 
   // ALLOC task1: rtcache update, always finishes in the first cycle, then waiting for FSM.ALLOC ends
   writer_lds.io.alloc_en := (fsm === FSM.ALLOC)

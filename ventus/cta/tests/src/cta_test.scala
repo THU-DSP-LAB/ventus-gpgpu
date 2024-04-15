@@ -9,32 +9,59 @@ import org.scalatest.freespec.AnyFreeSpec
 
 import scala.util.Random
 
-class DecoupledIO_monitor[T <: Data](gen: T) extends Bundle {
-  val valid = Bool()
-  val bits = gen
-  val ready = Bool()
-}
-
+class MyException(msg: String) extends Exception(msg)
 class ResourceConflictException(msg: String) extends Exception(msg) {
-  def this(resource: String, wg1: Int, wg2: Int) = {
-    this(s"ERROR: ${resource} conflicts between WG ${wg1} and ${wg2}")
+  def this(resource: String, wg1: Int, wftag1: Int, wg2: Int, wftag2: Int) = {
+    this(s"ERROR: ${resource} conflicts between WG.WF ${wg1}.${wftag1} and ${wg2}.${wftag2}")
   }
 }
 
-class Cu(val cu_id: Int, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) {
-  class Wf_slot {
-    var valid: Boolean = false
-    var wg_id: Int = _
-    var wf_tag: Int = _
-    var lds: (Int, Int) = _
-    var sgpr: (Int, Int) = _
-    var vgpr: (Int, Int) = _
-    var time: Int = _
+class TestIn(testlen: Int) {
+  val len = testlen
+  val csr = Seq.tabulate(len){i => Random.nextInt().abs}
+  val lds = Seq.tabulate(len){i =>  Random.nextInt(CONFIG.WG.NUM_LDS_MAX  / 2)}
+  val sgpr = Seq.tabulate(len){i => Random.nextInt(CONFIG.WG.NUM_SGPR_MAX / (2*CONFIG.WG.NUM_WF_MAX))}
+  val vgpr = Seq.tabulate(len){i => Random.nextInt(CONFIG.WG.NUM_VGPR_MAX / (2*CONFIG.WG.NUM_WF_MAX))}
+  val wf = Seq.tabulate(len){i => Random.nextInt(CONFIG.WG.NUM_WF_MAX) + 1}
+}
+
+class Wf_slot {
+  var valid: Boolean = false
+  var wg_id: Int = _
+  var wf_tag: Int = _
+  var lds: (Int, Int) = _
+  var sgpr: (Int, Int) = _
+  var vgpr: (Int, Int) = _
+  var csr: Int = _
+  var time: Int = _
+  assert(CONFIG.WG.NUM_WF_MAX == 32 && CONFIG.GPU.NUM_WG_SLOT == 8)
+  def wf_id: Int = (wf_tag & 0x1F)
+  def wg_slot: Int = (wf_tag >> 5) & 0x7
+  def :=(that: Wf_slot): Unit = {
+    valid = that.valid
+    wg_id = that.wg_id
+    wf_tag = that.wf_tag
+    lds = that.lds
+    sgpr = that.sgpr
+    vgpr = that.vgpr
+    csr = that.csr
+    time = that.time
   }
+}
+
+class Cu(val cu_id: Int, testIn: TestIn, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) {
 
   val wf_slot = Seq.fill(NUM_WF_SLOT)(new Wf_slot)
 
-  def update(cycle: Int = 1): (Boolean, Int, Int) = {
+  var wf_new_last_valid = false
+  var wf_new_last_wgid: Int = _
+  var wf_new_last_wfid: Int = _
+  var wf_new_last_csr: Int = _
+  var wf_new_last_lds: (Int,Int) = _
+  var wf_new_last_sgpr: (Int,Int) = _
+  var wf_new_last_vgpr: (Int,Int) = _
+
+  def update(): (Boolean, Int, Int) = {
     var wf_finish = false
     var wf_tag = 0
     var wg_id = 0
@@ -51,33 +78,68 @@ class Cu(val cu_id: Int, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) {
     }
     (wf_finish, wg_id, wf_tag)
   }
-  def wf_check(wg_id: Int, lds: (Int, Int), sgpr: (Int, Int), vgpr: (Int, Int)): Unit= {
-    wf_slot.foreach {wf =>
-      if(wf.valid) {
-        if((wf.lds._1  != wf.lds._2  + 1) && (wf.lds._1  >= lds._1  && wf.lds._1  <= lds._2 ) && wf.wg_id != wg_id) { throw new ResourceConflictException("LDS", wf.wg_id, wg_id) }
-        if((wf.sgpr._1 != wf.sgpr._2 + 1) && (wf.sgpr._1 >= sgpr._1 && wf.sgpr._1 <= sgpr._2) && wf.wg_id != wg_id) { throw new ResourceConflictException("sGPR", wf.wg_id, wg_id) }
-        if((wf.vgpr._1 != wf.vgpr._2 + 1) && (wf.vgpr._1 >= vgpr._1 && wf.vgpr._1 <= vgpr._2) && wf.wg_id != wg_id) { throw new ResourceConflictException("vGPR", wf.wg_id, wg_id) }
-        if((lds._1  != lds._2  + 1) && (lds._1  >= wf.lds._1  && lds._1  <= wf.lds._2 ) && wf.wg_id != wg_id) { throw new ResourceConflictException("LDS", wf.wg_id, wg_id) }
-        if((sgpr._1 != sgpr._2 + 1) && (sgpr._1 >= wf.sgpr._1 && sgpr._1 <= wf.sgpr._2) && wf.wg_id != wg_id) { throw new ResourceConflictException("sGPR", wf.wg_id, wg_id) }
-        if((vgpr._1 != vgpr._2 + 1) && (vgpr._1 >= wf.vgpr._1 && vgpr._1 <= wf.vgpr._2) && wf.wg_id != wg_id) { throw new ResourceConflictException("vGPR", wf.wg_id, wg_id) }
+  def wf_check1(wf2: Wf_slot): Unit= {
+    wf_slot.foreach { wf1 =>
+      if(wf1.valid) {
+        if((wf1.lds._1  != wf1.lds._2  + 1) && (wf1.lds._1  >= wf2.lds._1  && wf1.lds._1  <= wf2.lds._2 ) && wf1.wg_id != wf2.wg_id) { throw new ResourceConflictException("LDS", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
+        if((wf1.sgpr._1 != wf1.sgpr._2 + 1) && (wf1.sgpr._1 >= wf2.sgpr._1 && wf1.sgpr._1 <= wf2.sgpr._2)) { throw new ResourceConflictException("sGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
+        if((wf1.vgpr._1 != wf1.vgpr._2 + 1) && (wf1.vgpr._1 >= wf2.vgpr._1 && wf1.vgpr._1 <= wf2.vgpr._2)) { throw new ResourceConflictException("vGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
+        if((wf2.lds._1  != wf2.lds._2  + 1) && (wf2.lds._1  >= wf1.lds._1  && wf2.lds._1  <= wf1.lds._2 ) && wf1.wg_id != wf2.wg_id) { throw new ResourceConflictException("LDS", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
+        if((wf2.sgpr._1 != wf2.sgpr._2 + 1) && (wf2.sgpr._1 >= wf1.sgpr._1 && wf2.sgpr._1 <= wf1.sgpr._2)) { throw new ResourceConflictException("sGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
+        if((wf2.vgpr._1 != wf2.vgpr._2 + 1) && (wf2.vgpr._1 >= wf1.vgpr._1 && wf2.vgpr._1 <= wf1.vgpr._2)) { throw new ResourceConflictException("vGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
       }
     }
   }
-  def wf_new(wg_id: Int, wf_tag: Int, lds: (Int, Int), sgpr: (Int, Int), vgpr: (Int, Int)): Unit = {
-    wf_check(wg_id, lds, sgpr, vgpr)
+  def wf_check(wg_id: Int, wftag: Int, lds: (Int, Int), sgpr: (Int, Int), vgpr: (Int, Int)): Unit= {
+    wf_slot.foreach {wf =>
+      if(wf.valid) {
+        if((wf.lds._1  != wf.lds._2  + 1) && (wf.lds._1  >= lds._1  && wf.lds._1  <= lds._2 ) && wf.wg_id != wg_id) { throw new ResourceConflictException("LDS", wf.wg_id, wf.wf_tag, wg_id, wftag) }
+        if((wf.sgpr._1 != wf.sgpr._2 + 1) && (wf.sgpr._1 >= sgpr._1 && wf.sgpr._1 <= sgpr._2)) { throw new ResourceConflictException("sGPR", wf.wg_id, wf.wf_tag, wg_id, wftag) }
+        if((wf.vgpr._1 != wf.vgpr._2 + 1) && (wf.vgpr._1 >= vgpr._1 && wf.vgpr._1 <= vgpr._2)) { throw new ResourceConflictException("vGPR", wf.wg_id, wf.wf_tag, wg_id, wftag) }
+        if((lds._1  != lds._2  + 1) && (lds._1  >= wf.lds._1  && lds._1  <= wf.lds._2 ) && wf.wg_id != wg_id) { throw new ResourceConflictException("LDS", wf.wg_id, wf.wf_tag, wg_id, wftag) }
+        if((sgpr._1 != sgpr._2 + 1) && (sgpr._1 >= wf.sgpr._1 && sgpr._1 <= wf.sgpr._2)) { throw new ResourceConflictException("sGPR", wf.wg_id, wf.wf_tag, wg_id, wftag) }
+        if((vgpr._1 != vgpr._2 + 1) && (vgpr._1 >= wf.vgpr._1 && vgpr._1 <= wf.vgpr._2)) { throw new ResourceConflictException("vGPR", wf.wg_id, wf.wf_tag, wg_id, wftag) }
+      }
+    }
+  }
+  def wf_new(wf: Wf_slot): Unit = {
+    wf_check1(wf)
+    wf.valid = true
+    wf.time = 200 + Random.nextInt(400)
+
+    if(wf_new_last_valid && wf.wf_id == 0) {
+      if(wf_new_last_wfid + 1 != testIn.wf(wf_new_last_wgid)) {
+        throw new MyException(s"CU ${cu_id} WG ${wf_new_last_wgid} not complete: expect num_wf=${testIn.wf(wf_new_last_wgid)}, received ${wf_new_last_wfid+1}")
+      }
+      if(wf_new_last_lds._2 - wf_new_last_lds._1 + 1 != testIn.lds(wf_new_last_wgid)) {
+        throw new MyException(s"CU ${cu_id} WG ${wf_new_last_wgid} resource LDS allocation error: expect num_lds=${testIn.lds(wf_new_last_wgid)}, got ${wf_new_last_lds}")
+      }
+      println(s"CU ${cu_id} receive WG ${wf_new_last_wgid}: LDS=${wf_new_last_lds}, SGPR=${wf_new_last_sgpr}, VGPR=${wf_new_last_vgpr}")
+    } else if(wf_new_last_valid) {
+      if(wf_new_last_wgid != wf.wg_id) {
+        throw new MyException(s"CU ${cu_id} receives wrong WG: ${wf_new_last_wgid}, ${wf.wg_id}")
+      }
+      if(wf_new_last_sgpr._2 + 1 != wf.sgpr._1) {
+        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource SGPR allocation error: WF ID ${wf_new_last_wfid} and ${wf.wf_id}")
+      }
+      if(wf_new_last_vgpr._2 + 1 != wf.vgpr._1) {
+        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource VGPR allocation error: WF ID ${wf_new_last_wfid} and ${wf.wf_id}")
+      }
+    }
+    wf_new_last_valid = true
+    wf_new_last_wgid = wf.wg_id
+    wf_new_last_wfid = wf.wf_id
+    wf_new_last_csr = wf.csr
+    wf_new_last_lds = (if(wf.wf_id==0) wf.lds._1 else wf_new_last_lds._1, wf.lds._2)
+    wf_new_last_sgpr = (if(wf.wf_id==0) wf.sgpr._1 else wf_new_last_sgpr._1, wf.sgpr._2)
+    wf_new_last_vgpr = (if(wf.wf_id==0) wf.vgpr._1 else wf_new_last_vgpr._1, wf.vgpr._2)
     for(i <- 0 until NUM_WF_SLOT) {
       if(!wf_slot(i).valid) {
-        wf_slot(i).valid = true
-        wf_slot(i).wg_id = wg_id
-        wf_slot(i).wf_tag = wf_tag
-        wf_slot(i).lds = lds
-        wf_slot(i).sgpr = sgpr
-        wf_slot(i).vgpr = vgpr
-        wf_slot(i).time = 200 + Random.nextInt(200).abs
+        wf_slot(i) := wf
         return
       }
     }
-    throw new Exception(s"ERROR: CU ${cu_id} WF slot not enough")
+    throw new MyException(s"ERROR: CU ${cu_id} WF slot not enough")
   }
   def wf_done(wf_tag: Int): Int = {
     for(i <- 0 until NUM_WF_SLOT) {
@@ -87,23 +149,31 @@ class Cu(val cu_id: Int, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) {
         return wf_slot(i).wg_id
       }
     }
-    assert(cond = false)
+    chisel3.assert(cond=false)
     0
   }
 }
 
-class Gpu {
+class Gpu(val testIn: TestIn) {
   val NUM_CU = CONFIG.GPU.NUM_CU
-  val cu = Seq.tabulate(NUM_CU)(i => new Cu(cu_id = i))
+  val cu = Seq.tabulate(NUM_CU)(i => new Cu(cu_id = i, testIn))
   var wf_cnt = 0
-
-  def update(cycle: Int = 1): Seq[(Boolean, Int, Int)] = {
-    Seq.tabulate(NUM_CU)(i => cu(i).update(cycle))
+  def wftag_decode(wftag: Int): (Int, Int) = {
+    assert(CONFIG.WG.NUM_WF_MAX == 32 && CONFIG.GPU.NUM_WG_SLOT == 8)
+    val wfid_bitmask = 0x1F
+    val wgslot_bitmask = 0x7 << 5
+    val wgslot = (wftag & wgslot_bitmask) >> 5
+    val wfid = (wftag & wfid_bitmask)
+    (wgslot, wfid)
   }
-  def wf_new(cu_id: Int, wg_id: Int, wf_tag: Int, lds: (Int, Int), sgpr: (Int, Int), vgpr: (Int, Int)): Unit = {
-    cu(cu_id).wf_new(wg_id, wf_tag, lds, sgpr, vgpr)
+
+  def update(): Seq[(Boolean, Int, Int)] = {
+    Seq.tabulate(NUM_CU)(i => cu(i).update())
+  }
+  def wf_new(cu_id: Int, wg: Wf_slot): Unit = {
+    cu(cu_id).wf_new(wg)
     wf_cnt += 1
-    println(s"CU ${cu_id} exec WG ${wg_id}: LDS=${lds}, SGPR=${sgpr}, VGPR=${vgpr}")
+    //println(s"CU ${cu_id} exec WG ${wg_id} WF ${wf_id}: LDS=${lds}, SGPR=${sgpr}, VGPR=${vgpr}")
   }
   def wf_done(cu_id: Int, wf_tag: Int): Unit = {
     val wg_id = cu(cu_id).wf_done(wf_tag = wf_tag)
@@ -113,178 +183,34 @@ class Gpu {
 }
 
 class test1 extends AnyFreeSpec with ChiselScalatestTester {
-
-  println("class test1 begin")
-
-  class wg_buffer_wrapper extends Module {
-    val io = IO(new Bundle{
-      val host_wg_new = Flipped(DecoupledIO(new io_host2cta))             // Get new wg from host
-      val alloc_wg_new = DecoupledIO(new io_buffer2alloc(16))             // Request allocator to determine if the given wg is ok to allocate
-      val alloc_result = Flipped(DecoupledIO(new io_alloc2buffer()))      // Determination result from allocator
-      val cuinterface_wg_new = DecoupledIO(new io_buffer2cuinterface)
-      val host_wg_new_r = Output(new DecoupledIO_monitor(new io_host2cta))
-      val alloc_wg_new_r = Output(new DecoupledIO_monitor(new io_buffer2alloc(16)))
-      val alloc_result_r = Output(new DecoupledIO_monitor(new io_alloc2buffer()))
-      val cuinterface_wg_new_r = Output(new DecoupledIO_monitor(new io_buffer2cuinterface))
-    })
-    val inst = Module{new wg_buffer()}
-    inst.io.host_wg_new <> io.host_wg_new
-    inst.io.alloc_wg_new <> io.alloc_wg_new
-    inst.io.alloc_result <> io.alloc_result
-    inst.io.cuinterface_wg_new <> io.cuinterface_wg_new
-    io.host_wg_new_r.valid := RegNext(io.host_wg_new.valid)
-    io.host_wg_new_r.bits  := RegNext(io.host_wg_new.bits)
-    io.host_wg_new_r.ready := RegNext(io.host_wg_new.ready)
-    io.alloc_wg_new_r.valid := RegNext(io.alloc_wg_new.valid)
-    io.alloc_wg_new_r.bits  := RegNext(io.alloc_wg_new.bits )
-    io.alloc_wg_new_r.ready := RegNext(io.alloc_wg_new.ready)
-    io.alloc_result_r.valid := RegNext(io.alloc_result.valid)
-    io.alloc_result_r.bits  := RegNext(io.alloc_result.bits )
-    io.alloc_result_r.ready := RegNext(io.alloc_result.ready)
-    io.cuinterface_wg_new_r.valid := RegNext(io.cuinterface_wg_new.valid)
-    io.cuinterface_wg_new_r.bits  := RegNext(io.cuinterface_wg_new.bits )
-    io.cuinterface_wg_new_r.ready := RegNext(io.cuinterface_wg_new.ready)
-  }
-
-  /*
-  "Test1: wg_buffer" in {
-    test(new wg_buffer_wrapper).withAnnotations(Seq()) { dut =>
-
-      dut.io.host_wg_new.initSource().setSourceClock(dut.clock)
-      dut.io.alloc_wg_new.initSink().setSinkClock(dut.clock)
-      dut.io.alloc_result.initSource().setSourceClock(dut.clock)
-      dut.io.cuinterface_wg_new.initSink().setSinkClock(dut.clock)
-
-      val testlen = 200
-      val testIn = Seq.tabulate(testlen){i => (Random.nextInt().abs, Random.nextInt(1024))}
-
-      val testSeqIn = Seq.tabulate(testlen){i => (new io_host2cta).Lit(
-        _.wg_id -> i.U,
-        _.csr_kernel-> testIn(i)._1.U(32.W),
-        _.num_lds -> testIn(i)._2.U(10.W),
-        _.gds_base -> 0.U,
-        _.num_wf -> 0.U,
-        _.num_sgpr -> 0.U,
-        _.num_vgpr -> 0.U,
-        _.num_sgpr_per_wf -> 0.U,
-        _.num_vpgr_per_wf -> 0.U,
-        _.num_thread_per_wf -> 0.U,
-        _.num_gds -> 0.U,
-        _.pds_base -> 0.U,
-        _.start_pc -> 0.U,
-        _.num_wg_x -> 0.U,
-        _.num_wg_y -> 0.U,
-        _.num_wg_z -> 0.U,
-      ) }
-
-      val testOut = new Array[(BigInt, BigInt)](testlen)
-
-      var alloc_cnt = 0
-      var cu_cnt = 0
-      var wg_id = 0
-      var data = 0
-
-      dut.io.alloc_wg_new.ready.poke(false.B)
-      dut.io.cuinterface_wg_new.ready.poke(false.B)
-      dut.clock.step(5)
-
-
-      fork{
-        dut.clock.step(5)
-        dut.io.host_wg_new.enqueueSeq(testSeqIn)
-      } .fork {
-        while(alloc_cnt < testlen){
-          if(dut.io.alloc_wg_new_r.valid.peek().litToBoolean && dut.io.alloc_wg_new_r.ready.peek().litToBoolean) {
-            wg_id = dut.io.alloc_wg_new_r.bits.wg_id.peek.litValue.toInt;
-            data = dut.io.alloc_wg_new_r.bits.num_lds.peek.litValue.toInt;
-            val addr = dut.io.alloc_wg_new_r.bits.wgram_addr.peek.litValue;
-            dut.io.alloc_wg_new.ready.poke(false.B)
-
-            dut.clock.step(Random.nextInt(5))
-            val accept = Random.nextBoolean
-            if(accept){
-              alloc_cnt = alloc_cnt + 1
-            }
-
-            dut.io.alloc_result.valid.poke(true.B)
-            dut.io.alloc_result.bits.poke(
-              new(io_alloc2buffer).Lit(
-                _.accept -> accept.B,
-                _.wgram_addr -> addr.U,
-              )
-            )
-            do {
-              dut.clock.step(1)
-            } while(!dut.io.alloc_result_r.ready.peek.litToBoolean)
-            dut.io.alloc_result.valid.poke(false.B)
-          }
-          if(alloc_cnt > cu_cnt){
-            dut.io.alloc_wg_new.ready.poke(false.B)
-          } else {
-            dut.io.alloc_wg_new.ready.poke(Random.nextBoolean.B)
-          }
-          dut.clock.step(1)
-        }
-      } .fork {
-        while(cu_cnt < testlen){
-          if(dut.io.cuinterface_wg_new_r.valid.peek.litToBoolean && dut.io.cuinterface_wg_new_r.ready.peek.litToBoolean){
-            dut.io.cuinterface_wg_new.ready.poke(false.B)
-            testOut(wg_id) = (dut.io.cuinterface_wg_new_r.bits.csr_kernel.peek.litValue, data)
-          }
-          if(alloc_cnt > cu_cnt && dut.io.cuinterface_wg_new_r.valid.peek.litToBoolean){
-            dut.io.cuinterface_wg_new.ready.poke(true.B)
-            cu_cnt = cu_cnt + 1
-          }
-          dut.clock.step(1)
-        }
-        if(dut.io.cuinterface_wg_new_r.valid.peek.litToBoolean && dut.io.cuinterface_wg_new_r.ready.peek.litToBoolean){
-          dut.io.cuinterface_wg_new.ready.poke(false.B)
-          testOut(wg_id) = (dut.io.cuinterface_wg_new_r.bits.csr_kernel.peek.litValue, data)
-        }
-      }.join()
-
-      for(i <- 0 until testlen){
-        assert(testOut(i)._1 == testIn(i)._1)
-        assert(testOut(i)._2 == testIn(i)._2)
-      }
-    }
-  }
-  */
-
-  "Test2: CTA_scheduler" in {
-    test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)) { dut =>
+  "Test: CTA_scheduler" in {
+    //test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)) { dut =>
+    test(new cta_scheduler_top()).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
       dut.io.host_wg_new.initSource().setSourceClock(dut.clock)
       dut.io.host_wg_done.initSink().setSinkClock(dut.clock)
       dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
       dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
 
-      val NUM_CU = CONFIG.GPU.NUM_CU
-      val gpu = new Gpu
-
       val testlen = 2000
-      val testIn_csr = Seq.tabulate(testlen){i => Random.nextInt().abs}
-      val testIn_lds = Seq.tabulate(testlen){i =>  Random.nextInt(CONFIG.WG.NUM_LDS_MAX  / 3)}
-      val testIn_sgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_SGPR_MAX / 3)}
-      val testIn_vgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_VGPR_MAX / 3)}
+      val testIn = new TestIn(testlen)
       val testOut_wg = new Array[Boolean](testlen)
-      //val testOut_cu = new Array[Int](testlen)
-      //val testOut_csr = new Array[Int](testlen)
-      //val testOut_lds = new Array[Int](testlen)
-      //val testOut_sgpr = new Array[Int](testlen)
-      //val testOut_vgpr = new Array[Int](testlen)
+
+      val NUM_CU = CONFIG.GPU.NUM_CU
+      val gpu = new Gpu(testIn)
+
       val testSeqIn = Seq.tabulate(testlen){i => (new io_host2cta).Lit(
         _.wg_id -> i.U,
-        _.csr_kernel-> testIn_csr(i).U(CONFIG.GPU.MEM_ADDR_WIDTH),
-        _.num_lds -> testIn_lds(i).U,
-        _.num_sgpr -> testIn_sgpr(i).U,
-        _.num_vgpr -> testIn_vgpr(i).U,
-        _.num_wf -> 0.U,
+        _.csr_kernel-> testIn.csr(i).U(CONFIG.GPU.MEM_ADDR_WIDTH),
+        _.num_sgpr_per_wf -> testIn.sgpr(i).U,
+        _.num_vgpr_per_wf -> testIn.vgpr(i).U,
+        _.num_sgpr -> (testIn.sgpr(i) * testIn.wf(i)).U,
+        _.num_vgpr -> (testIn.vgpr(i) * testIn.wf(i)).U,
+        _.num_lds -> testIn.lds(i).U,
+        _.num_wf -> testIn.wf(i).U,
         _.gds_base -> 0.U,
-        _.num_sgpr_per_wf -> 0.U,
-        _.num_vgpr_per_wf -> 0.U,
-        _.num_thread_per_wf -> 0.U,
         _.num_gds -> 0.U,
+        _.num_thread_per_wf -> 0.U,
         _.pds_base -> 0.U,
         _.start_pc -> 0.U,
         _.num_wg_x -> 0.U,
@@ -292,14 +218,16 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
         _.num_wg_z -> 0.U,
       ) }
 
+
+
       dut.io.host_wg_done.ready.poke(false.B)
       dut.io.host_wg_new.valid.poke(false.B)
       dut.clock.step(5)
 
       var cnt = 0
-      fork{
+      fork{       // Host_wg_new
         dut.io.host_wg_new.enqueueSeq(testSeqIn)
-      } .fork {
+      } .fork {   // CU interface
         while(cnt < testlen) {
           val wf_done_seq = gpu.update()
           for(i <- 0 until NUM_CU) {
@@ -317,38 +245,26 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
           for(i <- 0 until NUM_CU) {
             val wf_new = dut.io.cu_wf_new(i)
             wf_new.ready.poke((Random.nextInt(10).abs < 2).B)
-            val wg_id = wf_new.bits.wg_id.peek.litValue.toInt
-            val lds =  (wf_new.bits.lds_base.peek.litValue.toInt , wf_new.bits.lds_base.peek.litValue.toInt  + testIn_lds(wg_id)  - 1)
-            val sgpr = (wf_new.bits.sgpr_base.peek.litValue.toInt, wf_new.bits.sgpr_base.peek.litValue.toInt + testIn_sgpr(wg_id) - 1)
-            val vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + testIn_vgpr(wg_id) - 1)
+            val wf = new Wf_slot
+            wf.wg_id = wf_new.bits.wg_id.peek.litValue.toInt
+            wf.lds =  (wf_new.bits.lds_base.peek.litValue.toInt , wf_new.bits.lds_base.peek.litValue.toInt  + testIn.lds(wf.wg_id)  - 1)
+            wf.sgpr = (wf_new.bits.sgpr_base.peek.litValue.toInt, wf_new.bits.sgpr_base.peek.litValue.toInt + testIn.sgpr(wf.wg_id) - 1)
+            wf.vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + testIn.vgpr(wf.wg_id) - 1)
+            wf.wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt
+            wf.csr = wf_new.bits.csr_kernel.peek.litValue.toInt
             if(wf_new.valid.peek.litToBoolean && wf_new.ready.peek.litToBoolean) {
-              gpu.wf_new(cu_id = i, wg_id = wg_id,
-                wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt,
-                lds = lds, sgpr = sgpr, vgpr = vgpr
-              )
+              gpu.wf_new(cu_id = i, wf)
             }
           }
           dut.clock.step()
         }
-      } .fork {
+      } .fork {   // Host_wg_done
         dut.clock.step(70)
         while(cnt < testlen){
           dut.io.host_wg_done.ready.poke((scala.util.Random.nextBoolean() && scala.util.Random.nextBoolean()).B)
           if(dut.io.host_wg_done.valid.peek.litToBoolean && dut.io.host_wg_done.ready.peek.litToBoolean) {
             val wg_id = dut.io.host_wg_done.bits.wg_id.peek.litValue.toInt
             testOut_wg(wg_id) = true
-            //testOut_cu(wg_id) = dut.io.host_wg_done.bits.cu_id.peek.litValue.toInt
-            //testOut_csr(wg_id) = dut.io.host_wg_done.bits.csr_kernel.peek.litValue.toInt
-            //testOut_lds(wg_id) = dut.io.host_wg_done.bits.lds_base.peek.litValue.toInt
-            //testOut_sgpr(wg_id) = dut.io.host_wg_done.bits.sgpr_base.peek.litValue.toInt
-            //testOut_vgpr(wg_id) = dut.io.host_wg_done.bits.vgpr_base.peek.litValue.toInt
-            //assert(testOut_csr(wg_id) == testIn_csr(wg_id))
-            //println(s"WG ${dut.io.host_wg_done.bits.wg_id.peek.litValue} finished: " +
-            //  s"CU = ${testOut_cu(wg_id)}, " +
-            //  s"LDS = [${testOut_lds(wg_id)}, ${testOut_lds(wg_id)+testIn_lds(wg_id)-1}], " +
-            //  s"SGPR = [${testOut_sgpr(wg_id)}, ${testOut_sgpr(wg_id)+testIn_sgpr(wg_id)-1}], " +
-            //  s"VGPR = [${testOut_vgpr(wg_id)}, ${testOut_vgpr(wg_id)+testIn_vgpr(wg_id)-1}], "
-            //)
             println(s"WG ${dut.io.host_wg_done.bits.wg_id.peek.litValue} finished")
             cnt = cnt + 1
           }
@@ -356,6 +272,7 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
         }
       }.join
 
+      assert(gpu.wf_cnt == 0)
       dut.clock.step(100)
     }
   }
