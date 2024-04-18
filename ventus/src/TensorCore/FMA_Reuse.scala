@@ -6,29 +6,7 @@ import chisel3._
 import chisel3.util._
 import fudian._
 
-class NaiveMultiplier(len: Int, pipeAt: Seq[Int]) extends Module {
-  val io = IO(new Bundle() {
-    val a, b = Input(UInt(len.W))
-    val regEnables = Input(Vec(pipeAt.size, Bool()))
-    val result = Output(UInt((2 * len).W))
-    val sum = Output(UInt(len.W))
-    val carry = Output(UInt(len.W))
-  })
-  io.result := RegEnable(io.a, io.regEnables(0)) * RegEnable(io.b, io.regEnables(0))
-  io.sum := 0.U
-  io.carry := 0.U
-}
-
-class MulToAddIO(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl()) extends Bundle {
-  val mulOutput = new FMULToFADD(expWidth, precision)
-  val addAnother = UInt((expWidth + precision).W)
-  val op = UInt(3.W)
-  val rm = UInt(3.W)
-  //val ctrl = if (hasCtrl) new FPUCtrl else new FPUCtrl(false)
-  val ctrl = FPUCtrlFac(ctrlGen)
-}
-
-class FMULPipe(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
+class FMULPipe_re(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
   extends FPUPipelineModule(expWidth + precision, ctrlGen) {
   override def latency: Int = 2
 
@@ -75,7 +53,76 @@ class FMULPipe(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
   io.out.bits.ctrl.foreach( _ := toAdd.ctrl.get)
 }
 
-class Int8Extender extends Module {
+class NaiveMultiplier_Int8(len: Int, pipeAt: Seq[Int]) extends Module {
+  val io = IO(new Bundle() {
+    val a, b = Input(UInt(8.W))
+    val regEnables = Input(Vec(pipeAt.size, Bool()))
+    val result = Output(UInt((len*2).W))
+    val result_16 = Output(UInt(16.W))
+    val sum = Output(UInt(len.W))
+    val carry = Output(UInt(len.W))
+  })
+  val int8Extender_a = Module(new Int8Extender_12)
+  val int8Extender_b = Module(new Int8Extender_12)
+  int8Extender_a.io.in := io.a
+  int8Extender_b.io.in := io.b
+
+  io.result := RegEnable(int8Extender_a.io.out, io.regEnables(0)) * RegEnable(int8Extender_b.io.out, io.regEnables(0))
+  io.result_16 := io.result(23,8).asUInt()
+  io.sum := 0.U
+  io.carry := 0.U
+}
+
+class NaiveMultiplier_Int4(len: Int, pipeAt: Seq[Int]) extends Module {
+  val io = IO(new Bundle() {
+    val a, b, c = Input(UInt(4.W))
+    val regEnables = Input(Vec(pipeAt.size, Bool()))
+    val result = Output(UInt((len*2).W))
+    val result_INT4_out_bc = Output(UInt(8.W))
+    val result_INT4_out_ac = Output(UInt(8.W))
+    val sum = Output(UInt(len.W))
+    val carry = Output(UInt(len.W))
+  })
+  val int4Extender = Module(new Int4Extender_12)
+//  val int4GetResult = Module(new Int4GetResult)
+
+  int4Extender.io.inA := io.a
+  int4Extender.io.inB := io.b
+  int4Extender.io.inC := io.c
+
+  io.result := RegEnable(int4Extender.io.out1, io.regEnables(0)) * RegEnable(int4Extender.io.out2, io.regEnables(0))
+
+//  int4GetResult.io.inB := io.b
+//  int4GetResult.io.inC := io.c
+//  int4GetResult.io.in := RegEnable(int4Extender.io.out1, io.regEnables(0)) * RegEnable(int4Extender.io.out2, io.regEnables(0))
+
+  io.result_INT4_out_bc := io.result(7,0).asUInt()//int4GetResult.io.out_bc
+  io.result_INT4_out_ac := io.result(15,8).asUInt() //int4GetResult.io.out_ac
+  io.sum := 0.U
+  io.carry := 0.U
+}
+
+class Multiplier_Binary(len: Int, pipeAt: Seq[Int]) extends Module {
+  val io = IO(new Bundle() {
+    val a0, w = Input(UInt(len.W))
+//    val regEnables = Input(Vec(pipeAt.size, Bool()))
+    val a1 = Output(UInt(len.W))
+  })
+//  val temp = PopCount(~(io.a0^io.w))
+  io.a1 := PopCount(~(io.a0^io.w))
+//  io.a1 := RegEnable(PopCount((~(io.a0^io.w)).asBools), io.regEnables(0))
+
+}
+
+class Int8Extender_12 extends Module {
+  val io = IO(new Bundle {
+    val in = Input(UInt(8.W))  // 输入端口，8 位无符号整数
+    val out = Output(UInt(12.W)) // 输出端口，12 位无符号整数
+  })
+  io.out := Cat(io.in, 0.U(4.W)).asUInt()
+}
+
+class Int8Extender_16 extends Module {
   val io = IO(new Bundle {
     val in = Input(UInt(8.W))  // 输入端口，8 位无符号整数
     val out = Output(UInt(16.W)) // 输出端口，16 位无符号整数
@@ -83,7 +130,20 @@ class Int8Extender extends Module {
   io.out := Cat(io.in(7), 0.U(4.W), io.in(6, 0), 0.U(4.W))
 }
 
-class Int4Extender extends Module {
+class Int4Extender_12 extends Module {
+  val io = IO(new Bundle {
+    val inA = Input(UInt(4.W))  // 输入端口，4 位无符号整数
+    val inB = Input(UInt(4.W))  // 输入端口，4 位无符号整数
+    val inC = Input(UInt(4.W))  // 输入端口，4 位无符号整数
+    val out1 = Output(UInt(12.W)) // 输出端口，12 位无符号整数
+    val out2 = Output(UInt(12.W)) // 输出端口，12 位无符号整数
+  })
+
+  io.out1 := Cat(io.inA,0.U(4.W), io.inB).asUInt()
+  // 将io.inC的位放在low位，然后在high位附加一个12位的零值
+  io.out2 := Cat(0.U(8.W),io.inC).asUInt()
+}
+class Int4Extender_16 extends Module {
   val io = IO(new Bundle {
     val inA = Input(UInt(4.W))  // 输入端口，4 位无符号整数
     val inB = Input(UInt(4.W))  // 输入端口，4 位无符号整数
@@ -92,95 +152,53 @@ class Int4Extender extends Module {
     val out2 = Output(UInt(16.W)) // 输出端口，16 位无符号整数
   })
 
-  io.out1 := Cat(io.inA(3), 0.U(4.W), io.inA(2, 0),0.U(4.W), io.inB)
+  io.out1 := Cat(io.inA(3), 0.U(4.W), io.inA(2, 0),0.U(4.W), io.inB).asUInt()
   // 将io.inC的位放在高位，然后在低位附加一个12位的零值
-  io.out2 := Cat(io.inC, 0.U(12.W))
+  io.out2 := Cat(0.U(12.W), io.inC).asUInt()
 }
 
 class Int4GetResult extends Module {
   val io = IO(new Bundle {
     val in = Input(UInt(24.W))  // 输入端口，24 位无符号整数
-    val inB = Input(UInt(4.W))  // 输入端口，4 位无符号整数
-    val inC = Input(UInt(4.W))  // 输入端口，4 位无符号整数
-    val out1 = Output(UInt(8.W)) // 输出端口，8 位无符号整数（BC 相乘结果）
-    val out2 = Output(UInt(8.W)) // 输出端口，8 位无符号整数（AC 相乘结果）
+    val out_bc = Output(UInt(8.W)) // 输出端口，8 位无符号整数（BC 相乘结果）
+    val out_ac = Output(UInt(8.W)) // 输出端口，8 位无符号整数（AC 相乘结果）
   })
 
   // 提取 BC 相乘的结果（低 8 位）
-  io.out1 := io.in(7, 0)
+  io.out_bc := io.in(7, 0)
 
   // 检查特定的位条件
-  val condition = (io.inB(3) & io.inC(3)) & (io.inB(2) & io.inC(2))
+//  val condition = (io.inB(3) & io.inC(3)) & (io.inB(2) & io.inC(2))
 
   // 根据条件计算 AC 相乘的结果
-  io.out2 := Mux(condition, io.in(23, 16) - 1.U, io.in(23, 16))
-}
-class FADDPipe(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
-  extends FPUPipelineModule(expWidth + precision, ctrlGen) {
-  override def latency: Int = 1
-
-  val len = expWidth + precision
-
-  val fromMul = IO(Input(new MulToAddIO(expWidth, precision, ctrlGen)))
-
-  val s1 = Module(new FCMA_ADD_s1(expWidth, 2 * precision, precision))
-  val s2 = Module(new FCMA_ADD_s2(expWidth, precision))
-
-  val isFMA = FPUOps.isFMA(io.in.bits.op)
-  //val s1_isFMA = S1Reg(isFMA)
-
-  //val s1_mulProd = S1Reg(fromMul.mulOutput)
-  val srcA = io.in.bits.a
-  val srcB = Mux(isFMA, fromMul.addAnother, io.in.bits.b)
-
-  val invAdd = withSUB(io.in.bits.op)
-
-  val add1 = Mux(isFMA,
-    fromMul.mulOutput.fp_prod.asUInt,
-    Cat(srcA(len - 1, 0), 0.U(precision.W))
-  )
-  val add2 = Cat(
-    Mux(invAdd, invertSign(srcB), srcB),
-    0.U(precision.W)
-  )
-  s1.io.a := add1
-  s1.io.b := add2
-  s1.io.b_inter_valid := isFMA
-  s1.io.b_inter_flags := Mux(isFMA,
-    fromMul.mulOutput.inter_flags,
-    0.U.asTypeOf(s1.io.b_inter_flags)
-  )
-  s1.io.rm := Mux(isFMA, fromMul.rm, io.in.bits.rm)
-  s2.io.in := S1Reg(s1.io.out)
-
-  io.out.bits.result := s2.io.result
-  io.out.bits.fflags := s2.io.fflags
-  io.out.bits.ctrl.foreach( _ := S1Reg(io.in.bits.ctrl.get))
+//  io.out_ac := Mux(condition, io.in(15, 8) - 1.U, io.in(15, 8))
+  io.out_ac := io.in(15, 8) //Mux(condition, io.in(15, 8), io.in(15, 8))
 }
 
-class FMULReused(expWidth: Int, precision: Int, INTmode: Bool,ctrlGen: Data = EmptyFPUCtrl())
+class FMULReused(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
   extends FPUSubModule(expWidth + precision, ctrlGen) {
+  val INTmode = IO(Input(Bool()))
+//  val InputINT8_A = IO(Input(UInt((precision+1).W)))
   val multiplierResult = IO(Output(UInt((2 * precision + 2).W)))
 
-  val mulPipe = Module(new FMULPipe(expWidth, precision, ctrlGen))
+  val mulPipe = Module(new FMULPipe_re(expWidth, precision, ctrlGen))
+  val addPipe = Module(new FADDPipe(expWidth, precision, ctrlGen))
+//  val InputInt8_a = Module(new Int8Extender())
+//  InputInt8_a.io.in := io.in.bits.a_UINT8
+//  val InputInt8_b = Module(new Int8Extender())
+//  InputInt8_b.io.in := io.in.bits.b_UINT8
+//
+//  mulPipe.io.in.bits.a := InputInt8_a.io.out
+//  mulPipe.io.in.bits.b := InputInt8_b.io.out
+
   mulPipe.io.in.bits := io.in.bits
+//  mulPipe.io.in.bits.rm := io.in.bits.rm
+
   mulPipe.INTmode := INTmode
   mulPipe.io.in.valid := io.in.valid && (FPUOps.isFMA(io.in.bits.op) || FPUOps.isFMUL(io.in.bits.op))
 
-  io.out := mulPipe.io.out
+//  io.out := mulPipe.io.out
   multiplierResult := mulPipe.multiplierResult
-  }
-
-class FMA(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
-  extends FPUSubModule(expWidth + precision, ctrlGen) {
-
-  val mulPipe = Module(new FMULPipe(expWidth, precision, ctrlGen))
-  val addPipe = Module(new FADDPipe(expWidth, precision, ctrlGen))
-
-  mulPipe.io.in.bits := io.in.bits
-  mulPipe.io.in.valid := io.in.valid && (FPUOps.isFMA(io.in.bits.op) || FPUOps.isFMUL(io.in.bits.op))
-  //addPipe.io.in.bits := io.in.bits
-
   // 加法器从FMA输入端和乘法器输出端接收数据
   // 乘加和加法同时抵达时，乘加优先级更高: 0->输入来自乘法器输出, 1->输入来自外层输入
   class ArbiterIO extends Bundle {
@@ -237,4 +255,5 @@ class FMA(expWidth: Int, precision: Int, ctrlGen: Data = EmptyFPUCtrl())
   toOutArbiter.io.in(0) <> addFIFO.io.deq
   toOutArbiter.io.in(1) <> mulFIFO.io.deq
   io.out <> toOutArbiter.io.out
-}
+
+  }
