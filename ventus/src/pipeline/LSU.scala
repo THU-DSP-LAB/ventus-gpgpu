@@ -67,12 +67,14 @@ class ShareMemCoreReq_np extends Bundle{
   val setIdx = UInt(dcache_SetIdxBits.W)
   val perLaneAddr = Vec(num_thread, new ShareMemPerLaneAddr_np)
   val data = Vec(num_thread, UInt(xLen.W))
+  val dma = Bool()
 }
 
 class ShareMemCoreRsp_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val data = Vec(num_thread, UInt(xLen.W))
   val activeMask = Vec(num_thread, Bool())//UInt(NLanes.W)
+  val dma = Bool()
 }
 
 class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag的接口
@@ -214,6 +216,8 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   })
   io.to_shared.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool(), VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
   io.to_shared.bits.isWrite := reg_save.ctrl.mem_cmd(1)
+  // xrn add dma
+  io.to_shared.bits.dma := false.B
   io.to_shared.valid := state===s_shared
 
   //val vld_toDCache = Reg(Bool())
@@ -451,7 +455,7 @@ class LSUexe() extends Module{
     val lsu_rsp = DecoupledIO(new MSHROutput)
     val dcache_req = DecoupledIO(new DCacheCoreReq_np())
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
-    val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np))
     val fence_end = Output(UInt(num_warp.W))
 
     val csr_wid = Output(UInt(depth_warp.W))
@@ -471,6 +475,7 @@ class LSUexe() extends Module{
   io.shared_req <> AddrCalc.io.to_shared
 
   val rspArbiter = Module(new Arbiter(new DCacheCoreRsp_np, n = 2))
+  // xrn add dma
   rspArbiter.io.in(1) <> io.shared_rsp
   rspArbiter.io.in(0) <> io.dcache_rsp
 

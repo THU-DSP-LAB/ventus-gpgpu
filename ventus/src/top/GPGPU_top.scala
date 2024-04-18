@@ -330,6 +330,9 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0) extends Module{
   sharedmem.io.coreReq.bits.isWrite:=pipe.io.shared_req.bits.isWrite
   sharedmem.io.coreReq.bits.setIdx:=pipe.io.shared_req.bits.setIdx
   sharedmem.io.coreReq.bits.perLaneAddr:=pipe.io.shared_req.bits.perLaneAddr
+  // xrn add dma
+  sharedmem.io.coreReq.bits.dma := pipe.io.shared_req.bits.dma
+
   sharedmem.io.coreReq.valid:=pipe.io.shared_req.valid
   pipe.io.shared_req.ready:=sharedmem.io.coreReq.ready
 
@@ -338,6 +341,8 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0) extends Module{
   pipe.io.shared_rsp.bits.data:=sharedmem.io.coreRsp.bits.data
   pipe.io.shared_rsp.bits.instrId:=sharedmem.io.coreRsp.bits.instrId
   pipe.io.shared_rsp.bits.activeMask:=sharedmem.io.coreRsp.bits.activeMask
+  // xrn add dma
+  pipe.io.shared_rsp.bits.dma := sharedmem.io.coreRsp.bits.dma
   // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
 }
 

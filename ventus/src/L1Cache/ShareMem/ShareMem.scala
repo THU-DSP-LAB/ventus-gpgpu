@@ -37,6 +37,7 @@ class ShareMemCoreReq(implicit p: Parameters) extends ShareMemBundle{
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new ShareMemPerLaneAddr)
   val data = Vec(NLanes, UInt(WordLength.W))
+  val dma = Bool()
 }
 
 class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
@@ -44,6 +45,7 @@ class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
   val isWrite = Bool()
   val data = Vec(NLanes, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
+  val dma = Bool()
 }
 
 class SharedMemory(implicit p: Parameters) extends ShareMemModule{
@@ -120,6 +122,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   val coreReqisValidWrite_st2 = RegNext(coreReqisValidWrite_st1)
 
   val coreReqInstrId_st2 = RegNext(coreReq_st1.instrId)
+  val coreReqDma_st2 = RegNext(coreReq_st1.dma)
   val coreReqActvMask_st2 = ShiftRegister(BankConfArb.io.activeLane,2)
   val coreReqIsWrite_st2 = RegNext(coreReq_st1.isWrite)
 
@@ -176,6 +179,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   coreRsp_Q.io.enq.bits.data := DataCorssBarForRead.io.DataOut
   coreRsp_Q.io.enq.bits.instrId := coreReqInstrId_st2
   coreRsp_Q.io.enq.bits.activeMask := coreReqActvMask_st2
+  coreRsp_Q.io.enq.bits.dma := coreReqDma_st2
   coreRsp_QAlmstFull := coreRsp_Q.io.count === DepthCoreRsp_Q.asUInt - 2.U
 
   // ******      core req ready

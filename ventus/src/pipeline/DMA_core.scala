@@ -340,7 +340,10 @@ class AddrCalc_l2cache() extends Module{
   io.to_tempmem.bits.tag.opmode := reg_save.ctrl.opmode
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
-  io.to_l2cache.bits.source :=  Cat(reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1),reg_entryID)
+
+  io.to_l2cache.bits.source(l2cache_params.source_bits - 1,l2cache_params.source_bits - 1 - (addr_tag_bits + log2Ceil(max_dma_inst)) + 1) :=  Cat(reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1),reg_entryID)
+  io.to_l2cache.bits.source(l2cache_params.source_bits - 1 - (addr_tag_bits + log2Ceil(max_dma_inst)),1) := 0.U
+  io.to_l2cache.bits.source(0) := 0.U // use crossbar of l1cache
   // temporarily set it as reg_entryID, for mshr; cat with wid, for shiftboard; jingguo ceshi hui fangzai hou 6 bit
   io.to_l2cache.bits.address := reg_save.address
 
@@ -1050,9 +1053,6 @@ class Addrcalc_shared() extends Module {
             output_reg.perLaneAddr(x).activeMask := current_mask(x)
             output_reg.data(x) := reg_save.data(x)
           })
-          output_reg.instrId := reg_save.entry_index
-          output_reg.isWrite := true.B
-          output_reg.setIdx := setIdx
         }
         is(1.U){
           (0 until(numgroupshared)).foreach(x =>{
@@ -1064,10 +1064,11 @@ class Addrcalc_shared() extends Module {
             output_reg.perLaneAddr(x).activeMask := current_mask(x)
             output_reg.data(x) := reg_save.data(x)
           })
-          output_reg.instrId := reg_save.entry_index
-          output_reg.isWrite := true.B
-          output_reg.setIdx := setIdx
         }
+        output_reg.instrId := reg_save.entry_index
+        output_reg.isWrite := true.B
+        output_reg.setIdx := setIdx
+        output_reg.dma := true.B
       }
 
     }
@@ -1128,7 +1129,7 @@ class DMA_core extends Module{
     //output
     val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
-    val fence_end_dma = DecoupledIO(UInt(32.W))
+    val fence_end_dma = DecoupledIO(UInt(xLen.W))
   })
 //  printf("l2req: %d \n",io.l2cache_req.bits.address.asUInt)
 //  printf("l2req.valid: %b \n",io.l2cache_req.valid.asUInt)

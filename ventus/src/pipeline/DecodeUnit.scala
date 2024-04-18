@@ -499,7 +499,7 @@ object IDecodeLUT_ASYNC {
   val table = Array(
     CP_ASYNC_COPYSIZE -> List(N,N,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_RS2,A1_RS1,IMM_S,MEM_X,FN_ADD,N,M_XRD,N,N,N,N,N,N,N,N,N,N,N),
     CP_ASYNC_BULK     -> List(N,N,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_RS2,A1_RS1,IMM_S,MEM_X,FN_ADD,N,M_XRD,N,N,N,N,N,N,N,N,N,N,N),
-
+    CP_ASYNC_FENCE    ->  List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_X,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
   )
 }
 //trait DecodeParameters{}

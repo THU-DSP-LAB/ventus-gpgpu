@@ -360,9 +360,15 @@ class pipe(val sm_id: Int = 0) extends Module{
   // lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
   // lsu.io.shared_rsp<>io.shared_rsp
   // lsu.io.shared_req<>io.shared_req
+  io.l2cache_req <> dma.io.l2cache_req
+  io.l2cache_rsp <> dma.io.l2cache_rsp
   val sharedreqArbiter = Module(new Arbiter(new ShareMemCoreRsp_np, 2))
   sharedreqArbiter.io.in(1) <> dma.io.shared_req
   sharedreqArbiter.io.in(2) <> lsu.io.shared_req
+  io.shared_req <> sharedreqArbiter.io.out
+  dma.io.shared_rsp <> Mux(io.shared_rsp.bits.dma, io.shared_rsp, 0.U.asTypeOf(new ShareMemCoreRsp_np))
+  lsu.io.shared_rsp <> Mux(io.shared_rsp.bits.dma, 0.U.asTypeOf(new ShareMemCoreRsp_np), io.shared_rsp)
+
 
 
   wb.io.in_x(0)<>alu.io.out
