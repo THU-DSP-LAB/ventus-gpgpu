@@ -423,10 +423,6 @@ class TCDotProductBinary(DimN: Int,
   io.in.ready := io.out.ready
 }
 
-class TensorCoreInput(vl: Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
-  val data = Vec(vl, new FPUInput(len, EmptyFPUCtrl(), false))
-  val ctrl = tcCtrl.cloneType
-}
 class TCComputationInput(DimM:Int,DimN:Int,DimK:Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
   val A = Vec(DimM*DimK, UInt(len.W))
   val B = Vec(DimN*DimK, UInt(len.W))
@@ -463,45 +459,8 @@ class TensorCoreOutput(vl:Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
   val ctrl = tcCtrl.cloneType
 }
 
-class TensorCoreFP32(vl: Int, DimM: Int, DimN: Int, DimK:Int, tcCtrl: TCCtrl) extends Module {
-  assert(DimM * DimN <= vl)
-  assert(DimN * DimK <= vl)
-  assert(DimM * DimK <= vl)
-  val io = IO(new Bundle{
-    val in = Flipped(DecoupledIO(new TensorCoreInput(vl,32, tcCtrl)))
-    val out = DecoupledIO(new TensorCoreOutput(vl,32, tcCtrl))
-  })
-  val TCArray = Seq(Module(new TCDotProduct(DimN, 8, 24, tcCtrl))) ++
-    Seq.fill(DimM*DimK-1)(Module(new TCDotProduct(DimN, 8, 24)))
 
-  for (i <- 0 until vl) {
-    io.out.bits.data(i).result := 0.U
-    io.out.bits.data(i).fflags := 0.U
-  }
-  io.in.ready := TCArray.head.io.in.ready
-  io.out.valid := TCArray.head.io.out.valid
-
-  for(m <- 0 until DimM){
-    for(k <- 0 until DimK){
-      for(n <- 0 until DimN){
-        TCArray(m * DimK + k).io.in.bits.a(n) := io.in.bits.data(m * DimN + n).a
-        TCArray(m * DimK + k).io.in.bits.b(n) := io.in.bits.data(k * DimN + n).b
-        TCArray(m * DimK + k).io.in.bits.c := io.in.bits.data(m * DimK + k).c
-      }
-      TCArray(m * DimK + k).io.in.bits.rm := io.in.bits.data(0).rm
-      TCArray(m * DimK + k).io.in.bits.ctrl.foreach(_ := io.in.bits.ctrl)
-      TCArray(m * DimK + k).io.in.valid := io.in.valid
-      TCArray(m * DimK + k).io.out.ready := io.out.ready
-
-      io.out.bits.data(m * DimK + k).result := TCArray(m * DimK + k).io.out.bits.result
-      io.out.bits.data(m * DimK + k).fflags := TCArray(m * DimK + k).io.out.bits.fflags
-    }
-  }
-  io.out.bits.ctrl := TCArray.head.io.out.bits.ctrl.get
-}
-
-
-class TC_ComputationArray_848_FP16(xDatalen: Int, DimM: Int, DimN: Int, DimK:Int, tcCtrl: TCCtrl) extends Module {
+class TC_ComputationArray_848_FP16(xDatalen: Int=16, DimM: Int=8, DimN: Int=4, DimK:Int=8, tcCtrl: TCCtrl) extends Module {
 //  mnk defined as cuda.
 //  m8n4k8
 //  xDatalen: data bit len
@@ -526,7 +485,8 @@ class TC_ComputationArray_848_FP16(xDatalen: Int, DimM: Int, DimN: Int, DimK:Int
     for(n <- 0 until DimN){
       for(k <- 0 until DimK){
         TCArray(m * DimN + n).io.in.bits.a(k) := io.in.bits.A(m*DimK+k)
-        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(k*DimN+n)
+        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(n*DimK+k)//col first
+//        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(k*DimN+n)//row first
       }
       TCArray(m * DimN + n).io.in.bits.c := io.in.bits.C(m * DimN + n)
 
@@ -567,7 +527,8 @@ class TC_ComputationArray_848_INT8FP16_Reuse(xDatalen: Int, DimM: Int, DimN: Int
     for(n <- 0 until DimN){
       for(k <- 0 until DimK){
         TCArray(m * DimN + n).io.in.bits.a(k) := io.in.bits.A(m*DimK+k)
-        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(k*DimN+n)
+        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(n*DimK+k)//col first
+        //        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(k*DimN+n)//row first
       }
       TCArray(m * DimN + n).io.in.bits.c := io.in.bits.C(m * DimN + n)
 
@@ -622,3 +583,46 @@ class TC_ComputationArray_848_Binary(DimM: Int, DimN: Int, DimK:Int, tcCtrl: TCC
   }
   io.out.bits.ctrl := TCArray.head.io.out.bits.ctrl.get
 }
+
+////xd.Liu'brand. TensorCoreFP32 现已废弃
+//class TensorCoreInput(vl: Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
+//  val data = Vec(vl, new FPUInput(len, EmptyFPUCtrl(), false))
+//  val ctrl = tcCtrl.cloneType
+//}
+
+//class TensorCoreFP32(vl: Int, DimM: Int, DimN: Int, DimK:Int, tcCtrl: TCCtrl) extends Module {
+//  assert(DimM * DimN <= vl)
+//  assert(DimN * DimK <= vl)
+//  assert(DimM * DimK <= vl)
+//  val io = IO(new Bundle{
+//    val in = Flipped(DecoupledIO(new TensorCoreInput(vl,32, tcCtrl)))
+//    val out = DecoupledIO(new TensorCoreOutput(vl,32, tcCtrl))
+//  })
+//  val TCArray = Seq(Module(new TCDotProduct(DimN, 8, 24, tcCtrl))) ++
+//    Seq.fill(DimM*DimK-1)(Module(new TCDotProduct(DimN, 8, 24)))
+//
+//  for (i <- 0 until vl) {
+//    io.out.bits.data(i).result := 0.U
+//    io.out.bits.data(i).fflags := 0.U
+//  }
+//  io.in.ready := TCArray.head.io.in.ready
+//  io.out.valid := TCArray.head.io.out.valid
+//
+//  for(m <- 0 until DimM){
+//    for(k <- 0 until DimK){
+//      for(n <- 0 until DimN){
+//        TCArray(m * DimK + k).io.in.bits.a(n) := io.in.bits.data(m * DimN + n).a
+//        TCArray(m * DimK + k).io.in.bits.b(n) := io.in.bits.data(k * DimN + n).b
+//        TCArray(m * DimK + k).io.in.bits.c := io.in.bits.data(m * DimK + k).c
+//      }
+//      TCArray(m * DimK + k).io.in.bits.rm := io.in.bits.data(0).rm
+//      TCArray(m * DimK + k).io.in.bits.ctrl.foreach(_ := io.in.bits.ctrl)
+//      TCArray(m * DimK + k).io.in.valid := io.in.valid
+//      TCArray(m * DimK + k).io.out.ready := io.out.ready
+//
+//      io.out.bits.data(m * DimK + k).result := TCArray(m * DimK + k).io.out.bits.result
+//      io.out.bits.data(m * DimK + k).fflags := TCArray(m * DimK + k).io.out.bits.fflags
+//    }
+//  }
+//  io.out.bits.ctrl := TCArray.head.io.out.bits.ctrl.get
+//}
