@@ -109,6 +109,14 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
         d.io.out.ready.poke(true.B)
       }.join()
       d.clock.step(40)
+      var clock_cnt = 0
+      while(clock_cnt <= 100){
+
+        d.io.out.ready.poke(true.B)
+        d.clock.step()
+        clock_cnt += 1
+      }
+      d.clock.step(30)
     }
   }
 
