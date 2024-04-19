@@ -8,8 +8,8 @@ import pipeline.vExeData
 
 class TC_MMA1688Input(tcCtrl: TCCtrl) extends Bundle{
   val data_in = new vExeData
-  val dtype = UInt(3.W)
-  val dshpe = UInt(2.W)
+//  val dtype = UInt(3.W)
+//  val dshpe = UInt(2.W)
   val rm = UInt(3.W)
   val ctrl = tcCtrl.cloneType
 }
@@ -20,7 +20,7 @@ class TC_MMA1688Output(DimM:Int, DimN:Int, dataLen:Int, tcCtrl:TCCtrl) extends B
   // write back to D
 
   //  val data_out = Vec(32,new vExeData)
-  //  val ctrl = tcCtrl.cloneType
+    val ctrl = tcCtrl.cloneType
 }
 
 class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) extends Module {
@@ -38,8 +38,11 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
   //A 8*8 row
   for (m <- 0 until 8) {
     for (n <- 0 until 4) {
-      TCComputation.io.in.bits.A(m * 4 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-      TCComputation.io.in.bits.A(m * 4 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+//      println(m,n,m * 4 + n * 2,m * 4 + n )
+//      println(m * 8 + n * 2,m * 8 + n * 2+1)
+      TCComputation.io.in.bits.A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+//      println(m * 4 + n * 2 + 1,m * 4 + n)
+      TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
     }
   }
   //B 8*4 col
@@ -86,8 +89,8 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.A(m * 4 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-            TCComputation.io.in.bits.A(m * 4 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
           }
         }
         //B 8*4 col
@@ -114,8 +117,8 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.A(m * 4 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(47, 32)
-            TCComputation.io.in.bits.A(m * 4 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(63, 48)
+            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(47, 32)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(63, 48)
           }
         }
         //B 8*4 col
@@ -142,8 +145,8 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.A(m * 4 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(47, 32)
-            TCComputation.io.in.bits.A(m * 4 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(63, 48)
+            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(47, 32)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(63, 48)
           }
         }
         //B 8*4 col
@@ -167,10 +170,12 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
       when(TCComputation.io.out.valid) {
         //        io.out.ready := TCComputation.io.out.ready
         io.out.valid := TCComputation.io.out.valid
+
         stateReg := sIdle
       }
     }
   }
+  io.out.bits.ctrl := TCComputation.io.out.bits.ctrl
 
 }
 
