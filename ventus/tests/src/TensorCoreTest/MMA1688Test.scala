@@ -1,17 +1,16 @@
 package TensorCoreTest
 
 import FPUv2.utils.{FPUInput, RoundingModes, TestFPUCtrl}
-import FPUv2.{TCDotProduct,TCComputationInput}
+import TensorCore.{TCComputationInput, TCCtrl, TCDotProduct, TC_MMA1688Input,TC_MMA1688}
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
-
-import FPUv2.vExeData
+import pipeline.vExeData
 
 class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
-  import TestArgs._
+  import FPUv2.TestArgs._
   object TCMMA1688Input {
     var count = 0
     def reset = { count = 0 }
