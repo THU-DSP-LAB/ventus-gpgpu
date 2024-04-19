@@ -471,6 +471,7 @@ class TC_ComputationArray_848_FP16(xDatalen: Int=16, DimM: Int=8, DimN: Int=4, D
     val in = Flipped(DecoupledIO(new TCComputationInput(DimM, DimN, DimK, xDatalen, tcCtrl)))
     val out = DecoupledIO(new TensorCoreOutput(DimM * DimN, xDatalen, tcCtrl))// out matrix dim=[8,4]
   })
+  dontTouch(io.in.bits)
   val TCArray = Seq(Module(new TCDotProduct(DimK, 5, 11, tcCtrl))) ++
     Seq.fill(DimM*DimN-1)(Module(new TCDotProduct(DimK, 5, 11)))
 // control sig only claim 1 times

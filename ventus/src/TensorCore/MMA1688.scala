@@ -118,8 +118,8 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 
   TCComputation.io.in.bits.rm := io.in.bits.rm
   TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
-  TCComputation.io.out.ready := DontCare//io.in.ready
-  TCComputation.io.in.valid := DontCare//io.in.valid
+  TCComputation.io.out.ready := io.out.ready//io.in.ready
+  TCComputation.io.in.valid := false.B//io.in.valid
 
   io.in.ready := TCComputation.io.in.ready
   io.out.valid := TCComputation.io.out.valid
@@ -132,10 +132,10 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
   // 根据当前状态，设置下一个状态和输出
   switch(stateReg) {
     is(sIdle) {
-      when(io.in.ready) {
-        println("Set1 Data Done. To Set1")
+      when(io.in.fire) {
+        printf("Set1 Data Done. To Set1")
         //        TCComputation.io.out.ready := io.in.ready
-        //        TCComputation.io.in.valid := io.in.valid
+                TCComputation.io.in.valid := io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -171,7 +171,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //        }
 
         //        TCComputation.io.out.ready := io.out.ready
-        //        TCComputation.io.in.valid := io.in.valid
+                TCComputation.io.in.valid := io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -193,7 +193,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
           TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(2+m * 4 + 1)(15, 0)
           TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(2+m * 4 + 1)(31, 16)
         }
-        println("Set2 Data Done. To Set2")
+        printf("Set2 Data Done. To Set2")
         stateReg := sSet2
       }
     }
@@ -208,7 +208,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //        }
 
         //        TCComputation.io.out.ready := io.out.ready
-        //        TCComputation.io.in.valid := io.in.valid
+                TCComputation.io.in.valid := io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -230,7 +230,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
           TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(m * 4 + 1)(47, 32)
           TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(m * 4 + 1)(63, 48)
         }
-        println("Set3 Data Done. To Set3")
+        printf("Set3 Data Done. To Set3")
         stateReg := sSet3
       }
     }
@@ -245,7 +245,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //        }
 
         //        TCComputation.io.out.ready := io.out.ready
-        //        TCComputation.io.in.valid := io.in.valid
+                TCComputation.io.in.valid := io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -267,7 +267,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
           TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(2+m * 4 + 1)(47, 32)
           TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(2+m * 4 + 1)(63, 48)
         }
-        println("Set4 Data Done. To Set4")
+        printf("Set4 Data Done. To Set4")
         stateReg := sSet4
       }
     }
