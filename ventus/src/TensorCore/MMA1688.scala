@@ -5,7 +5,6 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 import pipeline.vExeData
-import FPUv2.{TC_ComputationArray_848_Binary, TC_ComputationArray_848_FP16, TC_ComputationArray_848_INT8FP16_Reuse}
 
 
 class TC_MMA1688Input(tcCtrl: TCCtrl) extends Bundle{
@@ -20,11 +19,11 @@ class TC_MMA1688Output(DimM:Int, DimN:Int, dataLen:Int, tcCtrl:TCCtrl) extends B
 //  val data_out = Vec(DimM*DimN,UInt(dataLen.W))
   // ??? d=a*b+d
   // write back to D
-  val data_out = Vec(num_thread,new vExeData)
-  val ctrl = tcCtrl.cloneType
+//  val data_out = Vec(num_thread,new vExeData)
+//  val ctrl = tcCtrl.cloneType
 }
 
-class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int,xDatalen:Int, tcCtrl: TCCtrl) extends Module {
+class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) extends Module {
   //  mnk defined as cuda.
   //  m16n8k8
   //  xDatalen: data bit len === xLen. FP16: xDatalen=16
@@ -35,9 +34,34 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int,xDatalen:Int, tcCtrl: TCCtrl) e
     val out = DecoupledIO(new TC_MMA1688Output(DimM, DimN, xDatalen, tcCtrl))
   })
 
-  val TCComputation = new TC_ComputationArray_848_FP16(tcCtrl = tcCtrl)
+  val TCComputation = Module(new TC_ComputationArray_848_FP16(16,8,4,8,tcCtrl = tcCtrl))
+  //A 8*8 row
+  for (m <- 0 until 8) {
+    for (n <- 0 until 4) {
+      TCComputation.io.in.bits.A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+      TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+    }
+  }
+  //B 8*4 col
+  for (m <- 0 until 4) {
+    for (n <- 0 until 4) {
+      TCComputation.io.in.bits.B(m * 8 + n * 2) := io.in.bits.data_in.in2(m * 4 + n)(15, 0)
+      TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(m * 4 + n)(31, 16)
+    }
+  }
+  //C 8*4 row First
+  for (m <- 0 until 8) {
+    TCComputation.io.in.bits.C(m * 4) := io.in.bits.data_in.in3(m * 4)(15, 0)
+    TCComputation.io.in.bits.C(m * 4 + 1) := io.in.bits.data_in.in3(m * 4)(31, 16)
+    TCComputation.io.in.bits.C(m * 4 + 2) := io.in.bits.data_in.in3(m * 4 + 1)(15, 0)
+    TCComputation.io.in.bits.C(m * 4 + 3) := io.in.bits.data_in.in3(m * 4 + 1)(31, 16)
+  }
+
   TCComputation.io.in.bits.rm := io.in.bits.rm
   TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
+
+  io.in.ready := TCComputation.io.in.ready
+  io.out.valid := TCComputation.io.out.valid
 
   val sIdle :: sSet1 :: sSet2 :: sSet3 :: sSet4 :: Nil = Enum(5)
 
@@ -47,52 +71,104 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int,xDatalen:Int, tcCtrl: TCCtrl) e
   // 根据当前状态，设置下一个状态和输出
   switch(stateReg) {
     is(sIdle) {
-      TCComputation.io.out.ready := true.B
-      for (m <- 0 until 8) {
-        for (n <- 0 until 4) {
-          if ((m * 8 + n) % 2 == 0) {
-            TCComputation.io.in.bits.A(m * 8 + n) := io.in.bits.data_in.in1((m * 8 + n) / 2)(15, 0)
-          } else {
-            TCComputation.io.in.bits.A(m * 8 + n) := io.in.bits.data_in.in1((m * 8 + n) / 2)(31, 16)
-          }
-        }
-      }
-
-      for (m <- 0 until 8) {
-        for (n <- 0 until 4) {
-          if ((m * 8 + n) % 2 == 0) {
-            TCComputation.io.in.bits.A(m * 8 + n) := io.in.bits.data_in.in1((m * 8 + n) / 2)(15, 0)
-          } else {
-            TCComputation.io.in.bits.A(m * 8 + n) := io.in.bits.data_in.in1((m * 8 + n) / 2)(31, 16)
-          }
-        }
-      }
-
-
-      TCComputation.io.in.valid := true.B
-      stateReg := sSet1
-      }
-      is(sSet1) {
-        when(TCComputation.io.out.valid) {
-          stateReg := sSet2
-        }
-      }
-      is(sSet2) {
-        when(TCComputation.io.out.valid) {
-          stateReg := sSet3
-        }
-      }
-      is(sSet3) {
-        when(TCComputation.io.out.valid) {
-          stateReg := sSet4
-        }
-      }
-      is(sSet4) {
-        when(TCComputation.io.out.valid) {
-          stateReg := sIdle
-        }
+      when(io.in.ready) {
+        TCComputation.io.out.ready := io.in.ready
+        TCComputation.io.in.valid := io.in.valid
+        stateReg := sSet1
       }
     }
+    is(sSet1) {
+      when(TCComputation.io.out.valid) {
+        TCComputation.io.out.ready := io.out.ready
+        TCComputation.io.in.valid := io.in.valid
+        //A 8*8 row
+        for (m <- 0 until 8) {
+          for (n <- 0 until 4) {
+            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+          }
+        }
+        //B 8*4 col
+        for (m <- 0 until 4) {
+          for (n <- 0 until 4) {
+            TCComputation.io.in.bits.B(m * 8 + n*2) := io.in.bits.data_in.in2(16+m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.B(m * 8 + n*2 + 1) := io.in.bits.data_in.in2(16+m * 4 + n)(31, 16)
+          }
+        }
+        //C 8*4 row First
+        for (m <- 0 until 8) {
+          TCComputation.io.in.bits.C(m * 4 ) := io.in.bits.data_in.in3(2+m * 4 )(15, 0)
+          TCComputation.io.in.bits.C(m * 4 +1) := io.in.bits.data_in.in3(2+m * 4)(31, 16)
+          TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(2+m * 4 + 1)(15, 0)
+          TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(2+m * 4 + 1)(31, 16)
+        }
+        stateReg := sSet2
+      }
+    }
+    is(sSet2) {
+      when(TCComputation.io.out.valid) {
+        TCComputation.io.out.ready := io.out.ready
+        TCComputation.io.in.valid := io.in.valid
+        //A 8*8 row
+        for (m <- 0 until 8) {
+          for (n <- 0 until 4) {
+            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(47, 32)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(63, 48)
+          }
+        }
+        //B 8*4 col
+        for (m <- 0 until 4) {
+          for (n <- 0 until 4) {
+            TCComputation.io.in.bits.B(m * 8 + n*2) := io.in.bits.data_in.in2(m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.B(m * 8 + n*2 + 1) := io.in.bits.data_in.in2(m * 4 + n)(31, 16)
+          }
+        }
+        //C 8*4 row First
+        for (m <- 0 until 8) {
+          TCComputation.io.in.bits.C(m * 4 ) := io.in.bits.data_in.in3(m * 4 )(47, 32)
+          TCComputation.io.in.bits.C(m * 4 +1) := io.in.bits.data_in.in3(m * 4)(63, 48)
+          TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(m * 4 + 1)(47, 32)
+          TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(m * 4 + 1)(63, 48)
+        }
+        stateReg := sSet3
+      }
+    }
+    is(sSet3) {
+      when(TCComputation.io.out.valid) {
+        TCComputation.io.out.ready := io.out.ready
+        TCComputation.io.in.valid := io.in.valid
+        //A 8*8 row
+        for (m <- 0 until 8) {
+          for (n <- 0 until 4) {
+            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(47, 32)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(63, 48)
+          }
+        }
+        //B 8*4 col
+        for (m <- 0 until 4) {
+          for (n <- 0 until 4) {
+            TCComputation.io.in.bits.B(m * 8 + n*2) := io.in.bits.data_in.in2(16+m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.B(m * 8 + n*2 + 1) := io.in.bits.data_in.in2(16+m * 4 + n)(31, 16)
+          }
+        }
+        //C 8*4 row First
+        for (m <- 0 until 8) {
+          TCComputation.io.in.bits.C(m * 4 ) := io.in.bits.data_in.in3(2+m * 4 )(47, 32)
+          TCComputation.io.in.bits.C(m * 4 +1) := io.in.bits.data_in.in3(2+m * 4)(63, 48)
+          TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(2+m * 4 + 1)(47, 32)
+          TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(2+m * 4 + 1)(63, 48)
+        }
+        stateReg := sSet4
+      }
+    }
+    is(sSet4) {
+      when(TCComputation.io.out.valid) {
+        //        io.out.ready := TCComputation.io.out.ready
+        io.out.valid := TCComputation.io.out.valid
+        stateReg := sIdle
+      }
+    }
+  }
 
 }
 
