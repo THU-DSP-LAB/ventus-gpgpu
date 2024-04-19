@@ -1,13 +1,14 @@
 package TensorCoreTest
 
 import FPUv2.utils.{FPUInput, RoundingModes, TestFPUCtrl}
-import TensorCore.{TCComputationInput, TCCtrl, TCDotProduct, TC_MMA1688, TC_MMA1688Input}
+import TensorCore.{TCComputationInput, TCCtrl, TCDotProduct, TC_MMA1688, TC_MMA1688Input, TC_MMA1688Output}
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import pipeline.{CtrlSigs, InstWriteBack, vExeData}
+import play.TestUtils.RequestSender
 
 class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
 //  import FPUv2.TestArgs._
@@ -80,7 +81,7 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
       _.wxd -> false.B,
       _.pc -> 4096.U,
       _.imm_ext -> 0.U,
-      _.spike_info.get -> (new InstWriteBack).Lit(_.pc -> 0.U, _.inst -> 0.U),
+      _.spike_info.get -> (new InstWriteBack).Lit(_.sm_id -> 0.U,_.pc -> 0.U, _.inst -> 0.U),
       _.atomic -> false.B,
       _.aq -> false.B,
       _.rl -> false.B,
@@ -99,19 +100,19 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
       d.io.out.initSink()
       d.io.out.setSinkClock(d.clock)
       d.clock.setTimeout(80)
-      d.io.out.ready.poke(true.B)
-      d.io.in.valid.poke(true.B)
-      fork{
-        d.io.in.enqueueSeq(Seq(
-          TCMMA1688Input(8,4,8)
-        ))
-      }.fork {
-        d.io.out.ready.poke(true.B)
-      }.join()
-      d.clock.step(40)
-      var clock_cnt = 0
-      while(clock_cnt <= 100){
 
+      val input_list = Seq(TCMMA1688Input(8,4,8))
+
+      val TC_input_sender = new RequestSender[TC_MMA1688Input, TC_MMA1688Output](d.io.in, d.io.out)
+
+      TC_input_sender.add(input_list)
+
+      d.clock.setTimeout(0)
+      d.clock.step(4)
+      var clock_cnt = 0
+
+      while(clock_cnt <= 100){
+        TC_input_sender.eval()
         d.io.out.ready.poke(true.B)
         d.clock.step()
         clock_cnt += 1
@@ -119,8 +120,5 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
       d.clock.step(30)
     }
   }
-
-
-
 }
 

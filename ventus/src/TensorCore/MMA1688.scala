@@ -162,13 +162,13 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
     }
     is(sSet1) {
       when(TCComputation.io.out.valid) {
-        //        get set1 Result
-        for (m <- 0 until 8) {
-          io.out.bits.data_out.in3(m * 4)(15, 0) := TCComputation.io.out.bits.data(m * 4)
-          io.out.bits.data_out.in3(m * 4)(31, 16) := TCComputation.io.out.bits.data(m * 4+1)
-          io.out.bits.data_out.in3(m * 4 + 1)(15, 0) := TCComputation.io.out.bits.data(m * 4+2)
-          io.out.bits.data_out.in3(m * 4 + 1)(31, 16) := TCComputation.io.out.bits.data(m * 4+3)
-        }
+//        //        get set1 Result
+//        for (m <- 0 until 8) {
+//          io.out.bits.data_out.in3(m * 4)(15, 0) := TCComputation.io.out.bits.data(m * 4)
+//          io.out.bits.data_out.in3(m * 4)(31, 16) := TCComputation.io.out.bits.data(m * 4+1)
+//          io.out.bits.data_out.in3(m * 4 + 1)(15, 0) := TCComputation.io.out.bits.data(m * 4+2)
+//          io.out.bits.data_out.in3(m * 4 + 1)(31, 16) := TCComputation.io.out.bits.data(m * 4+3)
+//        }
 
         //        TCComputation.io.out.ready := io.out.ready
         //        TCComputation.io.in.valid := io.in.valid
@@ -199,13 +199,13 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
     }
     is(sSet2) {
       when(TCComputation.io.out.valid) {
-        //        get set2 Result
-        for (m <- 0 until 8) {
-          io.out.bits.data_out.in3(2+m * 4)(15, 0):= TCComputation.io.out.bits.data(m * 4)
-          io.out.bits.data_out.in3(2+m * 4)(31, 16) := TCComputation.io.out.bits.data(m * 4+1)
-          io.out.bits.data_out.in3(2+m * 4 + 1)(15, 0) := TCComputation.io.out.bits.data(m * 4+2)
-          io.out.bits.data_out.in3(2+m * 4 + 1)(31, 16) := TCComputation.io.out.bits.data(m * 4+3)
-        }
+//        //        get set2 Result
+//        for (m <- 0 until 8) {
+//          io.out.bits.data_out.in3(2+m * 4)(15, 0):= TCComputation.io.out.bits.data(m * 4)
+//          io.out.bits.data_out.in3(2+m * 4)(31, 16) := TCComputation.io.out.bits.data(m * 4+1)
+//          io.out.bits.data_out.in3(2+m * 4 + 1)(15, 0) := TCComputation.io.out.bits.data(m * 4+2)
+//          io.out.bits.data_out.in3(2+m * 4 + 1)(31, 16) := TCComputation.io.out.bits.data(m * 4+3)
+//        }
 
         //        TCComputation.io.out.ready := io.out.ready
         //        TCComputation.io.in.valid := io.in.valid
@@ -236,13 +236,13 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
     }
     is(sSet3) {
       when(TCComputation.io.out.valid) {
-        //        get set3 Result
-        for (m <- 0 until 8) {
-          io.out.bits.data_out.in3(m * 4)(47, 32):= TCComputation.io.out.bits.data(m * 4)
-          io.out.bits.data_out.in3(m * 4)(63, 48) := TCComputation.io.out.bits.data(m * 4+1)
-          io.out.bits.data_out.in3(m * 4 + 1)(47, 32) := TCComputation.io.out.bits.data(m * 4+2)
-          io.out.bits.data_out.in3(m * 4 + 1)(63, 48) := TCComputation.io.out.bits.data(m * 4+3)
-        }
+//        //        get set3 Result
+//        for (m <- 0 until 8) {
+//          io.out.bits.data_out.in3(m * 4)(47, 32):= TCComputation.io.out.bits.data(m * 4)
+//          io.out.bits.data_out.in3(m * 4)(63, 48) := TCComputation.io.out.bits.data(m * 4+1)
+//          io.out.bits.data_out.in3(m * 4 + 1)(47, 32) := TCComputation.io.out.bits.data(m * 4+2)
+//          io.out.bits.data_out.in3(m * 4 + 1)(63, 48) := TCComputation.io.out.bits.data(m * 4+3)
+//        }
 
         //        TCComputation.io.out.ready := io.out.ready
         //        TCComputation.io.in.valid := io.in.valid
@@ -273,13 +273,13 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
     }
     is(sSet4) {
       when(TCComputation.io.out.valid) {
-        //        get set4 Result
-        for (m <- 0 until 8) {
-          io.out.bits.data_out.in3(2+m * 4)(47, 32):= TCComputation.io.out.bits.data(m * 4)
-          io.out.bits.data_out.in3(2+m * 4)(63, 48) := TCComputation.io.out.bits.data(m * 4+1)
-          io.out.bits.data_out.in3(2+m * 4 + 1)(47, 32) := TCComputation.io.out.bits.data(m * 4+2)
-          io.out.bits.data_out.in3(2+m * 4 + 1)(63, 48) := TCComputation.io.out.bits.data(m * 4+3)
-        }
+//        //        get set4 Result
+//        for (m <- 0 until 8) {
+//          io.out.bits.data_out.in3(2+m * 4)(47, 32):= TCComputation.io.out.bits.data(m * 4)
+//          io.out.bits.data_out.in3(2+m * 4)(63, 48) := TCComputation.io.out.bits.data(m * 4+1)
+//          io.out.bits.data_out.in3(2+m * 4 + 1)(47, 32) := TCComputation.io.out.bits.data(m * 4+2)
+//          io.out.bits.data_out.in3(2+m * 4 + 1)(63, 48) := TCComputation.io.out.bits.data(m * 4+3)
+//        }
 
         //        io.out.ready := TCComputation.io.out.ready
         io.out.valid := TCComputation.io.out.valid

@@ -52,6 +52,7 @@ object TestUtils {
               next_state = Idle
             case _ =>
               reqPort.valid.poke(true.B)
+//              println(send_list.head)
               reqPort.bits.poke(send_list.head)
               next_state = SendingReq
           }
