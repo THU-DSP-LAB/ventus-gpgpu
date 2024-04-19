@@ -84,7 +84,7 @@ class MSHRv2 extends Module{
       used := used.bitSet(valid_entry, true.B)
       tag.write(valid_entry,
         //Cat(reg_req.warp_id, reg_req.reg_idxw, reg_req.mask.asUInt)
-        io.from_addr.bits.tag.asUInt
+        reg_req.asUInt
       )
       data.write(valid_entry, VecInit(Seq.fill(num_thread)(0.U)))
       currentMask(valid_entry) := reg_req.mask.asUInt

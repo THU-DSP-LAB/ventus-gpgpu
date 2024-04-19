@@ -59,6 +59,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
     val cnt = Output(UInt(32.W))
+    val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
   })
 
   val counter = new Counter(200000)
@@ -69,6 +70,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   io.cnt := counter.value
 
   val GPU = Module(new GPGPU_top()(L1param, FakeCache))
+  GPU.io.cycle_cnt := counter.value
 
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))
   val pipe_d = Module(new DecoupledPipe(new TLBundleD_lite(l2cache_params), 2))
@@ -79,4 +81,6 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
 
   GPU.io.host_req <> io.host_req
   io.host_rsp <> GPU.io.host_rsp
+
+  io.inst_cnt := GPU.io.inst_cnt.getOrElse(0.U.asTypeOf(io.inst_cnt))
 }

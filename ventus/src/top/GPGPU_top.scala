@@ -143,9 +143,11 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
     val host_rsp=DecoupledIO(new CTA2host_data)
     val out_a =Vec(NL2Cache,Decoupled(new TLBundleA_lite(l2cache_params)))
     val out_d=Flipped(Vec(NL2Cache,Decoupled(new TLBundleD_lite(l2cache_params))))
+    val inst_cnt = if(INST_CNT) Some(Output(Vec(NSms, UInt(32.W)))) else if(INST_CNT_2) Some(Output(Vec(NSms, Vec(2, UInt(32.W))))) else None
+    val cycle_cnt = Input(UInt(20.W))
   })
   val cta = Module(new CTAinterface)
-  val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache)).io))
+  val sm_wrapper=VecInit((0 until NSms).map(i => Module(new SM_wrapper(FakeCache, i)).io))
   val l2cache=VecInit(Seq.fill(NL2Cache)( Module(new Scheduler(l2cache_params)).io))
   val sm2clusterArb = VecInit(Seq.fill(NCluster)(Module(new SM2clusterArbiter(l2cache_params_l)).io))
   val l2distribute = VecInit(Seq.fill(NCluster)(Module(new l2Distribute(l2cache_params_l)).io))
@@ -216,9 +218,19 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false) extends RVGM
     }
   io.host_rsp<>cta.io.CTA2host
   io.host_req<>cta.io.host2CTA
+  io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U.asTypeOf(l))})
+
+  for(i <- 0 until NL2Cache){
+    val port = l2cache(i).in_a
+    val cache_id: UInt = port.bits.source(l1cache_sourceBits)
+    val sm_id: UInt = port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
+    when(port.fire){
+      printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
+    }
+  }
 }
 
-class SM_wrapper(FakeCache: Boolean = false) extends Module{
+class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0) extends Module{
   val param = (new MyConfig).toInstance
   val io = IO(new Bundle{
     val CTAreq=Flipped(Decoupled(new CTAreqData))
@@ -226,12 +238,14 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
     val memReq = DecoupledIO(new L1CacheMemReq)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
   cta2warp.io.CTArsp<>io.CTArsp
-  val pipe=Module(new pipe)
+  val pipe=Module(new pipe(sm_id))
   pipe.io.pc_reset:=true.B
+  io.inst_cnt.foreach(_ := pipe.io.inst_cnt.getOrElse(0.U))
   val cnt=Counter(10)
   when(cnt.value<5.U){cnt.inc()}
   when(cnt.value===5.U){pipe.io.pc_reset:=false.B}
@@ -324,7 +338,7 @@ class SM_wrapper(FakeCache: Boolean = false) extends Module{
   pipe.io.shared_rsp.bits.data:=sharedmem.io.coreRsp.bits.data
   pipe.io.shared_rsp.bits.instrId:=sharedmem.io.coreRsp.bits.instrId
   pipe.io.shared_rsp.bits.activeMask:=sharedmem.io.coreRsp.bits.activeMask
- // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
+  // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
 }
 
 

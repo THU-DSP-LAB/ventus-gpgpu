@@ -74,7 +74,7 @@ class Issue extends Module{
     io.out_SIMT.bits.spike_info.get:=inputBuf.bits.ctrl.spike_info.get
 
     when(io.out_warpscheduler.fire/*&&io.out_LSU.bits.ctrl.wid===wid_to_check.U*/){
-      printf(p"warp ${Decimal(io.out_LSU.bits.ctrl.wid)} ")
+      printf(p"sm ${io.out_LSU.bits.ctrl.spike_info.get.sm_id} warp ${Decimal(io.out_LSU.bits.ctrl.wid)} ")
       printf(p"0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.pc)} 0x${Hexadecimal(io.out_LSU.bits.ctrl.spike_info.get.inst)}")
       when(io.out_warpscheduler.bits.ctrl.barrier & !io.out_warpscheduler.bits.ctrl.simt_stack_op){printf(p" barrier\n")}
       when(io.out_warpscheduler.bits.ctrl.simt_stack_op){printf(p" endprg\n")}
@@ -163,6 +163,43 @@ class arbiter_o2m(numTarget:Int) extends Module {
 
   io.in.ready:=ready.reduce(_ | _)
 
+}
+
+class XVDualIssue(num_buffer: Int) extends Module{
+  val io = IO(new Bundle{
+    val in = Flipped(Vec(num_buffer, Decoupled(Output(new vExeData))))
+    val out_x = Decoupled(Output(new vExeData))
+    val out_v = Decoupled(Output(new vExeData))
+  })
+  def inst_is_vec(in: vExeData): Bool = {
+    val out = Wire(new Bool)
+    // sALU | CSR | warpscheduler
+    // vFPU | vSFU | vALU&SIMT | vMUL | vTC | LSU
+    when(in.ctrl.tc || in.ctrl.fp || in.ctrl.mul || in.ctrl.sfu || in.ctrl.mem){
+      out := true.B
+    }.elsewhen(in.ctrl.csr.orR || in.ctrl.barrier){
+      out := false.B
+    }.elsewhen(in.ctrl.isvec){
+      out := true.B
+    }.otherwise{
+      out := false.B
+    }
+    out
+  }
+  val arb_x = Module(new RRArbiter(new vExeData, num_buffer))
+  val arb_v = Module(new RRArbiter(new vExeData, num_buffer))
+
+  (0 until num_buffer).foreach{ i =>
+    val in_isvec = inst_is_vec(io.in(i).bits)
+    io.in(i).ready := Mux(in_isvec, arb_v.io.in(i).ready, arb_x.io.in(i).ready)
+
+    arb_x.io.in(i).valid := io.in(i).valid && !in_isvec
+    arb_x.io.in(i).bits := io.in(i).bits
+    arb_v.io.in(i).valid := io.in(i).valid && in_isvec
+    arb_v.io.in(i).bits := io.in(i).bits
+  }
+  io.out_x <> arb_x.io.out
+  io.out_v <> arb_v.io.out
 }
 
 class IssueV2 extends Module {
