@@ -47,53 +47,10 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
     io.out.bits.data_out.in3(i) := 0.U
     io.out.bits.data_out.mask(i) := io.in.bits.data_in.mask(i)
   }
-//  io.out.bits.data_out.ctrl.foreach(_ := io.in.bits.data_in.ctrl)
-//  io.in.bits.data_in.ctrl.asInput.foreach { _ := io.out.bits.data_out.ctrl.asInput }
-//  io.out.bits.data_out.ctrl.inst := io.in.bits.data_in.ctrl.inst
-//  io.out.bits.data_out.ctrl.wid := io.in.bits.data_in.ctrl.wid
-//  io.out.bits.data_out.ctrl.fp := io.in.bits.data_in.ctrl.fp
-//  io.out.bits.data_out.ctrl.branch := io.in.bits.data_in.ctrl.branch
-//  io.out.bits.data_out.ctrl.simt_stack := io.in.bits.data_in.ctrl.simt_stack
-//  io.out.bits.data_out.ctrl.simt_stack_op := io.in.bits.data_in.ctrl.simt_stack_op
-//  io.out.bits.data_out.ctrl.barrier := io.in.bits.data_in.ctrl.barrier
-//  io.out.bits.data_out.ctrl.csr := io.in.bits.data_in.ctrl.csr
-//  io.out.bits.data_out.ctrl.reverse := io.in.bits.data_in.ctrl.reverse
-//  io.out.bits.data_out.ctrl.sel_alu2 := io.in.bits.data_in.ctrl.sel_alu2
-//  io.out.bits.data_out.ctrl.sel_alu1 := io.in.bits.data_in.ctrl.sel_alu1
-//  io.out.bits.data_out.ctrl.isvec := io.in.bits.data_in.ctrl.isvec
-//  io.out.bits.data_out.ctrl.sel_alu3 := io.in.bits.data_in.ctrl.sel_alu3
-//  io.out.bits.data_out.ctrl.mask := io.in.bits.data_in.ctrl.mask
-//  io.out.bits.data_out.ctrl.sel_imm := io.in.bits.data_in.ctrl.sel_imm
-//  io.out.bits.data_out.ctrl.mem_whb := io.in.bits.data_in.ctrl.mem_whb
-//  io.out.bits.data_out.ctrl.mem_unsigned := io.in.bits.data_in.ctrl.mem_unsigned
-//  io.out.bits.data_out.ctrl.alu_fn := io.in.bits.data_in.ctrl.alu_fn
-//  io.out.bits.data_out.ctrl.force_rm_rtz := io.in.bits.data_in.ctrl.force_rm_rtz
-//  io.out.bits.data_out.ctrl.is_vls12 := io.in.bits.data_in.ctrl.is_vls12
-//  io.out.bits.data_out.ctrl.mem := io.in.bits.data_in.ctrl.mem
-//  io.out.bits.data_out.ctrl.mul := io.in.bits.data_in.ctrl.mul
-//  io.out.bits.data_out.ctrl.tc := io.in.bits.data_in.ctrl.tc
-//  io.out.bits.data_out.ctrl.disable_mask := io.in.bits.data_in.ctrl.disable_mask
-//  io.out.bits.data_out.ctrl.custom_signal_0 := io.in.bits.data_in.ctrl.custom_signal_0
-//  io.out.bits.data_out.ctrl.mem_cmd := io.in.bits.data_in.ctrl.mem_cmd
-//  io.out.bits.data_out.ctrl.mop := io.in.bits.data_in.ctrl.mop
-//  io.out.bits.data_out.ctrl.reg_idx1 := io.in.bits.data_in.ctrl.reg_idx1
-//  io.out.bits.data_out.ctrl.reg_idx2 := io.in.bits.data_in.ctrl.reg_idx2
-//  io.out.bits.data_out.ctrl.reg_idx3 := io.in.bits.data_in.ctrl.reg_idx3
-//  io.out.bits.data_out.ctrl.reg_idxw := io.in.bits.data_in.ctrl.reg_idxw
-//  io.out.bits.data_out.ctrl.wvd := io.in.bits.data_in.ctrl.wvd
-//  io.out.bits.data_out.ctrl.fence := io.in.bits.data_in.ctrl.fence
-//  io.out.bits.data_out.ctrl.sfu := io.in.bits.data_in.ctrl.sfu
-//  io.out.bits.data_out.ctrl.readmask := io.in.bits.data_in.ctrl.readmask
-//  io.out.bits.data_out.ctrl.writemask := io.in.bits.data_in.ctrl.writemask
-//  io.out.bits.data_out.ctrl.wxd := io.in.bits.data_in.ctrl.wxd
-//  io.out.bits.data_out.ctrl.pc := io.in.bits.data_in.ctrl.pc
-//  io.out.bits.data_out.ctrl.imm_ext := io.in.bits.data_in.ctrl.imm_ext
-//  io.out.bits.data_out.ctrl.atomic := io.in.bits.data_in.ctrl.atomic
-//  io.out.bits.data_out.ctrl.aq := io.in.bits.data_in.ctrl.aq
-//  io.out.bits.data_out.ctrl.rl := io.in.bits.data_in.ctrl.rl
 
   // Init TC Computation Array
   val TCComputation = Module(new TC_ComputationArray_848_FP16(16,8,4,8,tcCtrl = tcCtrl))
+  dontTouch(TCComputation.io.out)
   //A 8*8 row
   for (m <- 0 until 8) {
     for (n <- 0 until 4) {
@@ -133,9 +90,9 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
   switch(stateReg) {
     is(sIdle) {
       when(io.in.fire) {
-        printf("Set1 Data Done. To Set1")
+        printf("Set1 Data Done. To Set1\n")
         //        TCComputation.io.out.ready := io.in.ready
-                TCComputation.io.in.valid := io.in.valid
+        TCComputation.io.in.valid := io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -171,7 +128,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //        }
 
         //        TCComputation.io.out.ready := io.out.ready
-                TCComputation.io.in.valid := io.in.valid
+        TCComputation.io.in.valid := true.B//io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -193,7 +150,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
           TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(2+m * 4 + 1)(15, 0)
           TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(2+m * 4 + 1)(31, 16)
         }
-        printf("Set2 Data Done. To Set2")
+        printf("Set2 Data Done. To Set2\n")
         stateReg := sSet2
       }
     }
@@ -208,7 +165,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //        }
 
         //        TCComputation.io.out.ready := io.out.ready
-                TCComputation.io.in.valid := io.in.valid
+        TCComputation.io.in.valid := true.B//io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
@@ -230,7 +187,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
           TCComputation.io.in.bits.C(m * 4 +2) := io.in.bits.data_in.in3(m * 4 + 1)(47, 32)
           TCComputation.io.in.bits.C(m * 4 +3) := io.in.bits.data_in.in3(m * 4 + 1)(63, 48)
         }
-        printf("Set3 Data Done. To Set3")
+        printf("Set3 Data Done. To Set3\n")
         stateReg := sSet3
       }
     }
@@ -245,7 +202,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //        }
 
         //        TCComputation.io.out.ready := io.out.ready
-                TCComputation.io.in.valid := io.in.valid
+        TCComputation.io.in.valid := true.B//io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
