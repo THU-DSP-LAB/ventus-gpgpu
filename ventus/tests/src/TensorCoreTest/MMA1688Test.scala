@@ -20,13 +20,20 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
       new TC_MMA1688Input(new TCCtrl(32, 1)).Lit(
         _.data_in -> new vExeData().Lit(
           _.in1 -> Vec(32, UInt(64.W)).Lit(
-            (0 until 32).map{ i => i -> "h3C003C003C003C00".U}:_*
+//            (0 until 32).map{ i => i -> "h3C003C003C003C00".U}:_*
+          (0 until 5).map{ i => i -> "h3C003C003C004880".U}++
+            (5 until 32).map{ i => i -> "h3C003C0048803C00".U}:_*
           ),
           _.in2 -> Vec(32, UInt(64.W)).Lit(
-            (0 until 32).map{ i => i -> "h3C003C003C003C00".U}:_*
+            (0 until 8).map{ i => i -> "h3C003C003C004880".U}++
+            (8 until 32).map{ i => i -> "h3C003C0048803C00".U}:_*
           ),
           _.in3 -> Vec(32, UInt(64.W)).Lit(
-            (0 until 32).map{ i => i -> "h3C003C003C003C00".U}:_*
+//            (0 until 32).map{ i => i -> "h48803C003C003C00".U}:_*
+            (0 until 8).map{ i => i -> "h3C003C003C004880".U}++
+              (8 until 23).map{ i => i -> "h3C003C0048803C00".U}++
+              (23 until 27).map{ i => i -> "h4880488048803C00".U}++
+              (27 until 32).map{ i => i -> "h3C0048803C003C00".U}:_*
           ),
           _.mask -> Vec(32,Bool()).Lit(
             (0 until 32).map{ i => i -> false.B}:_*

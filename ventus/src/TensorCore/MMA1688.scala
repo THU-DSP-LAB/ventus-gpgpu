@@ -54,23 +54,23 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
   //A 8*8 row
   for (m <- 0 until 8) {
     for (n <- 0 until 4) {
-      TCComputation.io.in.bits.A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-      TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+      TCComputation.io.in.bits.A(m * 8 + n * 2) := 0.U//io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+      TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := 0.U//io.in.bits.data_in.in1(m * 4 + n)(31, 16)
     }
   }
   //B 8*4 col
   for (m <- 0 until 4) {
     for (n <- 0 until 4) {
-      TCComputation.io.in.bits.B(m * 8 + n * 2) := io.in.bits.data_in.in2(m * 4 + n)(15, 0)
-      TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(m * 4 + n)(31, 16)
+      TCComputation.io.in.bits.B(m * 8 + n * 2) := 0.U//io.in.bits.data_in.in2(m * 4 + n)(15, 0)
+      TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := 0.U//io.in.bits.data_in.in2(m * 4 + n)(31, 16)
     }
   }
   //C 8*4 row First
   for (m <- 0 until 8) {
-    TCComputation.io.in.bits.C(m * 4) := io.in.bits.data_in.in3(m * 4)(15, 0)
-    TCComputation.io.in.bits.C(m * 4 + 1) := io.in.bits.data_in.in3(m * 4)(31, 16)
-    TCComputation.io.in.bits.C(m * 4 + 2) := io.in.bits.data_in.in3(m * 4 + 1)(15, 0)
-    TCComputation.io.in.bits.C(m * 4 + 3) := io.in.bits.data_in.in3(m * 4 + 1)(31, 16)
+    TCComputation.io.in.bits.C(m * 4) := 0.U//io.in.bits.data_in.in3(m * 4)(15, 0)
+    TCComputation.io.in.bits.C(m * 4 + 1) := 0.U//io.in.bits.data_in.in3(m * 4)(31, 16)
+    TCComputation.io.in.bits.C(m * 4 + 2) := 0.U//io.in.bits.data_in.in3(m * 4 + 1)(15, 0)
+    TCComputation.io.in.bits.C(m * 4 + 3) := 0.U//io.in.bits.data_in.in3(m * 4 + 1)(31, 16)
   }
 
   TCComputation.io.in.bits.rm := io.in.bits.rm
@@ -127,7 +127,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 //          io.out.bits.data_out.in3(m * 4 + 1)(31, 16) := TCComputation.io.out.bits.data(m * 4+3)
 //        }
 
-        //        TCComputation.io.out.ready := io.out.ready
+        // TCComputation.io.out.ready := io.out.ready
         TCComputation.io.in.valid := true.B//io.in.valid
         //A 8*8 row
         for (m <- 0 until 8) {
