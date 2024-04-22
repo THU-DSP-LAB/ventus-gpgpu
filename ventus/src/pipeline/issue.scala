@@ -52,6 +52,7 @@ class Issue extends Module{
     val out_TC=DecoupledIO(new vExeData)
     // xrn add dma
     val out_DMA=DecoupledIO(new vExeData)
+    val out_warpsheculer_async = DecoupledIO(new warpSchedulerExeData())
   })
   val inputBuf=Queue.apply(io.in,0)//Module(new Queue(new vExeData,entries = 1,pipe=true))
 
@@ -66,6 +67,8 @@ class Issue extends Module{
   io.out_SFU.bits:=inputBuf.bits
   io.out_LSU.bits:=inputBuf.bits
   io.out_TC.bits:=inputBuf.bits
+  io.out_DMA.bits := inputBuf.bits
+  io.out_warpsheculer_async.bits := inputBuf.bits.ctrl
   io.out_SIMT.bits.PC_branch:=inputBuf.bits.in3(0)
   io.out_SIMT.bits.PC_execute := inputBuf.bits.ctrl.pc
   //io.out_SIMT.bits.PC_reconv := inputBuf.bits.in1(0)
@@ -137,6 +140,7 @@ class Issue extends Module{
   }//xrn add dma
   .elsewhen(inputBuf.bits.ctrl.dma){
     io.out_DMA.valid := inputBuf.valid
+    io.out_warpsheculer_async.valid := inputBuf.valid
     inputBuf.ready := io.out_DMA.ready
   }.otherwise({
     io.out_sALU.valid:=inputBuf.valid

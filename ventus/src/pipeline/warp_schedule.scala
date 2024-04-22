@@ -36,8 +36,12 @@ class warp_scheduler extends Module{
     val CTA2csr=ValidIO(new warpReqData) //redirect warpreq
 
     //xrn add dma
-    val issued_dma = Flipped(DecoupledIO(new vExeData))
-    val finished_dma = Flipped(DecoupledIO(UInt(xLen.W)))
+    val issued_dma = Flipped(DecoupledIO(new warpSchedulerExeData))
+    val finished_dma = Flipped(DecoupledIO(UInt(depth_warp.W)))
+    val wg_id_lookup_async=Output(UInt(depth_warp.W)) //lookup CTA
+    val wg_id_tag_async=Input(UInt(TAG_WIDTH.W))  //barrier related
+
+
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
   })
@@ -87,7 +91,7 @@ class warp_scheduler extends Module{
   io.pc_req.bits.warpid := next_warp
   io.pc_req.bits.mask := pcControl(next_warp).mask_o
 
-  io.wg_id_lookup:=Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
+  io.wg_id_lookup:= Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
 
   val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_exp=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
@@ -131,8 +135,7 @@ class warp_scheduler extends Module{
 
   warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt()&Fill(num_warp,io.warpReq.fire()))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt() )).asUInt
   val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
-  val warp_ready_async = (~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
-  io.warp_ready:=warp_ready
+  io.warp_ready:= Mux(is_async,warp_ready_async,warp_ready)
   for (i<- num_warp-1 to 0 by -1){
     pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 
     when(pc_ready(i)){next_warp:=i.asUInt()}
@@ -175,17 +178,37 @@ class warp_scheduler extends Module{
 
 
   //xrn add dma
+  val is_async = Reg(Bool())
+  is_async := io.warp_control.fire()&io.warp_control.bits.ctrl.dma
   io.issued_dma.ready := true.B
   io.finished_dma.ready := true.B
-  val dma_cnt = RegInit(0.U(log2Ceil(max_dma_inst).W))
-  when(io.issued_dma.fire & !io.finished_dma.fire) {
-    dma_cnt := dma_cnt + 1.U
-  }.elsewhen(io.finished_dma.fire & !io.issued_dma.fire) {
-    dma_cnt := dma_cnt - 1.U
-  }.elsewhen(io.finished_dma.fire & io.issued_dma.fire) {
-    dma_cnt := dma_cnt
-  }.otherwise {
-    dma_cnt := dma_cnt
+  val dma_cnt=RegInit(VecInit(Seq.fill(num_block)(0.U(log2Ceil(max_dma_inst).W))))
+  io.wg_id_lookup_async := io.issued_dma.bits.ctrl.wid
+  val block_id_async = io.wg_id_tag_async
+  val block_id_tag_cache = RegInit(VecInit(Seq.fill(num_warp)(UInt(TAG_WIDTH.W))))
+  when(io.issued_dma.fire) {
+    dma_cnt(block_id_async) := dma_cnt(block_id_async) + 1.U
+    block_id_tag_cache(io.issued_dma.bits.ctrl.wid) := block_id_async
   }
-
+  when(io.finished_dma.fire) {
+    dma_cnt(block_id_tag_cache(io.finished_dma.bits)) := dma_cnt(block_id_tag_cache(io.finished_dma.bits)) - 1.U
+  }
+  val warp_bar_data_async = Wire(UInt(num_warp.W))
+  (0 until(num_warp)).foreach( x => {
+    when(dma_cnt(x).asUInt =/= 0.U){
+      warp_bar_data_async(x) := 1.U
+    }.otherwise{
+      warp_bar_data_async(x) := 0.U
+    }
+  })
+  val warp_ready_async = (~(warp_bar_data |warp_bar_data_async| io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
+  val pc_ready_async = Wire(Vec(num_warp,Bool()))
+  val next_warp_async=WireInit(current_warp)
+  for (i <- num_warp - 1 to 0 by -1) {
+    pc_ready_async(i) := io.pc_ibuffer_ready(i) & warp_active(i) & warp_bar_data_async(i)
+    when(pc_ready_async(i)) {
+      next_warp_async := i.asUInt()
+    }
+  }
+  io.pc_req.valid := Mux(is_async,pc_ready_async(next_warp_async),pc_ready(next_warp))
 }

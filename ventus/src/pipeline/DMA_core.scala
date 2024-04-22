@@ -32,7 +32,7 @@ class vExeDataDMA extends Bundle {
   val opmode = UInt(4.W)
   val copysize = UInt(xLen.W)  // only 4 8 16 , may add 32
   val srcsize = UInt(xLen.W)  // only 4 8 16 , may add 32
-  val pc = UInt(xLen.W)
+  val wid = UInt(depth_warp.W)
 //  val ctrl = new CtrlSigs()
 }
 
@@ -336,7 +336,7 @@ class AddrCalc_l2cache() extends Module{
     }
   }
   io.to_tempmem.bits.tag.dst := reg_save.in3
-  io.to_tempmem.bits.tag.pc := reg_save.ctrl.pc
+  io.to_tempmem.bits.tag.wid := reg_save.ctrl.wid
   io.to_tempmem.bits.tag.opmode := reg_save.ctrl.opmode
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
@@ -596,7 +596,7 @@ class Temp_mem() extends Module {
   io.to_shared.bits.data := output_data.data
   io.to_shared.bits.l2cacheTag := tag_wire
   io.to_shared.bits.instinfo := inst_to_shared
-  io.inst_complete.bits := output_inst.pc
+  io.inst_complete.bits := output_inst.wid
 
 
 //  printf("state: %d \n",state.asUInt)
