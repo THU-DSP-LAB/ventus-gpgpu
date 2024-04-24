@@ -9,38 +9,61 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import pipeline.{CtrlSigs, InstWriteBack, vExeData}
 import play.TestUtils.RequestSender
+//import chisel3.util.Hexadecimal
+
+import scala.io.Source
 
 class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
 //  import FPUv2.TestArgs._
   object TCMMA1688Input {
     var count = 0
     def reset = { count = 0 }
+    def readTxtFileToOneDimensionalArray(fileName: String): Array[String] = {
+      // 使用Source从文件中读取文本
+      val lines: Iterator[String] = Source.fromFile(fileName).getLines()
+      // 将每一行根据空格分割成单词，并将所有单词收集到一个数组中
+      val wordsArray = lines.flatMap(_.split("\\s+")).toArray
+//      // 关闭Source
+      //      Source.close(lines)
+//      println(wordsArray)
+      wordsArray
+    }
     def apply(DimM:Int, DimN:Int, DimK:Int) = {
       count = (count + 1) % 32
+      val RA = readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData/RA.txt")
+      val RB = readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData/RB.txt")
+      val RC = readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData/RC.txt")
       new TC_MMA1688Input(new TCCtrl(32, 1)).Lit(
         _.data_in -> new vExeData().Lit(
           _.in1 -> Vec(32, UInt(64.W)).Lit(
 //            (0 until 32).map{ i => i -> "h3C003C003C003C00".U}:_*
-          (0 until 5).map{ i => i -> "h3C003C003C004880".U}++
-            (5 until 32).map{ i => i -> "h3C003C0048803C00".U}:_*
+//          (0 until 5).map{ i => i -> "h3c003C003C004880".U}++
+//            (5 until 32).map{ i => i -> "h3C003C0048803C00".U}:_*
+          (0 until 32).map{i => i-> RA(i).U}:_*
           ),
           _.in2 -> Vec(32, UInt(64.W)).Lit(
-            (0 until 8).map{ i => i -> "h3C003C003C004880".U}++
-            (8 until 32).map{ i => i -> "h3C003C0048803C00".U}:_*
+//            (0 until 8).map{ i => i -> "h3C003C003C004880".U}++
+//            (8 until 32).map{ i => i -> "h3C003C0048803C00".U}:_*
+            (0 until 32).map{i => i-> RB(i).U}:_*
           ),
           _.in3 -> Vec(32, UInt(64.W)).Lit(
 //            (0 until 32).map{ i => i -> "h48803C003C003C00".U}:_*
-            (0 until 8).map{ i => i -> "h3C003C003C004880".U}++
-              (8 until 23).map{ i => i -> "h3C003C0048803C00".U}++
-              (23 until 27).map{ i => i -> "h4880488048803C00".U}++
-              (27 until 32).map{ i => i -> "h3C0048803C003C00".U}:_*
+//            (0 until 8).map{ i => i -> "h3C003C003C004880".U}++
+//              (8 until 23).map{ i => i -> "h3C003C0048803C00".U}++
+//              (23 until 27).map{ i => i -> "h4880488048803C00".U}++
+//              (27 until 32).map{ i => i -> "h3C0048803C003C00".U}:_*
+            (0 until 32).map{i => i-> RC(i).U}:_*
           ),
           _.mask -> Vec(32,Bool()).Lit(
             (0 until 32).map{ i => i -> false.B}:_*
           ),
           _.ctrl -> genBundle_bulk()
         ),
-        _.rm -> RoundingModes.RNE,
+//        _.rm -> RoundingModes.RNE,
+//        _.rm -> RoundingModes.RTZ,
+//        _.rm -> RoundingModes.RDN,
+//          _.rm -> RoundingModes.RUP,
+          _.rm -> RoundingModes.RMM,
         _.ctrl -> new TCCtrl(32, 1).Lit(
           _.reg_idxw -> count.U,
           _.warpID -> 0.U
@@ -124,7 +147,21 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
         d.clock.step()
         clock_cnt += 1
       }
-      d.clock.step(30)
+
+//      d.clock.step(600)
+      println("\n")
+      val Rd = TCMMA1688Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData/RD.txt")
+      for (i <- 0 until 32) {
+        val elementValue = d.io.out.bits.data_out(i).peek()
+        val intValue: Int = elementValue(31,0).litValue().toInt
+        val intValue2: Int = elementValue(63,32).litValue().toInt
+        val hexString: String = f"$intValue%08x" // %016x 表示至少16位的16进制数，不足的前面补零
+        val hexString2: String = f"$intValue2%08x" // %016x 表示至少16位的16进制数，不足的前面补零
+//        println(s"data_out($i) = hex:$hexString")
+        val std: String = Rd(i)
+        println(s"$i $hexString2$hexString, $std")
+      }
+//      d.clock.step(30)
     }
   }
 }
