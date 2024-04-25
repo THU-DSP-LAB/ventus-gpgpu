@@ -1,4 +1,4 @@
-package cta_scheduler
+package cta
 
 /**
  * @see doc/Allocator.md

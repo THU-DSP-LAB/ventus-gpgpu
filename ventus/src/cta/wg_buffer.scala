@@ -1,8 +1,9 @@
-package cta_scheduler
+package cta
 
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
+import cta.utils.RRPriorityEncoder
 
 class io_alloc2buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Bundle {
   val accept = Bool()   // true.B: it is ok to send this wg to CU.      false.B: rejected
@@ -59,8 +60,8 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   wgram2_wr_data := io.host_wg_new.bits
 
   // Next preferred writable/readable address of wg_ram
-  val wgram_wr_next = cta_util.RRPriorityEncoder(~wgram_valid)
-  val wgram1_rd_next = cta_util.RRPriorityEncoder(wgram_valid & ~wgram_alloc)
+  val wgram_wr_next = RRPriorityEncoder(~wgram_valid)
+  val wgram1_rd_next = RRPriorityEncoder(wgram_valid & ~wgram_alloc)
 
   val wgram_wr_act = Wire(Bool())          // Take a write operation to   wg_ram and wg_ram_valid
   val wgram1_rd_act = Wire(Bool())         // Take a read  operation from wg_ram1

@@ -1,4 +1,4 @@
-package cta_scheduler.cta_util
+package cta.utils
 
 /**
  * @see doc/Utilities.md

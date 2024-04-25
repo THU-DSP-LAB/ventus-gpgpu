@@ -1,11 +1,11 @@
-package cta_test
+package play.cta
 
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
 import chiseltest._
-import cta_scheduler._
 import org.scalatest.freespec.AnyFreeSpec
+import cta._
 
 import scala.util.Random
 
@@ -204,7 +204,7 @@ class Gpu(val test: Test) {
   }
 }
 
-class test1 extends AnyFreeSpec with ChiselScalatestTester {
+class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
   "Test: CTA_scheduler" in {
     test(new cta_scheduler_top()).withAnnotations(Seq(WriteFstAnnotation, VerilatorBackendAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
@@ -215,7 +215,7 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
       dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
 
-      val testlen = 10
+      val testlen = 5000
       val test = new Test(testlen)
       val testOut_wg = new Array[Boolean](testlen)
 

@@ -1,4 +1,4 @@
-package cta_scheduler
+package cta
 
 import chisel3._
 import chisel3.experimental.ChiselEnum
@@ -96,6 +96,7 @@ class cu_interface extends Module {
     io.cu_wf_new(i).bits.sgpr_base := splitter_sgpr_addr
     io.cu_wf_new(i).bits.vgpr_base := splitter_vgpr_addr
     io.cu_wf_new(i).bits.wg_id := fifo.io.deq.bits.wg_id
+    io.cu_wf_new(i).bits.num_wf := fifo.io.deq.bits.num_wf
     io.cu_wf_new(i).bits.wf_tag := { val wftag = Wire(new wftag_datatype)
       wftag.wg_slot_id := fifo.io.deq.bits.wg_slot_id
       wftag.wf_id := fifo.io.deq.bits.num_wf - splitter_cnt

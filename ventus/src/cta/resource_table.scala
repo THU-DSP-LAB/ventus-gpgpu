@@ -1,4 +1,4 @@
-package cta_scheduler
+package cta
 
 /**
  * @see doc/Resource_table.md
@@ -7,8 +7,8 @@ package cta_scheduler
 import chisel3._
 import chisel3.experimental.ChiselEnum
 import chisel3.util._
-import cta_util.sort3
-import cta_util.DecoupledIO_1_to_3
+import cta.utils.sort3
+import cta.utils.DecoupledIO_1_to_3
 
 // =
 // Abbreviations:

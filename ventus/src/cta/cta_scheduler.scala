@@ -1,32 +1,33 @@
-package cta_scheduler
+package cta
 
 import chisel3._
 import chisel3.util._
 
 object CONFIG {
-  object GPU{
-    val NUM_CU = 4
-    val MEM_ADDR_WIDTH = 32.W
-    val NUM_WG_SLOT = 8             // Number of WG slot in each CU
-    val NUM_WF_SLOT = 32            // Number of WG slot in each CU
+  import top.parameters
+  object GPU {
+    val NUM_CU = parameters.num_sm
+    val MEM_ADDR_WIDTH = parameters.MEM_ADDR_WIDTH.W
+    val NUM_WG_SLOT = parameters.num_block                  // Number of WG slot in each CU
+    val NUM_WF_SLOT = parameters.num_warp                   // Number of WG slot in each CU
   }
-  object WG{
-    val WG_ID_WIDTH = 32.W
-    val NUM_WG_DIM_MAX = 1024       // Max number of wg in a single dimension in each kernel
-    val NUM_THREAD_MAX = 32         // Max number of thread in each wavefront(warp)
-    val NUM_WF_MAX = 32             // Max number of wavefront in each workgroup(block)
-    val NUM_SGPR_MAX = 1024         // Max number of sgpr occupied by a workgroup
-    val NUM_VGPR_MAX = 1024         // Max number of vgpr occupied by a workgroup
-    val NUM_GDS_MAX = 1024          // Max number of GDS  occupied by a workgroup
-    val NUM_LDS_MAX = 1024          // Max number of LDS  occupied by a workgroup
+  object WG {
+    val WG_ID_WIDTH = parameters.WG_ID_WIDTH.W              //
+    val NUM_WG_DIM_MAX = parameters.NUM_WG_X                // Max number of wg in a single dimension in each kernel
+    val NUM_THREAD_MAX = 1 << parameters.WAVE_ITEM_WIDTH    // Max number of thread in each wavefront(warp)
+    val NUM_WF_MAX = 32                                     // Max number of wavefront in each workgroup(block)
+    val NUM_LDS_MAX = parameters.NUMBER_LDS_SLOTS           // Max number of LDS  occupied by a workgroup
+    val NUM_SGPR_MAX = parameters.num_sgpr                  // Max number of sgpr occupied by a workgroup
+    val NUM_VGPR_MAX = parameters.num_vgpr                  // Max number of vgpr occupied by a workgroup
+    //val NUM_GDS_MAX = 1024                                // Max number of GDS  occupied by a workgroup, useless
 
     // WF tag = cat(wg_slot_id_in_cu, wf_id_in_wg)
     val WF_TAG_WIDTH = (log2Ceil(GPU.NUM_WG_SLOT) + log2Ceil(NUM_WF_MAX)).W
   }
-  object WG_BUFFER{
+  object WG_BUFFER {
     val NUM_ENTRIES = 16
   }
-  object RESOURCE_TABLE{
+  object RESOURCE_TABLE {
     val NUM_RESULT = 2
   }
   val DEBUG = true
@@ -97,7 +98,7 @@ trait ctainfo_alloc_to_cu extends Bundle {
  */
 trait ctainfo_host_to_cu extends Bundle {
   val num_thread_per_wf = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_MAX+1).W)// Number of thread in each wf
-  val num_gds = UInt(log2Ceil(CONFIG.WG.NUM_GDS_MAX+1).W)             // Number of Global Data Share used by this cta
+  //val num_gds = UInt(log2Ceil(CONFIG.WG.NUM_GDS_MAX+1).W)           // Number of Global Data Share used by this cta
   val gds_base = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // GDS base address of this cta
   val pds_base = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // PDS base address of this cta
   val start_pc = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // Program start pc address
@@ -112,10 +113,11 @@ trait ctainfo_host_to_cu extends Bundle {
 class io_cuinterface2cu extends Bundle with ctainfo_host_to_cu with ctainfo_alloc_to_cu {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
   val wf_tag = UInt(CONFIG.WG.WF_TAG_WIDTH)
+  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)                 // Number of wavefront in this cta
 }
 class io_cu2cuinterface extends Bundle {
   val wf_tag = UInt(CONFIG.WG.WF_TAG_WIDTH)
-  val wg_id = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
+  //val wg_id = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 
 /** IO between host and wg-buffer
