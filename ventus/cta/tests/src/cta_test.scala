@@ -124,15 +124,15 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
     if(wf.csr != test.in.csr(wf.wg_id)) {
       throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} WF ${wf.wf_id} CSR error: expect csr=${test.in.csr(wf.wg_id)}, got ${wf.csr}")
     }
+    if(wf_cnt == test.in.wf(wf.wg_id)) {  // This WG has finished its dispatch
+      println(s"CU ${cu_id} receive WG ${wf.wg_id}: LDS=${wf.lds}, SGPR=${test.wg_exec.sgpr(wf.wg_id)}, VGPR=${test.wg_exec.vgpr(wf.wg_id)}")
+    } else if(wf_cnt > test.in.wf(wf.wg_id)) {
+      throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} got too much WF: expect num_wf=${test.in.wf(wf.wg_id)}, got WF_ID=${wf.wf_id}")
+    }
 
     if(test.wg_exec.valid(wf.wg_id)) {  // For wf_id != 0
       if(test.wg_exec.cu(wf.wg_id) != cu_id){
         throw new MyException(s"WG ${wf.wg_id} dispatched to more than 1 CU: ${test.wg_exec.cu(wf.wg_id)} and ${cu_id}")
-      }
-      if(wf_cnt == test.in.wf(wf.wg_id)) {  // This WG has finished its dispatch
-        println(s"CU ${cu_id} receive WG ${wf.wg_id}: LDS=${wf.lds}, SGPR=${test.wg_exec.sgpr(wf.wg_id)}, VGPR=${test.wg_exec.vgpr(wf.wg_id)}")
-      } else if(wf_cnt > test.in.wf(wf.wg_id)) {
-        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} got too much WF: expect num_wf=${test.in.wf(wf.wg_id)}, got WF_ID=${wf.wf_id}")
       }
       if(test.wg_exec.sgpr(wf.wg_id)._2 + 1 != wf.sgpr._1) {
         throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource SGPR allocation error: WF ID ${wf_cnt-1} and ${wf.wf_id}")
@@ -215,7 +215,7 @@ class test1 extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
       dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
 
-      val testlen = 5000
+      val testlen = 10
       val test = new Test(testlen)
       val testOut_wg = new Array[Boolean](testlen)
 

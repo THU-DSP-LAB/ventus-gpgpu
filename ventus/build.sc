@@ -17,7 +17,7 @@ object cta extends ScalaModule {
   def scalaVersion = ivys.sv
   //override def millSourcePath = os.pwd
 
-  override def forkArgs = Seq("-Xmx32G", "-Xss192m")
+  override def forkArgs = Seq("-Xmx12G", "-Xss192m")
 
   override def scalacOptions = Seq(
     "-Xsource:2.11",
@@ -36,6 +36,7 @@ object cta extends ScalaModule {
   )
 
   object tests extends Tests with TestModule.ScalaTest {
+    override def forkArgs = Seq("-Xmx12G", "-Xss192m")
     override def ivyDeps = super.ivyDeps() ++ Agg(
       ivys.chiseltest,
       ivys.scalatest
