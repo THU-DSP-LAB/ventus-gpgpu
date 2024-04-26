@@ -9,10 +9,10 @@ object CONFIG {
     val NUM_CU = parameters.num_sm
     val MEM_ADDR_WIDTH = parameters.MEM_ADDR_WIDTH.W
     val NUM_WG_SLOT = parameters.num_block                  // Number of WG slot in each CU
-    val NUM_WF_SLOT = parameters.num_warp                   // Number of WG slot in each CU
+    val NUM_WF_SLOT = 32                                    // Number of WG slot in each CU
   }
   object WG {
-    val WG_ID_WIDTH = parameters.WG_ID_WIDTH.W              //
+    val WG_ID_WIDTH = 32.W
     val NUM_WG_DIM_MAX = parameters.NUM_WG_X                // Max number of wg in a single dimension in each kernel
     val NUM_THREAD_MAX = 1 << parameters.WAVE_ITEM_WIDTH    // Max number of thread in each wavefront(warp)
     val NUM_WF_MAX = 32                                     // Max number of wavefront in each workgroup(block)
@@ -85,7 +85,7 @@ trait ctainfo_alloc_to_cuinterface extends Bundle {
 trait ctainfo_alloc_to_cu extends Bundle {
   val sgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)            // sgpr base address (initial WG, later WF)
   val vgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX).W)            // vgpr base address (initial WG, later WF)
-  val lds_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)             // lds  base address (initial WG, later WF)
+  val lds_base = UInt(log2Ceil(CONFIG.WG.NUM_LDS_MAX).W)             // lds  base address (initial WG, later WF)
 }
 
 /** IO Bundle: CTA information

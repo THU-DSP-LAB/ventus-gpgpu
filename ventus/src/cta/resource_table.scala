@@ -608,7 +608,7 @@ class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG
 /**
  * It is assumed that once alloc/dealloc.valid = true, it will keep valid until alloc/dealloc.fire
  */
-class resource_table_top extends Module {
+class resource_table_top(val NUM_CU_PER_GROUP: Int = 2) extends Module {
   // Constants used in IO
   val NUM_LDS = CONFIG.WG.NUM_LDS_MAX
   val NUM_SGPR = CONFIG.WG.NUM_SGPR_MAX
@@ -625,10 +625,9 @@ class resource_table_top extends Module {
   })
   // Constants
   val NUM_CU = CONFIG.GPU.NUM_CU
-  val NUM_CU_PER_GROUP = 2
   val NUM_HANDLER_PER_GROUP = 1
   val NUM_HANDLER = NUM_CU / NUM_CU_PER_GROUP * NUM_HANDLER_PER_GROUP
-  assert(NUM_CU % NUM_CU_PER_GROUP == 0)
+  assert(NUM_CU >= NUM_CU_PER_GROUP && NUM_CU % NUM_CU_PER_GROUP == 0)
   assert(NUM_HANDLER_PER_GROUP == 1)  // This implement (direct mapping from handler to rtram) only supports NUM_HANDLER_PER_CU=1
   val NUM_WG_SLOT = CONFIG.GPU.NUM_WG_SLOT
   val NUM_RT_RESULT = CONFIG.RESOURCE_TABLE.NUM_RESULT
@@ -638,7 +637,7 @@ class resource_table_top extends Module {
   def convert_cu_id(cu_id_global: UInt): (UInt, UInt) = {
     val cu_id_reversed = Reverse(cu_id_global)
     val cu_id_local = cu_id_reversed(log2Ceil(NUM_CU_PER_GROUP)-1, 0)
-    val cu_id_group = cu_id_reversed(log2Ceil(NUM_CU)-1, log2Ceil(NUM_CU_PER_GROUP))
+    val cu_id_group = if(NUM_CU > NUM_CU_PER_GROUP) cu_id_reversed(log2Ceil(NUM_CU)-1, log2Ceil(NUM_CU_PER_GROUP)) else WireInit(UInt(0.W), 0.U)
     (cu_id_group, cu_id_local)
   }
 

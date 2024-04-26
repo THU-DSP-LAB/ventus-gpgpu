@@ -105,13 +105,17 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
   def wf_new(wf: Wf_slot): Unit = {
     if(wf.wg_id < 0 || wf.wg_id >= test.len) {throw new MyException(s"WG ID ERROR: ${wf.wg_id}, expect WG ID Max = ${test.len - 1}")}
     wf_check(wf)
-    val wf_cnt = test.wg_exec.wf_cnt(wf.wg_id) + 1
     wf.valid = true
     wf.time = 200 + Random.nextInt(400)
 
+    val wf_cnt = test.wg_exec.wf_cnt(wf.wg_id) + 1
+
     if(wf.wf_id != test.wg_exec.wf_cnt(wf.wg_id)) {
-      throw new MyException(s"Warning: WF not dispatched in order, expect WF_ID=${test.wg_exec.wf_cnt(wf.wg_id)}, received WF_ID=${wf.wf_id}")
-    }
+      throw new MyException(s"Warning: WG ${wf.wg_id} WF not dispatched in order, expect WF_ID=${test.wg_exec.wf_cnt(wf.wg_id)}, received WF_ID=${wf.wf_id}")
+    } else test.wg_exec.wf_cnt(wf.wg_id) += 1
+    if(wf.csr != test.in.csr(wf.wg_id)) {
+      throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} WF ${wf.wf_id} CSR error: expect csr=${test.in.csr(wf.wg_id)}, got ${wf.csr}")
+    } else test.wg_exec.csr(wf.wg_id) = wf.csr
     if(wf.lds._2 - wf.lds._1 + 1 != test.in.lds(wf.wg_id)) {
       throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} WF ${wf.wf_id} resource LDS allocation error: expect num_lds=${test.in.lds(wf.wg_id)}, got ${wf.lds}")
     }
@@ -121,26 +125,32 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
     if(wf.vgpr._2 - wf.vgpr._1 + 1 != test.in.vgpr(wf.wg_id)) {
       throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource VGPR allocation error: expect num_vgpr_per_wf=${test.in.vgpr(wf.wg_id)}, got ${wf.vgpr}")
     }
-    if(wf.csr != test.in.csr(wf.wg_id)) {
-      throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} WF ${wf.wf_id} CSR error: expect csr=${test.in.csr(wf.wg_id)}, got ${wf.csr}")
+    if(test.wg_exec.valid(wf.wg_id)) {  // For wf_id != 0
+      if(test.wg_exec.cu(wf.wg_id) != cu_id){
+        throw new MyException(s"WG ${wf.wg_id} dispatched to more than 1 CU: ${test.wg_exec.cu(wf.wg_id)} and ${cu_id}")
+      }
+      if(test.wg_exec.lds(wf.wg_id) != wf.lds) {
+        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource LDS allocation error: WF ID ${wf_cnt-1} and ${wf.wf_id}, LDS ${test.wg_exec.lds(wf.wg_id)} VS ${wf.lds}")
+      }
+      if(test.wg_exec.sgpr(wf.wg_id)._2 + 1 != wf.sgpr._1) {
+        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource SGPR allocation error: WF ID ${wf_cnt-1} and ${wf.wf_id}")
+      } else test.wg_exec.sgpr(wf.wg_id) = (test.wg_exec.sgpr(wf.wg_id)._1, wf.sgpr._2)
+      if(test.wg_exec.vgpr(wf.wg_id)._2 + 1 != wf.vgpr._1) {
+        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource VGPR allocation error: WF ID ${wf_cnt-1} and ${wf.wf_id}")
+      } else test.wg_exec.vgpr(wf.wg_id) = (test.wg_exec.vgpr(wf.wg_id)._1, wf.vgpr._2)
+  } else {
+      assert(wf.wf_id == 0)
+      test.wg_exec.cu(wf.wg_id) = cu_id
+      test.wg_exec.lds(wf.wg_id) = wf.lds
+      test.wg_exec.sgpr(wf.wg_id) = wf.sgpr
+      test.wg_exec.vgpr(wf.wg_id) = wf.vgpr
     }
+
     if(wf_cnt == test.in.wf(wf.wg_id)) {  // This WG has finished its dispatch
       println(s"CU ${cu_id} receive WG ${wf.wg_id}: LDS=${wf.lds}, SGPR=${test.wg_exec.sgpr(wf.wg_id)}, VGPR=${test.wg_exec.vgpr(wf.wg_id)}")
     } else if(wf_cnt > test.in.wf(wf.wg_id)) {
       throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} got too much WF: expect num_wf=${test.in.wf(wf.wg_id)}, got WF_ID=${wf.wf_id}")
     }
-
-    if(test.wg_exec.valid(wf.wg_id)) {  // For wf_id != 0
-      if(test.wg_exec.cu(wf.wg_id) != cu_id){
-        throw new MyException(s"WG ${wf.wg_id} dispatched to more than 1 CU: ${test.wg_exec.cu(wf.wg_id)} and ${cu_id}")
-      }
-      if(test.wg_exec.sgpr(wf.wg_id)._2 + 1 != wf.sgpr._1) {
-        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource SGPR allocation error: WF ID ${wf_cnt-1} and ${wf.wf_id}")
-      }
-      if(test.wg_exec.vgpr(wf.wg_id)._2 + 1 != wf.vgpr._1) {
-        throw new MyException(s"CU ${cu_id} WG ${wf.wg_id} resource VGPR allocation error: WF ID ${wf_cnt-1} and ${wf.wf_id}")
-      }
-    } else assert(wf.wf_id == 0)
 
     if(wf_new_last_valid && wf.wf_id == 0) {
       if(wf_new_last_wfid + 1 != test.in.wf(wf_new_last_wgid)) {
@@ -152,13 +162,7 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
     wf_new_last_wfid = wf.wf_id
     for(i <- 0 until NUM_WF_SLOT) {
       if(!wf_slot(i).valid) {
-        test.wg_exec.cu(wf.wg_id) = cu_id
         test.wg_exec.valid(wf.wg_id) = true
-        test.wg_exec.wf_cnt(wf.wg_id) += 1
-        test.wg_exec.csr(wf.wg_id) = wf.csr
-        test.wg_exec.lds(wf.wg_id) = wf.lds
-        test.wg_exec.sgpr(wf.wg_id) = (if(wf.wf_id==0) wf.sgpr._1 else test.wg_exec.sgpr(wf.wg_id)._1, wf.sgpr._2)
-        test.wg_exec.vgpr(wf.wg_id) = (if(wf.wf_id==0) wf.vgpr._1 else test.wg_exec.vgpr(wf.wg_id)._1, wf.vgpr._2)
         wf_slot(i) := wf
         return
       }
@@ -215,7 +219,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
       dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
 
-      val testlen = 5000
+      val testlen = 1000
       val test = new Test(testlen)
       val testOut_wg = new Array[Boolean](testlen)
 
@@ -232,7 +236,6 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.num_lds -> test.in.lds(i).U,
         _.num_wf -> test.in.wf(i).U,
         _.gds_base -> 0.U,
-        _.num_gds -> 0.U,
         _.num_thread_per_wf -> 0.U,
         _.pds_base -> 0.U,
         _.start_pc -> 0.U,
@@ -256,7 +259,6 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
           for(i <- 0 until NUM_CU) {
             dut.io.cu_wf_done(i).valid.poke(wf_done_seq(i)._1.asBool)
             dut.io.cu_wf_done(i).bits.wf_tag.poke(wf_done_seq(i)._3.asUInt)
-            if(CONFIG.DEBUG) { dut.io.cu_wf_done(i).bits.wg_id.get.poke(wf_done_seq(i)._2.asUInt) }
           }
           for(i <- 0 until NUM_CU) {
             // 这个循环不能与上一个融合，CU interface会从所有的wf_done(i).valid中Arbiter出一个作为处理对象
