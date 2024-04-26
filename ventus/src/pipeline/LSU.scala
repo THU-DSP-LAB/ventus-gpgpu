@@ -117,6 +117,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
       val tag = new MshrTag
     })
     val idx_entry = Input(UInt(log2Up(lsu_nMshrEntry).W))
+    val flush_dcache = Flipped(DecoupledIO(Bool()))
     val to_dcache = DecoupledIO(new DCacheCoreReq_np)
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
@@ -125,9 +126,11 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   val state = RegInit(init = s_idle)
 
   val reg_save = Reg(new vExeData)
+  val is_flush = RegInit(false.B)
   io.csr_wid:=reg_save.ctrl.wid
   //val rdy_fromFIFO = Reg(Bool())
-  io.from_fifo.ready := state===s_idle
+  io.from_fifo.ready := state===s_idle && !io.flush_dcache.valid
+  io.flush_dcache.ready := state === s_idle
   val reg_entryID = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
 
   val addr = Wire(Vec(num_thread, UInt(xLen.W)))
@@ -244,6 +247,9 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   }.elsewhen(reg_save.ctrl.fence){
     opcode_wire :=3.U
     param_wire :=0.U
+  }.elsewhen(is_flush) {
+    opcode_wire := 3.U
+    param_wire := 0.U
   }.otherwise{
     opcode_wire :=reg_save.ctrl.mem_cmd(1)
     param_wire :=0.U
@@ -272,16 +278,20 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // FSM State Transfer
   switch(state){
     is (s_idle){
-      when(io.from_fifo.valid){ state := s_save }.otherwise{ state := state }
+      when(io.from_fifo.valid || io.flush_dcache.valid){ state := s_save }.otherwise{ state := state }
       cnt.reset()
     }
     is (s_save){
       when(reg_save.ctrl.mem_cmd.orR){ // read or write
-        when(all_shared){ // shared memory
+        when(all_shared && !is_flush){ // shared memory
           when(io.to_mshr.fire()){state := s_shared}.otherwise{state := s_save}
         }.otherwise{ // dcache
-          when(io.to_mshr.fire()){state := s_dcache}.otherwise{state := s_save}
-        }
+            when(io.to_mshr.fire()) {
+              state := s_dcache
+            }.otherwise {
+              state := s_save
+            }
+          }
       }.otherwise{ state := s_idle }
     }
     is (s_shared){
@@ -293,16 +303,28 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
         }
       }.otherwise{state := s_shared}
     }
-    is (s_dcache){
-      when(io.to_dcache.fire()){
-        when((reg_save.ctrl.atomic && reg_save.ctrl.aq )||(reg_save.ctrl.atomic &&reg_save.ctrl.rl)){
-          state :=s_dcache_1
-        }.elsewhen (cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
-          cnt.reset(); state := s_idle
-        }.otherwise{
-          cnt.inc(); state := s_dcache
+    is (s_dcache) {
+      when(is_flush) {
+        when(io.to_dcache.fire()) {
+          state := s_idle
+        }.otherwise {
+          state := state
         }
-      }.otherwise{state := s_dcache}
+      }.otherwise {
+        when(io.to_dcache.fire()) {
+          when((reg_save.ctrl.atomic && reg_save.ctrl.aq) || (reg_save.ctrl.atomic && reg_save.ctrl.rl)) {
+            state := s_dcache_1
+          }.elsewhen(cnt.value >= num_thread.U || mask_next.asUInt() === 0.U) {
+            cnt.reset();
+            state := s_idle
+          }.otherwise {
+            cnt.inc();
+            state := s_dcache
+          }
+        }.otherwise {
+          state := s_dcache
+        }
+      }
     }
     is(s_dcache_1){
       when(io.to_dcache.fire()){
@@ -331,8 +353,16 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // FSM Operation
   switch(state){
     is (s_idle){
-      when(io.from_fifo.fire()){ // Next: s_save
+      when(io.flush_dcache.fire()){
+        reg_save := RegInit(0.U.asTypeOf(new vExeData))
+        reg_save.ctrl.mem_cmd := 1.U
+      }.elsewhen(io.from_fifo.fire()){ // Next: s_save
         reg_save := io.from_fifo.bits   // save data
+        when(io.from_fifo.bits.ctrl.atomic){
+          reg_save.ctrl.aq := true.B
+        }.otherwise{
+          reg_save.ctrl.aq:=io.from_fifo.bits.ctrl.aq
+        }
         reg_save.mask := Mux(io.from_fifo.bits.ctrl.isvec, io.from_fifo.bits.mask, VecInit((1.U(num_thread.W)).asBools))
       }.otherwise{reg_save := RegInit(0.U.asTypeOf(new vExeData))}
     }
@@ -354,6 +384,23 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
         reg_save.mask := mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
+      }
+    }
+  }
+
+  switch(state){
+    is (s_idle){
+      when(io.flush_dcache.fire){
+        is_flush := true.B
+      }.otherwise{
+        is_flush := false.B
+      }
+    }
+    is(s_dcache){
+      when(io.to_dcache.fire()){
+        is_flush := false.B
+      }.otherwise{
+        is_flush := is_flush
       }
     }
   }
@@ -453,6 +500,7 @@ class LSUexe() extends Module{
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val fence_end = Output(UInt(num_warp.W))
+    val flush_dcache = Flipped(DecoupledIO(Bool()))
 
     val csr_wid = Output(UInt(depth_warp.W))
     val csr_pds = Input(UInt(xLen.W))
@@ -469,6 +517,7 @@ class LSUexe() extends Module{
   AddrCalc.io.from_fifo <> InputFIFO.io.deq
   io.dcache_req <> AddrCalc.io.to_dcache
   io.shared_req <> AddrCalc.io.to_shared
+  AddrCalc.io.flush_dcache <> io.flush_dcache
 
   val rspArbiter = Module(new Arbiter(new DCacheCoreRsp_np, n = 2))
   rspArbiter.io.in(1) <> io.shared_rsp
