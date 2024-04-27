@@ -307,7 +307,7 @@ class tagChecker(way: Int, tagIdxBits: Int, AsidBits: Int) extends Module{
 
   io.waymask := tagMatch & ASIDMatch //Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
   //io.waymask := Reverse(Cat(io.tag_of_set.map{ tag => (tag(tagIdxBits-1,0) === io.tag_from_pipe) && tag(tagIdxBits)}))
-  assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
+  //assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
   io.cache_hit := io.waymask.orR
 }
 

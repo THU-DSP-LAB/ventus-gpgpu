@@ -155,7 +155,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     val asid_fill = if(SV.nonEmpty) Some(Input(Flipped(ValidIO(new mmu.AsidLookupEntry(SV.get))))) else None
   })
   val cta = Module(new CTAinterface)
-  val sm_wrapper=VecInit(Seq.fill(NSms)(Module(new SM_wrapper(FakeCache, SV)).io))
+  val sm_wrapper=VecInit((0 until NSms).map(i => Module(new SM_wrapper(FakeCache, i, SV)).io))
   val l2cache=VecInit(Seq.fill(NL2Cache)( Module(new Scheduler(l2cache_params)).io))
   val sm2clusterArb = VecInit(Seq.fill(NCluster)(Module(new SM2clusterArbiter(l2cache_params_l)).io))
   val l2distribute = VecInit(Seq.fill(NCluster)(Module(new l2Distribute(l2cache_params_l)).io))
@@ -308,7 +308,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   }
 }
 
-class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) extends Module {
+class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVParam] = None) extends Module{
   val param = (new MyConfig).toInstance
   class MMU_RVGParam(implicit val p: Parameters) extends HasRVGParameters
   val io = IO(new Bundle{
@@ -330,7 +330,7 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
   cta2warp.io.CTArsp<>io.CTArsp
-  val pipe=Module(new pipe)
+  val pipe=Module(new pipe(sm_id))
   pipe.io.pc_reset:=true.B
   io.inst_cnt.foreach(_ := pipe.io.inst_cnt.getOrElse(0.U))
   val cnt=Counter(10)
