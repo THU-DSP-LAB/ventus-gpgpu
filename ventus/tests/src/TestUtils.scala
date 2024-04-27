@@ -279,6 +279,7 @@ class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np
       _.data -> req.data.peek(),
       _.instrId -> req.instrId.peek(),
       _.activeMask -> Vec(num_thread, Bool()).Lit(req.perLaneAddr.map(_.activeMask.peek().litToBoolean).zipWithIndex.map { case (d, i) => (i, d.B) }: _*),
+        _.dma -> req.dma.peek()
     ))
 //    println("print: rsp: ")
 //    println(rsp.data)

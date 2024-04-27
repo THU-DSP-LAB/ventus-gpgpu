@@ -172,6 +172,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dma_aligned_bulk = 4 // bytes
   var dma_aligned_bulk_bits = dma_aligned_bulk * 8 // bytes
   def max_dma_inst = 8
+
+  def max_dma_tag = 8
   def max_l2cacheline = 6
   def cacheline = 128//todo Math.pow(2, l2cachetagbits).toInt //bytes
   var l2cacheline = cacheline

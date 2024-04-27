@@ -217,10 +217,11 @@ class Dma_test
             _.wxd -> false.B,
             _.pc -> 4096.U,
             _.imm_ext -> 0.U,
+            _.spike_info.get -> (new InstWriteBack).Lit(_.sm_id -> 0.U,_.pc -> 0.U, _.inst -> 0.U),
             _.atomic -> false.B,
             _.aq -> false.B,
             _.rl -> false.B,
-            _.spike_info.get -> (new InstWriteBack).Lit(_.sm_id -> 0.U,_.pc -> 0.U, _.inst -> 0.U),
+
             _.opmode -> 0.U,
             _.copysize -> 2.U,
             _.dma -> true.B

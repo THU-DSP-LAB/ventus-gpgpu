@@ -180,6 +180,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   coreRsp_Q.io.enq.bits.instrId := coreReqInstrId_st2
   coreRsp_Q.io.enq.bits.activeMask := coreReqActvMask_st2
   coreRsp_Q.io.enq.bits.dma := coreReqDma_st2
+  printf("dma(): %d",coreRsp_Q.io.enq.bits.dma.asUInt)
   coreRsp_QAlmstFull := coreRsp_Q.io.count === DepthCoreRsp_Q.asUInt - 2.U
 
   // ******      core req ready
