@@ -10,6 +10,7 @@ object CONFIG {
     val MEM_ADDR_WIDTH = parameters.MEM_ADDR_WIDTH.W
     val NUM_WG_SLOT = parameters.num_block                  // Number of WG slot in each CU
     val NUM_WF_SLOT = 32                                    // Number of WG slot in each CU
+    val ASID_WIDTH = 32.W
   }
   object WG {
     val WG_ID_WIDTH = 32.W
@@ -106,6 +107,7 @@ trait ctainfo_host_to_cu extends Bundle {
   val num_wg_x = UInt(log2Ceil(CONFIG.WG.NUM_WG_DIM_MAX+1).W)         // Number of wg in x-dimension in this kernel
   val num_wg_y = UInt(log2Ceil(CONFIG.WG.NUM_WG_DIM_MAX+1).W)         // Number of wg in y-dimension in this kernel
   val num_wg_z = UInt(log2Ceil(CONFIG.WG.NUM_WG_DIM_MAX+1).W)         // Number of wg in z-dimension in this kernel
+  val asid_kernel = UInt(CONFIG.GPU.ASID_WIDTH)                       // Virtual memory space ID
 }
 
 /** IO between CU-interface and CU
@@ -130,17 +132,6 @@ class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to
 //}
 class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
-  // Added for test
-  //val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                // Meta-data base address
-  //val lds_base  = UInt(log2Ceil(CONFIG.WG.NUM_LDS_MAX).W)         // lds base address (initial WG, later WF)
-  //val sgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_SGPR_MAX).W)        // lds base address (initial WG, later WF)
-  //val vgpr_base = UInt(log2Ceil(CONFIG.WG.NUM_VGPR_MAX).W)        // lds base address (initial WG, later WF)
-  //val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)
-  //val wgslot = UInt(log2Ceil(CONFIG.GPU.NUM_WG_SLOT).W)
-  //val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)
-  //val lds_dealloc_en = Bool()
-  //val sgpr_dealloc_en = Bool()
-  //val vgpr_dealloc_en = Bool()
 }
 
 class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {

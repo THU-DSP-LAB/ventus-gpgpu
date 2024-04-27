@@ -70,7 +70,8 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_new.bits.num_sgpr_per_wf    := io.host2CTA.bits.host_sgpr_size_per_wf
   cta_sche.io.host_wg_new.bits.num_vgpr_per_wf    := io.host2CTA.bits.host_vgpr_size_per_wf
   cta_sche.io.host_wg_new.bits.gds_base           := io.host2CTA.bits.host_gds_baseaddr
-
+  cta_sche.io.host_wg_new.bits.asid_kernel        := 0.U
+  
   io.CTA2host.bits.inflight_wg_buffer_host_wf_done_wg_id := cta_sche.io.host_wg_done.bits.wg_id
   io.CTA2host.valid := cta_sche.io.host_wg_done.valid
   cta_sche.io.host_wg_done.ready := io.CTA2host.ready
