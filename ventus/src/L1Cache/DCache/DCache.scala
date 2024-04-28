@@ -808,7 +808,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   memReq_st3_valid_tlb := io.TLBRsp.valid && waitTLB === 1.U
 
   when(memReq_Q.io.deq.valid && memReq_st3_ready_tlb) {
-    memReq_st3 := memReq_Q.io.deq.bits
+    memReq_st3.a_data := memReq_Q.io.deq.bits.a_data
+    memReq_st3.a_param := memReq_Q.io.deq.bits.a_param
+    memReq_st3.a_addr := memReq_Q.io.deq.bits.a_addr
+    memReq_st3.a_mask := memReq_Q.io.deq.bits.a_mask
+    memReq_st3.a_opcode := memReq_Q.io.deq.bits.a_opcode
   }
   when(memReq_st3_valid_tlb){
     memReq_st3_paddr := io.TLBRsp.bits.paddr
@@ -819,7 +823,9 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
    when(memReqIsWrite_st3 && memReq_Q.io.deq.fire()){
     memReq_st3.a_source := Cat("d0".U, WshrAccess.io.pushedIdx, memReqSetIdx_st2)
     //memReq_st3.a_source := Cat("d0".U, 0.U((log2Up(NMshrEntry)-log2Up(NWshrEntry)).W), WshrAccess.io.pushedIdx, coreReq_st1.setIdx)
-    }
+    }.elsewhen(memReqIsRead_st3 && memReq_Q.io.deq.valid){
+     memReq_st3.a_source := memReq_Q.io.deq.bits.a_source
+   }
   val coreRspFromMemReqMask_st1 = coreReq_st1.perLaneAddr.map(_.activeMask)
   val coreReqMask_Q = Module(new Queue(Vec(NLanes, Bool()),8,false ,false))
   coreReqMask_Q.io.enq.bits := coreRspFromMemReqMask_st1
