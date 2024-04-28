@@ -12,14 +12,23 @@ import chisel3.util.{log2Ceil, _}
 import IDecode._
 import org.scalactic.TypeCheckedTripleEquals.convertToCheckingEqualizer
 import chisel3.util._
+import chisel3.util.log2Floor
 
 import scala.math.Ordered.orderingToOrdered
+def log2Floor_dma(num: UInt): UInt = {
+//  require(num > 0.U, "Input to log2Floor must be greater than 0")
 
+  // Count the number of leading zeros
+  val leadingZeros = PriorityEncoder(Reverse(num))
+
+  // Subtract leadingZeros from the bit width of the number
+  (num.getWidth - 1).U - leadingZeros
+}
 
 class regSave extends Bundle{
-  val in1=UInt(xLen.W)
-  val in2=UInt(xLen.W)
-  val in3=UInt(xLen.W)
+  val in1 = Vec(num_thread, UInt(xLen.W))
+  val in2 = Vec(num_thread, UInt(xLen.W))
+  val in3 = Vec(num_thread, UInt(xLen.W))
   val address=UInt(xLen.W)
   val ctrl=new CtrlSigs()
 }
@@ -29,10 +38,11 @@ class vExeDataDMA extends Bundle {
   //  val complete = Bool()
   val src = UInt(xLen.W)  // src
   val dst = UInt(xLen.W)  //dst
-  val opmode = UInt(4.W)
+  val funct = UInt(4.W)
   val copysize = UInt(xLen.W)  // only 4 8 16 , may add 32
   val srcsize = UInt(xLen.W)  // only 4 8 16 , may add 32
   val wid = UInt(depth_warp.W)
+  val tensorvars = new TensorVars
 //  val ctrl = new CtrlSigs()
 }
 
@@ -77,12 +87,58 @@ class l2cache2temp extends Module {
 //  printf("l22temp data: %d \n",io.l22temp.bits.data(2).asUInt)
 //  printf("l22temp data: %d \n",io.l22temp.bits.data(3).asUInt)
 }
+class TensorVars extends Bundle{
+  // from vrs2 boxsize
+  val BoxAddress = UInt(xLen.W)
+  val boxDim = Vec(5, UInt(xLen.W))
+//  val boxDim1 = UInt(xLen.W)
+//  val boxDim2 = UInt(xLen.W)
+//  val boxDim3 = UInt(xLen.W)
+//  val boxDim4 = UInt(xLen.W)
+//  val boxDim5 = UInt(xLen.W)
+  val elementStrides  = Vec(5,UInt(xLen.W))
+//  val elementStrides1 = UInt(xLen.W)
+//  val elementStrides2 = UInt(xLen.W)
+//  val elementStrides3 = UInt(xLen.W)
+//  val elementStrides4 = UInt(xLen.W)
+//  val elementStrides5 = UInt(xLen.W)
+  val interleaveMode = UInt(log2Ceil(3).W)
+  val swizzleMode = UInt(log2Ceil(4).W)
+  val L2promotion = UInt(log2Ceil(4).W) // no use now
+  val obbfill = UInt(log2Ceil(2).W)
+
+  //from vrs1 l2cache tensor
+//  val dataWidth = UInt(2.W)
+  val dataType = UInt(log2Ceil(13).W)
+  val tensorRank = UInt(log2Ceil(5).W)
+  val globalAddress = UInt(xLen.W)
+  val globalDim = Vec(5, UInt(xLen.W))
+  val globalStrides = Vec(5, UInt(xLen.W))
+//  val globalDim1 = UInt(xLen.W)
+//  val globalDim2 = UInt(xLen.W)
+//  val globalDim3 = UInt(xLen.W)
+//  val globalDim4 = UInt(xLen.W)
+//  val globalDim5 = UInt(xLen.W)
+//  val globalStrides1 = UInt(xLen.W)
+//  val globalStrides2 = UInt(xLen.W)
+//  val globalStrides3 = UInt(xLen.W)
+//  val globalStrides4 = UInt(xLen.W)
+//  val globalStrides5 = UInt(xLen.W)
+
+  //from rs3 sharedmem
+//  val sharedAddress = UInt(xLen.W)
+
+  // generated
+//  val copysize = UInt(xLen.W)
+}
 class AddrCalc_l2cache() extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
-    val to_tempmem = DecoupledIO(new Bundle{
-      val tag = new vExeDataDMA
-    })
+    val to_tempmem = DecoupledIO(
+//      new Bundle{
+//      val tag = new vExeDataDMA
+      new vExeDataDMA
+    )
     val to_tempmem_tag = DecoupledIO(UInt(addr_tag_bits.W))
     val inst_mem_index = Input(UInt(log2Ceil(max_dma_inst).W))
     val tag_mem_index = Input(UInt(log2Ceil(max_dma_tag).W))
@@ -112,41 +168,118 @@ class AddrCalc_l2cache() extends Module{
       copysize := 32.U //todo may not good
     }
   }
+  val TensorVars = Wire(new TensorVars)
+  TensorVars.BoxAddress := reg_save.in2(0)
+//  TensorVars.boxDim1    := reg_save.in2(1)
+//  TensorVars.boxDim2    := reg_save.in2(2)
+//  TensorVars.boxDim3    := reg_save.in2(3)
+//  TensorVars.boxDim4    := reg_save.in2(4)
+//  TensorVars.boxDim5    := reg_save.in2(5)
+  (0 until(5)).foreach( x => {
+    TensorVars.boxDim(x)         := reg_save.in2(1 + x)
+    TensorVars.elementStrides(x) := reg_save.in2(6 + x)
+  })
+//  TensorVars.elementStrides1  :=  reg_save.in2(6)
+//  TensorVars.elementStrides2  :=  reg_save.in2(7)
+//  TensorVars.elementStrides3  :=  reg_save.in2(8)
+//  TensorVars.elementStrides4  :=  reg_save.in2(9)
+//  TensorVars.elementStrides5  :=  reg_save.in2(10)
+  TensorVars.interleaveMode   :=  reg_save.in2(11)(log2Ceil(3)-1,0)
+  TensorVars.swizzleMode      :=  reg_save.in2(12)(log2Ceil(4)-1,0)
+  TensorVars.L2promotion      :=  reg_save.in2(13)(log2Ceil(4)-1,0)
+  TensorVars.obbfill          :=  reg_save.in2(14)(log2Ceil(2)-1,0)
+  TensorVars.dataType         :=  reg_save.in1(0)(log2Ceil(13)-1,0)
+  TensorVars.tensorRank       :=  reg_save.in1(1)(log2Ceil(5)-1,0)
+  TensorVars.globalAddress    :=  reg_save.in1(2)
+  (0 until (5)).foreach(x => {
+    TensorVars.globalDim(x) := reg_save.in1(3 + x)
+    TensorVars.globalStrides(x) := reg_save.in1(8 + x)
+  })
+//  TensorVars.globalDim1       :=  reg_save.in1(3)
+//  TensorVars.globalDim2       :=  reg_save.in1(4)
+//  TensorVars.globalDim3       :=  reg_save.in1(5)
+//  TensorVars.globalDim4       :=  reg_save.in1(6)
+//  TensorVars.globalDim5       :=  reg_save.in1(7)
+//  TensorVars.globalStrides1   := reg_save.in1(8)
+//  TensorVars.globalStrides2   := reg_save.in1(9)
+//  TensorVars.globalStrides3   := reg_save.in1(10)
+//  TensorVars.globalStrides4   := reg_save.in1(11)
+//  TensorVars.globalStrides5   := reg_save.in1(12)
+//  TensorVars.sharedAddress    := reg_save.in3(0)
+  val Tensordatawidth =  UInt(xLen.W)
+  Tensordatawidth := 0.U
+  Tensordatawidth := Mux((reg_save.in1(0).asUInt === 0.U), 1.U,
+    Mux((reg_save.in1(0).asUInt === 1.U) || (reg_save.in1(0).asUInt === 6.U) || (reg_save.in1(0).asUInt === 9.U), 2.U,
+      Mux((reg_save.in1(0).asUInt === 2.U) || (reg_save.in1(0).asUInt === 3.U) || (reg_save.in1(0).asUInt === 7.U) || (reg_save.in1(0).asUInt === 10.U) || (reg_save.in1(0).asUInt === 11.U) || (reg_save.in1(0).asUInt === 12.U), 4.U, 8.U)))
+  val Tensorcopysize = UInt(xLen.W)
+  Tensorcopysize := 0.U
+  switch(TensorVars.tensorRank){
+    is(1.U){
+      Tensorcopysize     :=  (TensorVars.boxDim(0) + TensorVars.elementStrides(0) - 1.U)  << log2Floor_dma(TensorVars.elementStrides(0))
+    }
+    is(2.U){
+      Tensorcopysize := ((TensorVars.boxDim(0) + TensorVars.elementStrides(0) - 1.U)  << log2Floor_dma(TensorVars.elementStrides(0))).asUInt *
+        ((TensorVars.boxDim(1) + TensorVars.elementStrides(1) - 1.U)  << log2Floor_dma(TensorVars.elementStrides(1))).asUInt
+    }
+    is(3.U){
+      Tensorcopysize := ((TensorVars.boxDim(0) + TensorVars.elementStrides(0) - 1.U) << log2Floor_dma(TensorVars.elementStrides(0))).asUInt *
+        ((TensorVars.boxDim(1) + TensorVars.elementStrides(1) - 1.U) << log2Floor_dma(TensorVars.elementStrides(1))).asUInt *
+        ((TensorVars.boxDim(2) + TensorVars.elementStrides(2) - 1.U) << log2Floor_dma(TensorVars.elementStrides(2))).asUInt
+    }
+    is(4.U){
+      Tensorcopysize := ((TensorVars.boxDim(0) + TensorVars.elementStrides(0) - 1.U) << log2Floor_dma(TensorVars.elementStrides(0))).asUInt *
+        ((TensorVars.boxDim(1) + TensorVars.elementStrides(1) - 1.U) << log2Floor_dma(TensorVars.elementStrides(1))).asUInt *
+        ((TensorVars.boxDim(2) + TensorVars.elementStrides(2) - 1.U) << log2Floor_dma(TensorVars.elementStrides(2))).asUInt *
+        ((TensorVars.boxDim(3) + TensorVars.elementStrides(3) - 1.U) << log2Floor_dma(TensorVars.elementStrides(3))).asUInt
+    }
+    is(5.U){
+      Tensorcopysize := ((TensorVars.boxDim(0) + TensorVars.elementStrides(0) - 1.U) << log2Floor_dma(TensorVars.elementStrides(0))).asUInt *
+        ((TensorVars.boxDim(1) + TensorVars.elementStrides(1) - 1.U) << log2Floor_dma(TensorVars.elementStrides(1))).asUInt *
+        ((TensorVars.boxDim(2) + TensorVars.elementStrides(2) - 1.U) << log2Floor_dma(TensorVars.elementStrides(2))).asUInt *
+        ((TensorVars.boxDim(3) + TensorVars.elementStrides(3) - 1.U) << log2Floor_dma(TensorVars.elementStrides(3))).asUInt *
+        ((TensorVars.boxDim(4) + TensorVars.elementStrides(4) - 1.U) << log2Floor_dma(TensorVars.elementStrides(4))).asUInt
+    }
+  }
   val address_next = Wire(UInt(xLen.W))
   address_next := reg_save.address.asUInt + l2cacheline.asUInt
-//  switch(reg_save.ctrl.opmode){
+//  switch(reg_save.ctrl.funct){
 //    is(0.U){
-//      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + copysize,
+//      address_next := Mux(reg_save.address.asUInt< reg_save.in1(0).asUInt + copysize,
 //        reg_save.address.asUInt + l2cacheline.asUInt,
 //        0.U(xLen.W))
 //    }
 //    is(1.U){
-//      address_next := Mux(reg_save.address.asUInt< reg_save.in1.asUInt + reg_save.in2.asUInt,
+//      address_next := Mux(reg_save.address.asUInt< reg_save.in1(0).asUInt + reg_save.in2(0).asUInt,
 //        reg_save.address.asUInt + l2cacheline.asUInt,
 //        0.U(xLen.W))
 //    }
 //  }
+  // tensor varibales
 
   val complete_address = Wire(Bool())
-//  complete_address := address_next  >= Cat((reg_save.in1.asUInt + reg_save.in2.asUInt)(xLen - 1, xLen - 1 - addr_tag_bits + 1) + 1.U, 0.U((xLen - addr_tag_bits).W))
-  complete_address := address_next  >= (reg_save.in1.asUInt + reg_save.in2.asUInt)
+//  complete_address := address_next  >= Cat((reg_save.in1(0).asUInt + reg_save.in2(0).asUInt)(xLen - 1, xLen - 1 - addr_tag_bits + 1) + 1.U, 0.U((xLen - addr_tag_bits).W))
+  complete_address := address_next  >= (reg_save.in1(0).asUInt + reg_save.in2(0).asUInt)
   io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
   io.to_tempmem_tag.valid := (state === s_l2cache_tag)// ||(state === s_save)
-  io.to_tempmem.bits.tag.src := reg_save.in1
-  io.to_tempmem.bits.tag.srcsize := reg_save.in2
-  io.to_tempmem.bits.tag.copysize := reg_save.in2
-  switch(reg_save.ctrl.opmode){
+  io.to_tempmem.bits.src := Mux(reg_save.ctrl.funct === 3.U, TensorVars.globalAddress, reg_save.in1(0))
+  io.to_tempmem.bits.srcsize := Mux(reg_save.ctrl.funct === 3.U,Tensordatawidth,reg_save.in2(0))
+  io.to_tempmem.bits.copysize := reg_save.in2(0)
+  switch(reg_save.ctrl.funct){
     is(0.U){
-      io.to_tempmem.bits.tag.copysize := 4.U << reg_save.ctrl.copysize
+      io.to_tempmem.bits.copysize := 4.U << reg_save.ctrl.copysize
     }
     is(1.U){
-      io.to_tempmem.bits.tag.copysize := reg_save.in2
+      io.to_tempmem.bits.copysize := reg_save.in2(0)
+    }
+    is(3.U){
+      io.to_tempmem.bits.copysize := Tensorcopysize
     }
   }
   io.to_tempmem_tag.bits := reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1)
-  io.to_tempmem.bits.tag.dst := reg_save.in3
-  io.to_tempmem.bits.tag.wid := reg_save.ctrl.wid
-  io.to_tempmem.bits.tag.opmode := reg_save.ctrl.opmode
+  io.to_tempmem.bits.dst := reg_save.in3(0)
+  io.to_tempmem.bits.wid := reg_save.ctrl.wid
+  io.to_tempmem.bits.funct := reg_save.ctrl.funct
+  io.to_tempmem.bits.tensorvars := TensorVars
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
 
@@ -197,10 +330,11 @@ class AddrCalc_l2cache() extends Module{
   switch(state){
     is (s_idle){
       when(io.from_fifo.fire){ // Next: s_save
-        reg_save.in1 := io.from_fifo.bits.in1(0)
-        reg_save.in3 := io.from_fifo.bits.in3(0)
-        reg_save.in2 := io.from_fifo.bits.in2(0)
-        reg_save.address := Cat(io.from_fifo.bits.in1(0)(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+        reg_save.in1 := io.from_fifo.bits.in1
+        reg_save.in3 := io.from_fifo.bits.in3
+        reg_save.in2 := io.from_fifo.bits.in2
+        reg_save.address := Mux(io.from_fifo.bits.ctrl.funct === 3.U,Cat(io.from_fifo.bits.in2(0)(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W)),
+          Cat(io.from_fifo.bits.in1(0)(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W)))
         reg_save.ctrl := io.from_fifo.bits.ctrl
       }.otherwise{reg_save := RegInit(0.U.asTypeOf(new regSave))}
     }
@@ -224,7 +358,7 @@ class AddrCalc_l2cache() extends Module{
     }
   }
   //  printf("state: %b\n",state.asUInt)
-//    printf("copysize: %b\n",io.to_tempmem.bits.tag.copysize.asUInt)
+//    printf("copysize: %b\n",io.to_tempmem.bits.copysize.asUInt)
 //    printf("in2: %d\n",io.from_fifo.bits.in2(0).asUInt)
 //    printf("reg_save_in2: %d\n",reg_save.in2.asUInt)
   //  printf("l2req:address: %b\n",io.to_l2cache.bits.address.asUInt)
@@ -233,9 +367,10 @@ class AddrCalc_l2cache() extends Module{
 
 class Temp_mem() extends Module {
   val io = IO(new Bundle {
-    val from_addr = Flipped(DecoupledIO(new Bundle {
-      val tag = Input(new vExeDataDMA)
-    }))
+    val from_addr = Flipped(DecoupledIO(//new Bundle {
+//      val tag = Input(new vExeDataDMA)
+      new vExeDataDMA
+    ))
     val from_addr_tag = Flipped(DecoupledIO(UInt(addr_tag_bits.W)))
 
     val inst_mem_index = Output(UInt(log2Ceil(max_dma_inst).W))
@@ -355,21 +490,21 @@ class Temp_mem() extends Module {
 
       when(io.from_addr.fire) {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
-        instMem.write(valid_inst_entry, io.from_addr.bits.tag)
-        when(io.from_addr.bits.tag.opmode === 0.U){
-          var group_start = io.from_addr.bits.tag.dst(xLen-1,2)
-          var group_end   = (io.from_addr.bits.tag.dst + io.from_addr.bits.tag.copysize)(xLen-1,2)
+        instMem.write(valid_inst_entry, io.from_addr.bits)
+        when(io.from_addr.bits.funct === 0.U){
+          var group_start = io.from_addr.bits.dst(xLen-1,2)
+          var group_end   = (io.from_addr.bits.dst + io.from_addr.bits.copysize)(xLen-1,2)
 
           finish_cnt(valid_inst_entry) := 1.U + (group_end.asUInt - group_start.asUInt)
           printf("group_start : %d\n",group_start.asUInt)
           printf("group_end : %d\n",group_end.asUInt)
           printf("finish_cnt : %d\n",finish_cnt(valid_inst_entry).asUInt)
-        }.elsewhen(io.from_addr.bits.tag.opmode === 1.U){
-          finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(dma_aligned_bulk)
+        }.elsewhen(io.from_addr.bits.funct === 1.U){
+          finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
         }.otherwise{
-          finish_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(dma_aligned_bulk)
+          finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
         }
-        //shared_cnt(valid_inst_entry) := io.from_addr.bits.tag.copysize >> log2Ceil(dma_aligned_bulk)
+        //shared_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
       }
       when(io.from_shared.fire){
         finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(dma_aligned_bulk / 4)).asUInt
@@ -394,7 +529,7 @@ class Temp_mem() extends Module {
 //        printf(p"src : 0x${Hexadecimal(inst_to_shared.src.asUInt)} ")
 //        printf(p"src_start : 0x${Hexadecimal((tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt)))} ")
 //        printf(p"src_end : 0x${Hexadecimal(tag_wire.asUInt + (x+1).asUInt * dma_aligned_bulk.asUInt - 1.U)} ")
-        switch(inst_to_shared.opmode){
+        switch(inst_to_shared.funct){
           is(0.U){
             when(condition1 || condition2 || condition3) {
               printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt))} ")
@@ -580,7 +715,7 @@ class Addrcalc_shared() extends Module {
   (0 until numgroupl2cache*dma_aligned_bulk).foreach( x => {
     // todo
     wordOffset1H_bytes(x) := true.B
-    switch(reg_save.instinfo.opmode){
+    switch(reg_save.instinfo.funct){
       is(0.U){
         var shared_tag = l2cacheTag_shift - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt
         var shared_last_cp = reg_save.instinfo.dst.asUInt + reg_save.instinfo.copysize
@@ -607,7 +742,7 @@ class Addrcalc_shared() extends Module {
   switch(state){
     is(s_idle){
       when(io.from_temp.fire){
-        switch(io.from_temp.bits.instinfo.opmode){
+        switch(io.from_temp.bits.instinfo.funct){
           is(0.U){
             state := s_shift
           }
@@ -681,7 +816,7 @@ class Addrcalc_shared() extends Module {
       output_reg.isWrite := true.B
       output_reg.setIdx := setIdx
       output_reg.dma := true.B
-      switch(reg_save.instinfo.opmode) {
+      switch(reg_save.instinfo.funct) {
         is(0.U) {
           (0 until (numgroupshared)).foreach(x => {
             output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
@@ -718,35 +853,6 @@ class Addrcalc_shared() extends Module {
       }
     }
   }
-  //  printf("state: %d \n",state)
-  //  printf("mask: %b \n",mask_next.asUInt)
-  //  (0 until numgroupl2cache).foreach( x => {
-  //    //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
-  //    wordOffset1H(x) := 15.U(4.W)
-  //    switch(reg_save.ctrl.mem_whb){
-  //      is(MEM_W) { wordOffset1H(x) := 15.U }
-  //      is(MEM_H) { wordOffset1H(x) :=
-  //        Mux(addr(x)(1)===0.U,
-  //          3.U,
-  //          12.U
-  //        )
-  //      }
-  //      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
-  //    }
-  //  })
-  //  val srcsize = Wire(UInt(3.W))
-  //  switch(reg_save.ctrl.mem_whb){
-  //    is(MEM_W){
-  //      srcsize := 4.U
-  //    }
-  //    is(MEM_H){
-  //      srcsize := 2.U
-  //    }
-  //    is(MEM_B){
-  //      srcsize := 1.U
-  //    }
-  //  }
-
 }
 class DMA_core extends Module{
   val io = IO(new Bundle{

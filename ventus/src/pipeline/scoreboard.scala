@@ -63,7 +63,7 @@ class CtrlSigs extends Bundle {
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
 
   //xrn add
-  val opmode = UInt(3.W)
+  val funct = UInt(3.W)
   val copysize = UInt(2.W)  // only 4 8 16 , may add 32
   val dma = Bool()
 }
