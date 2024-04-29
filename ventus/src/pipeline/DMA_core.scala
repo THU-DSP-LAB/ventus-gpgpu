@@ -206,7 +206,7 @@ class AddrCalc_l2cache() extends Module{
 //  TensorVars.globalStrides4   := reg_save.in1(11)
 //  TensorVars.globalStrides5   := reg_save.in1(12)
 //  TensorVars.sharedAddress    := reg_save.in3(0)
-  val Tensordatawidth =  UInt(xLen.W)
+  val Tensordatawidth =  UInt(log2Ceil(8).W)
   Tensordatawidth := 0.U
   Tensordatawidth := Mux((reg_save.in1(0).asUInt === 0.U), 1.U,
     Mux((reg_save.in1(0).asUInt === 1.U) || (reg_save.in1(0).asUInt === 6.U) || (reg_save.in1(0).asUInt === 9.U), 2.U,
@@ -240,8 +240,82 @@ class AddrCalc_l2cache() extends Module{
         ((TensorVars.boxDim(4) + TensorVars.elementStrides(4) - 1.U) << log2Floor_dma(TensorVars.elementStrides(4))).asUInt
     }
   }
+//  val tensor_dim_start = RegInit(VecInit(Seq.fill(5)(0.U((xLen).W)))) // save the dim start, in order to add the strides in tensor
+  val tensor_dim_step = RegInit(VecInit(Seq.fill(5)(0.U((xLen).W)))) // index 0 mean how many boxline has been covered, in a array
+  val current_dim_start = Wire(UInt(xLen.W))
+  switch(TensorVars.tensorRank){
+    is(1.U){
+      current_dim_start := reg_save.address
+    }
+    is(2.U){
+      current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+        tensor_dim_step(1).asUInt * TensorVars.globalStrides(1)
+    }
+    is(3.U){
+      current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+        tensor_dim_step(1).asUInt * TensorVars.globalStrides(1).asUInt +
+        tensor_dim_step(2).asUInt * TensorVars.globalStrides(2).asUInt
+    }
+    is(4.U){
+      current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+        tensor_dim_step(1).asUInt * TensorVars.globalStrides(1).asUInt +
+        tensor_dim_step(2).asUInt * TensorVars.globalStrides(2).asUInt +
+        tensor_dim_step(3).asUInt * TensorVars.globalStrides(3).asUInt
+    }
+    is(5.U){
+      current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+        tensor_dim_step(1).asUInt * TensorVars.globalStrides(1).asUInt +
+        tensor_dim_step(2).asUInt * TensorVars.globalStrides(2).asUInt +
+        tensor_dim_step(3).asUInt * TensorVars.globalStrides(3).asUInt +
+        tensor_dim_step(4).asUInt * TensorVars.globalStrides(4).asUInt
+    }
+  }
   val address_next = Wire(UInt(xLen.W))
   address_next := reg_save.address.asUInt + l2cacheline.asUInt
+  switch(reg_save.ctrl.funct){
+    is(0.U){
+      address_next := reg_save.address.asUInt + l2cacheline.asUInt
+    }
+    is(2.U){
+      address_next := reg_save.address.asUInt + l2cacheline.asUInt
+    }
+    is(3.U){
+      when(reg_save.address.asUInt + l2cacheline.asUInt <= current_dim_start.asUInt + TensorVars.boxDim(0).asUInt * Tensordatawidth.asUInt){
+        address_next := reg_save.address.asUInt + l2cacheline.asUInt
+      }.otherwise{
+        switch(TensorVars.tensorRank){
+          is(1.U){
+            address_next := reg_save.address.asUInt + l2cacheline.asUInt
+          }
+          is(2.U){
+            address_next := current_dim_start + TensorVars.globalStrides(0)
+            tensor_dim_step(0) := tensor_dim_step(0) + 1.U
+          }
+          is(3.U){
+            current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+              tensor_dim_step(1).asUInt * TensorVars.globalStrides(1).asUInt +
+              tensor_dim_step(2).asUInt * TensorVars.globalStrides(2).asUInt
+            when(tensor_dim_step(0).asUInt ===TensorVars.boxDim(1).asUInt - 1.U){
+              address_next := current_dim_start + TensorVars.globalStrides(0)
+            }
+          }
+          is(4.U){
+            current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+              tensor_dim_step(1).asUInt * TensorVars.globalStrides(1).asUInt +
+              tensor_dim_step(2).asUInt * TensorVars.globalStrides(2).asUInt +
+              tensor_dim_step(3).asUInt * TensorVars.globalStrides(3).asUInt
+          }
+          is(5.U){
+            current_dim_start := TensorVars.globalAddress + tensor_dim_step(0).asUInt * TensorVars.globalStrides(0).asUInt +
+              tensor_dim_step(1).asUInt * TensorVars.globalStrides(1).asUInt +
+              tensor_dim_step(2).asUInt * TensorVars.globalStrides(2).asUInt +
+              tensor_dim_step(3).asUInt * TensorVars.globalStrides(3).asUInt +
+              tensor_dim_step(4).asUInt * TensorVars.globalStrides(4).asUInt
+          }
+        }
+      }
+    }
+  }
 //  switch(reg_save.ctrl.funct){
 //    is(0.U){
 //      address_next := Mux(reg_save.address.asUInt< reg_save.in1(0).asUInt + copysize,
