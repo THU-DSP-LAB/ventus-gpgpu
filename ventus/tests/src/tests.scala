@@ -385,7 +385,8 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         }
       }
       print("\n")
-      Seq.fill(3){
+      Seq.fill(3000){
+        mem_driver.eval()
         c.clock.step(1)
         clock_cnt +=1
       }
