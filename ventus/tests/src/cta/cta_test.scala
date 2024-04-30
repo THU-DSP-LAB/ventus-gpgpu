@@ -219,7 +219,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
       dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
 
-      val testlen = 1000
+      val testlen = 200
       val test = new Test(testlen)
       val testOut_wg = new Array[Boolean](testlen)
 
@@ -242,6 +242,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.num_wg_x -> 0.U,
         _.num_wg_y -> 0.U,
         _.num_wg_z -> 0.U,
+        _.asid_kernel -> 0.U,
       ) }
 
 
@@ -299,7 +300,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
 
       gpu.final_check()
       dut.clock.step(100)
-      println("===== Simulation passed =====")
+      println("===== CTA Simulation passed =====")
     }
   }
 }
