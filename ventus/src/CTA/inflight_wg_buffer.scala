@@ -170,7 +170,7 @@ class inflight_wg_buffer(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val CU_I
     host_wf_size_i := io.host_wf_size
     val host_start_pc_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     host_start_pc_i := io.host_start_pc
-    val host_kernel_asid_i = RegInit(UInt(KNL_ASID_WIDTH.W))
+    val host_kernel_asid_i = RegInit(0.U(KNL_ASID_WIDTH.W))
     host_kernel_asid_i := io.host_kernel_asid
     val host_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))
     host_kernel_size_3d_i := io.host_kernel_size_3d
@@ -323,7 +323,7 @@ class inflight_wg_buffer(val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val CU_I
     io.inflight_wg_buffer_gpu_wf_size := inflight_wg_buffer_gpu_wf_size_i
     val inflight_wg_buffer_start_pc_i = RegInit(0.U(MEM_ADDR_WIDTH.W))
     io.inflight_wg_buffer_start_pc := inflight_wg_buffer_start_pc_i
-    val inflight_wg_buffer_kernel_asid_i = RegInit(UInt(KNL_ASID_WIDTH.W))
+    val inflight_wg_buffer_kernel_asid_i = RegInit(0.U(KNL_ASID_WIDTH.W))
     io.inflight_wg_buffer_kernel_asid := inflight_wg_buffer_kernel_asid_i
     val inflight_wg_buffer_kernel_size_3d_i = RegInit(VecInit(Seq.fill(3)(0.U(top.parameters.WG_SIZE_X_WIDTH.W))))
     io.inflight_wg_buffer_kernel_size_3d := inflight_wg_buffer_kernel_size_3d_i

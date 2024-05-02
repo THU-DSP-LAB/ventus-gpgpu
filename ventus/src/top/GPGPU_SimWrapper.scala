@@ -9,6 +9,7 @@ import pipeline._
 import parameters._
 import L2cache._
 import config.config._
+import mmu.AsidLookupEntry
 import parameters.num_warp
 
 class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = false) extends Module {
@@ -53,7 +54,7 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
   io.enq.ready := (if(latency > 0) !(!out_port.ready && valids.drop(1).reduce(_ && _)) else out_port.ready)
 }
 
-class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
+class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) extends Module{
   val L1param = (new MyConfig).toInstance
   val L2param = InclusiveCacheParameters_lite(
     CacheParameters(
@@ -73,8 +74,9 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
     val host_rsp = DecoupledIO(new CTA2host_data)
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
+    val asid_fill = Flipped(ValidIO(new AsidLookupEntry(SV.getOrElse(mmu.SV32))))
     val cnt = Output(UInt(32.W))
-    val inst_cnt = Output(Vec(num_sm, UInt(32.W)))
+    val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
   })
 
   val counter = new Counter(200000)
@@ -84,8 +86,11 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   }
   io.cnt := counter.value
 
-  val GPU = Module(new GPGPU_top()(L1param, FakeCache))
+  val GPU = Module(new GPGPU_top()(L1param, FakeCache, SV))
+  GPU.suggestName("GPU")
+
   GPU.io.cycle_cnt := counter.value
+  GPU.io.asid_fill.foreach{ _ <> io.asid_fill }
 
   val pipe_a = Module(new DecoupledPipe(new TLBundleA_lite(l2cache_params), 2))
   val pipe_d = Module(new DecoupledPipe(new TLBundleD_lite(l2cache_params), 2))

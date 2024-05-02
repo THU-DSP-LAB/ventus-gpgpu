@@ -40,7 +40,7 @@ class warpReqData extends Bundle{
 }
 class warpRspData extends Bundle{
   val wid = UInt(depth_warp.W)
-  val asid = UInt(KNL_ASID_WIDTH.W)
+  //val asid = UInt(KNL_ASID_WIDTH.W)
 }
 
 class CTA2warp extends Module{

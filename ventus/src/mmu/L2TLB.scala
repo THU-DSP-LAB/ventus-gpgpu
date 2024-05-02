@@ -213,9 +213,9 @@ class L2TlbMemRsp_Test(SV: SVParam, sectors: Int) extends Bundle{
   val op = UInt(2.W)
 }
 
-class L2Tlb(
+class L2TLB(
   SV: SVParam,
-  debug: Boolean = false,
+  Debug: Boolean = false,
   L2C: Option[L2cache.InclusiveCacheParameters_lite] = None,
   accelSize: Int = 8,
 )(
@@ -255,7 +255,7 @@ class L2Tlb(
     a.io.out.ready := true.B
   }
 
-  val walker = Module(new PTW(SV, nBanks, false))
+  val walker = Module(new PTW(SV, nBanks, false, L2C))
 
   val replace = Seq.fill(nBanks)(new SetAssocLRU(nSets, nWays, "lru"))
   val refillIndex = RegInit(VecInit(Seq.fill(nBanks)(0.U(log2Up(nSets).W))))
@@ -449,7 +449,7 @@ class L2Tlb(
 ////        printf(p"[MEM${i} ${cnt.value}] ")
 ////      }
 //    }
-    if (debug){
+    if (Debug){
       //val level_cnt_next = Wire(Vec(SV.levels+1, UInt(18.W)))
       when(cState === s_check){
         level_cnt_next(i)(accelLevel_pre) := level_cnt(i)(accelLevel_pre) + 1.U
@@ -462,7 +462,7 @@ class L2Tlb(
       }
     }
   }
-  if(debug){
+  if(Debug){
     //val total_cnt_next = Wire(Vec(SV.levels+1, UInt(18.W)))
     when(curState.map(_ === s_check).reduce(_ || _)){
       printf(p"#${cnt.value} L2#T MISS ${total_cnt_next(SV.levels)} HIT ${total_cnt_next(0)} AC")
@@ -473,6 +473,13 @@ class L2Tlb(
     }
     cnt.inc()
   }
+//  L2C match {
+//    case Some(l2c) => {
+//      (io.mem_req zip walker.io.mem_req).foreach{ case (l, r) =>
+//        l.bits
+//      }
+//    }
+//  }
   io.mem_req <> walker.io.mem_req
   walker.io.mem_rsp <> io.mem_rsp
 }
@@ -588,7 +595,7 @@ class L2TlbToL2CacheXBar(
     val reply_id = (io.rsp_cache(0).bits.source >> (1 + log2Ceil(L1C.NSms)))(log2Ceil(nTlbMemPort) - 1, 0)
     for(i <- 0 until nTlbMemPort) {
       io.rsp_tlb(i).valid := io.rsp_cache(0).valid & reply_id === i.U
-      io.rsp_tlb(i).bits := Mux(io.rsp_cache(0).valid & reply_id === i.U, io.rsp_cache(0).bits, 0.U.asTypeOf(new TLBundleD_lite(L2C)))
+      io.rsp_tlb(i).bits := Mux(io.rsp_cache(0).valid & reply_id === i.U, io.rsp_cache(0).bits, 0.U.asTypeOf(new TLBundleD_lite_plus(L2C)))
       io.rsp_cache(0).ready := (VecInit(io.rsp_tlb.map(_.ready)).asUInt)(reply_id)
     }
   }
@@ -598,7 +605,7 @@ class L2TlbToL2CacheXBar(
          j <- 0 until nL2CReqPort) {
       val reply_id = (io.rsp_cache(j).bits.source >> (1 + log2Ceil(L1C.NSms)))(log2Ceil(nTlbMemPort)-1, 0)
       arb_rsp(i).io.in(j).valid := io.rsp_cache(j).valid & reply_id === i.U
-      arb_rsp(i).io.in(j).bits := Mux(io.rsp_cache(j).valid & reply_id === i.U, io.rsp_cache(j).bits, 0.U.asTypeOf(new TLBundleD_lite(L2C)))
+      arb_rsp(i).io.in(j).bits := Mux(io.rsp_cache(j).valid & reply_id === i.U, io.rsp_cache(j).bits, 0.U.asTypeOf(new TLBundleD_lite_plus(L2C)))
       io.rsp_cache(j).ready := (VecInit(arb_rsp.map{
         _.io.in(j).ready
       }).asUInt)(reply_id)

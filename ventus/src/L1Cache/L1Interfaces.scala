@@ -35,7 +35,7 @@ class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
   val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
   val param = UInt(4.W)
   val tag = UInt(TagBits.W)
-  val ASID = UInt(asidLen.W)
+  val asid = UInt(asidLen.W)
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
   val data = Vec(NLanes, UInt(WordLength.W))
@@ -68,7 +68,7 @@ class L1CacheMemReq extends Bundle{
   val a_param = UInt(3.W)
   //val a_size
   val a_source = UInt(xLen.W)
-  val a_addr = UInt(xLen.W)
+  val a_addr = UInt(paLen.W)//UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
@@ -88,7 +88,7 @@ class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
   val a_param = UInt(3.W)
   //val a_size
   val a_source = UInt((log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
-  val a_addr = UInt(xLen.W)
+  val a_addr = UInt(paLen.W)//UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes

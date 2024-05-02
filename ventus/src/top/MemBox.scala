@@ -1,4 +1,4 @@
-/*package top
+package top
 import chisel3._
 
 import scala.io.Source
@@ -16,6 +16,7 @@ object helper{
 }
 
 class MetaData{
+  var asid: BigInt = 0
   var kernel_id: BigInt = 0
   var kernel_size: Array[BigInt] = Array(0, 0, 0)
   var wf_size: BigInt = 0
@@ -36,6 +37,7 @@ class MetaData{
   def generateHostReq(i: BigInt, j: BigInt, k: BigInt) = {
     val blockID = (i * kernel_size(1) + j) * kernel_size(2) + k
     (new host2CTA_data).Lit(
+      _.host_kernel_asid -> asid.U,
       _.host_wg_id -> ("b" + blockID.toString(2) + "0" * CU_ID_WIDTH).U,
       _.host_num_wf -> wg_size.U,
       _.host_wf_size -> wf_size.U,
@@ -165,14 +167,14 @@ class MemBox[T <: BaseSV](SV: T) extends Memory(SV.MaxPhyRange, SV) {
       if(real_size > 0){
         if (metaData.lds_mem_index.contains(i)) { // dynamic
           tryAllocate(ptbr, lower, real_size)
-          writeDataVirtual(ptbr, lower, real_size, fileBytes.take(real_size))
+          writeDataVirtual(ptbr, lower, metaData.buffer_size(i).toInt, fileBytes.take(metaData.buffer_size(i).toInt))
         }
         else { // static
           val alloc_pa = allocateMemory(ptbr, lower, real_size)
           writeDataPhysical(alloc_pa, real_size, fileBytes.take(real_size))
         }
       }
-      fileBytes = fileBytes.drop(real_size)
+      fileBytes = fileBytes.drop(metaData.buffer_size(i).toInt)
     }
     metaData
   }
@@ -210,4 +212,3 @@ class DelayFIFO[T<: DelayFIFOEntry](val latency: Int, val depth: Int){
     out.entry
   }
 }
-*/

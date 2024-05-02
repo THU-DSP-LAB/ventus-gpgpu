@@ -98,6 +98,26 @@ class L1TlbAutoForward(SV: SVParam) extends L1TlbIO(SV, false){
   }
 }
 
+class L1TlbAutoReflect(SV: SVParam) extends L1TlbIO(SV, false){
+  io.invalidate <> DontCare
+  io.l2_req <> DontCare
+  io.l2_rsp <> DontCare
+  val s_idle :: s_reply :: Nil = Enum(2)
+  val state = RegInit(s_idle)
+  val reply = RegInit(0.U.asTypeOf(new L1TlbRsp(SV)))
+  when(state === s_idle && io.in.fire) {
+    state := s_reply
+    reply.paddr := io.in.bits.vaddr
+  }
+  when(state === s_reply && io.out.fire) {
+    state := s_idle
+    reply := 0.U.asTypeOf(reply)
+  }
+  io.out.valid := state === s_reply
+  io.in.ready := state === s_idle
+  io.out.bits := reply
+}
+
 class L1TLB(SV: SVParam, nWays: Int, Debug: Boolean = true) extends L1TlbIO(SV, Debug){
 
   val storage = Reg(Vec(nWays, new L1TlbEntry(SV)))
