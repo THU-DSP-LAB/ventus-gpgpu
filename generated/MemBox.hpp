@@ -1,0 +1,30 @@
+#pragma once
+
+#include <cstdint>
+#include <vector>
+inline constexpr int MEMACCESS_DATA_BYTE_SIZE = 32;
+inline constexpr uint32_t LDS_BASEADDR = 0x70000000;
+
+class MemBox {
+private:
+    const uint32_t PAGESIZE;
+    struct MemPage {
+        uint8_t* ptr;
+        uint32_t addr;
+    };
+    std::vector<struct MemPage> m_pages;
+    uint32_t m_page_cnt;
+    MemPage* page_new(uint32_t addr);
+    MemPage* page_find(uint32_t addr);
+
+public:
+    MemBox(uint32_t pageSize = 4 * 1024)
+        : PAGESIZE(pageSize)
+        , m_pages(1024, { .ptr = nullptr, .addr = 0 })
+        , m_page_cnt(0) { }
+
+public:
+    const uint8_t* read(uint32_t addr, int len = MEMACCESS_DATA_BYTE_SIZE);
+    void write(uint32_t addr, bool mask[], uint8_t data[], int len = MEMACCESS_DATA_BYTE_SIZE);
+    void write(uint32_t addr, uint8_t data[], int len = MEMACCESS_DATA_BYTE_SIZE);
+};
