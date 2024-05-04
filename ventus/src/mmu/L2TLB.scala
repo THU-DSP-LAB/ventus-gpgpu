@@ -9,7 +9,7 @@ import chisel3.experimental.dataview._
 trait L2TlbParam{
   def nSets = 16 // total Sets of all banks
   def nWays = 4
-  def nSectors = 2
+  def nSectors = top.parameters.l2cache_BlockWords
   def nBanks = 2
 
   def vpnL2TlbBundle(SV: SVParam) = new Bundle {
