@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 void increment_x_then_y_then_z(dim3_t& i, const dim3_t& bound) {
@@ -106,22 +107,21 @@ void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& m
     mtd.sgprUsage        = metadata[index++];
     mtd.vgprUsage        = metadata[index++];
     mtd.pdsBaseAddr      = metadata[index++];
-
-    mtd.num_buffer = metadata[index++]; // add localmem buffer
+    mtd.num_buffer       = metadata[index++];
 
     mtd.buffer_base = new uint64_t[mtd.num_buffer];
 
-    for (int i = 0; i < mtd.num_buffer - 1; i++) {
+    for (int i = 0; i < mtd.num_buffer; i++) {
         mtd.buffer_base[i] = metadata[index++];
     }
 
     mtd.buffer_size = new uint64_t[mtd.num_buffer];
-    for (int i = 0; i < mtd.num_buffer - 1; i++) {
+    for (int i = 0; i < mtd.num_buffer; i++) {
         mtd.buffer_size[i] = metadata[index++];
     }
 
     mtd.buffer_allocsize = new uint64_t[mtd.num_buffer];
-    for (int i = 0; i < mtd.num_buffer - 1; i++) {
+    for (int i = 0; i < mtd.num_buffer; i++) {
         mtd.buffer_allocsize[i] = metadata[index++];
     }
 }
@@ -151,6 +151,10 @@ void Kernel::readDataFile(const std::string& filename, MemBox& mem, metadata_t m
         assert(mtd.buffer_size[bufferIndex] == readbytes);
         mem.write(mtd.buffer_base[bufferIndex], buffer.data(), readbytes);
         buffer.clear();
+    }
+    std::getline(file, line);
+    for (const char* ptr = line.c_str(); *ptr != '\0'; ptr++) {
+        assert(*ptr == '0');
     }
     assert(file.eof());
 

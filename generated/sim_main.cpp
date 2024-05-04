@@ -96,11 +96,11 @@ int main(int argc, char** argv) {
     contextp->commandArgs(argc, argv);
 
     // Hardware construct
-    const std::unique_ptr<Vdut> dut { new Vdut { contextp.get(), "TOP" } };
-    MemBox mem;
+    const std::unique_ptr<Vdut> dut { new Vdut { contextp.get(), "DUT" } };
+    MemBox* mem = new MemBox;
 
     // Load workload kernel
-    Kernel kernel1("kernel1", "testcase/matadd/matadd.metadata", "testcase/matadd/matadd.data", mem);
+    Kernel kernel1("kernel1", "testcase/matadd/matadd.metadata", "testcase/matadd/matadd.data", *mem);
     Cta cta;
 
     // DUT initial reset
@@ -148,23 +148,23 @@ int main(int argc, char** argv) {
             if (dut->io_host_req_valid && dut->io_host_req_ready) {
                 kernel1.increment_cta_id();
             }
-            if(dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
+            if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
                 std::cout << "CTA " << dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id << " finished\n";
             }
         } else {
             // Memory access: read
-            const uint8_t* rd_data = mem.read(dut->io_mem_rd_addr);
+            const uint8_t* rd_data = mem->read(dut->io_mem_rd_addr);
             memcpy(dut->io_mem_rd_data.data(), rd_data, MEMACCESS_DATA_BYTE_SIZE / 4);
-            delete [] rd_data;
+            delete[] rd_data;
             // Memory access: write
-            if(dut->io_mem_wr_en){
+            if (dut->io_mem_wr_en) {
                 bool mask[MEMACCESS_DATA_BYTE_SIZE];
                 uint64_t mask_raw = dut->io_mem_wr_mask;
-                for(int i=0; i<MEMACCESS_DATA_BYTE_SIZE; i++) {
+                for (int i = 0; i < MEMACCESS_DATA_BYTE_SIZE; i++) {
                     mask[i] = mask_raw & 0x1;
                     mask_raw >>= 1;
                 }
-                mem.write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
+                mem->write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
             }
         }
     }

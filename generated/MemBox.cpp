@@ -81,6 +81,22 @@ const uint8_t* MemBox::read(uint32_t addr, int len) {
 }
 
 void MemBox::write(uint32_t addr, bool mask[], uint8_t data[], int len) {
+    int cnt       = 0;
+    MemPage* page = nullptr;
+    while (cnt) {
+        if (page == nullptr || page->addr + PAGESIZE <= addr + cnt) {
+            page = page_find(addr + cnt);
+            if(page == nullptr) {
+                page = page_new(addr+cnt);
+                assert(page);
+            }
+        }
+        if(mask[cnt]) {
+            page->ptr[addr + cnt - page->addr] = data[cnt];
+        }
+        cnt++;
+    }
+    /*
     bool within_single_page = (addr / PAGESIZE == (addr + len - 1) / PAGESIZE);
 
     MemPage* page1 = page_find(addr);
@@ -104,6 +120,7 @@ void MemBox::write(uint32_t addr, bool mask[], uint8_t data[], int len) {
             }
         }
     }
+    */
 }
 
 void MemBox::write(uint32_t addr, uint8_t data[], int len) {

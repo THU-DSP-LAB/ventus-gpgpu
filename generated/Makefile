@@ -39,7 +39,7 @@ VERILATOR_FLAGS += --assert
 #VERILATOR_FLAGS += --gdbbt
 
 VERILATOR_FLAGS += -j 12
-VERILATOR_FLAGS += -CFLAGS -std=c++17
+VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0"
 
 
 ######################################################################

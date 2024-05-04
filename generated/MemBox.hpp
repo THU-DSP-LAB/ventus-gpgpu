@@ -1,9 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 inline constexpr int MEMACCESS_DATA_BYTE_SIZE = 32;
-inline constexpr uint32_t LDS_BASEADDR = 0x70000000;
+inline constexpr uint32_t LDS_BASEADDR        = 0x70000000;
 
 class MemBox {
 private:
@@ -20,8 +21,11 @@ private:
 public:
     MemBox(uint32_t pageSize = 4 * 1024)
         : PAGESIZE(pageSize)
-        , m_pages(1024, { .ptr = nullptr, .addr = 0 })
-        , m_page_cnt(0) { }
+        , m_page_cnt(0) {
+        m_pages.reserve(32);
+        MemPage emptyPage = { .ptr = nullptr, .addr = 0 };
+        std::fill(m_pages.begin(), m_pages.end(), emptyPage);
+    }
 
 public:
     const uint8_t* read(uint32_t addr, int len = MEMACCESS_DATA_BYTE_SIZE);
