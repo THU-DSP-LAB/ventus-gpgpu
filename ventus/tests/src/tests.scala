@@ -97,10 +97,12 @@ class single extends AnyFreeSpec with ChiselScalatestTester{
   }
 }
 
+case class AdvTest(name: String, meta: Seq[String], data: Seq[String], var warp: Int, var cycles: Int)
+
 class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in progress
   import top.helper._
 
-  case class AdvTest(name: String, meta: Seq[String], data: Seq[String], var warp: Int, var cycles: Int)
+
 
   // "adv_test" in {
   //   // TODO: rename
@@ -419,5 +421,38 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         clock_cnt +=1
       }
     }
+  }
+}
+
+class PageTableTest extends AnyFreeSpec{
+  "Page Table builder" in {
+    val iniFile = new IniFile("./ventus/txt/_cases.ini")
+    val defaultCaseName: String = iniFile.sections("")("Default").head
+    val section = iniFile.sections(defaultCaseName)
+
+    val testbench = AdvTest(
+      defaultCaseName,
+      section("Files").map(_ + ".metadata"),
+      section("Files").map(_ + ".data"),
+      section("nWarps").head.toInt,
+      section("SimCycles").head.toInt
+    )
+    val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
+    val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
+
+    var meta = new MetaData
+    var size3d = Array.fill(3)(0)
+    var wg_list = Array.fill(metaFileDir.length)(Array.fill(1)(false))
+    val ptbr_table = ArrayBuffer.fill(256)(BigInt(-1))
+    var ptbr_pos = 1
+
+    val metas = metaFileDir.map(MetaData(_))
+
+    val mem = new MemBox(MemboxS.SV32)
+    ptbr_table(ptbr_pos) = mem.createRootPageTable()
+
+    var current_kernel = 0
+    meta = mem.loadfile(ptbr_table(ptbr_pos), metas(current_kernel), dataFileDir(current_kernel))
+    meta.asid = ptbr_pos
   }
 }
