@@ -123,7 +123,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
     shouldReset = false,
     holdRead = true,
     singlePort = false,
-    bypassWrite = false
+    bypassWrite = true
   ))
   timeAccess.io.r.req.valid := io.allocateWrite.fire
   timeAccess.io.r.req.bits.setIdx := io.allocateWrite.bits.setIdx
@@ -238,8 +238,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
     choosenDirtySetIdx_st0 := PriorityEncoder(setDirty)
     choosenDirtySetValid := way_dirtyAfterValid(choosenDirtySetIdx_st0)
     choosenDirtyWayMask_st0 := VecInit(PriorityEncoderOH(choosenDirtySetValid)).asUInt
-    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(choosenDirtyWayMask_st0)
-    choosenDirtyASID_st1 := ASIDAccess.io.r.resp.data(choosenDirtyWayMask_st0)
+    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(OHToUInt(choosenDirtyWayMask_st0))
+    choosenDirtyASID_st1 := ASIDAccess.io.r.resp.data(OHToUInt(choosenDirtyWayMask_st0))
     //val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
     //val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
     io.dirtyTag_st1.get := choosenDirtyTag_st1
