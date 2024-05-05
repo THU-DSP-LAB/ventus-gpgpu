@@ -748,6 +748,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
 
   val memReq_st3_paddr = Reg(UInt(paLen.W))
   val a_op_st3 = memReq_Q.io.deq.bits.a_opcode//memReq_Q.io.deq.bits.a_opcode
+  val a_op_st3_isFlush = a_op_st3 === 5.U
   val memReqIsWrite_st3 = (a_op_st3 === TLAOp_PutFull) || ((a_op_st3 === TLAOp_PutPart) && memReq_Q.io.deq.bits.a_param === 0.U)
   val memReqIsRead_st3 = (a_op_st3 === TLAOp_Get) && memReq_Q.io.deq.bits.a_param === 0.U
 
@@ -766,7 +767,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   WshrAccess.io.pushReq.valid := PushWshrValid//Mux(wshrPushPopConflictReg,true.B,Mux(WshrPushPopConflict,false.B,PushWshrValid))//wshrPass && memReq_Q.io.deq.fire() && memReqIsWrite_st3
   coreRsp_st2_valid_from_memReq := WshrAccess.io.pushReq.valid && memReq_Q.io.deq.bits.hasCoreRsp && !coreRsp_st2_valid_from_memRsp
 
-  memReq_Q.io.deq.ready := (waitTLB === 2.U) && (waitTLBnext === 0.U)//wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp
+  memReq_Q.io.deq.ready := Mux(a_op_st3_isFlush,io.memReq.ready && !coreRsp_st2_valid_from_memRsp,(waitTLB === 2.U) && (waitTLBnext === 0.U))//wshrPass && io.memReq.ready && !coreRsp_st2_valid_from_memRsp
 
   // FSM for TLB handle and memreq transmit
   // 0-idle 1-wait TLB resp 2-issue memreq
@@ -775,7 +776,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   waitTLB := waitTLBnext
   when(waitTLB === 0.U){
 
-    when(memReq_Q.io.deq.valid && io.TLBReq.ready){
+    when(memReq_Q.io.deq.valid  && !a_op_st3_isFlush && io.TLBReq.ready){
       waitTLBnext := 1.U
     }.otherwise{
       waitTLBnext := waitTLB
@@ -796,13 +797,13 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
     waitTLBnext := 0.U
   }
   io.TLBRsp.ready := waitTLB === 1.U
-  io.TLBReq.valid := memReq_Q.io.deq.valid && waitTLB === 0.U
+  io.TLBReq.valid := memReq_Q.io.deq.valid && waitTLB === 0.U && !a_op_st3_isFlush
   io.TLBReq.bits.vaddr := memReq_Q.io.deq.bits.a_addr
   io.TLBReq.bits.asid := memReq_Q.io.deq.bits.Asid
   memReq_st3_ready_tlb := io.TLBReq.ready && waitTLB === 0.U
   memReq_st3_valid_tlb := io.TLBRsp.valid && waitTLB === 1.U
 
-  when(memReq_Q.io.deq.valid && memReq_st3_ready_tlb) {
+  when(memReq_Q.io.deq.valid && (memReq_st3_ready_tlb || a_op_st3_isFlush)) {
     memReq_st3.a_data := memReq_Q.io.deq.bits.a_data
     memReq_st3.a_param := memReq_Q.io.deq.bits.a_param
     memReq_st3.a_addr := memReq_Q.io.deq.bits.a_addr
