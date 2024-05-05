@@ -5,6 +5,7 @@ endif
 
 ######################################################################
 # Set up variables
+NPROC = $(shell nproc)
 
 # If $VERILATOR_ROOT isn't in the environment, we assume it is part of a
 # package install, and verilator is in your path. Otherwise find the
@@ -28,7 +29,7 @@ VERILATOR_FLAGS += -x-assign fast
 #VERILATOR_FLAGS += -Wall
 VERILATOR_FLAGS += -Wno-WIDTHEXPAND
 # Make waveforms
-#VERILATOR_FLAGS += --trace
+VERILATOR_FLAGS += --trace-fst
 # Check SystemVerilog assertions
 VERILATOR_FLAGS += --assert
 # Generate coverage analysis
@@ -38,14 +39,15 @@ VERILATOR_FLAGS += --assert
 # Add this trace to get a backtrace in gdb
 #VERILATOR_FLAGS += --gdbbt
 
-VERILATOR_FLAGS += -j 12
+VERILATOR_FLAGS += -j $(NPROC)
 VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0"
 
+CHISEL_VERILOG_ENABLE_PRINT = 0
 
 ######################################################################
 DIR_SCALA = $(abspath ../ventus/src)
 
-SRC_SCALA = 
+SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
 SRC_V = dut.v
 SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp
 SRC_HEADER_CXX = kernel.hpp MemBox.hpp
@@ -63,6 +65,7 @@ default: run
 $(SRC_V): $(SRC_SCALA)
 	cd .. && ./mill ventus.runMain top.emitVerilog
 	mv GPGPU_SimTop.v $(SRC_V)
+	sed -i "1i\`define PRINTF_COND 0" dut.v
 
 $(VERILATED_FILES): $(SRC_V)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
@@ -71,13 +74,18 @@ $(VERILATED_DIR)/Vdut: $(VERILATED_FILES) $(SRC_CXX) $(SRC_HEADER_CXX)
 	$(MAKE) -j12 -C $(VERILATED_DIR) -f Vdut.mk
 
 run: $(VERILATED_DIR)/Vdut
-	@rm -rf logs
+	@-rm Vdut.fst
+	@-rm -rf logs
 	@mkdir -p logs
 	@$(VERILATED_DIR)/Vdut
 	#obj_dir/Vtop +trace
 
 verilog: $(SRC_V)
-.PHONY: run verilog
+
+gdb: ${VERILATED_DIR}/Vdut
+	gdb --tui $(VERILATED_DIR)/Vdut
+
+.PHONY: run gdb verilog
 
 ######################################################################
 # Other targets
@@ -85,6 +93,17 @@ verilog: $(SRC_V)
 show-config:
 	$(VERILATOR) -V
 
-maintainer-copy::
-clean mostlyclean distclean maintainer-clean::
-	-rm -rf $(VERILATED_DIR)/* logs *.log *.dmp *.vpd coverage.dat core
+clean:
+	-rm -f $(VERILATED_DIR)/*.a $(VERILATED_DIR)/*.d $(VERILATED_DIR)/*.o $(VERILATED_DIR)/Vdut
+	-rm -f *.log *.dmp *.vpd coverage.dat core
+	-rm -rf logs
+
+clean_cpp: clean
+	-rm -f $(VERILATED_DIR)/*
+
+clean_verilog: clean_cpp
+	-rm dut.V
+
+clean_all: clean_verilog
+
+.PHONY: clean clean_cpp clean_verilog clean_all

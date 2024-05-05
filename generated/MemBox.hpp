@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <vector>
-inline constexpr int MEMACCESS_DATA_BYTE_SIZE = 32;
+inline constexpr int MEMACCESS_DATA_BYTE_SIZE = 32 * 4;
 inline constexpr uint32_t LDS_BASEADDR        = 0x70000000;
 
 class MemBox {

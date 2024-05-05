@@ -28,6 +28,9 @@ Kernel::Kernel(
     initMetaData(metadata_file);
     // Load initial data of this kernel
     readDataFile(data_file, mem, m_metadata);
+    // Init finished-CTA record vector
+    cta_finished.resize(m_metadata.kernel_size[0] * m_metadata.kernel_size[1] * m_metadata.kernel_size[2]);
+    std::fill(cta_finished.begin(), cta_finished.end(), false);
 }
 
 void Kernel::readHexFile(const std::string& filename, std::vector<uint64_t>& items, int itemSize) const {
@@ -159,4 +162,12 @@ void Kernel::readDataFile(const std::string& filename, MemBox& mem, metadata_t m
     assert(file.eof());
 
     file.close();
+}
+
+bool Kernel::kernel_finished() const {
+    for (const auto& i : cta_finished) {
+        if (i == false)
+            return false;
+    }
+    return true;
 }

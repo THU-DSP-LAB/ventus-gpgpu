@@ -47,15 +47,20 @@ public:
     uint32_t get_num_wf() const { return m_metadata.wg_size; }
     uint32_t get_num_thread() const { return m_metadata.wf_size; }
     uint32_t get_num_lds() const { return m_metadata.ldsSize; }
-    //uint32_t get_num_sgpr() const { return m_metadata.sgprUsage * m_metadata.wg_size; }
-    //uint32_t get_num_vgpr() const { return m_metadata.vgprUsage * m_metadata.wg_size; }
+    // uint32_t get_num_sgpr() const { return m_metadata.sgprUsage * m_metadata.wg_size; }
+    // uint32_t get_num_vgpr() const { return m_metadata.vgprUsage * m_metadata.wg_size; }
     uint32_t get_num_sgpr_per_thread() const { return m_metadata.sgprUsage; }
     uint32_t get_num_vgpr_per_thread() const { return m_metadata.vgprUsage; }
     uint32_t get_start_pc() const { return m_metadata.startaddr; }
     uint32_t get_csr_baseaddr() const { return m_metadata.metaDataBaseAddr; }
-    uint32_t get_gds_baseaddr() const { return 0; }     // TODO
-    uint32_t get_pds_baseaddr() const { return m_metadata.pdsBaseAddr
-        + get_next_cta_id_single() * m_metadata.wg_size * m_metadata.wf_size * m_metadata.pdsSize; };
+    uint32_t get_gds_baseaddr() const { return 0; } // TODO
+    uint32_t get_pds_baseaddr() const {
+        return m_metadata.pdsBaseAddr
+            + get_next_cta_id_single() * m_metadata.wg_size * m_metadata.wf_size * m_metadata.pdsSize;
+    };
+
+    void cta_finish(int id) { cta_finished[id] = true; }
+    bool kernel_finished() const ;
 
 private:
     std::string m_kernel_name;
@@ -89,4 +94,7 @@ private:
 
     dim3_t m_next_cta = { 0, 0, 0 }; // start from 0 ~ (grid_dim - 1)
     dim3_t m_grid_dim;
+
+    // Record finished CTA
+    std::vector<bool> cta_finished;
 };

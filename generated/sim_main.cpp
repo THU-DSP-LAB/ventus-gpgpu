@@ -11,6 +11,7 @@
 #include <new>
 #include <vector>
 #include <verilated.h>
+#include <verilated_fst_c.h>
 
 // Legacy function required only so linking works on Cygwin and MSVC++
 double sc_time_stamp() { return 0; }
@@ -99,6 +100,11 @@ int main(int argc, char** argv) {
     const std::unique_ptr<Vdut> dut { new Vdut { contextp.get(), "DUT" } };
     MemBox* mem = new MemBox;
 
+    // waveform traces (FST)
+    VerilatedFstC *tfp = new VerilatedFstC;
+    dut->trace(tfp, 10);
+    tfp->open("Vdut.fst");
+
     // Load workload kernel
     Kernel kernel1("kernel1", "testcase/matadd/matadd.metadata", "testcase/matadd/matadd.data", *mem);
     Cta cta;
@@ -116,10 +122,16 @@ int main(int argc, char** argv) {
     dut->clock = 0;
     dut->reset = 0;
     dut->eval();
+    contextp->timeInc(1);
+    dut->clock = 1;
+    dut->eval();
+    contextp->timeInc(1);
+    dut->clock = 0;
+    dut->eval();
 
     constexpr int CLK_MAX = 50000;
     int clk_cnt           = 0;
-    while (!contextp->gotFinish() && clk_cnt < CLK_MAX) {
+    while (!contextp->gotFinish() && clk_cnt < CLK_MAX && !kernel1.kernel_finished()) {
         contextp->timeInc(1); // 1 timeprecision period passes...
         dut->clock = !dut->clock;
         clk_cnt += dut->clock ? 1 : 0;
@@ -133,6 +145,8 @@ int main(int argc, char** argv) {
             // Host WG new
             if (cta.get_new(kernel1)) {
                 cta.apply_to_dut(*dut);
+            } else {
+                dut->io_host_req_valid = false;
             }
         }
 
@@ -140,35 +154,48 @@ int main(int argc, char** argv) {
         // Eval
         //
         dut->eval();
+        tfp->dump(contextp->time());
 
         //
         // React to new output & prepare for new input stimulus
         //
         if (dut->clock == 0) {
             if (dut->io_host_req_valid && dut->io_host_req_ready) {
+                int cta_id = dut->io_host_req_bits_host_wg_id;
+                std::cout << "CTA " << cta_id << " dispatched to GPU\n";
                 kernel1.increment_cta_id();
             }
             if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
-                std::cout << "CTA " << dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id << " finished\n";
+                int cta_id = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
+                std::cout << "CTA " << cta_id << " finished\n";
+                kernel1.cta_finish(cta_id);
             }
         } else {
             // Memory access: read
+            volatile uint32_t rd_addr = dut->io_mem_rd_addr;
             const uint8_t* rd_data = mem->read(dut->io_mem_rd_addr);
-            memcpy(dut->io_mem_rd_data.data(), rd_data, MEMACCESS_DATA_BYTE_SIZE / 4);
+            memcpy(dut->io_mem_rd_data.data(), rd_data, MEMACCESS_DATA_BYTE_SIZE);
             delete[] rd_data;
             // Memory access: write
             if (dut->io_mem_wr_en) {
                 bool mask[MEMACCESS_DATA_BYTE_SIZE];
-                uint64_t mask_raw = dut->io_mem_wr_mask;
-                for (int i = 0; i < MEMACCESS_DATA_BYTE_SIZE; i++) {
-                    mask[i] = mask_raw & 0x1;
-                    mask_raw >>= 1;
+                for (int idx = 0; idx < 4; idx++) {
+                    uint32_t mask_raw = dut->io_mem_wr_mask[idx];
+                    for (int bit = 0; bit < 32; bit++) {
+                        mask[bit + idx * 32] = mask_raw & 0x1;
+                        mask_raw >>= 1;
+                    }
                 }
                 mem->write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
             }
+            // Clock output
+            if(clk_cnt % 5000)
+                std::cout << "Simulation cycles: " << clk_cnt << std::endl;
         }
     }
 
+    std::cout << "Simulation finished in " << clk_cnt << " cycles\n";
+    tfp->close();
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
     return 0;

@@ -4,4 +4,4 @@ obj_dir/
 *.json
 *.fir
 *.v
-
+*.fst

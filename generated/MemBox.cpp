@@ -1,5 +1,6 @@
 #include "MemBox.hpp"
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 
@@ -53,6 +54,23 @@ MemBox::MemPage* MemBox::page_find(uint32_t addr) {
 }
 
 const uint8_t* MemBox::read(uint32_t addr, int len) {
+    uint8_t* buffer = new uint8_t[len];
+    int cnt         = 0;
+    MemPage* page   = nullptr;
+    while (cnt < len) {
+        int len_this_step = PAGESIZE - (addr + cnt) % PAGESIZE;
+        len_this_step     = (len_this_step > len - cnt) ? len - cnt : len_this_step;
+        page              = page_find(addr + cnt);
+        if (page == nullptr) {
+            memset(buffer + cnt, 0, len_this_step);
+        } else {
+            memcpy(buffer + cnt, page->ptr + (addr + cnt - page->addr), len_this_step);
+        }
+        cnt += len_this_step;
+    }
+    return buffer;
+
+    /*
     bool within_single_page = (addr / PAGESIZE == (addr + len - 1) / PAGESIZE);
     MemBox::MemPage* page1  = page_find(addr);
     MemBox::MemPage* page2  = within_single_page ? nullptr : page_find(addr + len - 1);
@@ -78,20 +96,21 @@ const uint8_t* MemBox::read(uint32_t addr, int len) {
         }
     }
     return buffer;
+    */
 }
 
 void MemBox::write(uint32_t addr, bool mask[], uint8_t data[], int len) {
     int cnt       = 0;
     MemPage* page = nullptr;
-    while (cnt) {
+    while (cnt < len) {
         if (page == nullptr || page->addr + PAGESIZE <= addr + cnt) {
             page = page_find(addr + cnt);
-            if(page == nullptr) {
-                page = page_new(addr+cnt);
+            if (page == nullptr) {
+                page = page_new(addr + cnt);
                 assert(page);
             }
         }
-        if(mask[cnt]) {
+        if (mask[cnt]) {
             page->ptr[addr + cnt - page->addr] = data[cnt];
         }
         cnt++;
