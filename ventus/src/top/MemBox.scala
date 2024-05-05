@@ -35,7 +35,8 @@ class MetaData{
   def generateHostReq(i: BigInt, j: BigInt, k: BigInt) = {
     val blockID = (i * kernel_size(1) + j) * kernel_size(2) + k
     (new host2CTA_data).Lit(
-      _.host_wg_id -> ("b" + blockID.toString(2) + "0" * CU_ID_WIDTH).U,
+      //_.host_wg_id -> ("b" + blockID.toString(2) + "0" * CU_ID_WIDTH).U,
+      _.host_wg_id -> blockID.U,
       _.host_num_wf -> wg_size.U,
       _.host_wf_size -> wf_size.U,
       _.host_start_pc -> "h80000000".U,

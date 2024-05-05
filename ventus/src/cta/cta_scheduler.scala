@@ -9,14 +9,14 @@ object CONFIG {
     val NUM_CU = parameters.num_sm
     val MEM_ADDR_WIDTH = parameters.MEM_ADDR_WIDTH.W
     val NUM_WG_SLOT = parameters.num_block                  // Number of WG slot in each CU
-    val NUM_WF_SLOT = 32                                    // Number of WG slot in each CU
+    val NUM_WF_SLOT = parameters.num_warp                   // Number of WG slot in each CU
     val ASID_WIDTH = 32.W
   }
   object WG {
     val WG_ID_WIDTH = 32.W
     val NUM_WG_DIM_MAX = parameters.NUM_WG_X                // Max number of wg in a single dimension in each kernel
     val NUM_THREAD_MAX = 1 << parameters.WAVE_ITEM_WIDTH    // Max number of thread in each wavefront(warp)
-    val NUM_WF_MAX = 32                                     // Max number of wavefront in each workgroup(block)
+    val NUM_WF_MAX = parameters.num_warp_in_a_block         // Max number of wavefront in each workgroup(block)
     val NUM_LDS_MAX = parameters.NUMBER_LDS_SLOTS           // Max number of LDS  occupied by a workgroup
     val NUM_SGPR_MAX = parameters.num_sgpr                  // Max number of sgpr occupied by a workgroup
     val NUM_VGPR_MAX = parameters.num_vgpr                  // Max number of vgpr occupied by a workgroup

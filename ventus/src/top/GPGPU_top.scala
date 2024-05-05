@@ -57,7 +57,7 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_new.ready <> io.host2CTA.ready
   cta_sche.io.host_wg_new.bits.wg_id              := io.host2CTA.bits.host_wg_id
   cta_sche.io.host_wg_new.bits.num_wf             := io.host2CTA.bits.host_num_wf
-  cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wg_id
+  cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wf_size
   cta_sche.io.host_wg_new.bits.start_pc           := io.host2CTA.bits.host_start_pc
   cta_sche.io.host_wg_new.bits.num_wg_x           := io.host2CTA.bits.host_kernel_size_3d(0)
   cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_3d(1)
@@ -520,3 +520,4 @@ class CPUtest(C: TestCase#Props) extends Module{
   }
   //io.cta2host<>DontCare
 }
+
