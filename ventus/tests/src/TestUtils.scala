@@ -128,14 +128,14 @@ object TestUtils {
           val mask = req.mask.peek().litValue.toString(2).reverse.padTo(req.mask.getWidth, '0').map {
             case '1' => true
             case _ => false
-          }.flatMap(x => Seq.fill(4)(x))
+          }.toArray
           mem.writeMem(addr, data_byte_count, data, mask)
           data = Array.fill(data_byte_count)(0.toByte) // write operation
           opcode_rsp = 0 // response = 0
         }
         case 0 => { // write full
           data = top.helper.BigInt2ByteArray(req.data.peek().litValue, data_byte_count)
-          val mask = IndexedSeq.fill(4 * req.mask.getWidth)(true)
+          val mask = IndexedSeq.fill(req.mask.getWidth)(true)
           mem.writeMem(addr, data_byte_count, data, mask) // write operation
           data = Array.fill(data_byte_count)(0.toByte) // response = 0
           opcode_rsp = 0
