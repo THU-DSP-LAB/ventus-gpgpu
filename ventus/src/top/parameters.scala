@@ -190,4 +190,31 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def numgroupl2cache = l2cacheline / dma_aligned_bulk
   def numgroupshared = sharedcacheline / dma_aligned_bulk
   def numgroupinsdmax = maxcopysize / dma_aligned_bulk
+
+  def UINT8 = 0
+
+  def UINT16 = 1
+
+  def UINT32 = 2
+
+  def INT32 = 3
+
+  def UINT64 = 4
+
+  def INT64 = 5
+
+  def FLOAT16 = 6
+
+  def FLOAT32 = 7
+
+  def FLOAT64 = 8
+
+  def BFLOAT16 = 9
+
+  def FLOAT32_FTZ = 10
+
+  def TFLOAT32 = 11
+
+  def TFLOAT32_FTZ = 12
+
 }
