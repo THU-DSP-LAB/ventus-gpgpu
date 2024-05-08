@@ -1,6 +1,7 @@
 #include "MemBox.hpp"
 #include "Vdut.h"
 #include "kernel.hpp"
+#include "testcase.hpp"
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
@@ -12,6 +13,10 @@
 #include <vector>
 #include <verilated.h>
 #include <verilated_fst_c.h>
+
+#ifndef SIM_WAVEFORM_FST
+#define SIM_WAVEFORM_FST 1
+#endif
 
 // Legacy function required only so linking works on Cygwin and MSVC++
 double sc_time_stamp() { return 0; }
@@ -100,13 +105,17 @@ int main(int argc, char** argv) {
     const std::unique_ptr<Vdut> dut { new Vdut { contextp.get(), "DUT" } };
     MemBox* mem = new MemBox;
 
+#if(SIM_WAVEFORM_FST)
     // waveform traces (FST)
     VerilatedFstC *tfp = new VerilatedFstC;
-    dut->trace(tfp, 10);
-    tfp->open("Vdut.fst");
+    dut->trace(tfp, 5);
+    tfp->open("obj_dir/Vdut.fst");
+#endif
 
     // Load workload kernel
-    Kernel kernel1("kernel1", "testcase/matadd/matadd.metadata", "testcase/matadd/matadd.data", *mem);
+    //Kernel kernel1("kernel1", "testcase/matadd/matadd.metadata", "testcase/matadd/matadd.data", *mem);
+    Kernel kernel1 = tc_matadd.get_kernel(0, *mem);
+    //Kernel kernel1 = tc_vecadd.get_kernel(0, *mem);
     Cta cta;
 
     // DUT initial reset
@@ -129,7 +138,7 @@ int main(int argc, char** argv) {
     dut->clock = 0;
     dut->eval();
 
-    constexpr int CLK_MAX = 50000;
+    constexpr int CLK_MAX = 100000;
     int clk_cnt           = 0;
     while (!contextp->gotFinish() && clk_cnt < CLK_MAX && !kernel1.kernel_finished()) {
         contextp->timeInc(1); // 1 timeprecision period passes...
@@ -154,7 +163,9 @@ int main(int argc, char** argv) {
         // Eval
         //
         dut->eval();
+#if(SIM_WAVEFORM_FST)
         tfp->dump(contextp->time());
+#endif
 
         //
         // React to new output & prepare for new input stimulus
@@ -189,13 +200,15 @@ int main(int argc, char** argv) {
                 mem->write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
             }
             // Clock output
-            if(clk_cnt % 5000)
+            if(clk_cnt % 5000 == 0)
                 std::cout << "Simulation cycles: " << clk_cnt << std::endl;
         }
     }
 
     std::cout << "Simulation finished in " << clk_cnt << " cycles\n";
+#if(SIM_WAVEFORM_FST)
     tfp->close();
+#endif
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
     return 0;

@@ -39,8 +39,11 @@ VERILATOR_FLAGS += --assert
 # Add this trace to get a backtrace in gdb
 #VERILATOR_FLAGS += --gdbbt
 
+VERILATOR_FLAGS += --threads $(shell expr $(NPROC) - 4)
+VERILATOR_FLAGS += --trace-threads 2
 VERILATOR_FLAGS += -j $(NPROC)
 VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0"
+VERILATOR_FLAGS += -LDFLAGS "-fuse-ld=mold"
 
 CHISEL_VERILOG_ENABLE_PRINT = 0
 
@@ -49,8 +52,8 @@ DIR_SCALA = $(abspath ../ventus/src)
 
 SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
 SRC_V = dut.v
-SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp
-SRC_HEADER_CXX = kernel.hpp MemBox.hpp
+SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp testcase.cpp
+SRC_HEADER_CXX = kernel.hpp MemBox.hpp testcase.hpp
 VERILATOR_INPUT = $(SRC_V) $(SRC_CXX)
 
 VERILATED_DIR = $(abspath obj_dir)
@@ -65,27 +68,29 @@ default: run
 $(SRC_V): $(SRC_SCALA)
 	cd .. && ./mill ventus.runMain top.emitVerilog
 	mv GPGPU_SimTop.v $(SRC_V)
-	sed -i "1i\`define PRINTF_COND 0" dut.v
+	sed -i "1i\`define PRINTF_COND 0" $(SRC_V)
 
-$(VERILATED_FILES): $(SRC_V)
+verilog: $(SRC_V)
+
+verilator: verilog
 	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
 
-$(VERILATED_DIR)/Vdut: $(VERILATED_FILES) $(SRC_CXX) $(SRC_HEADER_CXX)
-	$(MAKE) -j12 -C $(VERILATED_DIR) -f Vdut.mk
+#$(VERILATED_FILES): $(SRC_V)
+#	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
+
+$(VERILATED_DIR)/Vdut: verilator
+	$(MAKE) -j $(NPROC) -C $(VERILATED_DIR) -f Vdut.mk
 
 run: $(VERILATED_DIR)/Vdut
-	@-rm Vdut.fst
+	@-rm -f Vdut.fst
 	@-rm -rf logs
 	@mkdir -p logs
 	@$(VERILATED_DIR)/Vdut
-	#obj_dir/Vtop +trace
-
-verilog: $(SRC_V)
 
 gdb: ${VERILATED_DIR}/Vdut
 	gdb --tui $(VERILATED_DIR)/Vdut
 
-.PHONY: run gdb verilog
+.PHONY: run gdb verilog verilator
 
 ######################################################################
 # Other targets
