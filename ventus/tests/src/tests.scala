@@ -147,7 +147,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(200)
+      c.clock.setTimeout(0)
       c.clock.step(5)
 
       var size3d = Array.fill(3)(0)
