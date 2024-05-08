@@ -227,8 +227,61 @@ class Dma_test
             _.dma -> true.B
           )
           ctrlsigs
-
         }
+
+        def genBundle_tensor(): CtrlSigs = {
+          val ctrlsigs = (new CtrlSigs).Lit(
+            _.inst -> 0.U,
+            _.wid -> 0.U,
+            _.fp -> false.B,
+            _.branch -> 0.U,
+            _.simt_stack -> false.B,
+            _.simt_stack_op -> false.B,
+            _.barrier -> false.B,
+            _.csr -> 0.U,
+            _.reverse -> false.B,
+            _.sel_alu2 -> 0.U,
+            _.sel_alu1 -> 0.U,
+            _.isvec -> false.B,
+            _.sel_alu3 -> 0.U,
+            _.mask -> false.B,
+            _.sel_imm -> 0.U,
+            _.mem_whb -> 0.U,
+            _.mem_unsigned -> false.B,
+            _.alu_fn -> 0.U,
+            _.force_rm_rtz -> false.B,
+            _.is_vls12 -> false.B,
+            _.mem -> false.B,
+            _.mul -> false.B,
+            _.tc -> false.B,
+            _.disable_mask -> false.B,
+            _.custom_signal_0 -> false.B,
+            _.mem_cmd -> 0.U,
+            _.mop -> 0.U,
+            _.reg_idx1 -> 0.U,
+            _.reg_idx2 -> 0.U,
+            _.reg_idx3 -> 0.U,
+            _.reg_idxw -> 0.U,
+            _.wvd -> false.B,
+            _.fence -> false.B,
+            _.sfu -> false.B,
+            _.readmask -> false.B,
+            _.writemask -> false.B,
+            _.wxd -> false.B,
+            _.pc -> 4096.U,
+            _.imm_ext -> 0.U,
+            _.spike_info.get -> (new InstWriteBack).Lit(_.sm_id -> 0.U, _.pc -> 0.U, _.inst -> 0.U),
+            _.atomic -> false.B,
+            _.aq -> false.B,
+            _.rl -> false.B,
+
+            _.funct -> 3.U,
+            _.copysize -> 2.U,
+            _.dma -> true.B
+          )
+          ctrlsigs
+        }
+
         val myData1 = vExeData_Soft(
           in1 = Seq.fill(num_thread)(BigInt("90000000", 16)),
           in3 = Seq.fill(num_thread)(BigInt("70000000", 16)),
@@ -257,17 +310,62 @@ class Dma_test
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_copysize() // copysize = 16
         )
+        var seq_in1 = Seq(BigInt("00000000", 16))   //datatype
+        seq_in1 = seq_in1 :+ BigInt("00000003",16)  //tensorRank
+        seq_in1 = seq_in1 :+ BigInt("90000000",16)  //globalAddress
+        seq_in1 = seq_in1 :+ BigInt("00000020",16)  //globalDim1
+        seq_in1 = seq_in1 :+ BigInt("00000020",16)  //globalDim2
+        seq_in1 = seq_in1 :+ BigInt("00000020",16)  //globalDim3
+        seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalDim4
+        seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalDim5
+        seq_in1 = seq_in1 :+ BigInt("00000100",16)  //globalStrides1
+        seq_in1 = seq_in1 :+ BigInt("00002000",16)  //globalStrides2
+        seq_in1 = seq_in1 :+ BigInt("00080000",16)  //globalStrides3
+        seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalStrides4
+        seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalStrides5
+        (0 until(num_thread - 13)).foreach( x =>{
+          seq_in1 = seq_in1 :+ BigInt("00000000", 16)
+        })
+
+        var seq_in2 = Seq(BigInt("90000010", 16))   //datatype
+        seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim1
+        seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim2
+        seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim3
+        seq_in2 = seq_in2 :+  BigInt("00000000",16) //boxDim4
+        seq_in2 = seq_in2 :+  BigInt("00000000",16) //boxDim5
+        seq_in2 = seq_in2 :+  BigInt("00000001", 16) //elementStrides1
+        seq_in2 = seq_in2 :+  BigInt("00000004", 16) //elementStrides2
+        seq_in2 = seq_in2 :+  BigInt("00000008", 16) //elementStrides3
+        seq_in2 = seq_in2 :+  BigInt("00000000", 16) //elementStrides4
+        seq_in2 = seq_in2 :+  BigInt("00000000", 16) //elementStrides5
+        seq_in2 = seq_in2 :+  BigInt("00000000", 16)  //interleave
+        seq_in2 = seq_in2 :+  BigInt("00000000", 16)  //swizzle
+        seq_in2 = seq_in2 :+  BigInt("00000000", 16)  //l2promotion
+        seq_in2 = seq_in2 :+  BigInt("00000001", 16)  //oobfill
+        (0 until (num_thread - 15)).foreach(x => {
+          seq_in2 = seq_in2 :+ BigInt("00000000", 16)
+        })
+
+        val myData5 = vExeData_Soft(
+          in1 = seq_in1,
+          in3 = Seq.fill(num_thread)(BigInt("70000000", 16)),
+          in2 = seq_in2,
+          mask = Seq.fill(num_thread)(true.B),
+          ctrl = genBundle_tensor() // copysize = 16
+        )
 
         val hw_data1 = makeData(myData1)
         val hw_data2 = makeData(myData2)
         val hw_data3 = makeData(myData3)
         val hw_data4 = makeData(myData4)
+        val hw_data5 = makeData(myData5)
 
         val req_list = Seq(
-          hw_data1,
-          hw_data2,
-          hw_data4,
-          hw_data3,
+//          hw_data1,
+//          hw_data2,
+//          hw_data4,
+//          hw_data3,
+          hw_data5
           //          makeData(myData2),
           // 根据需要添加更多 vExeData 实例
         )
@@ -279,7 +377,7 @@ class Dma_test
         //        }
         dma_sender.add(req_list)
         d.clock.setTimeout(0)
-        while (clock_cnt <= 400) {
+        while (clock_cnt <= 800) {
           //        while (clock_cnt <= 100000) {
 
           dma_sender.eval()
