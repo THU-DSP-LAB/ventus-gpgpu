@@ -132,6 +132,7 @@ class io_host2cta extends Bundle with ctainfo_host_to_alloc with ctainfo_host_to
 //}
 class io_cta2host extends Bundle {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+  val cu_id = UInt(log2Ceil(CONFIG.GPU.NUM_CU).W)   // For CTA schedule strategy research
 }
 
 class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {

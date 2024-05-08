@@ -209,6 +209,7 @@ class cu_interface extends Module {
   }
   io.host_wg_done.valid := (fsm === FSM.UPDATE && wf_gather_finish) || (fsm === FSM.DEALLOC && !host_wg_done_ok)
   io.host_wg_done.bits.wg_id := wf_gather_ram_read_data.wg_id
+  io.host_wg_done.bits.cu_id := wf_cu_reg
 
   // =
   // FSM state transition logic
