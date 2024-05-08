@@ -9,7 +9,7 @@ import pipeline._
 import parameters._
 import L2cache._
 import config.config._
-import parameters.num_warp
+import parameters.{INST_CNT, INST_CNT_2, num_warp}
 
 class DecoupledPipe[T <: Data](dat: T, latency: Int = 1) extends Module {
   val io = IO(new Bundle {
@@ -59,7 +59,8 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
     val cnt = Output(UInt(32.W))
-    val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
+    val inst_cnt = if(INST_CNT) Some(Output(Vec(num_sm, UInt(32.W)))) else None
+    val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(num_sm, Vec(2, UInt(32.W))))) else None
   })
 
   val counter = new Counter(200000)
@@ -82,5 +83,6 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false) extends Module{
   GPU.io.host_req <> io.host_req
   io.host_rsp <> GPU.io.host_rsp
 
-  io.inst_cnt := GPU.io.inst_cnt.getOrElse(0.U.asTypeOf(io.inst_cnt))
+  if(INST_CNT) io.inst_cnt.foreach{_ := GPU.io.inst_cnt.getOrElse(0.U) }
+  if(INST_CNT_2) io.inst_cnt2.foreach{_ := GPU.io.inst_cnt2.getOrElse(0.U) }
 }
