@@ -168,7 +168,7 @@ class Dma_test
             _.atomic -> false.B,
             _.aq -> false.B,
             _.rl -> false.B,
-            _.opmode -> 1.U,
+            _.funct -> 1.U,
             _.copysize -> 0.U,
             _.dma -> true.B
           )
@@ -222,7 +222,7 @@ class Dma_test
             _.aq -> false.B,
             _.rl -> false.B,
 
-            _.opmode -> 0.U,
+            _.funct -> 0.U,
             _.copysize -> 2.U,
             _.dma -> true.B
           )
