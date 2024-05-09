@@ -200,32 +200,32 @@ class AddrCalc_l2cache() extends Module{
   Tensorcopysize := 0.U
   switch(TensorVars.tensorRank) {
     is(1.U) {
-      Tensorcopysize := TensorVars.boxDim(0)
+      Tensorcopysize := TensorVars.boxDim(0) * TensorVars.datawidth
     }
     is(2.U) {
-      Tensorcopysize := TensorVars.boxDim(0) *
+      Tensorcopysize := TensorVars.boxDim(0) * TensorVars.datawidth *
         box_elements_num(1).asUInt
     }
     is(3.U) {
-      Tensorcopysize := TensorVars.boxDim(0) *
+      Tensorcopysize := TensorVars.boxDim(0) * TensorVars.datawidth *
         box_elements_num(1).asUInt *
         box_elements_num(2).asUInt
     }
     is(4.U) {
-      Tensorcopysize := TensorVars.boxDim(0) *
+      Tensorcopysize := TensorVars.boxDim(0) * TensorVars.datawidth *
         box_elements_num(1).asUInt *
         box_elements_num(2).asUInt *
         box_elements_num(3).asUInt
     }
     is(5.U) {
-      Tensorcopysize := TensorVars.boxDim(0) *
+      Tensorcopysize := TensorVars.boxDim(0) * TensorVars.datawidth *
         box_elements_num(1).asUInt *
         box_elements_num(2).asUInt *
         box_elements_num(3).asUInt *
         box_elements_num(4).asUInt
     }
   }
-  //  val tensor_dim_start = RegInit(VecInit(Seq.fill(5)(0.U((xLen).W)))) // save the dim start, in order to add the strides in tensor
+  //  val output_data.cacheline_info.tensor_dim0_start = RegInit(VecInit(Seq.fill(5)(0.U((xLen).W)))) // save the dim start, in order to add the strides in tensor
   val tensor_dim_step_reg = RegInit(VecInit(Seq.fill(5)(0.U((xLen).W)))) // index 0 mean how many boxline has been covered, in a array
   val tensor_dim_step_next = Wire(Vec(5, UInt(xLen.W))) // index 0 mean how many boxline has been covered, in a array
   (0 until(5)).foreach( x=> {
@@ -261,6 +261,7 @@ class AddrCalc_l2cache() extends Module{
 
     }
   }
+//  val box_dim0_start_reg = RegInit(TensorVars.BoxAddress.asUInt)
   val box_dim0_start = Wire(UInt(xLen.W))
   box_dim0_start := 0.U
   switch(TensorVars.tensorRank) {
@@ -310,26 +311,28 @@ class AddrCalc_l2cache() extends Module{
     }
     is(3.U) {
       when((reg_save.address + l2cacheline.U).asUInt <= box_dim0_start.asUInt + TensorVars.boxDim(0).asUInt * TensorVars.datawidth.asUInt) {
-//      when(tensor_dim_step(0) <= dim0_num_cacheline) {
         address_next := reg_save.address.asUInt + l2cacheline.asUInt
-        tensor_dim_step_next(0) := tensor_dim_step_reg(0) + 1.U
       }.otherwise {
-        tensor_dim_step_next(0) := 0.U
         switch(TensorVars.tensorRank) {
           is(1.U) {
             address_next := reg_save.address.asUInt + l2cacheline.asUInt
           }
           is(2.U) {
-            address_next := Cat((box_dim0_start +  TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+            address_next := Cat((TensorVars.BoxAddress +  (tensor_dim_step_reg(1) + 1.U) * TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
             tensor_dim_step_next(1) := tensor_dim_step_reg(1) + 1.U
           }
           is(3.U) {
             when(tensor_dim_step_reg(1).asUInt === box_elements_num(1).asUInt - 1.U) {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(1) * TensorVars.elementStrides(2))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                (tensor_dim_step_reg(2) + 1.U) * TensorVars.globalStrides(1) * TensorVars.elementStrides(2))(xLen - 1, xLen - 1 - addr_tag_bits + 1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := 0.U
               tensor_dim_step_next(2) := tensor_dim_step_reg(2) + 1.U
             }.otherwise {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                tensor_dim_step_reg(2) * TensorVars.globalStrides(1) * TensorVars.elementStrides(2) +
+                (tensor_dim_step_reg(1) + 1.U) * TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen - 1, xLen - 1 - addr_tag_bits + 1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := tensor_dim_step_reg(1) + 1.U
             }
 
@@ -338,16 +341,25 @@ class AddrCalc_l2cache() extends Module{
             var dim1_full = tensor_dim_step_reg(1).asUInt === box_elements_num(1).asUInt - 1.U
             var dim2_full = tensor_dim_step_reg(2).asUInt === box_elements_num(2).asUInt - 1.U
             when(dim1_full && dim2_full) {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(2) * TensorVars.elementStrides(3))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                (tensor_dim_step_reg(3) + 1.U) * TensorVars.globalStrides(2) * TensorVars.elementStrides(3))(xLen-1, xLen-1-addr_tag_bits +1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := 0.U
               tensor_dim_step_next(2) := 0.U
               tensor_dim_step_next(3) := tensor_dim_step_reg(3) + 1.U
             }.elsewhen(dim1_full) {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(1) * TensorVars.elementStrides(2))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                tensor_dim_step_reg(3) * TensorVars.globalStrides(2) * TensorVars.elementStrides(3) +
+                (tensor_dim_step_reg(2) + 1.U) * TensorVars.globalStrides(1) * TensorVars.elementStrides(2))(xLen-1, xLen-1-addr_tag_bits +1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := 0.U
               tensor_dim_step_next(2) := tensor_dim_step_reg(2) + 1.U
             }.otherwise {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                tensor_dim_step_reg(3) * TensorVars.globalStrides(2) * TensorVars.elementStrides(3) +
+                tensor_dim_step_reg(2) * TensorVars.globalStrides(1) * TensorVars.elementStrides(2) +
+                (tensor_dim_step_reg(1) + 1.U) * TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen - 1, xLen - 1 - addr_tag_bits + 1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := tensor_dim_step_reg(1) + 1.U
             }
           }
@@ -357,22 +369,36 @@ class AddrCalc_l2cache() extends Module{
             var dim3_full = tensor_dim_step_reg(3).asUInt === box_elements_num(3).asUInt - 1.U
             //            var dim4_full = tensor_dim_step_reg(3).asUInt === box_elements_num(4).asUInt - 1.U
             when(dim1_full && dim2_full && dim3_full) {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(3) * TensorVars.elementStrides(4))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress
+                +  (tensor_dim_step_reg(4) + 1.U) * TensorVars.globalStrides(3) * TensorVars.elementStrides(4))(xLen-1, xLen-1-addr_tag_bits +1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := 0.U
               tensor_dim_step_next(2) := 0.U
               tensor_dim_step_next(3) := 0.U
               tensor_dim_step_next(4) := tensor_dim_step_reg(4) + 1.U
             }.elsewhen(dim1_full && dim2_full) {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(2) * TensorVars.elementStrides(3))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                tensor_dim_step_reg(4) * TensorVars.globalStrides(3) * TensorVars.elementStrides(4) +
+                (tensor_dim_step_reg(3) + 1.U) * TensorVars.globalStrides(2) * TensorVars.elementStrides(3))(xLen-1, xLen-1-addr_tag_bits +1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := 0.U
               tensor_dim_step_next(2) := 0.U
               tensor_dim_step_next(3) := tensor_dim_step_reg(3) + 1.U
             }.elsewhen(dim1_full) {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(1) * TensorVars.elementStrides(2))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                tensor_dim_step_reg(4) * TensorVars.globalStrides(3) * TensorVars.elementStrides(4) +
+                tensor_dim_step_reg(3) * TensorVars.globalStrides(2) * TensorVars.elementStrides(3) +
+                (tensor_dim_step_reg(2) + 1.U) * TensorVars.globalStrides(1) * TensorVars.elementStrides(2))(xLen-1, xLen-1-addr_tag_bits +1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := 0.U
               tensor_dim_step_next(2) := tensor_dim_step_reg(2) + 1.U
             }.otherwise {
-              address_next := Cat((box_dim0_start +  TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen-1, xLen-1-addr_tag_bits +1),0.U((xLen - addr_tag_bits).W))
+              address_next := Cat((TensorVars.BoxAddress +
+                tensor_dim_step_reg(4) * TensorVars.globalStrides(3) * TensorVars.elementStrides(4) +
+                tensor_dim_step_reg(3) * TensorVars.globalStrides(2) * TensorVars.elementStrides(3) +
+                tensor_dim_step_reg(2) * TensorVars.globalStrides(1) * TensorVars.elementStrides(2) +
+                (tensor_dim_step_reg(1) + 1.U) * TensorVars.globalStrides(0) * TensorVars.elementStrides(1))(xLen - 1, xLen - 1 - addr_tag_bits + 1),
+                0.U((xLen - addr_tag_bits).W))
               tensor_dim_step_next(1) := tensor_dim_step_reg(1) + 1.U
             }
           }
@@ -484,6 +510,7 @@ class AddrCalc_l2cache() extends Module{
         (0 until(5)).foreach(x =>{
           tensor_dim_step_reg(x) := tensor_dim_step_next(x)
         })
+//        box_dim0_start_reg := box_dim0_start
       }.otherwise{
         reg_save.address := reg_save.address
       }
@@ -498,7 +525,7 @@ class AddrCalc_l2cache() extends Module{
 }
 
 
-class Temp_mem() extends Module {
+class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2cachemask
   val io = IO(new Bundle {
     val from_addr = Flipped(DecoupledIO(//new Bundle {
 //      val tag = Input(new vExeDataDMA)
@@ -526,7 +553,9 @@ class Temp_mem() extends Module {
   from_l2cache_all.cacheline_info.tag  := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tag
   from_l2cache_all.cacheline_info.tensor_dim0_start := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim0_start
   from_l2cache_all.cacheline_info.box_dim0_start    := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).box_dim0_start
-  from_l2cache_all.cacheline_info.tensor_dim_step          := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim_step
+  (0 until(5)).foreach( x=> {
+    from_l2cache_all.cacheline_info.tensor_dim_step(x)          := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim_step(x)
+  })
 
   //  val tensor_dim_step = Wire(Vec(5, UInt(xLen.W)))
 //  tensor_dim_step := stepMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1))
@@ -559,9 +588,9 @@ class Temp_mem() extends Module {
   val current_mask_l2cache_obb = RegInit(VecInit(Seq.fill(numgroupl2cache* dma_aligned_bulk)(false.B)))
   val output_inst = Reg(new vExeDataDMA)
   val output_data = Reg(new l2cacheline_info)
-  val output_data_4byte = Wire(Vec(numgroupl2cache, UInt(dma_aligned_bulk.W)))
+  val output_data_4byte = Wire(Vec(numgroupl2cache, UInt((dma_aligned_bulk * BitsOfByte).W)))
   (0 until (numgroupl2cache)).foreach(x => {
-    output_data_4byte(x) := output_data.base.data((x + 1) * (dma_aligned_bulk * 8) - 1, x * (dma_aligned_bulk * 8))
+    output_data_4byte(x) := output_data.base.data((x + 1) * (dma_aligned_bulk * BitsOfByte) - 1, x * (dma_aligned_bulk * BitsOfByte))
   })
 
 
@@ -584,6 +613,95 @@ class Temp_mem() extends Module {
     tagMem.write(valid_tag_entry, io.from_addr_tag.bits)
 //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
   }
+  val tmp_1 = Wire(Vec(l2cacheline, UInt((1 * BitsOfByte).W)))
+  val tmp_2 = Wire(Vec(l2cacheline/2, UInt((2 * BitsOfByte).W)))
+  val tmp_4 = Wire(Vec(l2cacheline/4, UInt((4 * BitsOfByte).W)))
+  val tmp_8 = Wire(Vec(l2cacheline/8, UInt((8 * BitsOfByte).W)))
+  tmp_1.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * BitsOfByte + 1 * BitsOfByte - 1, i * BitsOfByte) }
+  tmp_2.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * 2 * BitsOfByte + 2 * BitsOfByte - 1, i * 2 * BitsOfByte) }
+  tmp_4.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * 4 * BitsOfByte + 4 * BitsOfByte - 1, i * 4 * BitsOfByte) }
+  tmp_8.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * 8 * BitsOfByte + 8 * BitsOfByte - 1, i * 8 * BitsOfByte) }
+  switch(output_inst.tensorvars.datawidth) {
+    is(1.U) {
+      (0 until l2cacheline).foreach(x => {
+        var line_in_tensor = (tag_wire.asUInt + x.asUInt >= output_data.cacheline_info.tensor_dim0_start.asUInt) && (tag_wire.asUInt + x.asUInt < (output_data.cacheline_info.tensor_dim0_start + output_inst.tensorvars.globalDim(0) * output_inst.tensorvars.datawidth).asUInt)
+        when(!line_in_tensor){
+          tmp_1(x) := 0.U
+        }
+      })
+    }
+    is(2.U) {
+      (0 until l2cacheline  by 2).foreach(x => {
+        var line_in_tensor = (tag_wire.asUInt + x.asUInt >= output_data.cacheline_info.tensor_dim0_start) && (tag_wire.asUInt + x.asUInt < output_data.cacheline_info.tensor_dim0_start + output_inst.tensorvars.globalDim(0) * output_inst.tensorvars.datawidth)
+        when(!line_in_tensor.asBool){
+          switch(output_inst.tensorvars.dataType) {
+            is(UINT16.asUInt) {
+              tmp_2(x/2) :=  0.U
+            }
+            is(FLOAT16.asUInt) {
+              tmp_2(x/2) :=  Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(2 * BitsOfByte)(1.U)).asUInt,0.U)
+//              tmp_2(x/2) :=  Mux(output_inst.tensorvars.oobfill.asBool,"b1111111111111111".U,0.U)
+              //                        output_data.base.data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
+              //                          Cat(output_data.base.data(x + 2 * BitsOfByte - 1),(BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt),0.U)
+            }
+            is(BFLOAT16.asUInt) {
+                tmp_2(x/2) :=  Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(2 * BitsOfByte)(1.U)).asUInt,0.U)
+              //                        output_data.base.data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
+              //                          Cat(output_data.base.data(x + 2 * BitsOfByte - 1), (BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt), 0.U)
+            }
+          }
+        }
+      })
+    }
+    is(4.U) {
+      (0 until l2cacheline by 4).foreach(x => {
+        var line_in_tensor = (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt >= output_data.cacheline_info.tensor_dim0_start) && (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt < output_data.cacheline_info.tensor_dim0_start + output_inst.tensorvars.globalDim(0) * output_inst.tensorvars.datawidth)
+        when(!line_in_tensor.asBool) {
+          switch(output_inst.tensorvars.dataType) {
+            is(UINT32.asUInt) {
+              tmp_4( x / 4) := 0.U
+            }
+            is(INT32.asUInt) {
+              tmp_4( x / 4) := 0.U
+            }
+            is(FLOAT32.asUInt) {
+              tmp_4( x / 4) := Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(4 * BitsOfByte)(1.U)).asUInt,0.U)
+            }
+            is(FLOAT32_FTZ.asUInt) {
+              tmp_4( x / 4) := Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(4 * BitsOfByte)(1.U)).asUInt,0.U)
+            }
+            is(TFLOAT32.asUInt) {
+              tmp_4( x / 4) := Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(4 * BitsOfByte)(1.U)).asUInt,0.U)
+            }
+            is(TFLOAT32_FTZ.asUInt) {
+              tmp_4( x / 4) := Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(4 * BitsOfByte)(1.U)).asUInt,0.U)
+            }
+          }
+        }
+      })
+    }
+    is(8.U) {
+      (0 until l2cacheline  by 8).foreach(x => {
+        var line_in_tensor = (tag_wire.asUInt + x.asUInt >= output_data.cacheline_info.tensor_dim0_start) && (tag_wire.asUInt + x.asUInt < output_data.cacheline_info.tensor_dim0_start + output_inst.tensorvars.globalDim(0) * output_inst.tensorvars.datawidth)
+        when(!line_in_tensor.asBool) {
+          switch(output_inst.tensorvars.dataType) {
+            is(UINT64.asUInt) {
+              tmp_8( x / 8) := 0.U
+            }
+            is(INT64.asUInt) {
+              tmp_8( x / 8) := 0.U
+            }
+            is(FLOAT64.asUInt) {
+              tmp_8( x / 8) := Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(8 * BitsOfByte)(1.U)).asUInt,0.U)
+            }
+          }
+        }
+      })
+    }
+  }
+
+
+
   val s_idle ::s_getdata :: s_shared :: s_reset :: Nil = Enum(4)
   val state = RegInit(s_idle)
   io.from_l2cache.ready := !(used_cache.andR) && !(io.to_shared.ready && used_cache.orR) && !(state === s_shared)
@@ -638,21 +756,26 @@ class Temp_mem() extends Module {
       when(io.from_addr.fire) {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
         instMem.write(valid_inst_entry, io.from_addr.bits)
-        when(io.from_addr.bits.funct === 0.U){
-          var group_start = io.from_addr.bits.dst(xLen-1,2)
-          var group_end   = (io.from_addr.bits.dst + io.from_addr.bits.copysize)(xLen-1,2)
+        switch(io.from_addr.bits.funct){
+          is(0.U) {
+            var group_start = io.from_addr.bits.dst(xLen - 1, 2)
+            var group_end = (io.from_addr.bits.dst + io.from_addr.bits.copysize)(xLen - 1, 2)
 
-          finish_cnt(valid_inst_entry) := 1.U + (group_end.asUInt - group_start.asUInt)
-//          printf("group_start : %d\n",group_start.asUInt)
-//          printf("group_end : %d\n",group_end.asUInt)
-//          printf("finish_cnt : %d\n",finish_cnt(valid_inst_entry).asUInt)
-        }.elsewhen(io.from_addr.bits.funct === 1.U){
-          finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
-        }.otherwise{
-          finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
+            finish_cnt(valid_inst_entry) := 1.U + (group_end.asUInt - group_start.asUInt)
+            //          printf("group_start : %d\n",group_start.asUInt)
+            //          printf("group_end : %d\n",group_end.asUInt)
+            //          printf("finish_cnt : %d\n",finish_cnt(valid_inst_entry).asUInt)
+          }
+          is(1.U) {
+            finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
+          }
+          is(3.U) {
+            finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
+          }
+          //shared_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
         }
-        //shared_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
       }
+
       when(io.from_shared.fire){
         finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(dma_aligned_bulk / 4)).asUInt
       }
@@ -698,12 +821,12 @@ class Temp_mem() extends Module {
             })
           }
           is(3.U){
-            var box_dim_start = from_l2cache_all.cacheline_info.box_dim0_start
-            var tensor_dim_start = from_l2cache_all.cacheline_info.tensor_dim0_start
+            var box_dim_start = output_data.cacheline_info.box_dim0_start
+//            var output_data.cacheline_info.tensor_dim0_start = output_data.cacheline_info.tensor_dim0_start
             var datawidth = output_inst.tensorvars.datawidth
             (0 until(numgroupl2cache)).foreach( x=> {
 //              var element_group_width = datawidth * output_inst.tensorvars.elementStrides(0)
-              var cacheline_in_box = (tag_wire.asUInt + x.asUInt * dma_aligned_bulk.asUInt >= box_dim_start) && (tag_wire.asUInt + x.asUInt * dma_aligned_bulk.asUInt < box_dim_start + output_inst.tensorvars.boxDim(0) * datawidth)
+              var cacheline_in_box = (tag_wire.asUInt + x.asUInt * dma_aligned_bulk.asUInt >= box_dim_start) && (tag_wire.asUInt + x.asUInt * dma_aligned_bulk.asUInt < box_dim_start + output_inst.tensorvars.boxDim(0) * output_inst.tensorvars.datawidth)
 //              var index_of_the_start = (tag_wire.asUInt - box_dim_start.asUInt) % (from_l2cache_all.asUInt)
               when(cacheline_in_box){
                 current_mask_l2cache(x) := true.B
@@ -711,166 +834,22 @@ class Temp_mem() extends Module {
                 current_mask_l2cache(x) := false.B
               }
             })
-
-            switch(datawidth) {
-              is(1.U) {
-                (0 until l2cacheline*BitsOfByte by 1 * BitsOfByte).foreach(x => {
-                  var box_in_tensor = (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt >= tensor_dim_start) && (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt < tensor_dim_start + output_inst.tensorvars.globalDim(0) * datawidth)
-                  when(box_in_tensor.asBool){
-//                    output_data.base.data(x + 1 * BitsOfByte - 1, x) := output_data.base.data(x + 1 * BitsOfByte - 1, x)
-                    // do nothing
-                  }.otherwise{
-                    output_data.base.data := {
-                      val tmp = Wire(Vec(l2cacheline, UInt(BitsOfByte.W)))
-                      tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 1 *BitsOfByte - 1, i) }
-                      tmp(x  >> log2Ceil(BitsOfByte)) := 0.U
-                      tmp.asUInt
-                    }
-//                    output_data.base.data(x + 1 , x) := 0.U //2024.5.8
-                  }
-                })
+            switch(datawidth){
+              is(1.U){
+                output_data.base.data := tmp_1.asUInt
               }
               is(2.U) {
-                (0 until l2cacheline * BitsOfByte by 2 * BitsOfByte).foreach(x => {
-                  var box_in_tensor = (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt >= tensor_dim_start) && (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt < tensor_dim_start + output_inst.tensorvars.globalDim(0) * datawidth)
-                  when(box_in_tensor.asBool){
-//                    output_data.base.data(x + 2 * BitsOfByte - 1, x) := output_data.base.data(x + 2 * BitsOfByte - 1, x)
-                  }.otherwise {
-                    switch(output_inst.tensorvars.dataType){
-                      is(UINT16.asUInt){
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 2, UInt((2 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 2 * BitsOfByte - 1, i) }
-                          tmp(x  >> log2Ceil(2 * BitsOfByte)) := 0.U
-                          tmp.asUInt
-                        }
-                      }
-                      is(FLOAT16.asUInt){
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 2, UInt((2 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 2 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(2 * BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 2 * BitsOfByte - 1), (BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-//                        output_data.base.data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
-//                          Cat(output_data.base.data(x + 2 * BitsOfByte - 1),(BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt),0.U)
-                      }
-                      is(BFLOAT16.asUInt){
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 2, UInt((2 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 2 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(2 * BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 2 * BitsOfByte - 1), (BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-//                        output_data.base.data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
-//                          Cat(output_data.base.data(x + 2 * BitsOfByte - 1), (BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                      }
-                    }
-                  }
-                })
+                output_data.base.data := tmp_2.asUInt
               }
               is(4.U) {
-                (0 until l2cacheline * BitsOfByte by 4 * BitsOfByte).foreach(x => {
-                  var box_in_tensor = (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt >= tensor_dim_start) && (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt < tensor_dim_start + output_inst.tensorvars.globalDim(0) * datawidth)
-                  when(box_in_tensor.asBool) {
-//                    output_data.base.data(x + 4 * BitsOfByte - 1, x) := output_data.base.data(x + 4 * BitsOfByte - 1, x)
-                  }.otherwise {
-                    switch(output_inst.tensorvars.dataType) {
-                      is(UINT32.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 4, UInt((4 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 4 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(4 *BitsOfByte)) := 0.U
-                          tmp.asUInt
-                        }
-                      }
-                      is(INT32.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 4, UInt((4 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 4 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(4 *BitsOfByte)) := 0.U
-                          tmp.asUInt
-                        }
-                      }
-                      is(FLOAT32.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 4, UInt((4 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 4 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(4 * BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 4 * BitsOfByte - 1), (BigInt(1) << (4 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-                      }
-                      is(FLOAT32_FTZ.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 4, UInt((4 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 4 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(4 * BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 4 * BitsOfByte - 1), (BigInt(1) << (4 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-                      }
-                      is(TFLOAT32.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 4, UInt((4 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 4 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(4 * BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 4 * BitsOfByte - 1), (BigInt(1) << (4 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-                      }
-                      is(TFLOAT32_FTZ.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 4, UInt((4 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 4 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(4 * BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 4 * BitsOfByte - 1), (BigInt(1) << (4 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-                      }
-                    }
-                  }
-                })
+                output_data.base.data := tmp_4.asUInt
               }
               is(8.U) {
-                (0 until l2cacheline * BitsOfByte by 8 * BitsOfByte).foreach(x => {
-                  var box_in_tensor = (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt >= tensor_dim_start) && (tag_wire.asUInt + (x.asUInt >> log2Ceil(BitsOfByte).asUInt).asUInt < tensor_dim_start + output_inst.tensorvars.globalDim(0) * datawidth)
-                  when(box_in_tensor.asBool) {
-//                    output_data.base.data(x + 8 * BitsOfByte - 1, x) := output_data.base.data(x + 8 * BitsOfByte - 1, x)
-                  }.otherwise {
-                    switch(output_inst.tensorvars.dataType) {
-                      is(UINT64.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 8, UInt((8 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 8 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(8 *BitsOfByte)) := 0.U
-                          tmp.asUInt
-                        }
-                      }
-                      is(INT64.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 8, UInt((8 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 8 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(8 *BitsOfByte)) := 0.U
-                          tmp.asUInt
-                        }
-                      }
-                      is(FLOAT64.asUInt) {
-                        output_data.base.data := {
-                          val tmp = Wire(Vec(l2cacheline / 8, UInt((8 * BitsOfByte).W)))
-                          tmp.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i + 8 * BitsOfByte - 1, i) }
-                          tmp(x >> log2Ceil(8 *BitsOfByte)) := Mux(output_inst.tensorvars.oobfill.asBool,
-                            Cat(output_data.base.data(x + 8 * BitsOfByte - 1), (BigInt(1) << (8 * BitsOfByte - 1) - 1).asUInt), 0.U)
-                          tmp.asUInt
-                        }
-                      }
-                    }
-                  }
-                })
+                output_data.base.data := tmp_8.asUInt
               }
             }
+
+
         }
       }
     }
@@ -896,7 +875,9 @@ class Temp_mem() extends Module {
   io.to_shared.valid := state === s_shared
   io.to_shared.bits.entry_index := current_inst_entry_index_reg
   io.to_shared.bits.mask := current_mask_l2cache
-  io.to_shared.bits.data := output_data_4byte
+  (0 until(numgroupl2cache)).foreach( x=> {
+    io.to_shared.bits.data(x) := output_data_4byte(x)
+  })
   io.to_shared.bits.cacheline_info.tag := tag_wire
   io.to_shared.bits.instinfo := output_inst
   io.to_shared.bits.cacheline_info := output_data.cacheline_info
@@ -927,23 +908,34 @@ class Addrcalc_shared() extends Module {
   val output_reg = Reg(new ShareMemCoreReq_np)
   val cnt = new Counter(n = numgroupl2cache)
   //  val inst_mem_index_reg = RegInit(0.U(log2Ceil(max_dma_inst).W))
+
+  val box_elements_num = Wire(Vec(5, UInt(xLen.W)))
+  (0 until (5)).foreach(x => {
+    box_elements_num(x) := ((reg_save.instinfo.tensorvars.boxDim(x) + reg_save.instinfo.tensorvars.elementStrides(x) - 1.U) / reg_save.instinfo.tensorvars.elementStrides(x)).asUInt
+  })
+
   val addr = Wire(Vec(numgroupl2cache,UInt(xLen.W))) // changed according to l2cachetag
   addr := VecInit(Seq.fill(numgroupl2cache)(0.U(xLen.W)))
   (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
     switch(reg_save.instinfo.funct){
       is(0.U){
-        addr(x) := reg_save.cacheline_info.tag - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
+        addr(x) := Cat(reg_save.cacheline_info.tag, 0.U((xLen - addr_tag_bits).W)) - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
       }
       is(1.U){
-        addr(x) := reg_save.cacheline_info.tag - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
+        addr(x) := Cat(reg_save.cacheline_info.tag, 0.U((xLen - addr_tag_bits).W)) - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
       }
       is(3.U){
-        var shared_box_dim_start = reg_save.instinfo.tensorvars.BoxAddress +
+        var shared_box_dim_start = reg_save.instinfo.dst +
           reg_save.cacheline_info.tensor_dim_step(1) * reg_save.instinfo.tensorvars.boxDim(0) +
-          reg_save.cacheline_info.tensor_dim_step(2) * reg_save.instinfo.tensorvars.boxDim(1) * reg_save.instinfo.tensorvars.boxDim(0) +
-          reg_save.cacheline_info.tensor_dim_step(3) * reg_save.instinfo.tensorvars.boxDim(2) * reg_save.instinfo.tensorvars.boxDim(1) * reg_save.instinfo.tensorvars.boxDim(0) +
-          reg_save.cacheline_info.tensor_dim_step(4) * reg_save.instinfo.tensorvars.boxDim(3) * reg_save.instinfo.tensorvars.boxDim(2) * reg_save.instinfo.tensorvars.boxDim(1) * reg_save.instinfo.tensorvars.boxDim(0)
-        addr(x) := reg_save.cacheline_info.tag.asUInt - reg_save.cacheline_info.box_dim0_start.asUInt + shared_box_dim_start.asUInt + x.asUInt * dma_aligned_bulk.U
+          reg_save.cacheline_info.tensor_dim_step(2) * box_elements_num(1) * reg_save.instinfo.tensorvars.boxDim(0) +
+          reg_save.cacheline_info.tensor_dim_step(3) * box_elements_num(2) * box_elements_num(1) * reg_save.instinfo.tensorvars.boxDim(0) +
+          reg_save.cacheline_info.tensor_dim_step(4) * box_elements_num(3) * box_elements_num(2) * box_elements_num(1) * reg_save.instinfo.tensorvars.boxDim(0)
+//        printf(p"addr_shift : ${Hexadecimal(reg_save.cacheline_info.tensor_dim_step(1) * reg_save.instinfo.tensorvars.boxDim(0) +
+//          reg_save.cacheline_info.tensor_dim_step(2) * box_elements_num(1) * reg_save.instinfo.tensorvars.boxDim(0) +
+//          reg_save.cacheline_info.tensor_dim_step(3) * box_elements_num(2) * box_elements_num(1) * reg_save.instinfo.tensorvars.boxDim(0) +
+//          reg_save.cacheline_info.tensor_dim_step(4) * box_elements_num(3) * box_elements_num(2) * box_elements_num(1) * reg_save.instinfo.tensorvars.boxDim(0))} \n")
+//        printf(p"addr(x) : ${Hexadecimal(reg_save.cacheline_info.tensor_dim_step(1) * reg_save.instinfo.tensorvars.boxDim(0) +
+        addr(x) := Cat(reg_save.cacheline_info.tag, 0.U((xLen - addr_tag_bits).W)) - reg_save.cacheline_info.box_dim0_start + shared_box_dim_start + x.asUInt * dma_aligned_bulk.U
       }
     }
   })
@@ -1172,6 +1164,17 @@ class Addrcalc_shared() extends Module {
           })
         }
         is(1.U) {
+          (0 until (numgroupshared)).foreach(x => {
+            output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
+            output_reg.perLaneAddr(x).wordOffset1H := Cat(wordOffset1H_bytes(x * dma_aligned_bulk),
+              wordOffset1H_bytes(x * dma_aligned_bulk + 1),
+              wordOffset1H_bytes(x * dma_aligned_bulk + 2),
+              wordOffset1H_bytes(x * dma_aligned_bulk + 3))
+            output_reg.perLaneAddr(x).activeMask := current_mask(x)
+            output_reg.data(x) := reg_save.data(x)
+          })
+        }
+        is(3.U) {
           (0 until (numgroupshared)).foreach(x => {
             output_reg.perLaneAddr(x).blockOffset := blockOffset(x)
             output_reg.perLaneAddr(x).wordOffset1H := Cat(wordOffset1H_bytes(x * dma_aligned_bulk),

@@ -310,33 +310,33 @@ class Dma_test
           mask = Seq.fill(num_thread)(true.B),
           ctrl = genBundle_copysize() // copysize = 16
         )
-        var seq_in1 = Seq(BigInt("00000000", 16))   //datatype
-        seq_in1 = seq_in1 :+ BigInt("00000003",16)  //tensorRank
+        var seq_in1 = Seq(BigInt("00000006", 16))   //datatype
+        seq_in1 = seq_in1 :+ BigInt("00000004",16)  //tensorRank
         seq_in1 = seq_in1 :+ BigInt("90000000",16)  //globalAddress
-        seq_in1 = seq_in1 :+ BigInt("00000020",16)  //globalDim1
-        seq_in1 = seq_in1 :+ BigInt("00000020",16)  //globalDim2
-        seq_in1 = seq_in1 :+ BigInt("00000020",16)  //globalDim3
-        seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalDim4
+        seq_in1 = seq_in1 :+ BigInt("00000080",16)  //globalDim1
+        seq_in1 = seq_in1 :+ BigInt("00000080",16)  //globalDim2
+        seq_in1 = seq_in1 :+ BigInt("00000080",16)  //globalDim3
+        seq_in1 = seq_in1 :+ BigInt("00000080",16)  //globalDim4
         seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalDim5
-        seq_in1 = seq_in1 :+ BigInt("00000100",16)  //globalStrides1
+        seq_in1 = seq_in1 :+ BigInt("00000200",16)  //globalStrides1
         seq_in1 = seq_in1 :+ BigInt("00002000",16)  //globalStrides2
         seq_in1 = seq_in1 :+ BigInt("00080000",16)  //globalStrides3
-        seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalStrides4
+        seq_in1 = seq_in1 :+ BigInt("00200000",16)  //globalStrides4
         seq_in1 = seq_in1 :+ BigInt("00000000",16)  //globalStrides5
         (0 until(num_thread - 13)).foreach( x =>{
           seq_in1 = seq_in1 :+ BigInt("00000000", 16)
         })
 
-        var seq_in2 = Seq(BigInt("90000010", 16))   //datatype
-        seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim1
+        var seq_in2 = Seq(BigInt("90000010", 16))   //boxdim
+        seq_in2 = seq_in2 :+  BigInt("00000120",16) //boxDim1
         seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim2
         seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim3
-        seq_in2 = seq_in2 :+  BigInt("00000000",16) //boxDim4
+        seq_in2 = seq_in2 :+  BigInt("00000010",16) //boxDim4
         seq_in2 = seq_in2 :+  BigInt("00000000",16) //boxDim5
         seq_in2 = seq_in2 :+  BigInt("00000001", 16) //elementStrides1
-        seq_in2 = seq_in2 :+  BigInt("00000004", 16) //elementStrides2
+        seq_in2 = seq_in2 :+  BigInt("00000008", 16) //elementStrides2
         seq_in2 = seq_in2 :+  BigInt("00000008", 16) //elementStrides3
-        seq_in2 = seq_in2 :+  BigInt("00000000", 16) //elementStrides4
+        seq_in2 = seq_in2 :+  BigInt("00000008", 16) //elementStrides4
         seq_in2 = seq_in2 :+  BigInt("00000000", 16) //elementStrides5
         seq_in2 = seq_in2 :+  BigInt("00000000", 16)  //interleave
         seq_in2 = seq_in2 :+  BigInt("00000000", 16)  //swizzle
@@ -377,7 +377,7 @@ class Dma_test
         //        }
         dma_sender.add(req_list)
         d.clock.setTimeout(0)
-        while (clock_cnt <= 800) {
+        while (clock_cnt <= 1500) {
           //        while (clock_cnt <= 100000) {
 
           dma_sender.eval()
