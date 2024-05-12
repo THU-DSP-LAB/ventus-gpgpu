@@ -30,6 +30,7 @@ class warp_scheduler extends Module{
     val exe_busy=Input(UInt(num_warp.W)) //exe race
     //val pc_icache_ready=Input(Vec(num_warp,Bool()))
     val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W))) //ibuffer ready
+    val asid =  Output(UInt(KNL_ASID_WIDTH.W)) // 2ibuffer
     val warp_ready=Output(UInt(num_warp.W)) //to issue
     val flush=(ValidIO(UInt(depth_warp.W)))
     val flushCache=(ValidIO(UInt(depth_warp.W)))
@@ -44,6 +45,7 @@ class warp_scheduler extends Module{
 
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
+    val flushDCache = Decoupled(Bool())
   })
 
 
@@ -59,6 +61,12 @@ class warp_scheduler extends Module{
 
   io.CTA2csr.bits:=io.warpReq.bits
   io.CTA2csr.valid:=io.warpReq.valid
+  val asidReg = Reg(Vec(num_warp,UInt(KNL_ASID_WIDTH.W)))
+  val new_warpid = io.warpReq.bits.wid
+  when(io.warpReq.fire){
+    asidReg(new_warpid) := io.warpReq.bits.CTAdata.dispatch2cu_knl_asid_dispatch
+  }
+  io.asid := asidReg(io.pc_rsp.bits.warpid)
 
 
   io.flush.valid:=(io.branch.fire()&io.branch.bits.jump) | warp_end//(暂定barrier不flush)
@@ -90,11 +98,15 @@ class warp_scheduler extends Module{
   io.pc_req.bits.addr := pcControl(next_warp).PC_next
   io.pc_req.bits.warpid := next_warp
   io.pc_req.bits.mask := pcControl(next_warp).mask_o
+  io.pc_req.bits.asid := asidReg(next_warp)
 
   io.wg_id_lookup:= Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
 
   val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_exp=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
+  val warp_endprg_cnt = RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
+  val warp_wg_valid = RegInit(VecInit(Seq.fill(num_block)(false.B)))
+  val warp_endprg_mask_0 = WireInit(VecInit(Seq.fill(num_block)(false.B)))
   //val warp_bar_cur_next=warp_bar_cur
   //val warp_bar_exp_next=warp_bar_exp
   val warp_bar_lock=WireInit(VecInit(Seq.fill(num_block)(false.B))) //equals to "active block"
@@ -126,7 +138,24 @@ class warp_scheduler extends Module{
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
     }
   }
-
+  // collect endprg in one wg and issue flush request
+  when(io.warpReq.fire){
+    warp_endprg_cnt(new_wg_id):=warp_endprg_cnt(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
+    warp_wg_valid(new_wg_id):=true.B
+  }
+  when(io.warpRsp.fire){
+    warp_endprg_cnt(new_wg_id) := warp_endprg_cnt(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+  }
+  for(i<-0 until num_block){
+    warp_endprg_mask_0(i) := (warp_endprg_cnt(i).orR === false.B) && warp_wg_valid(i)
+  }
+  val need_flush = warp_endprg_mask_0.asUInt.orR
+  val flush_entry = OHToUInt(warp_endprg_mask_0.asUInt)
+  when(warp_endprg_mask_0(flush_entry) && io.flushDCache.ready){
+    warp_wg_valid(flush_entry) := false.B
+  }
+  io.flushDCache.valid := need_flush
+  io.flushDCache.bits := need_flush
 
 
   val warp_active=RegInit(0.U(num_warp.W))
@@ -207,7 +236,7 @@ class warp_scheduler extends Module{
   for (i <- num_warp - 1 to 0 by -1) {
     pc_ready_async(i) := io.pc_ibuffer_ready(i) & warp_active(i) & warp_bar_data_async(i)
     when(pc_ready_async(i)) {
-      next_warp_async := i.asUInt()
+      next_warp_async := i.asUInt
     }
   }
   io.pc_req.valid := Mux(is_async,pc_ready_async(next_warp_async),pc_ready(next_warp))

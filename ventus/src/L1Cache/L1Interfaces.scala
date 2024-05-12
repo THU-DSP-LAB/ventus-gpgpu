@@ -4,7 +4,9 @@ import L1Cache.DCache.DCacheBundle
 import chisel3._
 import chisel3.util.log2Up
 import config.config.Parameters
+import mmu.SV32.{asidLen, paLen}
 import top.parameters._
+import mmu._
 /*Version Note
 * DCacheCoreReq spec changed, shift some work to LSU
 * //byteEn
@@ -33,6 +35,7 @@ class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
   val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
   val param = UInt(4.W)
   val tag = UInt(TagBits.W)
+  val asid = UInt(asidLen.W)
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
   val data = Vec(NLanes, UInt(WordLength.W))
@@ -65,7 +68,7 @@ class L1CacheMemReq extends Bundle{
   val a_param = UInt(3.W)
   //val a_size
   val a_source = UInt(xLen.W)
-  val a_addr = UInt(xLen.W)
+  val a_addr = UInt(paLen.W)//UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
@@ -76,12 +79,16 @@ class DCacheMemReq extends L1CacheMemReq{
   override val a_source = UInt((3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
 }
 
+class DCacheMemReq_p extends DCacheMemReq{
+  override val a_addr = UInt(paLen.W)
+}
+
 class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
   val a_opcode = UInt(3.W)
   val a_param = UInt(3.W)
   //val a_size
   val a_source = UInt((log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)).W)
-  val a_addr = UInt(xLen.W)
+  val a_addr = UInt(paLen.W)//UInt(xLen.W)
   //val isWrite = Bool()//Merged into a_opcode
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes

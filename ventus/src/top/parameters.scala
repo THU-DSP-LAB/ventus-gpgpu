@@ -8,7 +8,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_sm = 2
   val SINGLE_INST: Boolean = false
   val SPIKE_OUTPUT: Boolean = true
-  val INST_CNT: Boolean = true
+  val INST_CNT: Boolean = false
+  val INST_CNT_2: Boolean = true
   val wid_to_check = 2
   def num_bank = 4
   def num_collectorUnit = num_warp
@@ -63,15 +64,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def lsu_nMshrEntry = num_warp // less than num_warp
 
-  def dcache_NSets: Int = 128
+  def dcache_NSets: Int = 256
 
   def dcache_NWays: Int = 2
 
-//  def dcache_BlockWords: Int = 2//num_thread
-  def dcache_BlockWords: Int = 32//num_thread
+  def dcache_BlockWords: Int = 8  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
-  def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets) // 5
+  def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
 
   def BytesOfWord = 32 / 8
 
@@ -80,7 +80,6 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_BlockOffsetBits = log2Ceil(dcache_BlockWords) // select word in block
 
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
-  // 32 - (5 + 1 + 2)
 
   def dcache_MshrEntry: Int = 4
 
@@ -89,16 +88,15 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sharedmem_depth = 256
 
-  def sharedmem_BlockWords = num_thread//dcache_BlockWords
+  def sharedmem_BlockWords = dcache_BlockWords
 
   def sharemem_size = sharedmem_depth * sharedmem_BlockWords * 4 //bytes
 
-  def l2cache_NSets: Int = 32
+  def l2cache_NSets: Int = 64
 
   def l2cache_NWays: Int = 16
 
-//  def l2cache_BlockWords: Int = dcache_BlockWords
-  def l2cache_BlockWords: Int = 32 //dma
+  def l2cache_BlockWords: Int = dcache_BlockWords
 
   def l2cache_writeBytes: Int = 1
 
@@ -125,9 +123,11 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sig_length = 33
 
-  def num_cache_in_sm = 2
+  def num_cache_in_sm = 3
 
   def num_l2cache = 1
+
+  def l1tlb_ways = 8
 
   def NUMBER_CU = num_sm
   def NUMBER_RES_TABLE = 1 // <NUMBER_CU
@@ -157,6 +157,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def TAG_WIDTH = WG_SLOT_ID_WIDTH + WF_COUNT_WIDTH_PER_WG
   def INIT_MAX_WG_COUNT = NUMBER_WF_SLOTS
   def NUM_SCHEDULER_WIDTH = log2Ceil(NUM_SCHEDULER)
+  def KNL_ASID_WIDTH = mmu.SV32.asidLen
+
   def NUM_WG_X=1024 // max wg num in kernel
   def NUM_WG_Y=1024
   def NUM_WG_Z=1024

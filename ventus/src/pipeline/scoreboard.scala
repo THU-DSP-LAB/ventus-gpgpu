@@ -61,6 +61,7 @@ class CtrlSigs extends Bundle {
   val aq = Bool()
   val rl = Bool()
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
+  val asid = UInt(KNL_ASID_WIDTH.W)
 
   //xrn add
   val funct = UInt(3.W)

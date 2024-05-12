@@ -15,11 +15,13 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
+import mmu.SV32.paLen, mmu.SV32.asidLen
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(depth_warp.W)
+  val asid = UInt(KNL_ASID_WIDTH.W)
 }
 class ICachePipeRsp_np extends Bundle{
   val addr = UInt(32.W)
@@ -28,7 +30,10 @@ class ICachePipeRsp_np extends Bundle{
   val warpid = UInt(depth_warp.W)
   val status = UInt(2.W)
 }
-
+class DmaTLBReq extends Bundle{
+  val v_addr = UInt(xLen.W)
+  val asid = UInt(asidLen.W)
+}
 class pipe(val sm_id: Int = 0) extends Module{
   val io = IO(new Bundle{
     val icache_req = (DecoupledIO(new ICachePipeReq_np))
@@ -41,14 +46,18 @@ class pipe(val sm_id: Int = 0) extends Module{
     // xrn add dma
     val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
     val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
+    val TLBReq = Decoupled(new DmaTLBReq)
+    val TLBRsp = Flipped(Decoupled(UInt(paLen.W)))
 
     val pc_reset = Input(Bool())
     val warpReq=Flipped(Decoupled(new warpReqData))
     val warpRsp=(Decoupled(new warpRspData))
     val wg_id_lookup=Output(UInt(depth_warp.W))
     val wg_id_tag=Input(UInt(TAG_WIDTH.W))
+    val wg_id_lookup_async = Output(UInt(depth_warp.W))
+    val wg_id_tag_async = Input(UInt(TAG_WIDTH.W))
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
-    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -72,12 +81,35 @@ class pipe(val sm_id: Int = 0) extends Module{
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,6))
 
+  val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
+  if(INST_CNT_2){
+    when(issueX.io.in.fire){
+      when(issueV.io.in.fire && !issueV.io.in.bits.ctrl.isvec){
+        inst_cnt_xv(0) := inst_cnt_xv(0) + 2.U
+      }.otherwise{
+        inst_cnt_xv(0) := inst_cnt_xv(0) + 1.U
+      }
+    }
+    when(issueV.io.in.fire){
+      when(issueV.io.in.bits.ctrl.isvec){
+        inst_cnt_xv(1) := inst_cnt_xv(1) + PopCount(issueV.io.in.bits.mask)
+      }
+    }
+  }
+
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
-  // xrn add dma
   val dma = Module(new DMA_core)
-  io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
+  if(INST_CNT) {
+    io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
+  }
+  else if(INST_CNT_2){
+    io.inst_cnt.foreach( _ := inst_cnt_xv)
+  }
+  else{
+    io.inst_cnt.foreach( _ := 0.U)
+  }
   //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
   val exe_dataX=Module(new Module{
     val io = IO(new Bundle{
@@ -114,7 +146,9 @@ class pipe(val sm_id: Int = 0) extends Module{
   //warp_sche.io.pc_icache_ready:=pcfifo.io.icachebuf_ready
   warp_sche.io.pc_ibuffer_ready:=ibuffer.io.ibuffer_ready
   warp_sche.io.wg_id_tag:=io.wg_id_tag
+  warp_sche.io.wg_id_tag_async := io.wg_id_tag_async
   io.wg_id_lookup:=warp_sche.io.wg_id_lookup
+  io.wg_id_lookup_async := warp_sche.io.wg_id_lookup_async
   warp_sche.io.pc_rsp.valid:=io.icache_rsp.valid
   warp_sche.io.pc_rsp.bits:=io.icache_rsp.bits
   warp_sche.io.pc_rsp.bits.status:=Mux(ibuffer.io.in.ready,io.icache_rsp.bits.status,1.U(2.W))
@@ -325,9 +359,32 @@ class pipe(val sm_id: Int = 0) extends Module{
   issueV.io.out_SFU<>sfu.io.in
   issueX.io.out_SFU.ready := false.B
 
-  // xrn add dma
+  //dma add xrn
   issueX.io.out_DMA <> dma.io.dma_req
-  issueV.io.out_DMA.ready := false.B 
+  issueV.io.out_DMA.ready := false.B
+  dma.io.TLBReq <> io.TLBReq
+  dma.io.TLBRsp <> io.TLBRsp
+  dma.io.l2cache_req <> io.l2cache_req
+  dma.io.l2cache_rsp <> io.l2cache_rsp
+
+  val sharedreqArbiter = Module(new Arbiter(new ShareMemCoreReq_np, n = 2))
+
+  lsu.io.shared_req <> sharedreqArbiter.io.in(0)
+  dma.io.shared_req <> sharedreqArbiter.io.in(1)
+  io.shared_req     <> sharedreqArbiter.io.out
+
+  val sharedrspRouter = Module(new sharedRspRouter)
+  sharedrspRouter.io.in <> io.shared_rsp
+
+  lsu.io.shared_rsp <> sharedrspRouter.io.outLSU
+  dma.io.shared_rsp <> sharedrspRouter.io.outDMA
+
+  warp_sche.io.issued_dma <> issueX.io.out_warpsheculer_async
+  warp_sche.io.finished_dma <> dma.io.fence_end_dma
+
+
+
+
 
 
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
@@ -356,19 +413,7 @@ class pipe(val sm_id: Int = 0) extends Module{
 
   lsu.io.dcache_rsp<>io.dcache_rsp
   lsu.io.dcache_req<>io.dcache_req
-  // xrn add dma and modify
-  // lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
-  // lsu.io.shared_rsp<>io.shared_rsp
-  // lsu.io.shared_req<>io.shared_req
-  io.l2cache_req <> dma.io.l2cache_req
-  io.l2cache_rsp <> dma.io.l2cache_rsp
-  val sharedreqArbiter = Module(new Arbiter(new ShareMemCoreRsp_np, 2))
-  sharedreqArbiter.io.in(1) <> dma.io.shared_req
-  sharedreqArbiter.io.in(2) <> lsu.io.shared_req
-  io.shared_req <> sharedreqArbiter.io.out
-  dma.io.shared_rsp <> Mux(io.shared_rsp.bits.dma, io.shared_rsp, 0.U.asTypeOf(new ShareMemCoreRsp_np))
-  lsu.io.shared_rsp <> Mux(io.shared_rsp.bits.dma, 0.U.asTypeOf(new ShareMemCoreRsp_np), io.shared_rsp)
-
+  lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
 
 
   wb.io.in_x(0)<>alu.io.out

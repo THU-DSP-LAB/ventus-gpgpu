@@ -38,15 +38,17 @@ object TestUtils {
     val rspPort: DecoupledIO[B]
   ) extends IOTestDriver[A, B] {
     var send_list: Seq[A] = Nil
+    var time_list: scala.collection.mutable.Seq[Int] = scala.collection.mutable.Seq.empty
     val Idle = 0; val SendingReq = 1; val WaitingRsp = 2
     var state = Idle; var next_state = Idle
 
-    def add(req: A): Unit = send_list = send_list :+ req
-    def add(req: Seq[A]): Unit = send_list = send_list ++ req
+    def add(req: A, ttl: Int = 0): Unit = {send_list = send_list :+ req; time_list = time_list :+ ttl}
+    def add(req: Seq[A]): Unit = { send_list = send_list ++ req; time_list = time_list ++ Seq.fill(req.size)(0) }
+    def add(req: Seq[A], time: Seq[Int]): Unit = {send_list = send_list ++ req; time_list = time_list ++ time}
     var pause: Boolean = false
 
     def finishWait(): Boolean = {
-      state == WaitingRsp //&& checkForValid(rspPort)
+      state == WaitingRsp && checkForValid(rspPort)
     }
 
     def eval(): Unit = {
@@ -56,18 +58,28 @@ object TestUtils {
         rspPort.ready.poke(false.B)
         return
       }
+      else{
+        time_list = time_list match{
+          case x if x.isEmpty => x
+          case x => {
+            if(x.head > 0) x.map{ i => if(i >= 0) i - 1 else i}
+            else x
+          }
+        }
+      }
       state match {
         case Idle =>
-          send_list match {
+          (send_list zip time_list) match {
             case Nil =>
               reqPort.valid.poke(false.B)
               next_state = Idle
-            case _ =>
+            case x if x.head._2 == 0 =>
               reqPort.valid.poke(true.B)
-              println(send_list.size)
-              println(send_list.head)
-              reqPort.bits.poke(send_list.head)
+              reqPort.bits.poke(x.head._1)
               next_state = SendingReq
+            case _ =>
+              reqPort.valid.poke(false.B)
+              next_state = Idle
           }
         case SendingReq =>
           if (checkForReady(reqPort)){
@@ -79,6 +91,7 @@ object TestUtils {
           if (finishWait()){
             rspPort.ready.poke(false.B)
             send_list = send_list.drop(1)
+            time_list = time_list.drop(1)
             next_state = Idle
           }
       }
@@ -88,7 +101,7 @@ object TestUtils {
   class MemPortDriverDelay[A <: TLBundleA_lite, B >: TLBundleD_lite <: Data](
     val reqPort: DecoupledIO[A],
     val rspPort: DecoupledIO[B],
-    val mem: MemBox,
+    val mem: MemBox[_],
     val latency: Int,
     val depth: Int
   ) extends IOTestDriver[A, B] with IOTransform[A, B]{
@@ -142,7 +155,7 @@ object TestUtils {
 
       opcode_req match {
         case 4 => { // read
-          data = mem.readMem(addr, data_byte_count)
+          data = mem.readDataPhysical(addr, data_byte_count)._2
           opcode_rsp = 1
         }
         case 1 => { // write partial
@@ -150,15 +163,15 @@ object TestUtils {
           val mask = req.mask.peek().litValue.toString(2).reverse.padTo(req.mask.getWidth, '0').map {
             case '1' => true
             case _ => false
-          }.flatMap(x => Seq.fill(4)(x))
-          mem.writeMem(addr, data_byte_count, data, mask)
+          }.toArray
+          mem.writeDataPhysical(addr, data_byte_count, data, mask)
           data = Array.fill(data_byte_count)(0.toByte) // write operation
           opcode_rsp = 0 // response = 0
         }
         case 0 => { // write full
           data = top.helper.BigInt2ByteArray(req.data.peek().litValue, data_byte_count)
-          val mask = IndexedSeq.fill(4 * req.mask.getWidth)(true)
-          mem.writeMem(addr, data_byte_count, data, mask) // write operation
+          val mask = Array.fill(req.mask.getWidth)(true)
+          mem.writeDataPhysical(addr, data_byte_count, data, mask) // write operation
           data = Array.fill(data_byte_count)(0.toByte) // response = 0
           opcode_rsp = 0
         }
@@ -180,11 +193,11 @@ object TestUtils {
 }
 
 
-
+//TODO
 class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np <: Data](
                                                                             val reqPort: DecoupledIO[A],
                                                                             val rspPort: DecoupledIO[B],
-                                                                            val mem: MemBox,
+                                                                            val mem: MemBox[_],
                                                                             val latency: Int,
                                                                             val depth: Int
                                                                           ) extends IOTestDriver[A, B] with IOTransform[A, B]{

@@ -3,19 +3,14 @@ package pipeline
 import top.parameters._
 import chisel3._
 import chisel3.util.{log2Ceil, _}
-import IDecode._
+import mmu.SV32.asidLen
+import mmu.SV32.paLen
 import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
-import org.scalactic.TypeCheckedTripleEquals.convertToCheckingEqualizer
 import top.parameters._
 import chisel3._
-import chisel3.util.{log2Ceil, _}
-import IDecode._
-import org.scalactic.TypeCheckedTripleEquals.convertToCheckingEqualizer
 import chisel3.util._
-import chisel3.util.log2Floor
-
-import scala.math.Ordered.orderingToOrdered
-import scala.xml.TextBuffer
+import IDecode._
+import mmu.SV32.asidLen
 //def log2Floor_dma(num: UInt): UInt = {
 ////  require(num > 0.U, "Input to log2Floor must be greater than 0")
 //
@@ -134,10 +129,30 @@ class TensorVars extends Bundle{
   // generated
 //  val copysize = UInt(xLen.W)
 }
+class sharedRspRouter extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new ShareMemCoreRsp_np))
+    val outDMA = DecoupledIO(new ShareMemCoreRsp_np)
+    val outLSU = DecoupledIO(new ShareMemCoreRsp_np)
+  })
+  val RSPFIFO = Module(new Queue(new ShareMemCoreRsp_np, entries=1, pipe=true))
+  RSPFIFO.io.enq <> io.in
+  io.outDMA.valid := RSPFIFO.io.deq.valid && is_dma
+  io.outLSU.valid := RSPFIFO.io.deq.valid && !is_dma
+  RSPFIFO.io.deq.ready := Mux(is_dma, io.outDMA.ready, io.outLSU.ready)
+  io.outDMA.bits := io.outDMA.bits
+  io.outLSU.bits := io.outLSU.bits
+  val is_dma = RegInit(false.B)
+  when(io.in.fire){
+    is_dma := io.in.bits.dma
+  }.otherwise{
+    is_dma := is_dma
+  }
+}
 class AddrCalc_l2cache() extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
-    val to_tempmem = DecoupledIO(
+    val to_tempmem_inst = DecoupledIO(
 //      new Bundle{
 //      val tag = new vExeDataDMA
       new vExeDataDMA
@@ -147,14 +162,23 @@ class AddrCalc_l2cache() extends Module{
     val inst_mem_index = Input(UInt(log2Ceil(max_dma_inst).W))
     val tag_mem_index = Input(UInt(log2Ceil(max_dma_tag).W))
     val to_l2cache = DecoupledIO(new TLBundleA_lite(l2cache_params))
+
+    //tlb
+    val to_l2TLB = Decoupled(new DmaTLBReq)
+    val from_l2TLB = Flipped(Decoupled(UInt(paLen.W)))
   })
-  val s_idle :: s_save :: s_l2cache_tag :: s_l2cache :: Nil = Enum(4)
+  val s_idle :: s_save :: s_l2cache_tag :: s_tlb_req :: s_tlb_rsp :: s_l2cache :: Nil = Enum(5)
   val state = RegInit(init = s_idle)
   val reg_save = Reg(new regSave)
 //  val current_numgroup = io.from_fifo.bits.in2(0).asUInt /dma_aligned_bulk.asUInt
 //  val cnt = new Counter(n = numgroupinsdmax)
   val inst_mem_index_reg = RegInit(0.U(log2Ceil(max_dma_inst).W))
   val tag_mem_index_reg  = RegInit(0.U(log2Ceil(max_dma_tag).W))
+
+  //tlb
+  val p_addr_reg = RegInit(0.U(paLen.W))
+
+
   val copysize = Wire(UInt(log2Ceil(16).W))
   copysize := 4.U
   switch(reg_save.ctrl.copysize){
@@ -411,20 +435,20 @@ class AddrCalc_l2cache() extends Module{
   complete_address := Mux(reg_save.ctrl.funct === 3.U,
     tensor_dim_step_next(TensorVars.tensorRank - 1.U) === box_elements_num(TensorVars.tensorRank - 1.U)
     ,address_next  >= (reg_save.in1(0).asUInt + reg_save.in2(0).asUInt))
-  io.to_tempmem.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
+  io.to_tempmem_inst.valid := state===s_save// & (reg_save.ctrl.mem_cmd.orR)
   io.to_tempmem_tag.valid := (state === s_l2cache_tag)// ||(state === s_save)
-  io.to_tempmem.bits.src := Mux(reg_save.ctrl.funct === 3.U, TensorVars.globalAddress, reg_save.in1(0))
-  io.to_tempmem.bits.srcsize := Mux(reg_save.ctrl.funct === 3.U,TensorVars.datawidth,reg_save.in2(0))
-  io.to_tempmem.bits.copysize := reg_save.in2(0)
+  io.to_tempmem_inst.bits.src := Mux(reg_save.ctrl.funct === 3.U, TensorVars.globalAddress, reg_save.in1(0))
+  io.to_tempmem_inst.bits.srcsize := Mux(reg_save.ctrl.funct === 3.U,TensorVars.datawidth,reg_save.in2(0))
+  io.to_tempmem_inst.bits.copysize := reg_save.in2(0)
   switch(reg_save.ctrl.funct){
     is(0.U){
-      io.to_tempmem.bits.copysize := 4.U << reg_save.ctrl.copysize
+      io.to_tempmem_inst.bits.copysize := 4.U << reg_save.ctrl.copysize
     }
     is(1.U){
-      io.to_tempmem.bits.copysize := reg_save.in2(0)
+      io.to_tempmem_inst.bits.copysize := reg_save.in2(0)
     }
     is(3.U){
-      io.to_tempmem.bits.copysize := Tensorcopysize
+      io.to_tempmem_inst.bits.copysize := Tensorcopysize
     }
   }
   io.to_tempmem_tag.bits.tag := reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1)
@@ -433,17 +457,17 @@ class AddrCalc_l2cache() extends Module{
   (0 until(5)).foreach( x => {
     io.to_tempmem_tag.bits.tensor_dim_step(x) := tensor_dim_step_reg(x)
   })
-  io.to_tempmem.bits.dst := reg_save.in3(0)
-  io.to_tempmem.bits.wid := reg_save.ctrl.wid
-  io.to_tempmem.bits.funct := reg_save.ctrl.funct
-  io.to_tempmem.bits.tensorvars := TensorVars
+  io.to_tempmem_inst.bits.dst := reg_save.in3(0)
+  io.to_tempmem_inst.bits.wid := reg_save.ctrl.wid
+  io.to_tempmem_inst.bits.funct := reg_save.ctrl.funct
+  io.to_tempmem_inst.bits.tensorvars := TensorVars
   io.to_l2cache.bits.opcode := 4.U
   io.to_l2cache.bits.size   := 0.U
   io.to_l2cache.bits.source :=  Cat(Cat(tag_mem_index_reg,inst_mem_index_reg),0.U((l2cache_params.source_bits - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst)).W))
 //  io.to_l2cache.bits.source(l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst),0) := 0.U
 //  io.to_l2cache.bits.source(0) := 0.U // use crossbar of l1cache
   // temporarily set it as inst_mem_index_reg, for mshr; cat with wid, for shiftboard; jingguo ceshi hui fangzai hou 6 bit
-  io.to_l2cache.bits.address := reg_save.address
+  io.to_l2cache.bits.address := p_addr_reg
 
   io.to_l2cache.bits.mask   := 0.U
   io.to_l2cache.bits.data   :=  0.U
@@ -451,6 +475,11 @@ class AddrCalc_l2cache() extends Module{
   io.to_l2cache.valid := (state===s_l2cache)// && !complete_address
 
   io.from_fifo.ready := state === s_idle
+
+  //tlb
+  io.to_l2TLB.valid := state === s_tlb_req
+  io.to_l2TLB.bits := reg_save.address
+  io.from_l2TLB.ready := state === s_tlb_rsp
 
   // FSM State Transfer
   switch(state){
@@ -460,13 +489,27 @@ class AddrCalc_l2cache() extends Module{
     }
     is (s_save){
       //      when(reg_save.ctrl.mem_cmd.orR){ // read or write
-      when(io.to_tempmem.fire){state := s_l2cache_tag}.otherwise{state := s_save}
+      when(io.to_tempmem_inst.fire){state := s_l2cache_tag}.otherwise{state := s_save}
       //      }.otherwise{ state := s_idle }
     }
     is(s_l2cache_tag){
       when(io.to_tempmem_tag.fire){
-        state := s_l2cache
+        state := s_tlb_req
       }.otherwise{
+        state := state
+      }
+    }
+    is(s_tlb_req){
+      when(io.to_l2TLB.fire){
+        state := s_tlb_rsp
+      }.otherwise{
+        state := state
+      }
+    }
+    is(s_tlb_rsp) {
+      when(io.from_l2TLB.fire) {
+        state := s_l2cache
+      }.otherwise {
         state := state
       }
     }
@@ -495,9 +538,17 @@ class AddrCalc_l2cache() extends Module{
       }.otherwise{reg_save := RegInit(0.U.asTypeOf(new regSave))}
     }
     is (s_save){
-      when(io.to_tempmem.fire){
+      when(io.to_tempmem_inst.fire){
         inst_mem_index_reg := io.inst_mem_index
       }  // get entryID from MSHR
+    }
+    is(s_tlb_req){
+
+    }
+    is(s_tlb_rsp){
+      when(io.from_l2TLB.fire){
+        p_addr_reg := io.from_l2TLB.bits
+      }
     }
     is(s_l2cache_tag){
       when(io.to_tempmem_tag.fire){
@@ -518,7 +569,7 @@ class AddrCalc_l2cache() extends Module{
     }
   }
   //  printf("state: %b\n",state.asUInt)
-//    printf("copysize: %b\n",io.to_tempmem.bits.copysize.asUInt)
+//    printf("copysize: %b\n",io.to_tempmem_inst.bits.copysize.asUInt)
 //    printf("in2: %d\n",io.from_fifo.bits.in2(0).asUInt)
 //    printf("reg_save_in2: %d\n",reg_save.in2.asUInt)
   //  printf("l2req:address: %b\n",io.to_l2cache.bits.address.asUInt)
@@ -897,7 +948,7 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
 class Addrcalc_shared() extends Module {
   val io = IO(new Bundle {
     val from_temp = Flipped(DecoupledIO(new TempOutput))
-    val to_shared = DecoupledIO(new ShareMemCoreReq_np)
+    val shared_req = DecoupledIO(new ShareMemCoreReq_np)
   })
   //  val s_idle :: s_save :: s_shared :: Nil = Enum(3)
 //  val s_idle :: s_shared1 ::s_shared2:: s_shared3::Nil = Enum(4)
@@ -1064,8 +1115,8 @@ class Addrcalc_shared() extends Module {
       }
     }
   })
-  io.to_shared.bits := output_reg
-  io.to_shared.valid := state===s_shared2
+  io.shared_req.bits := output_reg
+  io.shared_req.valid := state===s_shared2
 
   io.from_temp.ready := state === s_idle
   var cnt_mask = 0
@@ -1093,14 +1144,14 @@ class Addrcalc_shared() extends Module {
       state := s_shared1
     }
     is(s_shared1){
-      when(io.to_shared.ready){
+      when(io.shared_req.ready){
         state := s_shared2
       }.otherwise{
         state := s_shared1
       }
     }
     is(s_shared2){
-      when(io.to_shared.fire){
+      when(io.shared_req.fire){
 //        when(cnt.value >= current_numgroup || mask_next.asUInt === 0.U){
         when(mask_next.asUInt === 0.U){
           cnt.reset()
@@ -1188,7 +1239,7 @@ class Addrcalc_shared() extends Module {
       }
     }
     is(s_shared2){
-      when(io.to_shared.fire){
+      when(io.shared_req.fire){
         reg_save.mask := mask_next
 //        current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Ceil(numgroupl2cache).W))))
         output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
@@ -1216,6 +1267,10 @@ class DMA_core extends Module{
     val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val fence_end_dma = DecoupledIO(UInt(depth_warp.W))
+
+    //tlb and p_addr
+    val TLBReq = Decoupled(new DmaTLBReq)
+    val TLBRsp = Flipped(Decoupled(UInt(paLen.W)))
   })
 //  printf("l2req: %d \n",io.l2cache_req.bits.address.asUInt)
 //  printf("l2req.valid: %b \n",io.l2cache_req.valid.asUInt)
@@ -1229,6 +1284,8 @@ class DMA_core extends Module{
   val addrCalc_l2cache = Module(new AddrCalc_l2cache)
   addrCalc_l2cache.io.from_fifo <> InputFIFO.io.deq
   io.l2cache_req <> addrCalc_l2cache.io.to_l2cache
+  io.TLBReq <> addrCalc_l2cache.io.to_l2TLB
+  addrCalc_l2cache.io.from_l2TLB <> io.TLBRsp
 
 
 
@@ -1236,14 +1293,14 @@ class DMA_core extends Module{
   addrCalc_l2cache.io.to_tempmem_tag <> tempmem.io.from_addr_tag
   addrCalc_l2cache.io.inst_mem_index := tempmem.io.inst_mem_index
   addrCalc_l2cache.io.tag_mem_index := tempmem.io.tag_mem_index
-  tempmem.io.from_addr <> addrCalc_l2cache.io.to_tempmem
+  tempmem.io.from_addr <> addrCalc_l2cache.io.to_tempmem_inst
   tempmem.io.from_addr_tag <> addrCalc_l2cache.io.to_tempmem_tag
   tempmem.io.from_l2cache <> io.l2cache_rsp
   tempmem.io.from_shared <> io.shared_rsp
   io.fence_end_dma <> tempmem.io.inst_complete
   val addrCalc_shared = Module(new Addrcalc_shared)
   addrCalc_shared.io.from_temp <> tempmem.io.to_shared
-  io.shared_req <> addrCalc_shared.io.to_shared
+  io.shared_req <> addrCalc_shared.io.shared_req
 
 //  val L2cache2Temp = Module(new l2cache2temp)
 //  L2cache2Temp.io.from_l2cache <> io.l2cache_rsp

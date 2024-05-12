@@ -12,10 +12,11 @@ package CTA
 
 import chisel3._
 
-class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR_WIDTH: Int, val VGPR_ID_WIDTH: Int, val NUMBER_VGPR_SLOTS: Int, val SGPR_ID_WIDTH: Int, val NUMBER_SGPR_SLOTS: Int, val LDS_ID_WIDTH: Int, val NUMBER_LDS_SLOTS: Int, val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_ID_WIDTH: Int, val NUMBER_WF_SLOTS: Int, val WF_COUNT_MAX: Int, val NUMBER_RES_TABLE: Int, val GDS_ID_WIDTH: Int, val GDS_SIZE: Int, val ENTRY_ADDR_WIDTH: Int, val NUMBER_ENTRIES: Int, val WAVE_ITEM_WIDTH: Int, val MEM_ADDR_WIDTH: Int, val TAG_WIDTH: Int, val INIT_MAX_WG_COUNT: Int, val WF_COUNT_WIDTH_PER_WG: Int) extends Module{
+class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR_WIDTH: Int, val VGPR_ID_WIDTH: Int, val NUMBER_VGPR_SLOTS: Int, val SGPR_ID_WIDTH: Int, val NUMBER_SGPR_SLOTS: Int, val LDS_ID_WIDTH: Int, val NUMBER_LDS_SLOTS: Int, val WG_ID_WIDTH: Int, val WF_COUNT_WIDTH: Int, val WG_SLOT_ID_WIDTH: Int, val NUMBER_WF_SLOTS: Int, val WF_COUNT_MAX: Int, val NUMBER_RES_TABLE: Int, val GDS_ID_WIDTH: Int, val GDS_SIZE: Int, val ENTRY_ADDR_WIDTH: Int, val NUMBER_ENTRIES: Int, val WAVE_ITEM_WIDTH: Int, val MEM_ADDR_WIDTH: Int, val TAG_WIDTH: Int, val INIT_MAX_WG_COUNT: Int, val WF_COUNT_WIDTH_PER_WG: Int, val KNL_ASID_WIDTH: Int) extends Module{
     val io = IO(new Bundle{
         val host_wg_valid = Input(Bool())
         val host_wg_id = Input(UInt(WG_ID_WIDTH.W)) // wg_tag_id
+        val host_kernel_asid = Input(UInt(KNL_ASID_WIDTH.W))
         val host_kernel_size_3d = Input(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
         val host_num_wf = Input(UInt(WF_COUNT_WIDTH_PER_WG.W))
         val host_wf_size = Input(UInt(WAVE_ITEM_WIDTH.W))
@@ -40,6 +41,7 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
         val dispatch2cu_wf_tag_dispatch = Output(UInt(TAG_WIDTH.W))
         val dispatch2cu_lds_base_dispatch = Output(UInt((LDS_ID_WIDTH + 1).W))
         val dispatch2cu_start_pc_dispatch = Output(UInt(MEM_ADDR_WIDTH.W)) // TODO:
+        val dispatch2cu_kernel_asid_dispatch = Output(UInt(KNL_ASID_WIDTH.W))
         val dispatch2cu_kernel_size_3d_dispatch = Output(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
         val dispatch2cu_pds_baseaddr_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
         val dispatch2cu_csr_knl_dispatch = Output(UInt(MEM_ADDR_WIDTH.W))
@@ -67,6 +69,7 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
     val inflight_wg_buffer_gpu_sgpr_size_per_wf = Wire(UInt((SGPR_ID_WIDTH + 1).W))
     val inflight_wg_buffer_gpu_wf_size = Wire(UInt(WAVE_ITEM_WIDTH.W))
     val inflight_wg_buffer_start_pc = Wire(UInt(MEM_ADDR_WIDTH.W))
+    val inflight_wg_buffer_kernel_asid = Wire(UInt(KNL_ASID_WIDTH.W))
     val inflight_wg_buffer_kernel_size_3d = Wire(Vec(3, UInt(top.parameters.WG_SIZE_X_WIDTH.W)))
     val inflight_wg_buffer_pds_baseaddr = Wire(UInt(MEM_ADDR_WIDTH.W))
     val inflight_wg_buffer_csr_knl = Wire(UInt(MEM_ADDR_WIDTH.W))
@@ -105,8 +108,8 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
 
     val allocator_neo_i = Module(new allocator_neo(WG_ID_WIDTH, CU_ID_WIDTH, NUMBER_CU, VGPR_ID_WIDTH, NUMBER_VGPR_SLOTS, SGPR_ID_WIDTH, NUMBER_SGPR_SLOTS, LDS_ID_WIDTH, NUMBER_LDS_SLOTS, NUMBER_WF_SLOTS, WF_COUNT_WIDTH, WG_SLOT_ID_WIDTH, WF_COUNT_WIDTH_PER_WG))
     val top_resource_table_i = Module(new top_resource_table(NUMBER_CU, CU_ID_WIDTH, RES_TABLE_ADDR_WIDTH, VGPR_ID_WIDTH + 1, NUMBER_VGPR_SLOTS, SGPR_ID_WIDTH + 1, NUMBER_SGPR_SLOTS, LDS_ID_WIDTH + 1, NUMBER_LDS_SLOTS, WG_ID_WIDTH, WF_COUNT_WIDTH, WG_SLOT_ID_WIDTH, NUMBER_WF_SLOTS, WF_COUNT_MAX, NUMBER_RES_TABLE, INIT_MAX_WG_COUNT, WF_COUNT_WIDTH_PER_WG))
-    val inflight_wg_buffer_i = Module(new inflight_wg_buffer(WG_ID_WIDTH, WF_COUNT_WIDTH, CU_ID_WIDTH, VGPR_ID_WIDTH, SGPR_ID_WIDTH, LDS_ID_WIDTH, GDS_ID_WIDTH, ENTRY_ADDR_WIDTH, NUMBER_ENTRIES, WAVE_ITEM_WIDTH, MEM_ADDR_WIDTH, WF_COUNT_WIDTH_PER_WG))
-    val gpu_interface_i = Module(new gpu_interface(WG_ID_WIDTH, WF_COUNT_WIDTH, WG_SLOT_ID_WIDTH, NUMBER_WF_SLOTS, NUMBER_CU, CU_ID_WIDTH, VGPR_ID_WIDTH, SGPR_ID_WIDTH, LDS_ID_WIDTH, TAG_WIDTH, MEM_ADDR_WIDTH, WAVE_ITEM_WIDTH, WF_COUNT_WIDTH_PER_WG))
+    val inflight_wg_buffer_i = Module(new inflight_wg_buffer(WG_ID_WIDTH, WF_COUNT_WIDTH, CU_ID_WIDTH, VGPR_ID_WIDTH, SGPR_ID_WIDTH, LDS_ID_WIDTH, GDS_ID_WIDTH, ENTRY_ADDR_WIDTH, NUMBER_ENTRIES, WAVE_ITEM_WIDTH, MEM_ADDR_WIDTH, WF_COUNT_WIDTH_PER_WG, KNL_ASID_WIDTH))
+    val gpu_interface_i = Module(new gpu_interface(WG_ID_WIDTH, WF_COUNT_WIDTH, WG_SLOT_ID_WIDTH, NUMBER_WF_SLOTS, NUMBER_CU, CU_ID_WIDTH, VGPR_ID_WIDTH, SGPR_ID_WIDTH, LDS_ID_WIDTH, TAG_WIDTH, MEM_ADDR_WIDTH, WAVE_ITEM_WIDTH, WF_COUNT_WIDTH_PER_WG, KNL_ASID_WIDTH))
     val dis_controller_i = Module(new dis_controller(NUMBER_CU, CU_ID_WIDTH, RES_TABLE_ADDR_WIDTH))
     allocator_cu_valid := allocator_neo_i.io.allocator_cu_valid
     allocator_cu_rejected := allocator_neo_i.io.allocator_cu_rejected
@@ -143,6 +146,7 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
     inflight_wg_buffer_i.io.host_wf_size := io.host_wf_size
     inflight_wg_buffer_i.io.host_start_pc := io.host_start_pc
     inflight_wg_buffer_i.io.host_kernel_size_3d := io.host_kernel_size_3d
+    inflight_wg_buffer_i.io.host_kernel_asid := io.host_kernel_asid
     inflight_wg_buffer_i.io.host_pds_baseaddr := io.host_pds_baseaddr
     inflight_wg_buffer_i.io.host_csr_knl := io.host_csr_knl
     inflight_wg_buffer_i.io.host_gds_baseaddr := io.host_gds_baseaddr
@@ -173,6 +177,7 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
     inflight_wg_buffer_gpu_sgpr_size_per_wf := inflight_wg_buffer_i.io.inflight_wg_buffer_gpu_sgpr_size_per_wf
     inflight_wg_buffer_gpu_wf_size := inflight_wg_buffer_i.io.inflight_wg_buffer_gpu_wf_size
     inflight_wg_buffer_start_pc := inflight_wg_buffer_i.io.inflight_wg_buffer_start_pc
+    inflight_wg_buffer_kernel_asid := inflight_wg_buffer_i.io.inflight_wg_buffer_kernel_asid
     inflight_wg_buffer_kernel_size_3d := inflight_wg_buffer_i.io.inflight_wg_buffer_kernel_size_3d
     inflight_wg_buffer_pds_baseaddr := inflight_wg_buffer_i.io.inflight_wg_buffer_pds_baseaddr
     inflight_wg_buffer_csr_knl := inflight_wg_buffer_i.io.inflight_wg_buffer_csr_knl
@@ -180,6 +185,7 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
     gpu_interface_i.io.inflight_wg_buffer_gpu_valid := inflight_wg_buffer_gpu_valid
     gpu_interface_i.io.inflight_wg_buffer_gpu_wf_size := inflight_wg_buffer_gpu_wf_size
     gpu_interface_i.io.inflight_wg_buffer_start_pc := inflight_wg_buffer_start_pc
+    gpu_interface_i.io.inflight_wg_buffer_kernel_asid := inflight_wg_buffer_kernel_asid
     gpu_interface_i.io.inflight_wg_buffer_kernel_size_3d := inflight_wg_buffer_kernel_size_3d
     gpu_interface_i.io.inflight_wg_buffer_pds_baseaddr := inflight_wg_buffer_pds_baseaddr
     gpu_interface_i.io.inflight_wg_buffer_csr_knl := inflight_wg_buffer_csr_knl
@@ -206,6 +212,7 @@ class cta_scheduler(val NUMBER_CU: Int, val CU_ID_WIDTH: Int, val RES_TABLE_ADDR
     io.dispatch2cu_wf_tag_dispatch := gpu_interface_i.io.dispatch2cu_wf_tag_dispatch
     io.dispatch2cu_lds_base_dispatch := gpu_interface_i.io.dispatch2cu_lds_base_dispatch
     io.dispatch2cu_start_pc_dispatch := gpu_interface_i.io.dispatch2cu_start_pc_dispatch
+    io.dispatch2cu_kernel_asid_dispatch := gpu_interface_i.io.dispatch2cu_kernel_asid_dispatch
     io.dispatch2cu_kernel_size_3d_dispatch := gpu_interface_i.io.dispatch2cu_kernel_size_3d_dispatch
     io.dispatch2cu_pds_baseaddr_dispatch := gpu_interface_i.io.dispatch2cu_pds_baseaddr_dispatch
     io.dispatch2cu_csr_knl_dispatch := gpu_interface_i.io.dispatch2cu_csr_knl_dispatch

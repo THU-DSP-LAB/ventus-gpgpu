@@ -157,8 +157,9 @@ case class InclusiveCacheParameters_lite(
   // If we are the first level cache, we do not need to support inner-BCE
   val op_bits = 3
   val param_bits = 3
-  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1
-//  val source_bits= addr_tag_bits + log2Up(max_dma_inst)
+  // the additional 1-bit at LSB is used for specifying TLB/L1Cache
+  // automatically removed when L2Cache responsing to L1Cache
+  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
@@ -178,7 +179,7 @@ case class InclusiveCacheParameters_lite(
   def bitOffsets(x: BigInt, offset: Int = 0, tail: List[Int] = List.empty[Int]): List[Int] =
     if (x == 0) tail.reverse else bitOffsets(x >> 1, offset + 1, if ((x & 1) == 1) offset :: tail else tail)
 //  val addressMapping = bitOffsets(pickMask)
-  val addressBits = 32
+  val addressBits = 34
 
   // println(s"addresses: ${flatAddresses} => ${pickMask} => ${addressBits}")
 
