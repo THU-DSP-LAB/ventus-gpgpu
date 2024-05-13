@@ -59,11 +59,11 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
           ),
           _.ctrl -> genBundle_bulk()
         ),
-//        _.rm -> RoundingModes.RNE,
+        _.rm -> RoundingModes.RNE,
 //        _.rm -> RoundingModes.RTZ,
 //        _.rm -> RoundingModes.RDN,
 //          _.rm -> RoundingModes.RUP,
-          _.rm -> RoundingModes.RMM,
+//          _.rm -> RoundingModes.RMM,
         _.ctrl -> new TCCtrl(32, 1).Lit(
           _.reg_idxw -> count.U,
           _.warpID -> 0.U
@@ -151,15 +151,21 @@ class MMA1688Test extends AnyFlatSpec with ChiselScalatestTester {
 //      d.clock.step(600)
       println("\n")
       val Rd = TCMMA1688Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData/RD.txt")
+      val Rd_torch = TCMMA1688Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData/RD_torch.txt")
       for (i <- 0 until 32) {
         val elementValue = d.io.out.bits.data_out(i).peek()
-        val intValue: Int = elementValue(31,0).litValue().toInt
-        val intValue2: Int = elementValue(63,32).litValue().toInt
-        val hexString: String = f"$intValue%08x" // %016x 表示至少16位的16进制数，不足的前面补零
-        val hexString2: String = f"$intValue2%08x" // %016x 表示至少16位的16进制数，不足的前面补零
+        val intValue: Int = elementValue(15,0).litValue().toInt
+        val intValue2: Int = elementValue(31,16).litValue().toInt
+        val intValue3: Int = elementValue(47,32).litValue().toInt
+        val intValue4: Int = elementValue(63,48).litValue().toInt
+        val hexString: String = f"$intValue%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+        val hexString2: String = f"$intValue2%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+        val hexString3: String = f"$intValue3%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+        val hexString4: String = f"$intValue4%04x" // %016x 表示至少16位的16进制数，不足的前面补零
 //        println(s"data_out($i) = hex:$hexString")
         val std: String = Rd(i)
-        println(s"$i $hexString2$hexString, $std")
+        val std_torch: String = Rd_torch(i)
+        println(s"$i $hexString4$hexString3$hexString2$hexString, $std, $std_torch")
       }
 //      d.clock.step(30)
     }

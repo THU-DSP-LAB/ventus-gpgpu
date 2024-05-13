@@ -14,6 +14,3 @@
 	path = dependencies/fpuv2
 	url = git@github.com:liuxd17thu/fpuv2.git
 	branch = master
-[submodule "dependencies/fpuv2_new"]
-	path = dependencies/fpuv2_new
-	url = git@github.com:liuweibupt/fpuv2.git
