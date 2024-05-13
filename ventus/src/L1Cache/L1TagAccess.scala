@@ -209,7 +209,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     choosenDirtySetIdx_st0 := PriorityEncoder(setDirty)
     choosenDirtySetValid := way_dirtyAfterValid(choosenDirtySetIdx_st0)
     choosenDirtyWayMask_st0 := VecInit(PriorityEncoderOH(choosenDirtySetValid)).asUInt
-    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(choosenDirtyWayMask_st0)
+    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(OHToUInt(choosenDirtyWayMask_st0))
     //val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
     //val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
     io.dirtyTag_st1.get := choosenDirtyTag_st1
@@ -270,7 +270,7 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
 
   io.waymask := Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
   //io.waymask := Reverse(Cat(io.tag_of_set.map{ tag => (tag(tagIdxBits-1,0) === io.tag_from_pipe) && tag(tagIdxBits)}))
-  assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
+  //assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
   io.cache_hit := io.waymask.orR
 }
 

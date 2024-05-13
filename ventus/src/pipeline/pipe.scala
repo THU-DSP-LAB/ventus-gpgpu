@@ -147,6 +147,10 @@ class pipe(val sm_id: Int = 0) extends Module{
   operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
+  //warp_sche.io.flushDCache<>lsu.io.flush_dcache
+  lsu.io.flush_dcache.valid := warp_sche.io.flushDCache.valid
+   lsu.io.flush_dcache.bits := warp_sche.io.flushDCache.bits
+   warp_sche.io.flushDCache.ready := lsu.io.flush_dcache.ready
 
   //flush:=(warp_sche.io.branch.fire()&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid

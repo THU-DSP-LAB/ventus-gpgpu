@@ -288,7 +288,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val dataAccessInvOrFluRValid = (coreReqInvOrFluValid_st0 || coreReqInvOrFluValid_st1) &&
     TagAccess.io.hasDirty_st0.get//same to TagAccess.io.flushChoosen.get.valid
   DataAccessInvOrFluSRAMRReq.foreach(_.setIdx := Cat(TagAccess.io.dirtySetIdx_st0.get,
-    TagAccess.io.dirtyWayMask_st0.get))
+    OHToUInt(TagAccess.io.dirtyWayMask_st0.get)))
 
   // ******      l1_data_cache::coreReq_pipe1_cycle      ******
   coreReq_st1_valid := coreReq_Q.io.deq.valid && !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)
@@ -391,13 +391,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(memRspIsFluOrInv){
     waitforL2flush := false.B
   }
-  val invalidatenodirty = coreReq_st1_valid && coreReqControl_st1_Q.io.deq.bits.isInvalidate && !coreReqTagHasDirty_st1
-  when(waitforL2flush && MemReqArb.io.in(2).fire()){
+  val invalidatenodirty = coreReq_st1_valid && (coreReqControl_st1_Q.io.deq.bits.isInvalidate || coreReqControl_st1_Q.io.deq.bits.isFlush) && !coreReqTagHasDirty_st1
+  when(invalidatenodirty && waitforL2flush){
     waitforL2flush_st2 := true.B
   }.elsewhen (memRspIsFluOrInv) {
     waitforL2flush_st2 := false.B
-  }.elsewhen(invalidatenodirty && waitforL2flush) {
-    waitforL2flush_st2 := true.B
   }
 
   when(coreReqControl_st0.isWrite && MshrAccess.io.mshrStatus_st0 =/= 0.U){
@@ -455,11 +453,11 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   val InvOrFluMemReq = Wire(new WshrMemReq)
   val L2flush = Wire(new WshrMemReq)
-  InvOrFluMemReq.a_opcode := Mux(waitforL2flush_st2,L2flush.a_opcode, TLAOp_PutFull)//PutFullData:Get
-  InvOrFluMemReq.a_param := Mux(waitforL2flush_st2,L2flush.a_param,0.U) //regular write
+  InvOrFluMemReq.a_opcode := Mux(invalidatenodirty,L2flush.a_opcode, TLAOp_PutFull)//PutFullData:Get
+  InvOrFluMemReq.a_param := Mux(invalidatenodirty,L2flush.a_param,0.U) //regular write
   InvOrFluMemReq.a_source := DontCare //wait for WSHR
-  InvOrFluMemReq.a_addr := Cat(TagAccess.io.dirtyTag_st1.get,
-    RegNext(TagAccess.io.dirtySetIdx_st0.get), 0.U((WordLength - TagBits - SetIdxBits).W))
+  InvOrFluMemReq.a_addr := RegNext(Cat(TagAccess.io.dirtyTag_st1.get,
+    TagAccess.io.dirtySetIdx_st0.get, 0.U((WordLength - TagBits - SetIdxBits).W)))
   InvOrFluMemReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   //InvOrFluMemReq.a_data :=
   InvOrFluMemReq.hasCoreRsp := waitforL2flush_st2
@@ -709,19 +707,20 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   InvOrFluMemReq.a_data := DataAccessReadSRAMRRsp
   val flushL2 = Wire(Bool())
   val flushL2_Reg = RegEnable(flushL2,MemReqArb.io.in(2).fire())
-  flushL2 := (memRsp_Q.io.deq.fire && !memRspIsFluOrInv) || (invalidatenodirty && MemReqArb.io.in(2).ready && !flushL2_Reg)
+  flushL2 :=  (invalidatenodirty && MemReqArb.io.in(2).ready && !flushL2_Reg)
   when(flushL2){
     InvOrFluAlreadyflush := true.B
   }.elsewhen(coreReqInvOrFluValid_st0){
     InvOrFluAlreadyflush := false.B
   }
+  TagAccess.io.invalidateAll := flushL2 && coreReqControl_st1_Q.io.deq.bits.isInvalidate
 
   memReq_Q.io.enq <> MemReqArb.io.out
   MemReqArb.io.in(0).valid := tagReplaceStatus
   MemReqArb.io.in(0).bits := dirtyReplace_st1
   MemReqArb.io.in(1).valid := coreReq_st1_valid  && coreReq_Q.io.deq.fire() && ((writeMiss_st1 || readMiss_st1) && mshrProbeStatus === 0.U) && !injectTagProbe
   MemReqArb.io.in(1).bits := missMemReq
-  MemReqArb.io.in(2).valid := Mux(waitforL2flush_st2,flushL2,RegNext(InvOrFluMemReqValid_st1))
+  MemReqArb.io.in(2).valid := Mux(invalidatenodirty,flushL2 && WshrAccess.io.empty,RegNext(InvOrFluMemReqValid_st1))
   MemReqArb.io.in(2).bits := InvOrFluMemReq
 
   // ******      l1_data_cache::memReq_pipe2_cycle      ******
@@ -791,7 +790,7 @@ class getDataAccessBankEn(NBank:Int, NLane:Int) extends Module{
   val blockIdxMasked = Wire(Vec(NLane, UInt(NBank.W)))
   for(i <- 0 until NLane){
     blockIdx1H(i) := UIntToOH(io.perLaneBlockIdx(i))
-    blockIdxMasked(i) := blockIdx1H(i) & Fill(NLane, io.perLaneValid(i))
+    blockIdxMasked(i) := Mux(io.perLaneValid(i),blockIdx1H(i),0.U)//blockIdx1H(i) & Fill(NLane, io.perLaneValid(i))
   }
   val perBankReq_Bin: Vec[UInt] = Wire(Vec(NBank, UInt(NLane.W)))//transpose of blockIdxMasked
   for(i <- 0 until NBank){
