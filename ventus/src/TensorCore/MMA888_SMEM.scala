@@ -24,3 +24,4 @@ class TC_MMAOutput(tcCtrl:TCCtrl) extends Bundle{
   val data_out = Vec(num_thread,UInt(xLen.W)) //new WriteVecCtrl
   val ctrl = tcCtrl.cloneType
 }
+

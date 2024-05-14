@@ -1,5 +1,6 @@
 out/
 .bsp/
+.dependencies/
 .idea/
 .mill-bin/
 .metals/
