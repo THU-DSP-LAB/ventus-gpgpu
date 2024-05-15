@@ -10,13 +10,15 @@
  * See the Mulan PSL v2 for more details. */
 package pipeline
 
+import L1Cache.DCacheMemReq_p
+import L1Cache.DCacheMemRsp
 import L1Cache.ICache._
 import chisel3._
 import chisel3.util._
 import top.parameters._
 import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
-import mmu.SV32.paLen, mmu.SV32.asidLen
-
+import config.config.Parameters
+import mmu.SV32.{asidLen, paLen}
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
   val mask = UInt(num_fetch.W)
@@ -31,10 +33,10 @@ class ICachePipeRsp_np extends Bundle{
   val status = UInt(2.W)
 }
 class DmaTLBReq extends Bundle{
-  val v_addr = UInt(xLen.W)
+  val vaddr = UInt(xLen.W)
   val asid = UInt(asidLen.W)
 }
-class pipe(val sm_id: Int = 0) extends Module{
+class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends Module{
   val io = IO(new Bundle{
     val icache_req = (DecoupledIO(new ICachePipeReq_np))
     val icache_rsp = Flipped(DecoupledIO(new ICachePipeRsp_np))
@@ -42,10 +44,10 @@ class pipe(val sm_id: Int = 0) extends Module{
     val dcache_req = DecoupledIO(new DCacheCoreReq_np)
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val shared_req = DecoupledIO(new ShareMemCoreReq_np)
-    val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np))
+    val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     // xrn add dma
-    val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
-    val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
+    val dma_cache_req = Decoupled(new DCacheMemReq_p)
+    val dma_cache_rsp = Flipped(DecoupledIO(new DCacheMemRsp))
     val TLBReq = Decoupled(new DmaTLBReq)
     val TLBRsp = Flipped(Decoupled(UInt(paLen.W)))
 
@@ -100,7 +102,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
-  val dma = Module(new DMA_core)
+  val dma = Module(new DMA_core(SV)(p))
   if(INST_CNT) {
     io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
   }
@@ -164,7 +166,9 @@ class pipe(val sm_id: Int = 0) extends Module{
   operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
-
+  lsu.io.flush_dcache.valid := warp_sche.io.flushDCache.valid
+  lsu.io.flush_dcache.bits := warp_sche.io.flushDCache.bits
+  warp_sche.io.flushDCache.ready := lsu.io.flush_dcache.ready
   //flush:=(warp_sche.io.branch.fire()&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
 
@@ -180,6 +184,9 @@ class pipe(val sm_id: Int = 0) extends Module{
   ibuffer.io.in.bits.control := control.io.control
   ibuffer.io.in.bits.control_mask := control.io.control_mask
   ibuffer.io.in.valid:=io.icache_rsp.valid& !io.icache_rsp.bits.status(0)
+  for( i <- 0 until num_fetch){
+    ibuffer.io.in.bits.control(i).asid := warp_sche.io.asid
+  }
   ibuffer.io.flush_wid:=warp_sche.io.flush
 
   (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
@@ -364,8 +371,8 @@ class pipe(val sm_id: Int = 0) extends Module{
   issueV.io.out_DMA.ready := false.B
   dma.io.TLBReq <> io.TLBReq
   dma.io.TLBRsp <> io.TLBRsp
-  dma.io.l2cache_req <> io.l2cache_req
-  dma.io.l2cache_rsp <> io.l2cache_rsp
+  io.dma_cache_req <> dma.io.dma_cache_req
+  dma.io.dma_cache_rsp <> io.dma_cache_rsp
 
   val sharedreqArbiter = Module(new Arbiter(new ShareMemCoreReq_np, n = 2))
 
@@ -380,6 +387,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   dma.io.shared_rsp <> sharedrspRouter.io.outDMA
 
   warp_sche.io.issued_dma <> issueX.io.out_warpsheculer_async
+  issueV.io.out_warpsheculer_async.ready := false.B
   warp_sche.io.finished_dma <> dma.io.fence_end_dma
 
 

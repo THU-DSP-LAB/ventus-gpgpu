@@ -5,11 +5,13 @@ import chisel3._
 import chisel3.util.{log2Ceil, _}
 import mmu.SV32.asidLen
 import mmu.SV32.paLen
-import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
+//import L2cache.{InclusiveCacheParameters_lite, TLBundleA_lite, TLBundleD_lite, TLBundleD_lite_plus}
 import top.parameters._
 import chisel3._
 import chisel3.util._
 import IDecode._
+import L1Cache.{DCacheMemReq_p, DCacheMemRsp}
+import config.config.Parameters
 import mmu.SV32.asidLen
 //def log2Floor_dma(num: UInt): UInt = {
 ////  require(num > 0.U, "Input to log2Floor must be greater than 0")
@@ -57,9 +59,9 @@ class cacheline_info extends Bundle{
 //  val data  = Vec(numgroupl2cache, UInt((dma_aligned_bulk * 8).W))
 //  val param =UInt(3.W)
 //}
-class l2cacheline_info extends Bundle
+class l2cacheline_info(implicit p: Parameters) extends Bundle
 {
-  val base = new TLBundleD_lite(l2cache_params)
+  val base = new DCacheMemRsp
   val cacheline_info = new cacheline_info
 }
 class TempOutput extends Bundle{
@@ -131,18 +133,18 @@ class TensorVars extends Bundle{
 }
 class sharedRspRouter extends Module {
   val io = IO(new Bundle {
-    val in = Flipped(DecoupledIO(new ShareMemCoreRsp_np))
-    val outDMA = DecoupledIO(new ShareMemCoreRsp_np)
-    val outLSU = DecoupledIO(new ShareMemCoreRsp_np)
+    val in = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    val outDMA = DecoupledIO(new DCacheCoreRsp_np)
+    val outLSU = DecoupledIO(new DCacheCoreRsp_np)
   })
-  val RSPFIFO = Module(new Queue(new ShareMemCoreRsp_np, entries=1, pipe=true))
+  val is_dma = RegInit(false.B)
+  val RSPFIFO = Module(new Queue(new DCacheCoreRsp_np, entries=1, pipe=true))
   RSPFIFO.io.enq <> io.in
   io.outDMA.valid := RSPFIFO.io.deq.valid && is_dma
   io.outLSU.valid := RSPFIFO.io.deq.valid && !is_dma
   RSPFIFO.io.deq.ready := Mux(is_dma, io.outDMA.ready, io.outLSU.ready)
-  io.outDMA.bits := io.outDMA.bits
-  io.outLSU.bits := io.outLSU.bits
-  val is_dma = RegInit(false.B)
+  io.outDMA.bits := io.in.bits
+  io.outLSU.bits := io.in.bits
   when(io.in.fire){
     is_dma := io.in.bits.dma
   }.otherwise{
@@ -161,13 +163,13 @@ class AddrCalc_l2cache() extends Module{
     val to_tempmem_tag = DecoupledIO(new cacheline_info)
     val inst_mem_index = Input(UInt(log2Ceil(max_dma_inst).W))
     val tag_mem_index = Input(UInt(log2Ceil(max_dma_tag).W))
-    val to_l2cache = DecoupledIO(new TLBundleA_lite(l2cache_params))
+    val to_l2cache = DecoupledIO(new DCacheMemReq_p)
 
     //tlb
     val to_l2TLB = Decoupled(new DmaTLBReq)
     val from_l2TLB = Flipped(Decoupled(UInt(paLen.W)))
   })
-  val s_idle :: s_save :: s_l2cache_tag :: s_tlb_req :: s_tlb_rsp :: s_l2cache :: Nil = Enum(5)
+  val s_idle :: s_save :: s_l2cache_tag :: s_tlb_req :: s_tlb_rsp :: s_l2cache :: Nil = Enum(6)
   val state = RegInit(init = s_idle)
   val reg_save = Reg(new regSave)
 //  val current_numgroup = io.from_fifo.bits.in2(0).asUInt /dma_aligned_bulk.asUInt
@@ -461,24 +463,25 @@ class AddrCalc_l2cache() extends Module{
   io.to_tempmem_inst.bits.wid := reg_save.ctrl.wid
   io.to_tempmem_inst.bits.funct := reg_save.ctrl.funct
   io.to_tempmem_inst.bits.tensorvars := TensorVars
-  io.to_l2cache.bits.opcode := 4.U
-  io.to_l2cache.bits.size   := 0.U
-  io.to_l2cache.bits.source :=  Cat(Cat(tag_mem_index_reg,inst_mem_index_reg),0.U((l2cache_params.source_bits - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst)).W))
-//  io.to_l2cache.bits.source(l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst),0) := 0.U
+  io.to_l2cache.bits.a_opcode := 4.U
+//  io.to_l2cache.bits.a_size   := 0.U
+  io.to_l2cache.bits.a_source :=  Cat("d3".U,tag_mem_index_reg,inst_mem_index_reg,0.U((l1cache_sourceBits - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst) - log2Ceil(num_cache_in_sm)).W))
+//  io.to_l2cache.bits.source(l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst),0) := 0.U
 //  io.to_l2cache.bits.source(0) := 0.U // use crossbar of l1cache
   // temporarily set it as inst_mem_index_reg, for mshr; cat with wid, for shiftboard; jingguo ceshi hui fangzai hou 6 bit
-  io.to_l2cache.bits.address := p_addr_reg
+  io.to_l2cache.bits.a_addr := p_addr_reg
 
-  io.to_l2cache.bits.mask   := 0.U
-  io.to_l2cache.bits.data   :=  0.U
-  io.to_l2cache.bits.param  :=  0.U
+  io.to_l2cache.bits.a_mask   := VecInit(Seq.fill(dcache_BlockWords)(Fill(BytesOfWord,1.U)))
+  io.to_l2cache.bits.a_data   :=  VecInit(Seq.fill(dcache_BlockWords)(0.U(xLen.W)))
+  io.to_l2cache.bits.a_param  :=  0.U
   io.to_l2cache.valid := (state===s_l2cache)// && !complete_address
 
   io.from_fifo.ready := state === s_idle
 
   //tlb
   io.to_l2TLB.valid := state === s_tlb_req
-  io.to_l2TLB.bits := reg_save.address
+  io.to_l2TLB.bits.vaddr := reg_save.address
+  io.to_l2TLB.bits.asid := reg_save.ctrl.asid
   io.from_l2TLB.ready := state === s_tlb_rsp
 
   // FSM State Transfer
@@ -576,7 +579,7 @@ class AddrCalc_l2cache() extends Module{
 }
 
 
-class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2cachemask
+class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! sth wrong with the l2cachemask
   val io = IO(new Bundle {
     val from_addr = Flipped(DecoupledIO(//new Bundle {
 //      val tag = Input(new vExeDataDMA)
@@ -588,8 +591,8 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
     val inst_mem_index = Output(UInt(log2Ceil(max_dma_inst).W))
     val tag_mem_index = Output(UInt(log2Ceil(max_dma_tag).W))
 
-    val from_l2cache = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
-    val from_shared = Flipped(DecoupledIO(new ShareMemCoreRsp_np))
+    val from_l2cache = Flipped(DecoupledIO(new DCacheMemRsp))
+    val from_shared = Flipped(DecoupledIO(new DCacheCoreRsp_np))
 
     val to_shared = DecoupledIO(new TempOutput)
     val inst_complete = DecoupledIO(UInt(32.W))
@@ -601,15 +604,15 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
 //  val stepMem =   Mem(max_dma_tag, Vec(5, UInt(xLen.W)))
   val from_l2cache_all = Wire(new l2cacheline_info)
   from_l2cache_all.base := io.from_l2cache.bits
-  from_l2cache_all.cacheline_info.tag  := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tag
-  from_l2cache_all.cacheline_info.tensor_dim0_start := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim0_start
-  from_l2cache_all.cacheline_info.box_dim0_start    := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).box_dim0_start
+  from_l2cache_all.cacheline_info.tag  := tagMem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1 - log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).tag
+  from_l2cache_all.cacheline_info.tensor_dim0_start := tagMem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).tensor_dim0_start
+  from_l2cache_all.cacheline_info.box_dim0_start    := tagMem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).box_dim0_start
   (0 until(5)).foreach( x=> {
-    from_l2cache_all.cacheline_info.tensor_dim_step(x)          := tagMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim_step(x)
+    from_l2cache_all.cacheline_info.tensor_dim_step(x)          := tagMem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).tensor_dim_step(x)
   })
 
   //  val tensor_dim_step = Wire(Vec(5, UInt(xLen.W)))
-//  tensor_dim_step := stepMem.read(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1))
+//  tensor_dim_step := stepMem.read(io.from_l2cache.bits.source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1))
   //  val shared_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((log2Ceil(numgroupinsdmax)).W))))
 //  val finish_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((log2Ceil(numgroupinsdmax)).W))))
   //val shared_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((xLen).W))))
@@ -629,7 +632,7 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
   val output_data_entry = Reg(UInt(log2Ceil(max_l2cacheline).W))
 
   //l2cache logic
-  val current_inst_entry_index = io.from_l2cache.bits.source(l2cache_params.source_bits -1 -log2Ceil(max_dma_tag), l2cache_params.source_bits -1 -log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst) + 1).asUInt
+  val current_inst_entry_index = io.from_l2cache.bits.d_source(l1cache_sourceBits -1 -log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm), l1cache_sourceBits -1 -log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst)- log2Ceil(num_cache_in_sm) + 1).asUInt
 
 //  val current_inst_entry_index = io.from_l2cache.bits.source(log2Ceil(max_dma_inst) - 1, 0).asUInt
 
@@ -640,8 +643,9 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
   val output_inst = Reg(new vExeDataDMA)
   val output_data = Reg(new l2cacheline_info)
   val output_data_4byte = Wire(Vec(numgroupl2cache, UInt((dma_aligned_bulk * BitsOfByte).W)))
+  printf("output_data.base.d_data: %d",output_data.base.d_data.getWidth.asUInt)
   (0 until (numgroupl2cache)).foreach(x => {
-    output_data_4byte(x) := output_data.base.data((x + 1) * (dma_aligned_bulk * BitsOfByte) - 1, x * (dma_aligned_bulk * BitsOfByte))
+    output_data_4byte(x) := output_data.base.d_data.asUInt((x + 1) * (dma_aligned_bulk * BitsOfByte) - 1, x * (dma_aligned_bulk * BitsOfByte))
   })
 
 
@@ -652,11 +656,11 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
 //  tag_wire := Cat(tagMem.read(output_data.source(xLen - 1, xLen - 1 - log2Ceil(max_dma_tag) + 1)),0.U((xLen - addr_tag_bits).W))
   when(io.from_l2cache.fire) {
     used_cache := used_cache.bitSet(valid_data_entry, true.B)
-    used_tag  := used_tag.bitSet(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1),false.B)
+    used_tag  := used_tag.bitSet(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1),false.B)
 
     dataFIFO.write(valid_data_entry,from_l2cache_all)
     entry_index_reg(valid_data_entry) := current_inst_entry_index
-//    tagMem.write(io.from_l2cache.bits.source(l2cache_params.source_bits - 1, l2cache_params.source_bits - 1 - log2Ceil(max_dma_tag) + 1),0.U(addr_tag_bits.W))
+//    tagMem.write(io.from_l2cache.bits.source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1),0.U(addr_tag_bits.W))
   }
   when(io.from_addr_tag.fire) {
     used_tag := used_tag.bitSet(valid_tag_entry, true.B)
@@ -668,10 +672,10 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
   val tmp_2 = Wire(Vec(l2cacheline/2, UInt((2 * BitsOfByte).W)))
   val tmp_4 = Wire(Vec(l2cacheline/4, UInt((4 * BitsOfByte).W)))
   val tmp_8 = Wire(Vec(l2cacheline/8, UInt((8 * BitsOfByte).W)))
-  tmp_1.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * BitsOfByte + 1 * BitsOfByte - 1, i * BitsOfByte) }
-  tmp_2.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * 2 * BitsOfByte + 2 * BitsOfByte - 1, i * 2 * BitsOfByte) }
-  tmp_4.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * 4 * BitsOfByte + 4 * BitsOfByte - 1, i * 4 * BitsOfByte) }
-  tmp_8.zipWithIndex.foreach { case (x, i) => x := output_data.base.data(i * 8 * BitsOfByte + 8 * BitsOfByte - 1, i * 8 * BitsOfByte) }
+  tmp_1.zipWithIndex.foreach { case (x, i) => x := output_data.base.d_data.asUInt(i * BitsOfByte + 1 * BitsOfByte - 1, i * BitsOfByte) }
+  tmp_2.zipWithIndex.foreach { case (x, i) => x := output_data.base.d_data.asUInt(i * 2 * BitsOfByte + 2 * BitsOfByte - 1, i * 2 * BitsOfByte) }
+  tmp_4.zipWithIndex.foreach { case (x, i) => x := output_data.base.d_data.asUInt(i * 4 * BitsOfByte + 4 * BitsOfByte - 1, i * 4 * BitsOfByte) }
+  tmp_8.zipWithIndex.foreach { case (x, i) => x := output_data.base.d_data.asUInt(i * 8 * BitsOfByte + 8 * BitsOfByte - 1, i * 8 * BitsOfByte) }
   switch(output_inst.tensorvars.datawidth) {
     is(1.U) {
       (0 until l2cacheline).foreach(x => {
@@ -692,13 +696,13 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
             is(FLOAT16.asUInt) {
               tmp_2(x/2) :=  Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(2 * BitsOfByte)(1.U)).asUInt,0.U)
 //              tmp_2(x/2) :=  Mux(output_inst.tensorvars.oobfill.asBool,"b1111111111111111".U,0.U)
-              //                        output_data.base.data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
-              //                          Cat(output_data.base.data(x + 2 * BitsOfByte - 1),(BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt),0.U)
+              //                        output_data.base.d_data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
+              //                          Cat(output_data.base.d_data(x + 2 * BitsOfByte - 1),(BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt),0.U)
             }
             is(BFLOAT16.asUInt) {
                 tmp_2(x/2) :=  Mux(output_inst.tensorvars.oobfill.asBool,VecInit(Seq.fill(2 * BitsOfByte)(1.U)).asUInt,0.U)
-              //                        output_data.base.data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
-              //                          Cat(output_data.base.data(x + 2 * BitsOfByte - 1), (BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt), 0.U)
+              //                        output_data.base.d_data(x + 2 * BitsOfByte - 1, x) := Mux(output_inst.tensorvars.oobfill.asBool,
+              //                          Cat(output_data.base.d_data(x + 2 * BitsOfByte - 1), (BigInt(1) << (2 * BitsOfByte - 1) - 1).asUInt), 0.U)
             }
           }
         }
@@ -887,16 +891,16 @@ class Temp_mem() extends Module { //2024.5.9 start here! sth wrong with the l2ca
             })
             switch(datawidth){
               is(1.U){
-                output_data.base.data := tmp_1.asUInt
+                output_data.base.d_data := tmp_1.asTypeOf(output_data.base.d_data)
               }
               is(2.U) {
-                output_data.base.data := tmp_2.asUInt
+                output_data.base.d_data := tmp_2.asTypeOf(output_data.base.d_data)
               }
               is(4.U) {
-                output_data.base.data := tmp_4.asUInt
+                output_data.base.d_data := tmp_4.asTypeOf(output_data.base.d_data)
               }
               is(8.U) {
-                output_data.base.data := tmp_8.asUInt
+                output_data.base.d_data := tmp_8.asTypeOf(output_data.base.d_data)
               }
             }
 
@@ -1250,7 +1254,7 @@ class Addrcalc_shared() extends Module {
     }
   }
 }
-class DMA_core extends Module{
+class DMA_core(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends Module{
   val io = IO(new Bundle{
     //input
     val dma_req = Flipped(DecoupledIO(new vExeData()))
@@ -1261,10 +1265,12 @@ class DMA_core extends Module{
                            maybe 4*4*2 byte one cp.async
     vExeData.ctrl.memw/h/b: data type : determine the mask sent to L1 cache
     */
-    val l2cache_rsp = Flipped(DecoupledIO(new TLBundleD_lite(l2cache_params)))
-    val shared_rsp = Flipped(DecoupledIO(new ShareMemCoreRsp_np()))
+//    val dma_cache_rsp = Flipped(DecoupledIO(new DCacheMemRsp))
+    val dma_cache_rsp = Flipped(DecoupledIO(new DCacheMemRsp))
+    val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     //output
-    val l2cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
+//    val dma_cache_req = Decoupled( new TLBundleA_lite(l2cache_params))
+    val dma_cache_req = DecoupledIO(new DCacheMemReq_p)
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val fence_end_dma = DecoupledIO(UInt(depth_warp.W))
 
@@ -1272,10 +1278,10 @@ class DMA_core extends Module{
     val TLBReq = Decoupled(new DmaTLBReq)
     val TLBRsp = Flipped(Decoupled(UInt(paLen.W)))
   })
-//  printf("l2req: %d \n",io.l2cache_req.bits.address.asUInt)
-//  printf("l2req.valid: %b \n",io.l2cache_req.valid.asUInt)
-//  printf("l2rsp data: %d \n",io.l2cache_rsp.bits.data(128,0).asUInt)
-//  printf("l2rsp source: %d \n",io.l2cache_rsp.bits.source.asUInt)
+//  printf("l2req: %d \n",io.dma_cache_req.bits.address.asUInt)
+//  printf("l2req.valid: %b \n",io.dma_cache_req.valid.asUInt)
+//  printf("l2rsp data: %d \n",io.dma_cache_rsp.bits.data(128,0).asUInt)
+//  printf("l2rsp source: %d \n",io.dma_cache_rsp.bits.source.asUInt)
 
 
 
@@ -1283,7 +1289,7 @@ class DMA_core extends Module{
   InputFIFO.io.enq <> io.dma_req
   val addrCalc_l2cache = Module(new AddrCalc_l2cache)
   addrCalc_l2cache.io.from_fifo <> InputFIFO.io.deq
-  io.l2cache_req <> addrCalc_l2cache.io.to_l2cache
+  io.dma_cache_req <> addrCalc_l2cache.io.to_l2cache
   io.TLBReq <> addrCalc_l2cache.io.to_l2TLB
   addrCalc_l2cache.io.from_l2TLB <> io.TLBRsp
 
@@ -1295,7 +1301,7 @@ class DMA_core extends Module{
   addrCalc_l2cache.io.tag_mem_index := tempmem.io.tag_mem_index
   tempmem.io.from_addr <> addrCalc_l2cache.io.to_tempmem_inst
   tempmem.io.from_addr_tag <> addrCalc_l2cache.io.to_tempmem_tag
-  tempmem.io.from_l2cache <> io.l2cache_rsp
+  tempmem.io.from_l2cache <> io.dma_cache_rsp
   tempmem.io.from_shared <> io.shared_rsp
   io.fence_end_dma <> tempmem.io.inst_complete
   val addrCalc_shared = Module(new Addrcalc_shared)
@@ -1303,7 +1309,7 @@ class DMA_core extends Module{
   io.shared_req <> addrCalc_shared.io.shared_req
 
 //  val L2cache2Temp = Module(new l2cache2temp)
-//  L2cache2Temp.io.from_l2cache <> io.l2cache_rsp
+//  L2cache2Temp.io.from_l2cache <> io.dma_cache_rsp
 //  tempmem.io.from_l2cache <> L2cache2Temp.io.l22temp
 //  val share2sharedmem = Module(new shared2sharedmem)
 //  share2sharedmem.io.from_saddr <> addrCalc_shared.io.to_shared

@@ -27,6 +27,7 @@ import scala.collection.mutable.ArrayBuffer
 //import chiseltest.simulator.
 import pipeline.pipe
 import top._
+import config.config.Parameters
 
 // add new testcases here!
 object TestCaseList{
@@ -56,8 +57,9 @@ class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
 }
 
 class single extends AnyFreeSpec with ChiselScalatestTester{
+  val param = (new MyConfig).toInstance
   "first_test" in {
-    test(new pipe()).withAnnotations(Seq(WriteVcdAnnotation)) { div =>
+    test(new pipe(sm_id = 0, SV = Some(mmu.SV32))(param)).withAnnotations(Seq(WriteVcdAnnotation)) { div =>
       //c.io.in1.poke(2.U)
       //def input(a: Int) = chiselTypeOf(div.io.inst.get.bits.Lit(_.bits -> a.U))
       div.io.inst.get.initSource().setSourceClock(div.clock)

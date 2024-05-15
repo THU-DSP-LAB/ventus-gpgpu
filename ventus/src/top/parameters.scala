@@ -68,7 +68,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = 8  // number of words per cacheline(block)
+  def dcache_BlockWords: Int = 16  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
@@ -104,7 +104,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_portFactor: Int = 2
 
-  def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)
+  def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets) // 13
 
   def l2cache_cache = CacheParameters(2, l2cache_NWays, l2cache_NSets, num_l2cache, l2cache_BlockWords << 2, l2cache_BlockWords << 2)
   def l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster,dcache_MshrEntry,dcache_NSets)
@@ -124,6 +124,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def sig_length = 33
 
   def num_cache_in_sm = 3
+  def num_tlb_in_sm = 3
 
   def num_l2cache = 1
 
@@ -177,7 +178,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def max_dma_tag = 8
   def max_l2cacheline = 6
-  def cacheline = 128//todo Math.pow(2, l2cachetagbits).toInt //bytes
+  def cacheline = dcache_BlockWords * 4//128 // Math.pow(2, l2cachetagbits << 2).toInt //bytes
   var l2cacheline = cacheline
   var sharedcacheline = cacheline
   def l2wayBits = log2Ceil(l2cache_NWays) //4

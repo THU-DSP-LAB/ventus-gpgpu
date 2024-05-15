@@ -6,7 +6,7 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chisel3.util._
 import chiseltest._
-import pipeline.{ShareMemCoreReq_np, ShareMemCoreRsp_np, vExeData}
+import pipeline.{ShareMemCoreReq_np, DCacheCoreRsp_np, vExeData}
 import play.TestUtils.{IOTestDriver, IOTransform, checkForReady, checkForValid}
 import top._
 import top.parameters.{l2cache_params, num_thread}
@@ -194,7 +194,7 @@ object TestUtils {
 
 
 //TODO
-class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np <: Data](
+class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: DCacheCoreRsp_np <: Data](
                                                                             val reqPort: DecoupledIO[A],
                                                                             val rspPort: DecoupledIO[B],
                                                                             val mem: MemBox[_],
@@ -288,7 +288,7 @@ class MemPortDriverDelay_shared[A <: ShareMemCoreReq_np, B >: ShareMemCoreRsp_np
 //      }
 //
 //    }
-    val rsp = (new ShareMemCoreRsp_np().Lit(
+    val rsp = (new DCacheCoreRsp_np().Lit(
       _.data -> req.data.peek(),
       _.instrId -> req.instrId.peek(),
       _.activeMask -> Vec(num_thread, Bool()).Lit(req.perLaneAddr.map(_.activeMask.peek().litToBoolean).zipWithIndex.map { case (d, i) => (i, d.B) }: _*),

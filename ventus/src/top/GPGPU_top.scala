@@ -252,13 +252,21 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
         out
       }
       // dma xrn add (2)
-      for(i <- 0 until NSms){
-        sm_tlb_xbar.io.req_l1(i * NSms) :<> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NSms).U)
-        sm_wrapper(i).l2tlbRsp(0) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms))
-        sm_tlb_xbar.io.req_l1(i * NSms + 1) :<> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NSms + 1).U)
-        sm_wrapper(i).l2tlbRsp(1) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms + 1))
-        sm_tlb_xbar.io.req_l1(i * NSms + 2) :<> genXbarReq(sm_wrapper(i).l2tlbReq(2), (i * NSms + 2).U)
-        sm_wrapper(i).l2tlbRsp(2) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms + 2))
+//      for(i <- 0 until NSms){
+//        sm_tlb_xbar.io.req_l1(i * NSms) :<> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NSms).U)
+//        sm_wrapper(i).l2tlbRsp(0) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms))
+//        sm_tlb_xbar.io.req_l1(i * NSms + 1) :<> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NSms + 1).U)
+//        sm_wrapper(i).l2tlbRsp(1) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms + 1))
+//        sm_tlb_xbar.io.req_l1(i * NSms + 2) :<> genXbarReq(sm_wrapper(i).l2tlbReq(2), (i * NSms + 2).U)
+//        sm_wrapper(i).l2tlbRsp(2) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms + 2))
+//      }
+      for (i <- 0 until NSms) {
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM) :<> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NCacheInSM).U)
+        sm_wrapper(i).l2tlbRsp(0) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM))
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM + 1) :<> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NCacheInSM + 1).U)
+        sm_wrapper(i).l2tlbRsp(1) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 1))
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM + 2) :<> genXbarReq(sm_wrapper(i).l2tlbReq(2), (i * NCacheInSM + 2).U)
+        sm_wrapper(i).l2tlbRsp(2) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 2))
       }
 
       // l2tlb <-> l2c
@@ -336,7 +344,7 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
   cta2warp.io.CTArsp<>io.CTArsp
-  val pipe=Module(new pipe(sm_id))
+  val pipe=Module(new pipe(sm_id,SV)(param))
   pipe.io.pc_reset:=true.B
   io.inst_cnt.foreach(_ := pipe.io.inst_cnt.getOrElse(0.U))
   val cnt=Counter(10)
@@ -410,6 +418,7 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   pipe.io.dcache_rsp.bits.instrId:=dcache.io.coreRsp.bits.instrId
   pipe.io.dcache_rsp.bits.data:=dcache.io.coreRsp.bits.data
   pipe.io.dcache_rsp.bits.activeMask:=dcache.io.coreRsp.bits.activeMask
+  pipe.io.dcache_rsp.bits.dma:= false.B
   //pipe.io.dcache_rsp.bits.isWrite:=dcache.io.coreRsp.bits.isWrite
   dcache.io.coreRsp.ready:=pipe.io.dcache_rsp.ready
 
@@ -450,7 +459,10 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   l1tlb(1).io.in <> dcache.io.TLBReq
   dcache.io.TLBRsp <> l1tlb(1).io.out
   l1tlb(2).io.in <> pipe.io.TLBReq
-  pipe.io.TLBRsp <> l1tlb(2).io.out
+//  pipe.io.TLBRsp <> l1tlb(2).io.out
+  pipe.io.TLBRsp.valid := l1tlb(2).io.out.valid
+  l1tlb(2).io.out.ready := pipe.io.TLBRsp.ready
+  pipe.io.TLBRsp.bits := l1tlb(2).io.out.bits.paddr
 
   val sharedmem = Module(new SharedMemory()(param))
   sharedmem.io.coreReq.bits.data:=pipe.io.shared_req.bits.data
@@ -472,6 +484,18 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   // xrn add dma
   pipe.io.shared_rsp.bits.dma := sharedmem.io.coreRsp.bits.dma
   // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
+
+  // **** dma xrn pipe dma_cache_rsp ****
+  pipe.io.dma_cache_rsp.valid := l1Cache2L2Arb.io.memRspVecOut(2).valid
+  pipe.io.dma_cache_rsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_source
+  pipe.io.dma_cache_rsp.bits.d_addr := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_addr
+  pipe.io.dma_cache_rsp.bits.d_data := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_data
+  pipe.io.dma_cache_rsp.bits.d_opcode := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_opcode
+  l1Cache2L2Arb.io.memRspVecOut(2).ready := pipe.io.dma_cache_rsp.ready
+  // ***********************
+  // **** dcache memReq ****
+  l1Cache2L2Arb.io.memReqVecIn(2) <> pipe.io.dma_cache_req
+  // **** dcache coreReq ****
 }
 
 

@@ -117,6 +117,18 @@ class warp_scheduler extends Module{
 //  val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
   val warp_bar_data=RegInit(0.U(num_warp.W))    // =1 means warp stuck by barrier
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
+  val warp_active=RegInit(0.U(num_warp.W))
+
+  //dma xrn add
+  val is_async = Reg(Bool())
+  val warp_bar_data_async = Wire(Vec(num_warp,UInt(1.W)))
+  val warp_ready_async = (~(warp_bar_data | warp_bar_data_async.asUInt| io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
+  val pc_ready_async = Wire(Vec(num_warp, Bool()))
+  val next_warp_async = WireInit(current_warp)
+  val block_id_async = io.wg_id_tag_async
+  val block_id_tag_cache = RegInit(VecInit(Seq.fill(num_warp)(0.U(TAG_WIDTH.W))))
+  val dma_cnt=RegInit(VecInit(Seq.fill(num_block)(0.U(log2Ceil(max_dma_inst).W))))
+
 
   when(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
@@ -158,7 +170,6 @@ class warp_scheduler extends Module{
   io.flushDCache.bits := need_flush
 
 
-  val warp_active=RegInit(0.U(num_warp.W))
 
 
 
@@ -207,14 +218,11 @@ class warp_scheduler extends Module{
 
 
   //xrn add dma
-  val is_async = Reg(Bool())
-  is_async := io.warp_control.fire()&io.warp_control.bits.ctrl.dma
+  is_async := io.warp_control.fire & io.warp_control.bits.ctrl.dma
   io.issued_dma.ready := true.B
   io.finished_dma.ready := true.B
-  val dma_cnt=RegInit(VecInit(Seq.fill(num_block)(0.U(log2Ceil(max_dma_inst).W))))
   io.wg_id_lookup_async := io.issued_dma.bits.ctrl.wid
-  val block_id_async = io.wg_id_tag_async
-  val block_id_tag_cache = RegInit(VecInit(Seq.fill(num_warp)(UInt(TAG_WIDTH.W))))
+
   when(io.issued_dma.fire) {
     dma_cnt(block_id_async) := dma_cnt(block_id_async) + 1.U
     block_id_tag_cache(io.issued_dma.bits.ctrl.wid) := block_id_async
@@ -222,7 +230,6 @@ class warp_scheduler extends Module{
   when(io.finished_dma.fire) {
     dma_cnt(block_id_tag_cache(io.finished_dma.bits)) := dma_cnt(block_id_tag_cache(io.finished_dma.bits)) - 1.U
   }
-  val warp_bar_data_async = Wire(UInt(num_warp.W))
   (0 until(num_warp)).foreach( x => {
     when(dma_cnt(x).asUInt =/= 0.U){
       warp_bar_data_async(x) := 1.U
@@ -230,9 +237,7 @@ class warp_scheduler extends Module{
       warp_bar_data_async(x) := 0.U
     }
   })
-  val warp_ready_async = (~(warp_bar_data |warp_bar_data_async| io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
-  val pc_ready_async = Wire(Vec(num_warp,Bool()))
-  val next_warp_async=WireInit(current_warp)
+
   for (i <- num_warp - 1 to 0 by -1) {
     pc_ready_async(i) := io.pc_ibuffer_ready(i) & warp_active(i) & warp_bar_data_async(i)
     when(pc_ready_async(i)) {

@@ -53,6 +53,7 @@ class DCacheCoreRsp_np extends Bundle{
 //    val mop = UInt(2.W)
 //  }
   val activeMask = Vec(num_thread, Bool())
+  val dma = Bool()
  // val isWrite = Bool()
 }
 
@@ -76,7 +77,6 @@ class ShareMemCoreRsp_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val data = Vec(num_thread, UInt(xLen.W))
   val activeMask = Vec(num_thread, Bool())//UInt(NLanes.W)
-  val dma = Bool()
 }
 
 class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag的接口

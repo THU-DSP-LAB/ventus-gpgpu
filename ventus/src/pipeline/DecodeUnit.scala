@@ -630,7 +630,7 @@ class InstrDecodeV2 extends Module {
     //tma add
     c.copysize := Mux(io.inst(i)(26,25).asUInt === 0.U, 4.U, Mux(io.inst(i)(26,25).asUInt === 1.U, 8.U, 16.U))
     c.funct := io.inst(i)(14,12).asUInt
-//    c.dma := Mux(io.inst(i)(6,0) === "b1000001".U.asUInt,true.B,false.B)
+    c.dma := Mux(io.inst(i)(6,0) === "b1000001".U.asUInt,true.B,false.B)
   }
   io.control_mask := maskAfterExt
 

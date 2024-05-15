@@ -68,7 +68,7 @@ class Issue extends Module{
   io.out_LSU.bits:=inputBuf.bits
   io.out_TC.bits:=inputBuf.bits
   io.out_DMA.bits := inputBuf.bits
-  io.out_warpsheculer_async.bits := inputBuf.bits.ctrl
+  io.out_warpsheculer_async.bits.ctrl := inputBuf.bits.ctrl
   io.out_SIMT.bits.PC_branch:=inputBuf.bits.in3(0)
   io.out_SIMT.bits.PC_execute := inputBuf.bits.ctrl.pc
   //io.out_SIMT.bits.PC_reconv := inputBuf.bits.in1(0)
@@ -96,7 +96,9 @@ class Issue extends Module{
   io.out_LSU.valid:=false.B
   io.out_vFPU.valid:=false.B
   io.out_MUL.valid:=false.B
+  io.out_DMA.valid := false.B
   io.out_warpscheduler.valid:=false.B
+  io.out_warpsheculer_async.valid:=false.B
   io.out_CSR.valid:=false.B
   io.out_SFU.valid:=false.B
   inputBuf.ready:=false.B
@@ -142,7 +144,8 @@ class Issue extends Module{
     io.out_DMA.valid := inputBuf.valid
     io.out_warpsheculer_async.valid := inputBuf.valid
     inputBuf.ready := io.out_DMA.ready
-  }.otherwise({
+  }
+    .otherwise({
     io.out_sALU.valid:=inputBuf.valid
     inputBuf.ready:=io.out_sALU.ready
   })
