@@ -25,7 +25,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_cluster = 1
 
   def num_sm_in_cluster = num_sm / num_cluster
-  def depth_warp = log2Ceil(num_warp)
+  def depth_warp = if (num_warp > num_bank)  log2Ceil(num_warp) else log2Ceil(num_bank) //TODO
 
   var num_thread = 32
 
@@ -68,7 +68,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = 16  // number of words per cacheline(block)
+  def dcache_BlockWords: Int = 32//32  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
@@ -185,7 +185,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def l2setBits = log2Ceil(l2cache_NSets) //5
   def l2offsetBits = log2Ceil(l2cache_BlockWords << 2) // 7
   def l2cBits = log2Ceil(num_l2cache) //1
-  var l2cachetagbits = xLen - (l2wayBits + l2setBits + l2offsetBits + l2cBits)
+  var l2cachetagbits = xLen - (l2setBits + l2offsetBits + l2cBits)
+//  var l2cachetagbits = xLen - (l2wayBits + l2setBits + l2offsetBits + l2cBits)
   // 32 - (4 + 5 + 7) = 16
   var l2cachesetbits = l2setBits
 //  var sharedsetbits = dcache_SetIdxBits

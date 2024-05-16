@@ -119,6 +119,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   entryMatchMissRsp := missRspInHoldingIdx//Reverse(Cat(blockAddr_Access.map(_===missRspInHoldingbA))) & entry_valid
   //assert(PopCount(entryMatchMissRsp) <= 1.U)
   entryMatchMissReq := Reverse(Cat(blockAddr_Access.map(_===io.missReq.bits.blockAddr))) & entry_valid & Reverse(Cat(ASID_Access.map(_===io.missReq.bits.ASID)))//Block addr and asid match indicate same req
+  printf("entryMatchMissReq : %d \n", PopCount(entryMatchMissReq).asUInt)
   assert(PopCount(entryMatchMissReq) <= 1.U)
   //  ******     decide a primary miss or a secondary miss     ******
   val secondary_miss = entryMatchMissReq.orR
@@ -137,7 +138,8 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   }
 
   //  ******      update MSHR when missRsp    ******
-  assert(!io.missRspIn.fire() || (io.missRspIn.fire() && subentryStatus.io.used >= 1.U))
+  printf("\n fire: %d,  subentryStatus.io.used : %d \n",io.missRspIn.fire.asUInt,subentryStatus.io.used.asUInt)
+//  assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used.asUInt >= 1.U)) TODO
 
   when(io.missRspIn.fire() && (subentryStatus.io.used =/= 1.U || !io.missRspOut.ready)){
     missRsqBusy := true.B

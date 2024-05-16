@@ -325,7 +325,7 @@ class AddrCalc_l2cache() extends Module{
 //  dim0_num_cacheline := Mux(tensor_boxdim_length(0)(log2Ceil(l2cacheline) - 1, 0).asUInt === 0.U,
 //    (tensor_boxdim_length(0) >> log2Ceil(l2cacheline)).asUInt,
 //    (tensor_boxdim_length(0) >> log2Ceil(l2cacheline)).asUInt + 1.U)
-  
+
   val address_next = Wire(UInt(xLen.W))
   address_next := reg_save.address.asUInt + l2cacheline.asUInt
   switch(reg_save.ctrl.funct) {
@@ -643,7 +643,7 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   val output_inst = Reg(new vExeDataDMA)
   val output_data = Reg(new l2cacheline_info)
   val output_data_4byte = Wire(Vec(numgroupl2cache, UInt((dma_aligned_bulk * BitsOfByte).W)))
-  printf("output_data.base.d_data: %d",output_data.base.d_data.getWidth.asUInt)
+//  printf("output_data.base.d_data: %d",output_data.base.d_data.getWidth.asUInt)
   (0 until (numgroupl2cache)).foreach(x => {
     output_data_4byte(x) := output_data.base.d_data.asUInt((x + 1) * (dma_aligned_bulk * BitsOfByte) - 1, x * (dma_aligned_bulk * BitsOfByte))
   })
