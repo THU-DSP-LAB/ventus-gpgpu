@@ -465,7 +465,7 @@ class AddrCalc_l2cache() extends Module{
   io.to_tempmem_inst.bits.tensorvars := TensorVars
   io.to_l2cache.bits.a_opcode := 4.U
 //  io.to_l2cache.bits.a_size   := 0.U
-  io.to_l2cache.bits.a_source :=  Cat("d3".U,tag_mem_index_reg,inst_mem_index_reg,0.U((l1cache_sourceBits - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst) - log2Ceil(num_cache_in_sm)).W))
+  io.to_l2cache.bits.a_source :=  Cat(tag_mem_index_reg,inst_mem_index_reg,0.U((l1cache_sourceBits - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst)).W))
 //  io.to_l2cache.bits.source(l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst),0) := 0.U
 //  io.to_l2cache.bits.source(0) := 0.U // use crossbar of l1cache
   // temporarily set it as inst_mem_index_reg, for mshr; cat with wid, for shiftboard; jingguo ceshi hui fangzai hou 6 bit

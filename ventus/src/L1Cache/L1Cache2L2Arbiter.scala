@@ -32,6 +32,7 @@ class L1Cache2L2Arbiter(implicit p: Parameters) extends DCacheModule {
   val memReqArb = Module(new Arbiter(new L1CacheMemReq,NCacheInSM))
   memReqArb.io.in <> io.memReqVecIn
   for(i <- 0 until NCacheInSM) {
+    printf("a_cache: %d , a_source : %b \n", i.asUInt, Cat(i.asUInt,io.memReqVecIn(i).bits.a_source).asUInt)
     memReqArb.io.in(i).bits.a_source := Cat(i.asUInt,io.memReqVecIn(i).bits.a_source)
   }
   io.memReqOut <> memReqArb.io.out
@@ -39,6 +40,7 @@ class L1Cache2L2Arbiter(implicit p: Parameters) extends DCacheModule {
 
   // **** memRsp ****
   for(i <- 0 until NCacheInSM) {
+    printf("d_cache: %d , d_source : %b \n", i.asUInt, io.memRspIn.bits.d_source.asUInt)
     io.memRspVecOut(i).bits <> io.memRspIn.bits
     io.memRspVecOut(i).valid :=
       io.memRspIn.bits.d_source(log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)-1,3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets))===i.asUInt && io.memRspIn.valid
