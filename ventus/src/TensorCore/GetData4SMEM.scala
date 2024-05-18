@@ -2,10 +2,10 @@ package TensorCore
 
 import chisel3._
 import chisel3.util._
-import pipeline.IDecode.{MEM_B, MEM_H, MEM_W}
+import pipeline.IDecode._
 import top.parameters._
 import pipeline.{IDecode, InstWriteBack, LSUexe, MSHROutput, MSHRv2, WriteScalarCtrl, WriteVecCtrl, vExeData}
-
+import pipeline.{DCacheCoreRsp_np,toShared,ShareMemPerLaneAddr_np,ShareMemCoreReq_np,ShareMemCoreRsp_np,ByteExtract,ShiftBoard,LSU2WB,MshrTag}
 class Matrix_descriptor(dtype:Int) extends Bundle{
   //  val data_in = new vExeData
   //  val rm = UInt(3.W)
@@ -24,90 +24,13 @@ class getData4SMEM extends Module{
   })
 
   // use LSU | get data from SMEM
-//  val LSU = Module(new LSUexe())
+  val LSU = Module(new Load4SMEM())
 
   // WIP...
 
-
 }
 
-class DCacheCoreRsp_np extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-  val data = Vec(num_thread, UInt(xLen.W))
-  //  val ctrl = new Bundle{
-  //    val mem_cmd = UInt(2.W)
-  //    val mop = UInt(2.W)
-  //  }
-  val activeMask = Vec(num_thread, Bool())
-  // val isWrite = Bool()
-}
-
-
-class toShared extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-  val addr = Vec(num_thread, UInt(xLen.W))
-  val data = Vec(num_thread, UInt(xLen.W))
-  val ctrl = new Bundle{
-    val mem_cmd = UInt(2.W)
-    val mop = UInt(2.W)
-    val isvec = Bool()
-  }
-  val mask = Vec(num_thread, Bool())
-}
-
-class ShareMemPerLaneAddr_np extends Bundle{
-  val activeMask = Bool()
-  val blockOffset = UInt(dcache_BlockOffsetBits.W)
-  val wordOffset1H = UInt(BytesOfWord.W)
-}
-class ShareMemCoreReq_np extends Bundle{
-  //val ctrlAddr = new Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-  val isWrite = Bool()//Vec(NLanes, Bool())
-  //val tag = UInt(dcache_TagBits.W)
-  val setIdx = UInt(dcache_SetIdxBits.W)
-  val perLaneAddr = Vec(num_thread, new ShareMemPerLaneAddr_np)
-  val data = Vec(num_thread, UInt(xLen.W))
-}
-
-class ShareMemCoreRsp_np extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
-  val data = Vec(num_thread, UInt(xLen.W))
-  val activeMask = Vec(num_thread, Bool())//UInt(NLanes.W)
-}
-
-class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag的接口
-  val warp_id = UInt(depth_warp.W)
-  val wfd = Bool()
-  val wxd = Bool()
-  val reg_idxw = UInt((regidx_width + regext_width).W)
-  val mask = Vec(num_thread, Bool())
-  val unsigned = Bool()
-  val isvec = Bool()
-  val wordOffset1H = Vec(num_thread, UInt(BytesOfWord.W))
-  val isWrite = Bool()
-  val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
-}
-
-object ByteExtract{
-  def apply(isUInt: Bool = true.B, in: UInt = 0.U(xLen.W), sel: UInt = "hf".U(4.W)): UInt = {
-    val result = Wire(UInt(32.W))
-    result := MuxCase(
-      in, Array(
-        (sel==="hf".U) -> in,
-        (sel==="hc".U) -> Mux(!in(31)||isUInt, Cat(0.U(16.W),in(31,16)), Cat("hffff".U(16.W),in(31,16))),
-        (sel==="h3".U) -> Mux(!in(15)||isUInt, Cat(0.U(16.W),in(15,0)), Cat("hffff".U(16.W),in(15,0))),
-        (sel==="h8".U) -> Mux(!in(31)||isUInt, Cat(0.U(24.W),in(31,24)), Cat("hffffff".U(24.W),in(31,24))),
-        (sel==="h4".U) -> Mux(!in(23)||isUInt, Cat(0.U(24.W),in(23,16)), Cat("hffffff".U(24.W),in(23,16))),
-        (sel==="h2".U) -> Mux(!in(15)||isUInt, Cat(0.U(24.W),in(15,8)), Cat("hffffff".U(24.W),in(15,8))),
-        (sel==="h1".U) -> Mux(!in(7)||isUInt, Cat(0.U(24.W),in(7,0)), Cat("hffffff".U(24.W),in(7,0)))
-      )
-    )
-    result
-  }
-}
-
-class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Module{
+class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
     val csr_wid = Output(UInt(depth_warp.W))
@@ -230,36 +153,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
       Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
   val param_wire=Wire(UInt(4.W))
-  when(reg_save.ctrl.atomic){
-    when(reg_save.ctrl.aq &&reg_save.ctrl.rl){
-      opcode_wire :=Mux(state===s_dcache_2,3.U,Mux(state===s_dcache_1,2.U,3.U))
-      param_wire :=Mux(state===s_dcache_2,0.U,Mux(state===s_dcache_1,param_wire_alt,0.U))
-    }.elsewhen(reg_save.ctrl.aq){
-      opcode_wire :=Mux(state===s_dcache_1,2.U,3.U)
-      param_wire :=Mux(state===s_dcache_1,param_wire_alt,0.U)
-    }.elsewhen(reg_save.ctrl.rl){
-      opcode_wire :=Mux(state===s_dcache_1,3.U,2.U)
-      param_wire :=Mux(state===s_dcache_1,0.U,param_wire_alt)
-    }.otherwise{
-      opcode_wire := Mux(reg_save.ctrl.alu_fn===FN_ADD,reg_save.ctrl.mem_cmd(1),2.U) //todo should consider lr/sc
-      param_wire :=param_wire_alt
-    }
-  }.elsewhen(reg_save.ctrl.fence){
-    opcode_wire :=3.U
-    param_wire :=0.U
-  }.elsewhen(is_flush) {
-    opcode_wire := 3.U
-    param_wire := 0.U
-  }.otherwise{
-    opcode_wire :=reg_save.ctrl.mem_cmd(1)
-    param_wire :=0.U
-  }
+// SMEM get data don't have atomic(reg_save.ctrl.atomic)
 
   val mask_next = Wire(Vec(num_thread, Bool()))
 
-  (0 until num_thread).foreach( x => {                          // update mask
-    mask_next(x) := Mux(reg_save.ctrl.atomic ,reg_save.mask(x)&& !(x.asUInt===PriorityEncoder(reg_save.mask.asUInt)),reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
-    )})
   // End of Addr Logic
 
   // FSM State Transfer
@@ -374,47 +271,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     }
   }
 }
-class LSU2WB extends Module{
-  val io = IO(new Bundle{
-    val lsu_rsp=Flipped(DecoupledIO(new MSHROutput))
-    val out_x = DecoupledIO(new WriteScalarCtrl())
-    val out_v = DecoupledIO(new WriteVecCtrl)
-  })
-  io.out_x.bits.warp_id:=io.lsu_rsp.bits.tag.warp_id
-  io.out_x.bits.reg_idxw:=io.lsu_rsp.bits.tag.reg_idxw
-  io.out_x.bits.wxd:=io.lsu_rsp.bits.tag.wxd
-  io.out_x.bits.wb_wxd_rd:=io.lsu_rsp.bits.data(0)
-  io.out_v.bits.warp_id:=io.lsu_rsp.bits.tag.warp_id
-  io.out_v.bits.reg_idxw:=io.lsu_rsp.bits.tag.reg_idxw
-  io.out_v.bits.wvd:=io.lsu_rsp.bits.tag.wfd
-  io.out_v.bits.wvd_mask:=io.lsu_rsp.bits.tag.mask
-  io.out_v.bits.wb_wvd_rd:=io.lsu_rsp.bits.data
-  if(SPIKE_OUTPUT){
-    io.out_x.bits.spike_info.get:=io.lsu_rsp.bits.tag.spike_info.get
-    io.out_v.bits.spike_info.get:=io.lsu_rsp.bits.tag.spike_info.get
-  }
-  when(io.lsu_rsp.bits.tag.wxd){
-    io.out_x.valid:=io.lsu_rsp.valid
-    io.out_v.valid:=false.B
-    io.lsu_rsp.ready:=io.out_x.ready
-  }.elsewhen(io.lsu_rsp.bits.tag.wfd){
-    io.out_v.valid:=io.lsu_rsp.valid
-    io.out_x.valid:=false.B
-    io.lsu_rsp.ready:=io.out_v.ready
-  }.otherwise({
-    io.out_v.valid:=false.B
-    io.out_x.valid:=false.B
-    io.lsu_rsp.ready:=io.lsu_rsp.bits.tag.isWrite//true.B // CONNECTION OF io.lsu_rsp.bits.tag.isWrite
-    if(SPIKE_OUTPUT) {
-      when(io.lsu_rsp.fire && io.lsu_rsp.bits.tag.isWrite){
-        printf(p"sm ${io.lsu_rsp.bits.tag.spike_info.get.sm_id} warp ${io.lsu_rsp.bits.tag.warp_id} ")
-        printf(p"0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.pc)} 0x${Hexadecimal(io.lsu_rsp.bits.tag.spike_info.get.inst)} ")
-        printf(p"lsu.w fin\n")
-      }
-    }
-  })
-}
-class LSUexe() extends Module{
+class Load4SMEM() extends Module{
   // default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
   val io = IO(new Bundle{
     val lsu_req = Flipped(DecoupledIO(new vExeData()))
@@ -436,18 +293,15 @@ class LSUexe() extends Module{
   val InputFIFO = Module(new Queue(new vExeData, entries=1, pipe=true))
   InputFIFO.io.enq <> io.lsu_req
 
-  val AddrCalc = Module(new AddrCalculate(sharedmemory_addr_max))
+  val AddrCalc = Module(new AddrCalculate_SMEM(sharedmemory_addr_max))
   AddrCalc.io.from_fifo <> InputFIFO.io.deq
   io.shared_req <> AddrCalc.io.to_shared
   AddrCalc.io.flush_dcache <> io.flush_dcache
 
-  val rspArbiter = Module(new Arbiter(new DCacheCoreRsp_np, n = 2))
-  rspArbiter.io.in(1) <> io.shared_rsp
-
   // SOME MSHR INTERFACE
   val Coalscer = Module(new MSHRv2)
   //val outputFIFO = Module(new Queue(new MSHROutput, num_warp+1, pipe=true))
-  Coalscer.io.from_dcache <> rspArbiter.io.out
+  Coalscer.io.from_dcache <> io.shared_rsp
   Coalscer.io.from_addr <> AddrCalc.io.to_mshr
   AddrCalc.io.idx_entry:=Coalscer.io.idx_entry
   io.lsu_rsp <> Coalscer.io.to_pipe
@@ -465,24 +319,4 @@ class LSUexe() extends Module{
   AddrCalc.io.csr_tid:=io.csr_tid
   AddrCalc.io.csr_pds:=io.csr_pds
   AddrCalc.io.csr_numw:=io.csr_numw
-}
-
-class ShiftBoard(val depth:Int) extends Module{
-  val io=IO(new Bundle{
-    val left=Input(Bool())
-    val right=Input(Bool())
-    val full=Output(Bool())
-    val empty=Output(Bool())
-  })
-  val taps=(Seq.fill(depth)(RegInit(false.B)))
-  val left_move=io.left
-  val right_move=io.right
-
-  taps.zipWithIndex.foreach {case(a,b)=>
-    if(b==0) a:= Mux(left_move^right_move,Mux(left_move,true.B,taps(b+1)),a)
-    else if(b==depth-1) a:= Mux(left_move^right_move,Mux(left_move,taps(b-1),false.B),a)
-    else a:=Mux(left_move^right_move,Mux(left_move,taps(b-1),taps(b+1)),a)
-  }
-  io.full:= taps(depth-1)//Mux(left_move^right_move,Mux(left_move,taps(depth-2),false.B),taps(depth-1))
-  io.empty:= !Mux(left_move^right_move,Mux(left_move,true.B,taps(1)),taps(0))
 }
