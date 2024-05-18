@@ -24,30 +24,6 @@ class TC_MMAOutput(tcCtrl:TCCtrl) extends Bundle{
   val ctrl = tcCtrl.cloneType
 }
 
-class Matrix_descriptor(dtype:Int) extends Bundle{
-//  val data_in = new vExeData
-//  val rm = UInt(3.W)
-  val mat_des = UInt(dtype.W)
-}
-
-class Matrix_dataout() extends Bundle{
-//  val mat_des = UInt(dtype.W)
-  val data = Vec(num_thread, UInt(xLen.W))
-}
-
-class getData4SMEM extends Module{
-  val io = IO(new Bundle {
-    val in = Flipped(DecoupledIO(new Matrix_descriptor(64)))
-    val out = DecoupledIO(new Matrix_dataout)
-  })
-
-  // use LSU | get data from SMEM
-  val LSU = Module(new LSUexe())
-
-  // WIP...
-
-
-}
 
 class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl) extends Module {
   //  mnk defined as cuda.
