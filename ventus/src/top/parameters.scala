@@ -40,8 +40,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def size_ibuffer = 2
 
-  def xLen = 64 // data length 32-bit
+  def xLen = 32 // data length 32-bit
   //2024.04.15 modified. 32->64 to handle tensor core input size
+  //2024.05.15 modified. 64->32 to handle tensor core input size SMEM|888
 
   def instLen = 32
 
