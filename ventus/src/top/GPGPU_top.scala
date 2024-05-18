@@ -249,10 +249,10 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
         out
       }
       for(i <- 0 until NSms){
-        sm_tlb_xbar.io.req_l1(i * NSms) :<> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NSms).U)
-        sm_wrapper(i).l2tlbRsp(0) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms))
-        sm_tlb_xbar.io.req_l1(i * NSms + 1) :<> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NSms + 1).U)
-        sm_wrapper(i).l2tlbRsp(1) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NSms + 1))
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM) :<> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NCacheInSM).U)
+        sm_wrapper(i).l2tlbRsp(0) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM))
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM + 1) :<> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NCacheInSM + 1).U)
+        sm_wrapper(i).l2tlbRsp(1) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 1))
       }
 
       // l2tlb <-> l2c
