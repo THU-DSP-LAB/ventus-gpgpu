@@ -4,16 +4,21 @@ import chisel3._
 import chisel3.util._
 import pipeline.IDecode._
 import top.parameters._
-import pipeline.{IDecode, InstWriteBack, LSUexe, MSHROutput, MSHRv2, WriteScalarCtrl, WriteVecCtrl, vExeData}
-import pipeline.{DCacheCoreRsp_np,toShared,ShareMemPerLaneAddr_np,ShareMemCoreReq_np,ShareMemCoreRsp_np,ByteExtract,ShiftBoard,LSU2WB,MshrTag}
+import pipeline.{ByteExtract,LSU2WB, CtrlSigs, DCacheCoreRsp_np, IDecode, InstWriteBack, LSU2WB, LSUexe, MSHROutput, MSHRv2, MshrTag, ShareMemCoreReq_np, ShareMemCoreRsp_np, ShareMemPerLaneAddr_np, ShiftBoard, WriteScalarCtrl, WriteVecCtrl, toShared, vExeData}
 class Matrix_descriptor(dtype:Int) extends Bundle{
   //  val data_in = new vExeData
   //  val rm = UInt(3.W)
-  val mat_des = UInt(dtype.W)
+  val mat_des = UInt((dtype-33).W)
+  val isRowMajor = UInt(1.W)
+  val addrBase = UInt(32.W)
+
+  val mask = Vec(num_thread, Bool())
+  val ctrl = new CtrlSigs()
 }
 
 class Matrix_dataout() extends Bundle{
   //  val mat_des = UInt(dtype.W)
+  // output data will be reshape as register vExedata.in1/in2 type
   val data = Vec(num_thread, UInt(xLen.W))
 }
 
@@ -25,8 +30,17 @@ class getData4SMEM extends Module{
 
   // use LSU | get data from SMEM
   val LSU = Module(new Load4SMEM())
+  LSU.io.lsu_req.bits.mask <> io.in.bits.mask
+  for (x <- 0 until num_thread) {
+    LSU.io.lsu_req.bits.in1(x) := io.in.bits.addrBase.asUInt()
+    LSU.io.lsu_req.bits.in2(x) := 0.U//地址偏移量
+    LSU.io.lsu_req.bits.in3(x) := 0.U//要写入的数据
+  }
+  LSU.io.lsu_req.bits.ctrl <> io.in.bits.ctrl
+  LSU.io.lsu_req.valid := true.B
 
-  // WIP...
+  io.out.valid := LSU.io.lsu_rsp.valid
+  io.out.bits.data <> LSU.io.lsu_rsp.bits.data
 
 }
 
@@ -63,21 +77,25 @@ class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends
 
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
-    addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
-      Mux(reg_save.ctrl.is_vls12,
-        reg_save.in1(x)+reg_save.in2(x),
-        (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread)
-      ),
-      Mux(reg_save.ctrl.isvec,
-        reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
-          x.asUInt()<<2,
-          Mux(reg_save.ctrl.mop===3.U,
-            reg_save.in2(x),
-            x.asUInt*reg_save.in2(x))
-        ),
-        reg_save.in1(0) + reg_save.in2(0)
-      )
-    )
+//    addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
+//      Mux(reg_save.ctrl.is_vls12,
+//        reg_save.in1(x)+reg_save.in2(x),
+//        (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread)
+//      ),
+//      Mux(reg_save.ctrl.isvec,
+//        reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
+//          x.asUInt()<<2,
+//          Mux(reg_save.ctrl.mop===3.U,
+//            reg_save.in2(x),
+//            x.asUInt*reg_save.in2(x))
+//        ),
+//        reg_save.in1(0) + reg_save.in2(0)
+//      )
+//    )
+//  modified to unit-stride寻址模式	rs1 + i*4
+//    reg_save.in1(0) + x.asUInt()<<2!!!!
+//    not reg_save.in1(x) + x.asUInt()<<2
+    addr(x) := reg_save.in1(x) + x.asUInt()<<2
     is_shared(x) := !reg_save.mask(x) || addr(x)<sharedmemory_addr_max
   })
   all_shared := Mux(reg_save.ctrl.isvec,
@@ -99,16 +117,16 @@ class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends
   (0 until num_thread).foreach( x => {
     //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
     wordOffset1H(x) := 15.U(4.W)
-    switch(reg_save.ctrl.mem_whb){
-      is(MEM_W) { wordOffset1H(x) := 15.U }
-      is(MEM_H) { wordOffset1H(x) :=
-        Mux(addr(x)(1)===0.U,
-          3.U,
-          12.U
-        )
-      }
-      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
-    }
+//    switch(reg_save.ctrl.mem_whb){
+//      is(MEM_W) { wordOffset1H(x) := 15.U }
+//      is(MEM_H) { wordOffset1H(x) :=
+//        Mux(addr(x)(1)===0.U,
+//          3.U,
+//          12.U
+//        )
+//      }
+//      is(MEM_B) { wordOffset1H(x) := 1.U << addr(x)(1,0) }
+//    }
   })
   //val reg_toMSHR = Reg(new MshrTag)
   //val vld_toMSHR = Reg(Bool())
@@ -144,15 +162,16 @@ class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends
 
   //val vld_toDCache = Reg(Bool())
 //  io.to_dcache.bits.instrId := reg_entryID
+
 //  // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
 //  io.to_dcache.bits.tag := tag
 //  io.to_dcache.bits.setIdx := setIdx
-  val opcode_wire =Wire(UInt(3.W))
-  val param_wire_alt =Wire(UInt(4.W))
-  param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
-    Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
-      Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
-  val param_wire=Wire(UInt(4.W))
+//  val opcode_wire =Wire(UInt(3.W))
+//  val param_wire_alt =Wire(UInt(4.W))
+//  param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
+//    Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
+//      Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
+//  val param_wire=Wire(UInt(4.W))
 // SMEM get data don't have atomic(reg_save.ctrl.atomic)
 
   val mask_next = Wire(Vec(num_thread, Bool()))

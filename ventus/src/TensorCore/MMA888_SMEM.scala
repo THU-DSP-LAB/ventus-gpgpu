@@ -96,15 +96,23 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
   switch(stateReg) {
     is(sIdle) {
       when(io.in.fire) {
-        LSU.io.in.bits := 0.U//WIP
-        regArray_A := LSU.io.out //WIP
+        LSU.io.in.ready := io.in.fire//true.B
+        LSU.io.in.bits.mask := Vec(num_thread, true.B) //TODO. temp all true
+        LSU.io.in.bits.ctrl <> io.in.bits.ctrl
+        LSU.io.in.bits.isRowMajor := true.B// matrix A is row major
+        LSU.io.in.bits.addrBase := io.in.bits.data_in.in1(0) //!!!!!!!!
+        regArray_A <> LSU.io.out.bits.data
         stateReg := sSMEMseqA
       }
     }
     is(sSMEMseqA){
       when(LSU.io.out.valid){
-        LSU.io.in.bits := 0.U//WIP
-        regArray_B := LSU.io.out //WIP
+        LSU.io.in.ready := true.B
+        LSU.io.in.bits.mask := Vec(num_thread, true.B) //TODO. temp all true
+        LSU.io.in.bits.ctrl <> io.in.bits.ctrl
+        LSU.io.in.bits.isRowMajor := false.B// matrix A is row major
+        LSU.io.in.bits.addrBase := io.in.bits.data_in.in1(0) //!!!!!!!!
+        regArray_B <> LSU.io.out.bits.data
         stateReg := sSMEMseqB
       }
     }
@@ -116,15 +124,15 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-            TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+            TCComputation.io.in.bits.A(m * 8 + n * 2) := regArray_A(m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := regArray_A(m * 4 + n)(31, 16)
           }
         }
         //B 8*4 col
         for (m <- 0 until 4) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.B(m * 8 + n * 2) := io.in.bits.data_in.in2(m * 4 + n)(15, 0)
-            TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(m * 4 + n)(31, 16)
+            TCComputation.io.in.bits.B(m * 8 + n * 2) := regArray_B(m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := regArray_B(m * 4 + n)(31, 16)
           }
         }
         //C 8*4 row First
@@ -148,15 +156,15 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
         //A 8*8 row
         for (m <- 0 until 8) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.A(m * 8 + n*2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+            TCComputation.io.in.bits.A(m * 8 + n*2) := regArray_A(m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.A(m * 8 + n*2 + 1) := regArray_A(m * 4 + n)(31, 16)
           }
         }
         //B 8*4 col
         for (m <- 0 until 4) {
           for (n <- 0 until 4) {
-            TCComputation.io.in.bits.B(m * 8 + n*2) := io.in.bits.data_in.in2(16+m * 4 + n)(15, 0)
-            TCComputation.io.in.bits.B(m * 8 + n*2 + 1) := io.in.bits.data_in.in2(16+m * 4 + n)(31, 16)
+            TCComputation.io.in.bits.B(m * 8 + n*2) := regArray_B(16+m * 4 + n)(15, 0)
+            TCComputation.io.in.bits.B(m * 8 + n*2 + 1) := regArray_B(16+m * 4 + n)(31, 16)
           }
         }
         //C 8*4 row First
