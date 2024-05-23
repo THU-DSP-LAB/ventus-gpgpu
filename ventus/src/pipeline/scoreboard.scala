@@ -62,6 +62,11 @@ class CtrlSigs extends Bundle {
   val rl = Bool()
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
   val asid = UInt(KNL_ASID_WIDTH.W)
+
+  //518
+  val funct = UInt(3.W)
+  val copysize = UInt(2.W) // only 4 8 16 , may add 32
+  val dma = Bool()
 }
 class scoreboardIO extends Bundle{
   val ibuffer_if_ctrl=Input(new CtrlSigs())

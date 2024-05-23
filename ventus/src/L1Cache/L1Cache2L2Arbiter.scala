@@ -31,18 +31,27 @@ class L1Cache2L2Arbiter(implicit p: Parameters) extends DCacheModule {
   // **** memReq ****
   val memReqArb = Module(new Arbiter(new L1CacheMemReq,NCacheInSM))
   memReqArb.io.in <> io.memReqVecIn
+    //518
+  val cacheindex = Wire(Vec(NCacheInSM,UInt(log2Ceil(NCacheInSM).W)))
   for(i <- 0 until NCacheInSM) {
-    memReqArb.io.in(i).bits.a_source := Cat(i.asUInt,io.memReqVecIn(i).bits.a_source)
+//    printf("a_cache: %d , a_source : %b \n", i.asUInt, Cat(i.asUInt,io.memReqVecIn(i).bits.a_source).asUInt)
+    //518
+    cacheindex(i) := i.U
+    memReqArb.io.in(i).bits.a_source := Cat(cacheindex(i), io.memReqVecIn(i).bits.a_source)
+
+//    memReqArb.io.in(i).bits.a_source := Cat(i.asUInt,io.memReqVecIn(i).bits.a_source)
   }
   io.memReqOut <> memReqArb.io.out
   // ****************
 
   // **** memRsp ****
   for(i <- 0 until NCacheInSM) {
+//    printf("d_cache: %d , d_source : %b \n", i.asUInt, io.memRspIn.bits.d_source.asUInt)
     io.memRspVecOut(i).bits <> io.memRspIn.bits
     io.memRspVecOut(i).valid :=
       io.memRspIn.bits.d_source(log2Up(NCacheInSM)+3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)-1,3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets))===i.asUInt && io.memRspIn.valid
   }
+//  printf("valid: %d , d_source : %b \n",io.memRspIn.valid, io.memRspIn.bits.d_source)
   io.memRspIn.ready := Mux1H(UIntToOH(io.memRspIn.bits.d_source(log2Up(NCacheInSM)+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)+3-1,log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)+3)),
     Reverse(Cat(io.memRspVecOut.map(_.ready))))//TODO check order in test
   // ****************

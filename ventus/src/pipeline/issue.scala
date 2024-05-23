@@ -50,9 +50,11 @@ class Issue extends Module{
     val out_CSR=DecoupledIO(new csrExeData())
     val out_MUL=DecoupledIO(new vExeData)
     val out_TC=DecoupledIO(new vExeData)
+    //518
+    val out_DMA=DecoupledIO(new vExeData)
+//    val out_warpsheculer_async = DecoupledIO(new warpSchedulerExeData())
   })
   val inputBuf=Queue.apply(io.in,0)//Module(new Queue(new vExeData,entries = 1,pipe=true))
-
 
   io.out_sALU.bits.in1:=inputBuf.bits.in1(0)
   io.out_sALU.bits.in2:=inputBuf.bits.in2(0)
@@ -94,6 +96,12 @@ class Issue extends Module{
   io.out_warpscheduler.valid:=false.B
   io.out_CSR.valid:=false.B
   io.out_SFU.valid:=false.B
+  //518
+  io.out_DMA.valid := false.B
+  io.out_DMA.bits := inputBuf.bits
+  //  io.out_warpsheculer_async.bits.ctrl := inputBuf.bits.ctrl
+  //  io.out_warpsheculer_async.valid:=false.B
+
   inputBuf.ready:=false.B
   when(inputBuf.bits.ctrl.tc){
     io.out_TC.valid:=inputBuf.valid
@@ -110,8 +118,12 @@ class Issue extends Module{
   }.elsewhen(inputBuf.bits.ctrl.mul){
     io.out_MUL.valid:=inputBuf.valid
     inputBuf.ready:=io.out_MUL.ready
-  }
-    .elsewhen(inputBuf.bits.ctrl.mem){
+  } //518
+  .elsewhen(inputBuf.bits.ctrl.dma) {
+    io.out_DMA.valid := inputBuf.valid
+    //    io.out_warpsheculer_async.valid := inputBuf.valid
+    inputBuf.ready := io.out_DMA.ready
+  }.elsewhen(inputBuf.bits.ctrl.mem){
     //io.out_LSU<>inputBuf
     io.out_LSU.valid:=inputBuf.valid
     inputBuf.ready:=io.out_LSU.ready
@@ -133,13 +145,16 @@ class Issue extends Module{
   }.elsewhen(inputBuf.bits.ctrl.barrier){
     io.out_warpscheduler.valid:=inputBuf.valid
     inputBuf.ready:=io.out_warpscheduler.ready
-  }.otherwise({
+  }
+    .otherwise({
     io.out_sALU.valid:=inputBuf.valid
     inputBuf.ready:=io.out_sALU.ready
   })
   when(io.in.fire()&io.in.bits.ctrl.wid===0.U){
     //printf(p"wid=${io.in.bits.ctrl.wid},pc=0x${Hexadecimal(io.in.bits.ctrl.pc)},inst=0x${Hexadecimal(io.in.bits.ctrl.inst)}\n")
   }
+
+
 }
 
 // archive one to mux arbiter

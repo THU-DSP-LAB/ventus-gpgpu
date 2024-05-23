@@ -20,14 +20,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def regext_width = 3
 
-  var num_warp = 8
+  var num_warp = 2
 
   def num_cluster = 1
 
   def num_sm_in_cluster = num_sm / num_cluster
-  def depth_warp = log2Ceil(num_warp)
+  def depth_warp = if (num_warp > num_bank)  log2Ceil(num_warp) else log2Ceil(num_bank) //log2Ceil(num_warp)
 
-  var num_thread = 4
+  var num_thread = 16
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -68,7 +68,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = 8  // number of words per cacheline(block)
+  def dcache_BlockWords: Int = num_thread//num_thread//16  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
@@ -123,7 +123,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sig_length = 33
 
-  def num_cache_in_sm = 2
+  def num_cache_in_sm = 3 //518
 
   def num_l2cache = 1
 
@@ -165,4 +165,79 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X)
   def WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y)
   def WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
+
+
+  //518
+  //dma-xrn
+  def BitsOfByte = 8
+
+  def maxcopysize = 16 // bytes
+
+  def shared_aligned = 4 //bytes
+
+  var shared_aligned_bits = shared_aligned * 8 //bytes
+
+  def dma_aligned_bulk = 4 // bytes
+
+  var dma_aligned_bulk_bits = dma_aligned_bulk * 8 // bytes
+
+  def max_dma_inst = lsu_nMshrEntry
+
+  def max_dma_tag = 8
+
+  def max_l2cacheline = 6
+
+  def cacheline = dcache_BlockWords * 4 //128 // Math.pow(2, l2cachetagbits << 2).toInt //bytes
+
+  var l2cacheline = cacheline
+  var sharedcacheline = cacheline
+
+  def l2wayBits = log2Ceil(l2cache_NWays) //4
+
+  def l2setBits = log2Ceil(l2cache_NSets) //6
+
+  def l2offsetBits = log2Ceil(l2cache_BlockWords << 2) // 7
+
+  def l2cBits = log2Ceil(num_l2cache) //1
+
+  var l2cachetagbits = xLen - (l2setBits + l2offsetBits + l2cBits)
+  //  var l2cachetagbits = xLen - (l2wayBits + l2setBits + l2offsetBits + l2cBits)
+  // 32 - (4 + 5 + 7) = 16
+  var l2cachesetbits = l2setBits
+
+  //  var sharedsetbits = dcache_SetIdxBits
+  def addr_tag_bits = xLen - log2Ceil(l2cacheline)
+  def addr_set_bits = xLen - log2Ceil(sharedcacheline)
+
+  def numgroupl2cache = l2cacheline / dma_aligned_bulk
+
+  def numgroupshared = sharedcacheline / dma_aligned_bulk
+
+  def numgroupinsdmax = maxcopysize / dma_aligned_bulk
+
+  def UINT8 = 0
+
+  def UINT16 = 1
+
+  def UINT32 = 2
+
+  def INT32 = 3
+
+  def UINT64 = 4
+
+  def INT64 = 5
+
+  def FLOAT16 = 6
+
+  def FLOAT32 = 7
+
+  def FLOAT64 = 8
+
+  def BFLOAT16 = 9
+
+  def FLOAT32_FTZ = 10
+
+  def TFLOAT32 = 11
+
+  def TFLOAT32_FTZ = 12
 }

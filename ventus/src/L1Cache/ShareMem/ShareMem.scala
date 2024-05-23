@@ -15,6 +15,7 @@ import SRAMTemplate.SRAMTemplate
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
+import top.parameters.lsu_nMshrEntry
 
 /*Version Note
 * DCacheCoreReq spec changed, shift some work to LSU
@@ -31,7 +32,7 @@ class ShareMemPerLaneAddr(implicit p: Parameters) extends ShareMemBundle{
 }
 class ShareMemCoreReq(implicit p: Parameters) extends ShareMemBundle{
   //val ctrlAddr = new Bundle{
-  val instrId = UInt(WIdBits.W)//TODO length unsure
+  val instrId = UInt((1 + log2Up(lsu_nMshrEntry)).W)//TODO length unsure
   val isWrite = Bool()//Vec(NLanes, Bool())
   //val tag = UInt(TagBits.W)
   val setIdx = UInt(SetIdxBits.W)
@@ -40,8 +41,8 @@ class ShareMemCoreReq(implicit p: Parameters) extends ShareMemBundle{
 }
 
 class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
-  val instrId = UInt(WIdBits.W)
-  val isWrite = Bool()
+  val instrId = UInt((1 + log2Up(lsu_nMshrEntry)).W)
+//  val isWrite = Bool() 518
   val data = Vec(NLanes, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
 }
@@ -172,7 +173,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   // ******      core rsp
   coreRsp_Q.io.deq <> io.coreRsp
   coreRsp_Q.io.enq.valid := coreReqisValidRead_st2 || coreReqisValidWrite_st2
-  coreRsp_Q.io.enq.bits.isWrite := coreReqIsWrite_st2
+//  coreRsp_Q.io.enq.bits.isWrite := coreReqIsWrite_st2
   coreRsp_Q.io.enq.bits.data := DataCorssBarForRead.io.DataOut
   coreRsp_Q.io.enq.bits.instrId := coreReqInstrId_st2
   coreRsp_Q.io.enq.bits.activeMask := coreReqActvMask_st2

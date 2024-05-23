@@ -27,6 +27,7 @@ import scala.collection.mutable.ArrayBuffer
 //import chiseltest.simulator.
 import pipeline.pipe
 import top._
+import config.config.Parameters
 
 // add new testcases here!
 object TestCaseList{
@@ -56,8 +57,9 @@ class hello_test2 extends AnyFreeSpec with ChiselScalatestTester{
 }
 
 class single extends AnyFreeSpec with ChiselScalatestTester{
+  val param = (new MyConfig).toInstance
   "first_test" in {
-    test(new pipe()).withAnnotations(Seq(WriteVcdAnnotation)) { div =>
+    test(new pipe(sm_id = 0, SV = Some(mmu.SV32))(param)).withAnnotations(Seq(WriteVcdAnnotation)) { div =>
       //c.io.in1.poke(2.U)
       //def input(a: Int) = chiselTypeOf(div.io.inst.get.bits.Lit(_.bits -> a.U))
       div.io.inst.get.initSource().setSourceClock(div.clock)
@@ -290,6 +292,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
     val metaFileDir = testbench.meta.map("./ventus/txt/" + testbench.name + "/" + _)
     val dataFileDir = testbench.data.map("./ventus/txt/" + testbench.name + "/" + _)
     val maxCycle = testbench.cycles
+//    val maxCycle = 1
 
     val metas = metaFileDir.map(MetaData(_))
 
@@ -301,7 +304,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     val mem = new MemBox(MemboxS.SV32)
     //mem.loadfile(0, metas.head, dataFileDir.head)
-    test(new GPGPU_SimWrapper(FakeCache = false, Some(mmu.SV32))).withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false, Some(mmu.SV32))).withAnnotations(Seq(VerilatorBackendAnnotation, WriteVcdAnnotation)){ c =>
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)
       c.io.out_d.initSource()
@@ -311,6 +314,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
       c.clock.setTimeout(6000)
+//      c.clock.setTimeout(0)
       c.clock.step(5)
 
       var meta = new MetaData

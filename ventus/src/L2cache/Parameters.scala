@@ -155,7 +155,7 @@ case class InclusiveCacheParameters_lite(
   val param_bits = 3
   // the additional 1-bit at LSB is used for specifying TLB/L1Cache
   // automatically removed when L2Cache responsing to L1Cache
-  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1
+  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1 + 1
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题

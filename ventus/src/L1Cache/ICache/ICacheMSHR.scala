@@ -79,6 +79,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
     val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,asidLen))
     val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits,asidLen,NMshrEntry))
   })
+//  printf("missRspIn.valid : %d , entryidx :    %d \n",io.missRspIn.valid.asUInt,io.missRspIn.bits.EntryIdx.asUInt)
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
   val ASID_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(asidLen.W))))
