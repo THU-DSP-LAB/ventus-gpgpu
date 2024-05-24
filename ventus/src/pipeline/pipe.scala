@@ -86,6 +86,8 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
     val TLBRsp = Flipped(Decoupled(UInt(paLen.W)))
     val dma_cache_req = Decoupled(new DCacheMemReq_p)
     val dma_cache_rsp = Flipped(DecoupledIO(new DCacheMemRsp))
+    val wg_id_lookup_async = Output(UInt(depth_warp.W))
+    val wg_id_tag_async =Input(UInt(TAG_WIDTH.W))
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -461,7 +463,7 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
 
 
   val shared_req_lsu = Wire(DecoupledIO(new ShareMemCoreRep_np_ex))
-  shared_req_lsu.bits.instrId := Cat(1.U, lsu.io.shared_req.bits.instrId)
+  shared_req_lsu.bits.instrId := Cat(0.U, lsu.io.shared_req.bits.instrId)
   shared_req_lsu.bits.data := lsu.io.shared_req.bits.data
   shared_req_lsu.bits.isWrite := lsu.io.shared_req.bits.isWrite
   shared_req_lsu.bits.setIdx := lsu.io.shared_req.bits.setIdx
@@ -486,4 +488,9 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
   lsu.io.shared_rsp.bits <> shared_rsp_np
   lsu.io.shared_rsp.valid := Mux(io.shared_rsp.bits.instrId(log2Up(lsu_nMshrEntry)) === 0.U, io.shared_rsp.valid, false.B)
   io.shared_rsp.ready := Mux(io.shared_rsp.bits.instrId(log2Up(lsu_nMshrEntry)) === 1.U,dma.io.shared_rsp.ready, lsu.io.shared_rsp.ready)
+
+  io.wg_id_lookup_async:=warp_sche.io.wg_id_lookup_async
+  warp_sche.io.wg_id_tag_async:=io.wg_id_tag_async
+
+
 }

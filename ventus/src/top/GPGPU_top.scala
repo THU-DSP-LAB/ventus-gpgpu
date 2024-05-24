@@ -490,6 +490,8 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   pipe.io.dma_cache_rsp.bits.d_opcode := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_opcode
   l1Cache2L2Arb.io.memRspVecOut(2).ready := pipe.io.dma_cache_rsp.ready
 
+  pipe.io.wg_id_tag_async := cta2warp.io.wg_id_tag_async
+  cta2warp.io.wg_id_lookup_async := pipe.io.wg_id_lookup_async
 }
 
 

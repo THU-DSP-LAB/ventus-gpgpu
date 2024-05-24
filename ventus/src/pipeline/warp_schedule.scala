@@ -38,7 +38,13 @@ class warp_scheduler extends Module{
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
     val flushDCache = Decoupled(Bool())
+
+    //518
+    val wg_id_lookup_async = Output(UInt(depth_warp.W))
+    val wg_id_tag_async = Input(UInt(TAG_WIDTH.W))
+    val
   })
+  val
 
   val warp_end=io.warp_control.fire()&io.warp_control.bits.ctrl.simt_stack_op
   val warp_end_id=io.warp_control.bits.ctrl.wid

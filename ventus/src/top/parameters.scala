@@ -20,7 +20,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def regext_width = 3
 
-  var num_warp = 2
+  var num_warp = 8
 
   def num_cluster = 1
 
@@ -68,7 +68,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = num_thread//num_thread//16  // number of words per cacheline(block)
+  def dcache_BlockWords: Int = 32//num_thread//16  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
@@ -211,9 +211,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def numgroupl2cache = l2cacheline / dma_aligned_bulk
 
-  def numgroupshared = sharedcacheline / dma_aligned_bulk
+  def numgroupshared = num_thread * 4 / dma_aligned_bulk
 
   def numgroupinsdmax = maxcopysize / dma_aligned_bulk
+
+//  def shared_group = 16 // bytes
+//  def shared_group_num_0 = dcache_BlockWords * BytesOfWord / shared_group
+//
+//  def shared_group_num_1 = num_thread * BytesOfWord / shared_group
 
   def UINT8 = 0
 

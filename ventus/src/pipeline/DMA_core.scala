@@ -66,8 +66,8 @@ class l2cacheline_info(implicit p: Parameters) extends Bundle
 }
 class TempOutput extends Bundle{
   val entry_index = UInt(log2Ceil(max_dma_inst).W)
-  val mask = Vec(numgroupl2cache, Bool())
-  val data = Vec(numgroupl2cache, UInt((dma_aligned_bulk * BitsOfByte).W))
+  val mask = Vec(numgroupshared, Bool())
+  val data = Vec(numgroupshared, UInt((dma_aligned_bulk * BitsOfByte).W))
   val cacheline_info = new cacheline_info
   val instinfo = new vExeDataDMA()
 }
@@ -611,10 +611,10 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   val from_l2cache_all = Wire(new l2cacheline_info)
   from_l2cache_all.base := io.from_l2cache.bits
   from_l2cache_all.cacheline_info.tag  := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1)).tag
-  from_l2cache_all.cacheline_info.tensor_dim0_start := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).tensor_dim0_start
-  from_l2cache_all.cacheline_info.box_dim0_start    := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).box_dim0_start
+  from_l2cache_all.cacheline_info.tensor_dim0_start := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim0_start
+  from_l2cache_all.cacheline_info.box_dim0_start    := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1)).box_dim0_start
   (0 until(5)).foreach( x=> {
-    from_l2cache_all.cacheline_info.tensor_dim_step(x)          := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1)).tensor_dim_step(x)
+    from_l2cache_all.cacheline_info.tensor_dim_step(x)          := tagmem.read(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1)).tensor_dim_step(x)
   })
 
   //  val tensor_dim_step = Wire(Vec(5, UInt(xLen.W)))
@@ -634,9 +634,10 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   val valid_inst_entry = Mux(used_inst.andR, 0.U, PriorityEncoder(~used_inst))
   val valid_data_entry = Mux(used_cache.andR, 0.U, PriorityEncoder(~used_cache))
   val valid_tag_entry  = Mux(used_tag.andR, 0.U, PriorityEncoder(~used_tag))
-  val output_inst_entry = Mux(complete.asUInt.orR, PriorityEncoder(complete), 0.U)
+  val complete_inst_entry = Mux(complete.asUInt.orR, PriorityEncoder(complete), 0.U)
   val output_data_entry = Reg(UInt(log2Ceil(max_l2cacheline).W))
-
+  val output_tag_entry = Reg(UInt(log2Ceil(max_dma_tag).W))
+  val output_inst_entry = Reg(UInt(log2Ceil(max_dma_inst).W))
   //l2cache logic
   val current_inst_entry_index = io.from_l2cache.bits.d_source(l1cache_sourceBits -1 -log2Ceil(max_dma_tag), l1cache_sourceBits -1 -log2Ceil(max_dma_tag) - log2Ceil(max_dma_inst) + 1).asUInt
 
@@ -644,8 +645,40 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
 
   val current_inst_entry_index_reg = RegInit(0.U(log2Ceil(max_dma_inst).W))
   //  val current_tag_index = PriorityEncoder(output_inst(current_inst_entry_index).cacheline_info.tag.map(_===current_tag))
-  val current_mask_l2cache = RegInit(VecInit(Seq.fill(numgroupl2cache)(false.B)))
-//  val current_mask_l2cache_obb = RegInit(VecInit(Seq.fill(numgroupl2cache* dma_aligned_bulk)(false.B)))
+  val mask_l2cache = RegInit(VecInit(Seq.fill(numgroupl2cache)(false.B)))
+//  val mask_l2cache_cur = Wire(Vec(numgroupl2cache,Bool()))
+//  (0 until(numgroupl2cache)).foreach(x => {
+//      when(x.asUInt >= PriorityEncoder(mask_l2cache).asUInt && x.asUInt < PriorityEncoder(mask_l2cache).asUInt + numgroupshared.asUInt && mask_l2cache(x)){
+//        mask_l2cache_cur(x) := true.B
+//      }.otherwise{
+//        mask_l2cache_cur(x) := false.B
+//      }
+//  })
+  val mask_index = Wire(UInt((log2Ceil(xLen)+1).W))
+  mask_index := PriorityEncoder(mask_l2cache)
+  val mask_l2cache_next = Wire(Vec(numgroupl2cache, Bool()))
+  (0 until (numgroupl2cache)).foreach(x => {
+//    when(mask_l2cache(x)){
+//      when(x.asUInt >= PriorityEncoder(mask_l2cache) && x.asUInt < PriorityEncoder(mask_l2cache) + numgroupshared.asUInt){
+//        mask_l2cache_next(x) := false.B
+//      }.otherwise{
+//        mask_l2cache_next(x) := true.B
+//      }
+//    }.otherwise{
+//      mask_l2cache_next(x) := false.B
+//    }
+//    printf("x: %d  prior: %d  prior+shared: %d \n",x.asUInt,mask_index.asUInt,mask_index + numgroupshared.asUInt)
+    mask_l2cache_next(x) := mask_l2cache(x) && !(x.asUInt >= mask_index && x.asUInt < mask_index + numgroupshared.asUInt)
+  })
+  val mask_shared = Wire(Vec(numgroupshared,Bool()))
+  (0 until(numgroupshared)).foreach( x => {
+    when(x.asUInt + mask_index.asUInt < numgroupl2cache.asUInt){
+      mask_shared(x) := mask_l2cache(x.asUInt + mask_index)
+    }.otherwise{
+      mask_shared(x) := false.B
+    }
+  })
+//  val mask_l2cache_obb = RegInit(VecInit(Seq.fill(numgroupl2cache* dma_aligned_bulk)(false.B)))
   val output_inst = Reg(new vExeDataDMA)
   val output_data = Reg(new l2cacheline_info)
   val output_data_4byte = Wire(Vec(numgroupl2cache, UInt((dma_aligned_bulk * BitsOfByte).W)))
@@ -653,6 +686,20 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   (0 until (numgroupl2cache)).foreach(x => {
     output_data_4byte(x) := output_data.base.d_data.asUInt((x + 1) * (dma_aligned_bulk * BitsOfByte) - 1, x * (dma_aligned_bulk * BitsOfByte))
   })
+  // slice the l2cacheline to num_thread
+//  val shared_mask_reg = Reg(Vec(shared_group_num_0, Bool()))
+//  val shared_mask_next = Wire(Vec(shared_group_num_0, Bool()))
+//  val shared_mask_current = Wire(Vec(shared_group_num_0,Bool()))
+//  (0 until(shared_group_num_0)).foreach( x => {
+//    when(x.asUInt >= PriorityEncoder(shared_mask_reg) && x.asUInt < PriorityEncoder(shared_mask_reg) + shared_group_num_1.asUInt){
+//      shared_mask_current(x) := true.B
+//    }.otherwise{
+//      shared_mask_current(x) := false.B
+//    }
+//  })
+//  (0 until(shared_group_num_0)).foreach( x => {
+//    shared_mask_next(x) := shared_mask_reg(x) && !shared_mask_current(x)
+//  })
 
 
   //  val source_width = output_data.source.getWidth
@@ -660,20 +707,7 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   val tag_wire = Wire(UInt(xLen.W))
   tag_wire := output_data.cacheline_info.tag
   //  tag_wire := Cat(tagmem.read(output_data.source(xLen - 1, xLen - 1 - log2Ceil(max_dma_tag) + 1)),0.U((xLen - addr_tag_bits).W))
-  when(io.from_l2cache.fire) {
-    used_cache := used_cache.bitSet(valid_data_entry, true.B)
-    used_tag  := used_tag.bitSet(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1- log2Ceil(num_cache_in_sm), l1cache_sourceBits - 1 - log2Ceil(max_dma_tag)- log2Ceil(num_cache_in_sm) + 1),false.B)
 
-    datamem.write(valid_data_entry,from_l2cache_all)
-    entry_index_reg(valid_data_entry) := current_inst_entry_index
-    //    tagmem.write(io.from_l2cache.bits.source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1),0.U(addr_tag_bits.W))
-  }
-  when(io.from_addr_tag.fire) {
-    used_tag := used_tag.bitSet(valid_tag_entry, true.B)
-    //      tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
-    tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
-    //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
-  }
   val tmp_1 = Wire(Vec(l2cacheline, UInt((1 * BitsOfByte).W)))
   val tmp_2 = Wire(Vec(l2cacheline/2, UInt((2 * BitsOfByte).W)))
   val tmp_4 = Wire(Vec(l2cacheline/4, UInt((4 * BitsOfByte).W)))
@@ -763,16 +797,45 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
 
 
 
-  val s_idle ::s_getdata :: s_shared :: s_reset :: Nil = Enum(4)
+  val s_idle ::s_getdata :: s_shared :: s_shared1:: s_reset :: Nil = Enum(5)
   val state = RegInit(s_idle)
-  io.from_l2cache.ready := !(used_cache.andR) && !(io.to_shared.ready && used_cache.orR) && !(state === s_shared)
-  io.from_shared.ready := state === s_idle //&& used_cache.orR
+//  io.from_l2cache.ready := !(used_cache.andR) && !(io.to_shared.ready && used_cache.orR) && !(state === s_shared)&& !(state === s_shared1)
+  io.from_l2cache.ready := !(used_cache.andR) && (state === s_idle || state === s_getdata)
+  io.from_shared.ready := true.B //&& used_cache.orR
   io.from_addr.ready := state === s_idle && !(used_inst.andR)
   io.from_addr_tag.ready := !(used_tag.andR) && !io.from_l2cache.fire
   io.to_shared.valid := state === s_idle && used_cache.orR
   io.inst_complete.valid := state === s_reset
   io.inst_mem_index := Mux(io.from_addr.fire, valid_inst_entry, 0.U)
   io.tag_mem_index  := Mux(io.from_addr_tag.fire, valid_tag_entry, 0.U)
+
+  //finsih_cnt part
+  when(io.from_addr.fire) {
+    switch(io.from_addr.bits.funct) {
+      is(0.U) {
+        var group_start = io.from_addr.bits.dst(xLen - 1, 2)
+        var group_end = (io.from_addr.bits.dst + io.from_addr.bits.copysize)(xLen - 1, 2)
+
+        finish_cnt(valid_inst_entry) := 1.U + (group_end.asUInt - group_start.asUInt)
+        //          printf("group_start : %d\n",group_start.asUInt)
+        //          printf("group_end : %d\n",group_end.asUInt)
+        //          printf("finish_cnt : %d\n",finish_cnt(valid_inst_entry).asUInt)
+      }
+      is(1.U) {
+        finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
+      }
+      is(3.U) {
+        finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
+      }
+      //shared_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
+    }
+  }
+
+  when(io.from_shared.fire) {
+    finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(dma_aligned_bulk / 4)).asUInt
+  }
+
+  //state machine
   switch(state){
     is(s_idle){
       when(io.to_shared.ready && used_cache.orR && !io.from_l2cache.fire){
@@ -790,10 +853,17 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
     is(s_shared){
       when(complete.asUInt.orR){state:=s_reset}.otherwise{
         when(io.to_shared.fire) {
-          state := s_idle
+          state := s_shared1
         }.otherwise{
           state := state
         }
+      }
+    }
+    is(s_shared1){
+      when(mask_l2cache.asUInt === 0.U) {
+        state := s_idle
+      }.otherwise {
+        state := s_shared
       }
     }
     is(s_reset){
@@ -808,7 +878,7 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
 
   switch(state){
     is(s_idle) {
-      current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
+      mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
       output_data_entry := 0.U
       output_inst := 0.U.asTypeOf(new vExeDataDMA)
       output_data := 0.U.asTypeOf(new l2cacheline_info)
@@ -816,28 +886,20 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
       when(io.from_addr.fire) {
         used_inst := used_inst.bitSet(valid_inst_entry, true.B)
         instmem.write(valid_inst_entry, io.from_addr.bits)
-        switch(io.from_addr.bits.funct){
-          is(0.U) {
-            var group_start = io.from_addr.bits.dst(xLen - 1, 2)
-            var group_end = (io.from_addr.bits.dst + io.from_addr.bits.copysize)(xLen - 1, 2)
-
-            finish_cnt(valid_inst_entry) := 1.U + (group_end.asUInt - group_start.asUInt)
-            //          printf("group_start : %d\n",group_start.asUInt)
-            //          printf("group_end : %d\n",group_end.asUInt)
-            //          printf("finish_cnt : %d\n",finish_cnt(valid_inst_entry).asUInt)
-          }
-          is(1.U) {
-            finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
-          }
-          is(3.U) {
-            finish_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
-          }
-          //shared_cnt(valid_inst_entry) := io.from_addr.bits.copysize >> log2Ceil(dma_aligned_bulk)
-        }
       }
-
-      when(io.from_shared.fire){
-        finish_cnt(io.from_shared.bits.instrId) := finish_cnt(io.from_shared.bits.instrId) - (PopCount(io.from_shared.bits.activeMask) >> log2Ceil(dma_aligned_bulk / 4)).asUInt
+      when(io.from_l2cache.fire) {
+        used_cache := used_cache.bitSet(valid_data_entry, true.B)
+        used_tag := used_tag.bitSet(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1), false.B)
+        tagmem.write(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1), 0.U.asTypeOf(new cacheline_info))
+        datamem.write(valid_data_entry, from_l2cache_all)
+        entry_index_reg(valid_data_entry) := current_inst_entry_index
+        //    tagmem.write(io.from_l2cache.bits.source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1),0.U(addr_tag_bits.W))
+      }
+      when(io.from_addr_tag.fire) {
+        used_tag := used_tag.bitSet(valid_tag_entry, true.B)
+        //      tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
       }
       when(io.to_shared.ready && used_cache.orR && !io.from_l2cache.fire){
         output_data := datamem.read(PriorityEncoder(used_cache).asUInt).asTypeOf(new l2cacheline_info)
@@ -850,8 +912,6 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
       }
     }
     is(s_getdata){
-      //      tag_reg := tag_wire
-      //      printf("copysize : %d",output_inst.copysize)
       switch(output_inst.funct){
         is(0.U) {
           (0 until (numgroupl2cache)).foreach(x => {
@@ -860,10 +920,10 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
             var condition3 = (tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt)) < output_inst.src + output_inst.copysize && (tag_wire.asUInt + ((x.asUInt + 1.U) * dma_aligned_bulk.asUInt) - 1.U) >= output_inst.src + output_inst.copysize
             when(condition1 || condition2 || condition3) {
               printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt))} ")
-              current_mask_l2cache(x) := true.B
+              mask_l2cache(x) := true.B
             }.otherwise {
               printf(p"addr_false : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt))} ")
-              current_mask_l2cache(x) := false.B
+              mask_l2cache(x) := false.B
             }
           })
         }
@@ -873,10 +933,10 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
             var condition2 = (tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt) >= output_inst.src) && (tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt) < output_inst.src + output_inst.copysize)
             when(condition2) {
               printf(p"addr_true : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt))} ")
-              current_mask_l2cache(x) := true.B
+              mask_l2cache(x) := true.B
             }.otherwise {
               printf(p"addr_false : 0x${Hexadecimal(tag_wire.asUInt + (x.asUInt * dma_aligned_bulk.asUInt))} ")
-              current_mask_l2cache(x) := false.B
+              mask_l2cache(x) := false.B
             }
           })
         }
@@ -889,9 +949,9 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
             var cacheline_in_box = (tag_wire.asUInt + x.asUInt * dma_aligned_bulk.asUInt >= box_dim_start) && (tag_wire.asUInt + x.asUInt * dma_aligned_bulk.asUInt < box_dim_start + output_inst.tensorvars.boxDim(0) * output_inst.tensorvars.datawidth)
             //              var index_of_the_start = (tag_wire.asUInt - box_dim_start.asUInt) % (from_l2cache_all.asUInt)
             when(cacheline_in_box){
-              current_mask_l2cache(x) := true.B
+              mask_l2cache(x) := true.B
             }.otherwise{
-              current_mask_l2cache(x) := false.B
+              mask_l2cache(x) := false.B
             }
           })
           switch(datawidth){
@@ -910,35 +970,80 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
           }
         }
       }
+      when(io.from_addr_tag.fire) {
+        used_tag := used_tag.bitSet(valid_tag_entry, true.B)
+        //      tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
+      }
+      when(io.from_l2cache.fire) {
+        used_cache := used_cache.bitSet(valid_data_entry, true.B)
+        used_tag := used_tag.bitSet(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1), false.B)
+        tagmem.write(io.from_l2cache.bits.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1), 0.U.asTypeOf(new cacheline_info))
+        datamem.write(valid_data_entry, from_l2cache_all)
+        entry_index_reg(valid_data_entry) := current_inst_entry_index
+        //    tagmem.write(io.from_l2cache.bits.source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1),0.U(addr_tag_bits.W))
+      }
     }
     is(s_shared){
       when(io.to_shared.fire){
+        mask_l2cache := mask_l2cache_next
+      }
+      when(io.from_addr_tag.fire) {
+        used_tag := used_tag.bitSet(valid_tag_entry, true.B)
+        //      tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
+      }
+    }
+    is(s_shared1){
+      when(mask_l2cache.asUInt === 0.U){
         datamem.write(output_data_entry, 0.U.asTypeOf(new l2cacheline_info))
         used_cache := used_cache.bitSet(output_data_entry, false.B)
+//        tagmem.write(output_data.base.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1),0.U.asTypeOf(new cacheline_info()))
+//        used_tag := used_tag.bitSet(output_data.base.d_source(l1cache_sourceBits - 1, l1cache_sourceBits - 1 - log2Ceil(max_dma_tag) + 1), false.B)
         output_data_entry := 0.U
-        //shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(current_mask_l2cache.asUInt)
+        //shared_cnt(current_inst_entry_index_reg) := shared_cnt(current_inst_entry_index_reg) - PopCount(mask_l2cache.asUInt)
         //        datamem.write(0.U,0.U)
-        current_mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
-        output_inst :=  0.U.asTypeOf(new vExeDataDMA)
+        mask_l2cache := VecInit(Seq.fill(numgroupl2cache)(false.B))
+        output_inst := 0.U.asTypeOf(new vExeDataDMA)
         //        tag_reg :=  0.U(addr_tag_bits.W)
-        current_inst_entry_index_reg :=  0.U(log2Ceil(max_dma_inst).W)
+        current_inst_entry_index_reg := 0.U(log2Ceil(max_dma_inst).W)
+      }
+      when(io.from_addr_tag.fire) {
+        used_tag := used_tag.bitSet(valid_tag_entry, true.B)
+        //      tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
       }
     }
     is(s_reset){
-      used_inst := used_inst.bitSet(output_inst_entry, false.B)
+      used_inst := used_inst.bitSet(complete_inst_entry, false.B)
       finish_cnt(PriorityEncoder(complete)) := 1.U
-      //      instmem.write(output_inst_entry,0.U)
+      //      instmem.write(complete_inst_entry,0.U)
+      when(io.from_addr_tag.fire) {
+        used_tag := used_tag.bitSet(valid_tag_entry, true.B)
+        //      tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        tagmem.write(valid_tag_entry, io.from_addr_tag.bits)
+        //    stepMem.write(valid_tag_entry,io.from_addr_tag.bits.tensor_dim0_start)
+      }
     }
   }
   io.to_shared.valid := state === s_shared
   io.to_shared.bits.entry_index := current_inst_entry_index_reg
-  io.to_shared.bits.mask := current_mask_l2cache
-  (0 until(numgroupl2cache)).foreach( x=> {
-    io.to_shared.bits.data(x) := output_data_4byte(x)
+  io.to_shared.bits.mask := mask_shared
+  (0 until(numgroupshared)).foreach( x=> {
+    when(x.asUInt + mask_index < numgroupl2cache.asUInt){
+      io.to_shared.bits.data(x) := output_data_4byte(x.asUInt + mask_index)
+    }.otherwise{
+      io.to_shared.bits.data(x) := 0.U
+    }
   })
-  io.to_shared.bits.cacheline_info.tag := tag_wire
   io.to_shared.bits.instinfo := output_inst
-  io.to_shared.bits.cacheline_info := output_data.cacheline_info
+  io.to_shared.bits.cacheline_info.tag := tag_wire + mask_index * dma_aligned_bulk.asUInt
+  io.to_shared.bits.cacheline_info.tensor_dim0_start := output_data.cacheline_info.tensor_dim0_start
+  io.to_shared.bits.cacheline_info.tensor_dim_step := output_data.cacheline_info.tensor_dim_step
+  io.to_shared.bits.cacheline_info.box_dim0_start := output_data.cacheline_info.box_dim0_start
   io.inst_complete.bits := output_inst.wid
 
 
@@ -963,9 +1068,9 @@ class Addrcalc_shared() extends Module {
   val s_idle :: s_shared1 ::s_shared2::s_shift::Nil = Enum(4)
   val state = RegInit(init = s_idle)
   val reg_save = Reg(new TempOutput)
-  val current_numgroup = Reg(UInt(log2Ceil(numgroupl2cache).W))
+  val current_numgroup = Reg(UInt(log2Ceil(numgroupshared).W))
   val output_reg = Reg(new ShareMemCoreReq_np)
-  val cnt = new Counter(n = numgroupl2cache)
+  val cnt = new Counter(n = numgroupshared)
   //  val inst_mem_index_reg = RegInit(0.U(log2Ceil(max_dma_inst).W))
 
   val box_elements_num = Wire(Vec(5, UInt(xLen.W)))
@@ -974,15 +1079,15 @@ class Addrcalc_shared() extends Module {
   })
   val l2cacheTag_shift = Wire(UInt(xLen.W))
   l2cacheTag_shift := reg_save.cacheline_info.tag
-  val addr = Wire(Vec(numgroupl2cache,UInt(xLen.W))) // changed according to l2cachetag
-  addr := VecInit(Seq.fill(numgroupl2cache)(0.U(xLen.W)))
-  (0 until(numgroupl2cache)).foreach(x => { // assume the data stored in memory continuously
+  val addr = Wire(Vec(numgroupshared,UInt(xLen.W))) // changed according to l2cachetag
+  addr := VecInit(Seq.fill(numgroupshared)(0.U(xLen.W)))
+  (0 until(numgroupshared)).foreach(x => { // assume the data stored in memory continuously
     switch(reg_save.instinfo.funct){
       is(0.U){
         addr(x) := l2cacheTag_shift - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
       }
       is(1.U){
-        addr(x) := reg_save.instinfo.dst - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
+        addr(x) := reg_save.cacheline_info.tag - reg_save.instinfo.src + reg_save.instinfo.dst + x.asUInt * dma_aligned_bulk.U
       }
       is(3.U){
         var shared_box_dim_start = reg_save.instinfo.dst +
@@ -999,27 +1104,27 @@ class Addrcalc_shared() extends Module {
       }
     }
   })
-  val mask_bits = Wire(UInt((numgroupl2cache).W))
+  val mask_bits = Wire(UInt((numgroupshared).W))
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(mask_bits.asUInt))
   val current_tag = Mux(reg_save.mask.asUInt =/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
   val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
-  val blockOffset = Wire(Vec(numgroupl2cache, UInt(dcache_BlockOffsetBits.W)))
-  (0 until numgroupl2cache).foreach( x => blockOffset(x) := addr(x)(10, 2) )
+  val blockOffset = Wire(Vec(numgroupshared, UInt(dcache_BlockOffsetBits.W)))
+  (0 until numgroupshared).foreach( x => blockOffset(x) := addr(x)(10, 2) )
 
 
-  val current_mask = Wire(Vec(numgroupl2cache, Bool()))
-  (0 until numgroupl2cache).foreach(x => {
+  val current_mask = Wire(Vec(numgroupshared, Bool()))
+  (0 until numgroupshared).foreach(x => {
     current_mask(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
   })
-  val mask_next = Wire(Vec(numgroupl2cache, Bool()))
-  (0 until numgroupl2cache).foreach( x => {
+  val mask_next = Wire(Vec(numgroupshared, Bool()))
+  (0 until numgroupshared).foreach( x => {
     mask_next(x) := reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===current_tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
   })
-  //  val current_mask_index = Reg(Vec(numgroupl2cache, UInt(log2Ceil(numgroupl2cache).W)))
+  //  val current_mask_index = Reg(Vec(numgroupshared, UInt(log2Ceil(numgroupshared).W)))
   // wordoffset part
-  val wordOffset1H_bytes = Wire(Vec(numgroupl2cache * dma_aligned_bulk, Bool())) // will changed according to addr
-  (0 until numgroupl2cache * dma_aligned_bulk).foreach(x => {
+  val wordOffset1H_bytes = Wire(Vec(numgroupshared * dma_aligned_bulk, Bool())) // will changed according to addr
+  (0 until numgroupshared * dma_aligned_bulk).foreach(x => {
     // todo
     wordOffset1H_bytes(x) := true.B
     switch(reg_save.instinfo.funct) {
@@ -1044,10 +1149,10 @@ class Addrcalc_shared() extends Module {
     }
   })
   //set zero part
-  val data_bytes = Wire(Vec(numgroupl2cache * dma_aligned_bulk, UInt(BitsOfByte.W)))
+  val data_bytes = Wire(Vec(numgroupshared * dma_aligned_bulk, UInt(BitsOfByte.W)))
   data_bytes := reg_save.data.asTypeOf(data_bytes)
-  val data_bytes_z = Wire(Vec(numgroupl2cache * dma_aligned_bulk, UInt(BitsOfByte.W)))
-  (0 until (numgroupl2cache * dma_aligned_bulk)).foreach(x => {
+  val data_bytes_z = Wire(Vec(numgroupshared * dma_aligned_bulk, UInt(BitsOfByte.W)))
+  (0 until (numgroupshared * dma_aligned_bulk)).foreach(x => {
     var shared_tag = reg_save.cacheline_info.tag - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt
     var shared_last_cp = reg_save.cacheline_info.tag - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt + reg_save.instinfo.copysize - 1.U
     var shared_last_src = reg_save.cacheline_info.tag - reg_save.instinfo.src.asUInt + reg_save.instinfo.dst.asUInt + reg_save.instinfo.srcsize - 1.U
@@ -1070,14 +1175,14 @@ class Addrcalc_shared() extends Module {
   shiftbytes := 0.U
   val high_margin = PriorityEncoder(reg_save.mask.reverse)
   val low_margin = PriorityEncoder(reg_save.mask)
-  val data_bytes_z_s = Wire(Vec(numgroupl2cache * dma_aligned_bulk, UInt(BitsOfByte.W)))
-  val wordOffset1H_bytes_s = Wire(Vec(numgroupl2cache * dma_aligned_bulk, Bool())) // will changed according to addr
+  val data_bytes_z_s = Wire(Vec(numgroupshared * dma_aligned_bulk, UInt(BitsOfByte.W)))
+  val wordOffset1H_bytes_s = Wire(Vec(numgroupshared * dma_aligned_bulk, Bool())) // will changed according to addr
   wordOffset1H_bytes_s := wordOffset1H_bytes
-  data_bytes_z_s := reg_save.data.asTypeOf(Vec(numgroupl2cache * dma_aligned_bulk, UInt(BitsOfByte.W)))
+  data_bytes_z_s := reg_save.data.asTypeOf(Vec(numgroupshared * dma_aligned_bulk, UInt(BitsOfByte.W)))
   mask_bits := reg_save.mask.asUInt
   when(src_1(1,0).asUInt === dst_1(1,0).asUInt){
     // do not need to shift
-//    data_bytes_z_s := reg_save.data.asTypeOf(Vec(numgroupl2cache * dma_aligned_bulk, UInt(BitsOfByte.W)))
+//    data_bytes_z_s := reg_save.data.asTypeOf(Vec(numgroupshared * dma_aligned_bulk, UInt(BitsOfByte.W)))
     data_bytes_z_s := data_bytes_z
     mask_bits := reg_save.mask.asUInt
     l2cacheTag_shift := reg_save.cacheline_info.tag
@@ -1090,8 +1195,8 @@ class Addrcalc_shared() extends Module {
       when(high_margin <= low_margin){
         // shift right
         shiftbytes := src_1(1,0).asUInt - dst_1(1,0).asUInt
-        (0 until(dma_aligned_bulk * numgroupl2cache)).foreach( x => {
-          when( x.asUInt + shiftbytes.asUInt < dma_aligned_bulk.asUInt * numgroupl2cache.asUInt){
+        (0 until(dma_aligned_bulk * numgroupshared)).foreach( x => {
+          when( x.asUInt + shiftbytes.asUInt < dma_aligned_bulk.asUInt * numgroupshared.asUInt){
             data_bytes_z_s(x) := data_bytes_z(x.asUInt + shiftbytes.asUInt)
           }.otherwise{
             data_bytes_z_s(x) := 0.U(BitsOfByte.W)
@@ -1105,7 +1210,7 @@ class Addrcalc_shared() extends Module {
       }.otherwise{
         //shift left
         shiftbytes := dma_aligned_bulk.asUInt - (src_1(1,0).asUInt - dst_1(1,0).asUInt)
-        (0 until(dma_aligned_bulk * numgroupl2cache)).foreach( x => {
+        (0 until(dma_aligned_bulk * numgroupshared)).foreach( x => {
           when(x.asUInt - shiftbytes.asUInt > 0.U){
             data_bytes_z_s(x) := data_bytes_z(x.asUInt - shiftbytes.asUInt)
           }.otherwise{
@@ -1122,8 +1227,8 @@ class Addrcalc_shared() extends Module {
     }.elsewhen(src_1(1,0).asUInt < dst_1(1,0).asUInt){
       when(high_margin <= low_margin){
         shiftbytes := dma_aligned_bulk.asUInt - (dst_1(1,0).asUInt - src_1(1,0).asUInt)
-        (0 until(dma_aligned_bulk * numgroupl2cache)).foreach( x => {
-          when(x.asUInt + shiftbytes < dma_aligned_bulk.asUInt * numgroupl2cache.asUInt){
+        (0 until(dma_aligned_bulk * numgroupshared)).foreach( x => {
+          when(x.asUInt + shiftbytes < dma_aligned_bulk.asUInt * numgroupshared.asUInt){
             data_bytes_z_s(x) :=  data_bytes_z(x.asUInt + shiftbytes.asUInt)
           }.otherwise{
             data_bytes_z_s(x) := 0.U
@@ -1137,7 +1242,7 @@ class Addrcalc_shared() extends Module {
         //        mask_bits := mask_bits >> 1
       }.otherwise{
         shiftbytes := dst_1.asUInt - src_1.asUInt
-        (0 until(dma_aligned_bulk * numgroupl2cache)).foreach( x => {
+        (0 until(dma_aligned_bulk * numgroupshared)).foreach( x => {
           when(x.asUInt - shiftbytes < 0.U){
             data_bytes_z_s(x) :=  data_bytes_z(x.asUInt - shiftbytes.asUInt)
           }.otherwise{
@@ -1209,9 +1314,9 @@ class Addrcalc_shared() extends Module {
       when(io.from_temp.fire){
         reg_save := io.from_temp.bits
         output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
-        current_numgroup := PopCount(io.from_temp.bits.mask)
+//        current_numgroup := PopCount(io.from_temp.bits.mask)
       }.otherwise{
-        current_numgroup := 0.U(log2Ceil(numgroupl2cache).W)
+//        current_numgroup := 0.U(log2Ceil(numgroupshared).W)
         reg_save := RegInit(0.U.asTypeOf(new TempOutput))
         output_reg := RegInit(0.U.asTypeOf(new ShareMemCoreReq_np))
       }
@@ -1219,7 +1324,7 @@ class Addrcalc_shared() extends Module {
     is(s_shift){
       reg_save.data := data_bytes_z_s.asTypeOf(reg_save.data)
       reg_save.cacheline_info.tag := l2cacheTag_shift
-      (0 until(numgroupl2cache)).foreach( x => {
+      (0 until(numgroupshared)).foreach( x => {
         reg_save.mask(x) := mask_bits(x)
       })
     }
@@ -1271,7 +1376,7 @@ class Addrcalc_shared() extends Module {
     is(s_shared2){
       when(io.shared_req.fire){
         reg_save.mask := mask_next
-        //        current_mask_index := RegInit(VecInit(Seq.fill(numgroupl2cache)(0.U(log2Ceil(numgroupl2cache).W))))
+        //        current_mask_index := RegInit(VecInit(Seq.fill(numgroupshared)(0.U(log2Ceil(numgroupshared).W))))
         output_reg := RegInit(0.U.asTypeOf((new ShareMemCoreReq_np)))
 
       }.otherwise{

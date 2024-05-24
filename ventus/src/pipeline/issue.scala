@@ -119,11 +119,17 @@ class Issue extends Module{
     io.out_MUL.valid:=inputBuf.valid
     inputBuf.ready:=io.out_MUL.ready
   } //518
-  .elsewhen(inputBuf.bits.ctrl.dma) {
+  .elsewhen(inputBuf.bits.ctrl.dma && inputBuf.bits.ctrl.funct.asUInt =/= 4.U) { // not mbarrier
     io.out_DMA.valid := inputBuf.valid
     //    io.out_warpsheculer_async.valid := inputBuf.valid
     inputBuf.ready := io.out_DMA.ready
-  }.elsewhen(inputBuf.bits.ctrl.mem){
+  }
+  .elsewhen(inputBuf.bits.ctrl.dma && inputBuf.bits.ctrl.funct.asUInt === 4.U) { // dma mbarrier
+    io.out_warpscheduler.valid := inputBuf.valid
+    //    io.out_warpsheculer_async.valid := inputBuf.valid
+    inputBuf.ready := io.out_warpscheduler.ready
+  }
+    .elsewhen(inputBuf.bits.ctrl.mem){
     //io.out_LSU<>inputBuf
     io.out_LSU.valid:=inputBuf.valid
     inputBuf.ready:=io.out_LSU.ready
