@@ -442,13 +442,15 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
   val dma = Module(new DMA_core(SV)(p))
   dma.io.dma_req <> issueX.io.out_DMA
   issueV.io.out_DMA.ready := false.B
+  warp_sche.io.issued_dma.bits := issueX.io.out_DMA.bits.ctrl.wid
+  warp_sche.io.issued_dma.valid := dma.io.dma_req.fire
 //  issueX.io.out_warpsheculer_async.ready := false.B
-//  issueV.io.out_warpsheculer_async.ready := false.B//TODO to scheduler
+//  issueV.io.out_warpsheculer_async.ready := false.B
   dma.io.TLBReq <> io.TLBReq
   dma.io.TLBRsp <> io.TLBRsp
   io.dma_cache_req <> dma.io.dma_cache_req
   dma.io.dma_cache_rsp <> io.dma_cache_rsp
-  dma.io.fence_end_dma.ready := true.B //TODO to scheduler
+  dma.io.fence_end_dma <> warp_sche.io.finished_dma
 //  dma.io.shared_req.ready := false.B
 //  dma.io.shared_rsp.valid := false.B
 //  dma.io.shared_rsp.bits := 0.U.asTypeOf(new DCacheCoreRsp_np)

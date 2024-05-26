@@ -42,16 +42,18 @@ class warp_scheduler extends Module{
     //518
     val wg_id_lookup_async = Output(UInt(depth_warp.W))
     val wg_id_tag_async = Input(UInt(TAG_WIDTH.W))
-    val
+    val issued_dma = Flipped(DecoupledIO(UInt(depth_warp.W)))
+    val finished_dma = Flipped(DecoupledIO(UInt(depth_warp.W)))
   })
-  val
+
 
   val warp_end=io.warp_control.fire()&io.warp_control.bits.ctrl.simt_stack_op
   val warp_end_id=io.warp_control.bits.ctrl.wid
 
   io.branch.ready:= !io.flushCache.valid
   io.warp_control.ready:= !io.branch.fire() & !io.flushCache.valid
-
+  io.wg_id_lookup_async := io.finished_dma.bits
+  val dma_end_wg_id=io.wg_id_tag_async(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
   io.warpReq.ready:=true.B
   io.warpRsp.valid:=warp_end // always ready.
   io.warpRsp.bits.wid:=warp_end_id
@@ -113,8 +115,75 @@ class warp_scheduler extends Module{
   val end_wg_id=io.wg_id_tag(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
   val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
   val warp_bar_data=RegInit(0.U(num_warp.W))
+  val warp_bar_data_async=RegInit(0.U(num_warp.W)) // 518
+  val warp_bar_data_async_tmp = Wire(Vec(num_warp/warp_align_async, UInt(warp_align_async.W))) // 518
+  val warp_bar_cur_async_tmp=Wire(Vec(num_warp_in_a_block / warp_align_async,UInt(warp_align_async.W)))
+  val warp_dma = RegInit(VecInit(Seq.fill(num_warp)(0.U(max_dma_inst.W))))
+  val warp_dmaing = Wire(Vec(num_warp,UInt(max_dma_inst.W)))
+  val warp_dma_judge_reg = RegInit(VecInit(Seq.fill(num_warp/ warp_align_async)(0.U(2.W))))
+  /* 0: all done
+    * 1: barrier done, dma not done
+    * 2: barrier not done, dma done
+    * */
+  val warp_dma_judge_wire = Wire(Vec(num_warp,Bool()))
+//  val warp_dma_not_done = Wire(Vec(num_warp/warp_align_async,Bool()))
+  val warp_bar_cur_async=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
-
+  (0 until(num_warp/ warp_align_async)).foreach( x=> {
+    (0 until(warp_align_async)).foreach( y =>{
+      warp_dma_judge_wire(x * warp_align_async + y) := warp_dma_judge_reg(x) =/= 0.U
+    })
+  })
+  (0 until( num_warp)).foreach( x=> {
+    warp_dmaing(x) := warp_dma(x)
+    when(x.asUInt === io.issued_dma.bits.asUInt && io.issued_dma.fire){
+      warp_dmaing(x) := warp_dma(x) + 1.U
+    }
+    when(x.asUInt === io.finished_dma.bits.asUInt && io.finished_dma.fire){
+      warp_dmaing(x) := warp_dma(x) - 1.U
+    }
+  })
+  (0 until( num_warp / warp_align_async)).foreach( x=> {
+    when(warp_dmaing.asUInt(x * warp_align_async* max_dma_inst + warp_align_async* max_dma_inst - 1, x * warp_align_async * max_dma_inst) === 0.U && !(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma )){
+//      warp_dma_not_done(x) := true.B
+//      when(warp_dma_judge_reg(x) === 0.U){
+//        warp_dma_judge_reg(x) := 2.U
+      when(warp_dma_judge_reg(x) === 1.U){
+          warp_dma_judge_reg(x) := 0.U
+        }
+    }//.otherwise{
+//      warp_dma_not_done(x) := false.B
+//    }
+  })
+  (0 until (num_warp / warp_align_async)).foreach(x => {
+    when(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma ){
+      when(((warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt))(x * warp_align_async + warp_align_async - 1, x * warp_align_async) === warp_bar_exp(end_wg_id)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)) {
+        warp_bar_cur_async_tmp(x) := 0.U
+        warp_bar_data_async_tmp(x) := warp_bar_data_async(x * warp_align_async + warp_align_async - 1, x * warp_align_async) & (~warp_bar_belong(end_wg_id)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)).asUInt
+        when(warp_dma_judge_reg(x) === 0.U) {
+          warp_dma_judge_reg(x) := 1.U
+        }
+//          .elsewhen(warp_dma_judge_reg(x) === 2.U) {
+//          warp_dma_judge_reg(x) := 0.U
+//        }
+      }.otherwise {
+        warp_bar_cur_async_tmp(x) := (warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+        warp_bar_data_async_tmp(x) := (warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+      }
+    }.otherwise{
+      warp_bar_cur_async_tmp(x) := (warp_bar_cur_async(end_wg_id))(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+      warp_bar_data_async_tmp(x) := (warp_bar_data_async)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+    }
+  })
+  io.issued_dma.ready := true.B
+  io.finished_dma.ready := !io.issued_dma.fire || !io.warp_control.fire
+  when(io.issued_dma.fire || io.finished_dma.fire){
+//    warp_dma(io.issued_dma.bits) := warp_dma(io.issued_dma.bits) + 1.U
+    warp_dma := warp_dmaing
+  }
+//  when(io.finished_dma.fire){
+//    warp_dma(io.finished_dma.bits) := warp_dma(io.finished_dma.bits) - 1.U
+//  }
   when(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
       warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
@@ -127,12 +196,19 @@ class warp_scheduler extends Module{
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
   warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
-  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
-    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
-    warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
-    when((warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt())===warp_bar_exp(end_wg_id)){
-      warp_bar_cur(end_wg_id):=0.U
-      warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
+  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op) ){ //means barrrier 518
+    when(io.warp_control.bits.ctrl.dma){ // 518
+//      warp_bar_cur_async(end_wg_id) := warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+//      warp_bar_data_async := warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+      warp_bar_cur_async(end_wg_id) := warp_bar_cur_async_tmp.asUInt
+      warp_bar_data_async := warp_bar_data_async_tmp.asUInt
+    }.otherwise{
+      warp_bar_cur(end_wg_id) := warp_bar_cur(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+      warp_bar_data := warp_bar_data | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+      when((warp_bar_cur(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt()) === warp_bar_exp(end_wg_id)) {
+        warp_bar_cur(end_wg_id) := 0.U
+        warp_bar_data := warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
+      }
     }
   }
   // collect endprg in one wg and issue flush request
@@ -160,7 +236,7 @@ class warp_scheduler extends Module{
 
 
   warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt()&Fill(num_warp,io.warpReq.fire()))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt() )).asUInt
-  val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
+  val warp_ready=(~(warp_bar_data |warp_bar_data_async|warp_dma_judge_wire.asUInt| io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt //518
   io.warp_ready:=warp_ready
   for (i<- num_warp-1 to 0 by -1){
     pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 

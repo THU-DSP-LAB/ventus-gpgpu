@@ -622,7 +622,7 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   //  val shared_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((log2Ceil(numgroupinsdmax)).W))))
   //  val finish_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((log2Ceil(numgroupinsdmax)).W))))
   //val shared_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((xLen).W))))
-  val finish_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)((numgroupinsdmax-1).U((xLen).W))))
+  val finish_cnt = RegInit(VecInit(Seq.fill(max_dma_inst)(1.U((xLen).W))))
   val used_inst = RegInit(0.U(max_dma_inst.W))
   val used_tag = RegInit(0.U(max_dma_tag.W))
   val used_cache = RegInit(0.U(max_l2cacheline.W))
@@ -801,7 +801,7 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
   val state = RegInit(s_idle)
 //  io.from_l2cache.ready := !(used_cache.andR) && !(io.to_shared.ready && used_cache.orR) && !(state === s_shared)&& !(state === s_shared1)
   io.from_l2cache.ready := !(used_cache.andR) && (state === s_idle || state === s_getdata)
-  io.from_shared.ready := true.B //&& used_cache.orR
+  io.from_shared.ready := !io.from_addr.fire && !(state === s_reset) //&& used_cache.orR
   io.from_addr.ready := state === s_idle && !(used_inst.andR)
   io.from_addr_tag.ready := !(used_tag.andR) && !io.from_l2cache.fire
   io.to_shared.valid := state === s_idle && used_cache.orR
@@ -851,13 +851,13 @@ class Temp_mem(implicit p: Parameters) extends Module { //2024.5.9 start here! s
       state:=s_shared
     }
     is(s_shared){
-      when(complete.asUInt.orR){state:=s_reset}.otherwise{
-        when(io.to_shared.fire) {
-          state := s_shared1
-        }.otherwise{
-          state := state
-        }
+//      when(complete.asUInt.orR){state:=s_reset}.otherwise{
+      when(io.to_shared.fire) {
+        state := s_shared1
+      }.otherwise{
+        state := state
       }
+//      }
     }
     is(s_shared1){
       when(mask_l2cache.asUInt === 0.U) {

@@ -215,6 +215,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def numgroupinsdmax = maxcopysize / dma_aligned_bulk
 
+  def warp_align_async = 4
+
 //  def shared_group = 16 // bytes
 //  def shared_group_num_0 = dcache_BlockWords * BytesOfWord / shared_group
 //
