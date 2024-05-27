@@ -361,7 +361,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       }
 
       val host_driver = new RequestSenderGPU(5)
-      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 0, 5)
+      val mem_driver = new MemPortDriverDelay(c.io.out_a, c.io.out_d, mem, 10, 5)
 
       while(clock_cnt <= maxCycle && !wg_list.flatten.reduce(_ && _)){
         if(clock_cnt - timestamp == 0){

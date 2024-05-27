@@ -116,20 +116,20 @@ class warp_scheduler extends Module{
   val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
   val warp_bar_data=RegInit(0.U(num_warp.W))
   val warp_bar_data_async=RegInit(0.U(num_warp.W)) // 518
-  val warp_bar_data_async_tmp = Wire(Vec(num_warp/warp_align_async, UInt(warp_align_async.W))) // 518
-  val warp_bar_cur_async_tmp=Wire(Vec(num_warp_in_a_block / warp_align_async,UInt(warp_align_async.W)))
+  val warp_bar_data_async_tmp = Wire(Vec(num_wgroup, UInt(warp_align_async.W))) // 518
+  val warp_bar_cur_async_tmp=Wire(Vec(num_wgroup,UInt(warp_align_async.W)))
   val warp_dma = RegInit(VecInit(Seq.fill(num_warp)(0.U(max_dma_inst.W))))
   val warp_dmaing = Wire(Vec(num_warp,UInt(max_dma_inst.W)))
-  val warp_dma_judge_reg = RegInit(VecInit(Seq.fill(num_warp/ warp_align_async)(0.U(2.W))))
+  val warp_dma_judge_reg = RegInit(VecInit(Seq.fill(num_wgroup)(0.U(2.W))))
   /* 0: all done
     * 1: barrier done, dma not done
     * 2: barrier not done, dma done
     * */
   val warp_dma_judge_wire = Wire(Vec(num_warp,Bool()))
-//  val warp_dma_not_done = Wire(Vec(num_warp/warp_align_async,Bool()))
+//  val warp_dma_not_done = Wire(Vec(num_wgroup,Bool()))
   val warp_bar_cur_async=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
-  (0 until(num_warp/ warp_align_async)).foreach( x=> {
+  (0 until(num_wgroup)).foreach( x=> {
     (0 until(warp_align_async)).foreach( y =>{
       warp_dma_judge_wire(x * warp_align_async + y) := warp_dma_judge_reg(x) =/= 0.U
     })
@@ -143,7 +143,7 @@ class warp_scheduler extends Module{
       warp_dmaing(x) := warp_dma(x) - 1.U
     }
   })
-  (0 until( num_warp / warp_align_async)).foreach( x=> {
+  (0 until( num_wgroup)).foreach( x=> {
     when(warp_dmaing.asUInt(x * warp_align_async* max_dma_inst + warp_align_async* max_dma_inst - 1, x * warp_align_async * max_dma_inst) === 0.U && !(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma )){
 //      warp_dma_not_done(x) := true.B
 //      when(warp_dma_judge_reg(x) === 0.U){
@@ -155,7 +155,7 @@ class warp_scheduler extends Module{
 //      warp_dma_not_done(x) := false.B
 //    }
   })
-  (0 until (num_warp / warp_align_async)).foreach(x => {
+  (0 until (num_wgroup)).foreach(x => {
     when(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma ){
       when(((warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt))(x * warp_align_async + warp_align_async - 1, x * warp_align_async) === warp_bar_exp(end_wg_id)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)) {
         warp_bar_cur_async_tmp(x) := 0.U
