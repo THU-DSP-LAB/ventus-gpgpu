@@ -43,7 +43,8 @@ class pipe(val sm_id: Int = 0) extends Module{
     val wg_id_lookup=Output(UInt(depth_warp.W))
     val wg_id_tag=Input(UInt(TAG_WIDTH.W))
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
-    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
+    val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -89,8 +90,8 @@ class pipe(val sm_id: Int = 0) extends Module{
   if(INST_CNT) {
     io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
   }
-  else if(INST_CNT_2){
-    io.inst_cnt.foreach( _ := inst_cnt_xv)
+  if(INST_CNT_2){
+    io.inst_cnt2.foreach( _ := inst_cnt_xv)
   }
   else{
     io.inst_cnt.foreach( _ := 0.U)
