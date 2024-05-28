@@ -46,7 +46,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def addrLen = 32
 
-  def num_block = num_warp // not bigger than num_warp
+  def num_block = 8// not bigger than num_warp
 
   def num_warp_in_a_block = num_warp
 

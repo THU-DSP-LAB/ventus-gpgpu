@@ -16,13 +16,21 @@ class ResourceConflictException(msg: String) extends MyException(msg) {
   }
 }
 
+object TESTCONFIG {
+  val TESTLEN = 5000
+}
+import TESTCONFIG.TESTLEN
+
 class Test(val len: Int) {
   class TestIn(testlen: Int) {
-    val csr = Seq.tabulate(testlen){i => Random.nextInt().abs}
-    val lds = Seq.tabulate(testlen){i =>  Random.nextInt(CONFIG.WG.NUM_LDS_MAX  / 2)}
-    val sgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_SGPR_MAX / (2*CONFIG.WG.NUM_WF_MAX))}
-    val vgpr = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_VGPR_MAX / (2*CONFIG.WG.NUM_WF_MAX))}
-    val wf = Seq.tabulate(testlen){i => Random.nextInt(CONFIG.WG.NUM_WF_MAX) + 1}
+    val random = Random
+    val csr = Seq.tabulate(testlen){i => random.nextInt().abs}
+    val wf_max = CONFIG.WG.NUM_WF_MAX                                           * 3 /  8
+    val wf = Seq.tabulate(testlen){i => random.nextInt(wf_max - 1) + 1}
+    val lds = Seq.tabulate(testlen){i =>  random.nextInt(CONFIG.WG.NUM_LDS_MAX  * 3 / (8*wf(i))) * wf(i)}
+    val sgpr = Seq.tabulate(testlen){i => random.nextInt(CONFIG.WG.NUM_SGPR_MAX * 3 / (8*wf(i)))}
+    val vgpr = Seq.tabulate(testlen){i => random.nextInt(CONFIG.WG.NUM_VGPR_MAX * 3 / (8*wf(i)))}
+    val wf_time = Seq.tabulate(testlen){i => Seq.tabulate(wf(i)){j => 400 + random.nextInt(200)}}
   }
   class TestExec(testlen: Int) {
     val valid = Array.fill(testlen)(false)
@@ -106,7 +114,6 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
     if(wf.wg_id < 0 || wf.wg_id >= test.len) {throw new MyException(s"WG ID ERROR: ${wf.wg_id}, expect WG ID Max = ${test.len - 1}")}
     wf_check(wf)
     wf.valid = true
-    wf.time = 200 + Random.nextInt(400)
 
     val wf_cnt = test.wg_exec.wf_cnt(wf.wg_id) + 1
 
@@ -219,7 +226,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
       dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
 
-      val testlen = 200
+      val testlen = TESTLEN
       val test = new Test(testlen)
       val testOut_wg = new Array[Boolean](testlen)
 
@@ -252,6 +259,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
       dut.clock.step(5)
 
       var cnt = 0
+      var clk_cnt = 0
       fork{       // Host_wg_new
         dut.io.host_wg_new.enqueueSeq(testSeqIn)
       } .fork {   // CU interface
@@ -270,15 +278,16 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
           }
           for(i <- 0 until NUM_CU) {
             val wf_new = dut.io.cu_wf_new(i)
-            wf_new.ready.poke((Random.nextInt(10).abs < 2).B)
-            val wf = new Wf_slot
-            wf.wg_id = wf_new.bits.wg_id.peek.litValue.toInt
-            wf.lds =  (wf_new.bits.lds_base.peek.litValue.toInt , wf_new.bits.lds_base.peek.litValue.toInt  + test.in.lds(wf.wg_id)  - 1)
-            wf.sgpr = (wf_new.bits.sgpr_base.peek.litValue.toInt, wf_new.bits.sgpr_base.peek.litValue.toInt + test.in.sgpr(wf.wg_id) - 1)
-            wf.vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + test.in.vgpr(wf.wg_id) - 1)
-            wf.wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt
-            wf.csr = wf_new.bits.csr_kernel.peek.litValue.toInt
+            wf_new.ready.poke(Random.nextBoolean().B)
             if(wf_new.valid.peek.litToBoolean && wf_new.ready.peek.litToBoolean) {
+              val wf = new Wf_slot
+              wf.wg_id = wf_new.bits.wg_id.peek.litValue.toInt
+              wf.lds =  (wf_new.bits.lds_base.peek.litValue.toInt , wf_new.bits.lds_base.peek.litValue.toInt  + test.in.lds(wf.wg_id)  - 1)
+              wf.sgpr = (wf_new.bits.sgpr_base.peek.litValue.toInt, wf_new.bits.sgpr_base.peek.litValue.toInt + test.in.sgpr(wf.wg_id) - 1)
+              wf.vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + test.in.vgpr(wf.wg_id) - 1)
+              wf.wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt
+              wf.csr = wf_new.bits.csr_kernel.peek.litValue.toInt
+              wf.time = test.in.wf_time(wf.wg_id)(wf.wf_id)
               gpu.wf_new(cu_id = i, wf)
             }
           }
@@ -296,11 +305,16 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
           }
           dut.clock.step()
         }
+      } .fork {
+        while(cnt < testlen) {
+          clk_cnt += 1
+          dut.clock.step()
+        }
       }.join
 
       gpu.final_check()
       dut.clock.step(100)
-      println("===== CTA Simulation passed =====")
+      println(s"===== CTA Simulation passed in ${clk_cnt} cycles =====")
     }
   }
 }

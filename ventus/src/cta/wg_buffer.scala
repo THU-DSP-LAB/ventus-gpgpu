@@ -37,6 +37,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
     val alloc_result = Flipped(DecoupledIO(new io_alloc2buffer()))      // Determination result from allocator
     val cuinterface_wg_new = DecoupledIO(new io_buffer2cuinterface)
   })
+  val DEBUG = CONFIG.DEBUG
 
   // =
   // wgram1(addr) stores wg information which is used by allocator
@@ -46,7 +47,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   // wgram_alloc(addr) stores if wg in wg_ram(addr) is now being processed by allocator
   // =
   class ram1datatype extends ctainfo_host_to_alloc{
-    val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
+    val wg_id = if(DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
   }
 
   val wgram1 = Mem(NUM_ENTRIES, new ram1datatype)              // combinational/asynchronous-read memory
@@ -105,7 +106,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   io.alloc_wg_new.bits.viewAsSupertype(new ctainfo_host_to_alloc {}) :=
     wgram1_rd_data.viewAsSupertype(new ctainfo_host_to_alloc {})    // TODO: check if the connection is right
   io.alloc_wg_new.bits.wgram_addr := wgram1_rd_data_addr
-  io.alloc_wg_new.bits.wg_id.get := wgram1_rd_data.wg_id
+  if(DEBUG) io.alloc_wg_new.bits.wg_id.get := wgram1_rd_data.wg_id.get
 
   // =
   // Main function 3
@@ -123,7 +124,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   val wgram2_rd_data = RegEnable(wgram2.read(wgram_rd2_clear_addr), wgram_rd2_clear_act)
   io.cuinterface_wg_new.bits := wgram2_rd_data
 
-  if(CONFIG.DEBUG) {
+  if(DEBUG) {
     val alloc_result_wgid = RegEnable(io.alloc_result.bits.wg_id.get, wgram_rd2_clear_act)
     val wgram_rd2_clear_act_r1 = RegNext(wgram_rd2_clear_act, false.B)
     when(wgram_rd2_clear_act_r1) {

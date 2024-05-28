@@ -469,10 +469,19 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     val addr1 = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), Mux(fsm_s_init_p1, (~0.U(log2Ceil(NUM_RESOURCE+1).W)).asUInt, rtram_scan.addr2.rd.data.pad(log2Ceil(NUM_RESOURCE+1))))
     val addr2 = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), Mux(fsm_s_finish_p1, NUM_RESOURCE.U - 1.U, rtram_scan.addr1.rd.data.pad(log2Ceil(NUM_RESOURCE+1)) - 1.U))
     val thissize = WireInit(UInt(log2Ceil(NUM_RESOURCE+1).W), addr2 - addr1)
-    assert(NUM_RT_RESULT == 2)   // Current implement only support NUM_RT_RESULT=2. Replace `sort3()` to support other values
-    val result = sort3(Mux(fsm_s_init_p1, 0.U, rtcache_data(0)), Mux(fsm_s_init_p1, 0.U, rtcache_data(1)), thissize)
-    rtcache_data(0) := result(0)
-    rtcache_data(1) := result(1)
+    val result = Wire(Vec(NUM_RT_RESULT, UInt(log2Ceil(NUM_RESOURCE+1).W)))
+    if(NUM_RT_RESULT == 1) {
+      val rtcache_data_tmp = Mux(fsm_s_init_p1, 0.U, rtcache_data(0))
+      result := VecInit(Mux(rtcache_data_tmp > thissize, rtcache_data_tmp, thissize))
+    } else if (NUM_RT_RESULT == 2) {
+      // This implement only support NUM_RT_RESULT=2. Replace `sort3()` to support other values
+      val result_tmp = sort3(Mux(fsm_s_init_p1, 0.U, rtcache_data(0)), Mux(fsm_s_init_p1, 0.U, rtcache_data(1)), thissize)
+      result(0) := result_tmp(0)
+      result(1) := result_tmp(1)
+    } else assert(NUM_RT_RESULT == 1 || NUM_RT_RESULT == 2)
+    for(i <- 0 until NUM_RT_RESULT) {
+      rtcache_data(i) := result(i)
+    }
     // pipeline debug
     if(CONFIG.DEBUG) {
       rtram_scan.valid.get.rd.addr := fsm_s_ptr1
@@ -492,8 +501,9 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
       }
       when(fsm_s_valid_p1) {
         assert(fsm_s_finish_p1 || rtram_scan.valid.get.rd.data) // The linked-list node we are visiting should stores valid data
-        assert(fsm_s_init_p1 || rtcache_data(0) <= result(0))
-        assert(fsm_s_init_p1 || rtcache_data(1) <= result(1))
+        for(i <- 0 until NUM_RT_RESULT) {
+          assert(fsm_s_init_p1 || rtcache_data(i) <= result(i))
+        }
       }
     }
   } .otherwise { // prepare for FSM.SCAN
@@ -502,8 +512,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     fsm_s_init_p1 := false.B
     fsm_s_finish_p1 := false.B
     fsm_s_valid_p1 := false.B
-    rtcache_data(0) := rtcache_data(0)
-    rtcache_data(1) := rtcache_data(1)
+    // keep rtcache_data untouched
   }
   scan_ok := (fsm === FSM.SCAN) && fsm_s_finish_p1
 
