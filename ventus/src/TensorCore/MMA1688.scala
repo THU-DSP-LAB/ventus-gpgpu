@@ -35,10 +35,11 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
   })
 
   // Init Register/FIFO(depth=1)
-  val regArray4 = Reg(Vec(DimN*DimM/4, UInt(xDatalen.W)))
   val regArray1 = Reg(Vec(DimN*DimM/4, UInt(xDatalen.W)))
   val regArray2 = Reg(Vec(DimN*DimM/4, UInt(xDatalen.W)))
   val regArray3 = Reg(Vec(DimN*DimM/4, UInt(xDatalen.W)))
+  val regArray4 = Reg(Vec(DimN*DimM/4, UInt(xDatalen.W)))
+
 
   // Init data_out
   for (i <- 0 until num_thread) {
@@ -93,11 +94,11 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
 
   TCComputation.io.in.bits.rm := io.in.bits.rm
   TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
-  TCComputation.io.out.ready := io.out.ready//io.in.ready
-  TCComputation.io.in.valid := false.B//io.in.valid
+  TCComputation.io.out.ready := io.out.ready //io.in.ready
+  TCComputation.io.in.valid := false.B //io.in.valid
 
   io.in.ready := TCComputation.io.in.ready
-  io.out.valid := false.B//TCComputation.io.out.valid
+  io.out.valid := false.B //TCComputation.io.out.valid
 
   val sIdle :: sSet1 :: sSet2 :: sSet3 :: sSet4 ::sDataOut:: Nil = Enum(6)
 
@@ -137,7 +138,7 @@ class TC_MMA1688(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int, tcCtrl: TCCtrl) 
     }
     is(sSet1) {
       when(TCComputation.io.out.valid) {
-        //        get set1 Result
+        // get set1 Result
         for (m<- 0 until DimN*DimM/4){
           regArray1(m) := TCComputation.io.out.bits.data(m).result
         }

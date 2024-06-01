@@ -329,6 +329,10 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0) extends Module{
   dcache.io.coreRsp.ready:=pipe.io.dcache_rsp.ready
 
   val sharedmem = Module(new SharedMemory()(param))
+  //TODO.
+  val toSMEMArbiter = Module(new Arbiter(new ShareMemCoreReq_np, 2))
+
+
   sharedmem.io.coreReq.bits.data:=pipe.io.shared_req.bits.data
   sharedmem.io.coreReq.bits.instrId:=pipe.io.shared_req.bits.instrId
   sharedmem.io.coreReq.bits.isWrite:=pipe.io.shared_req.bits.isWrite

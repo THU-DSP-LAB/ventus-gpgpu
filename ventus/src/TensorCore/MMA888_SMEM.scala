@@ -4,7 +4,7 @@ import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
 import chisel3.util._
 import top.parameters._
-import pipeline.{vExeData,WriteVecCtrl,LSUexe}
+import pipeline.{DCacheCoreRsp_np, LSUexe, ShareMemCoreReq_np, WriteVecCtrl, vExeData}
 
 // D=A*B+D
 // Matrix D comes from Register.
@@ -24,8 +24,7 @@ class TC_MMAOutput(tcCtrl:TCCtrl) extends Bundle{
   val ctrl = tcCtrl.cloneType
 }
 
-
-class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl) extends Module {
+class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 16, tcCtrl: TCCtrl) extends Module {
   //  mnk defined as cuda.
   //  m8n8k8
   //  xDatalen: data bit len === xLen. FP16: xDatalen=16
@@ -35,6 +34,8 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new TC_MMAInput(tcCtrl)))
     val out = DecoupledIO(new TC_MMAOutput(tcCtrl))
+    val shared_req = DecoupledIO(new ShareMemCoreReq_np())
+    val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
   })
   val set_num = 2 //2 := (888/848)
 
@@ -78,14 +79,14 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
 
   TCComputation.io.in.bits.rm := io.in.bits.rm
   TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
-  TCComputation.io.out.ready := io.out.ready//io.in.ready
-  TCComputation.io.in.valid := false.B//io.in.valid
+  TCComputation.io.out.ready := io.out.ready// io.in.ready
+  TCComputation.io.in.valid := false.B// io.in.valid
 
   io.in.ready := TCComputation.io.in.ready
-  io.out.valid := false.B//TCComputation.io.out.valid
+  io.out.valid := false.B// TCComputation.io.out.valid
 
   // Init LSU.
-  val LSU = Module(new getData4SMEM)
+  val Load4SMEM = Module(new getData4SMEM)
 
   val sIdle :: sSMEMseqA :: sSMEMseqB :: sSet1 :: sSet2 :: sDataOut:: Nil = Enum(6)
 
@@ -96,28 +97,36 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
   switch(stateReg) {
     is(sIdle) {
       when(io.in.fire) {
-        LSU.io.in.ready := io.in.fire//true.B
-        LSU.io.in.bits.mask := Vec(num_thread, true.B) //TODO. temp all true
-        LSU.io.in.bits.ctrl <> io.in.bits.ctrl
-        LSU.io.in.bits.isRowMajor := true.B// matrix A is row major
-        LSU.io.in.bits.addrBase := io.in.bits.data_in.in1(0) //!!!!!!!!
-        regArray_A <> LSU.io.out.bits.data
+        Load4SMEM.io.in.valid := io.in.fire//true.B
+        Load4SMEM.io.in.bits.mask := Vec(num_thread, true.B) //TODO. temp all true
+        Load4SMEM.io.in.bits.ctrl <> io.in.bits.ctrl
+        Load4SMEM.io.in.bits.isRowMajor := true.B // matrix A is row major
+        Load4SMEM.io.in.bits.addrBase := io.in.bits.data_in.in1(0) //!!!!!!!!
+        regArray_A <> Load4SMEM.io.out.bits.data
+
+        Load4SMEM.io.shared_rsp <> io.shared_rsp
+        io.shared_req <> Load4SMEM.io.shared_req
+
         stateReg := sSMEMseqA
       }
     }
     is(sSMEMseqA){
-      when(LSU.io.out.valid){
-        LSU.io.in.ready := true.B
-        LSU.io.in.bits.mask := Vec(num_thread, true.B) //TODO. temp all true
-        LSU.io.in.bits.ctrl <> io.in.bits.ctrl
-        LSU.io.in.bits.isRowMajor := false.B// matrix A is row major
-        LSU.io.in.bits.addrBase := io.in.bits.data_in.in1(0) //!!!!!!!!
-        regArray_B <> LSU.io.out.bits.data
+      when(Load4SMEM.io.out.ready){
+        Load4SMEM.io.in.valid := true.B
+        Load4SMEM.io.in.bits.mask := Vec(num_thread, true.B) //TODO. temp all true
+        Load4SMEM.io.in.bits.ctrl <> io.in.bits.ctrl
+        Load4SMEM.io.in.bits.isRowMajor := false.B // matrix A is row major
+        Load4SMEM.io.in.bits.addrBase := io.in.bits.data_in.in1(0) //!!!!!!!!
+        regArray_B <> Load4SMEM.io.out.bits.data
+
+        Load4SMEM.io.shared_rsp <> io.shared_rsp
+        io.shared_req <> Load4SMEM.io.shared_req
+
         stateReg := sSMEMseqB
       }
     }
     is(sSMEMseqB) {
-      when(LSU.io.out.valid) {
+      when(Load4SMEM.io.out.valid) {
         printf("Set1 Data Done. To Set1\n")
         //        TCComputation.io.out.ready := io.in.ready
         TCComputation.io.in.valid := io.in.valid
@@ -184,7 +193,6 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
         for (m<- 0 until DimN*DimM/set_num){
           regArray2(m) := TCComputation.io.out.bits.data(m).result
         }
-
         stateReg := sDataOut
       }
     }
@@ -196,9 +204,9 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int=16, tcCtrl: TCCtrl
         io.out.bits.data_out(m*4+2) := Cat(regArray2(m*4+1),regArray2(m*4))
         io.out.bits.data_out(m*4+3) := Cat(regArray2(m*4+3),regArray2(m*4+2))
       }
-      //        val validSignal = RegInit(true.B)
+      // val validSignal = RegInit(true.B)
       io.out.valid := true.B//RegNext(validSignal)
-      //        io.out.valid := RegNext(true.B)//TCComputation.io.out.valid
+      // io.out.valid := RegNext(true.B)//TCComputation.io.out.valid
       stateReg := sIdle
     }
   }

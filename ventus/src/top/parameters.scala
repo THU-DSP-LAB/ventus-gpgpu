@@ -82,6 +82,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_BlockOffsetBits = log2Ceil(dcache_BlockWords) // select word in block
 
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
+//  32 -( 8 + 3 + 2 )
 
   def dcache_MshrEntry: Int = 4
 

@@ -26,22 +26,27 @@ class getData4SMEM extends Module{
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new Matrix_descriptor(64)))
     val out = DecoupledIO(new Matrix_dataout)
+    val shared_req = DecoupledIO(new ShareMemCoreReq_np())
+    val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
   })
 
   // use LSU | get data from SMEM
-  val LSU = Module(new Load4SMEM())
-  LSU.io.lsu_req.bits.mask <> io.in.bits.mask
+  val LoadSMEM = Module(new Load4SMEM())
+  LoadSMEM.io.lsu_req.bits.mask <> io.in.bits.mask
+
+  LoadSMEM.io.shared_req <> io.shared_req
+  LoadSMEM.io.shared_rsp <> io.shared_rsp
+
   for (x <- 0 until num_thread) {
-    LSU.io.lsu_req.bits.in1(x) := io.in.bits.addrBase.asUInt()
-    LSU.io.lsu_req.bits.in2(x) := 0.U//地址偏移量
-    LSU.io.lsu_req.bits.in3(x) := 0.U//要写入的数据
+    LoadSMEM.io.lsu_req.bits.in1(x) := io.in.bits.addrBase.asUInt()
+    LoadSMEM.io.lsu_req.bits.in2(x) := 0.U // 地址偏移量
+    LoadSMEM.io.lsu_req.bits.in3(x) := 0.U // 要写入的数据
   }
-  LSU.io.lsu_req.bits.ctrl <> io.in.bits.ctrl
-  LSU.io.lsu_req.valid := true.B
+  LoadSMEM.io.lsu_req.bits.ctrl <> io.in.bits.ctrl
+  LoadSMEM.io.lsu_req.valid := true.B
 
-  io.out.valid := LSU.io.lsu_rsp.valid
-  io.out.bits.data <> LSU.io.lsu_rsp.bits.data
-
+  io.out.valid := LoadSMEM.io.lsu_rsp.valid
+  io.out.bits.data <> LoadSMEM.io.lsu_rsp.bits.data
 }
 
 class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Module{
@@ -65,7 +70,7 @@ class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends
   val reg_save = Reg(new vExeData)
   val is_flush = RegInit(false.B)
   io.csr_wid:=reg_save.ctrl.wid
-  //val rdy_fromFIFO = Reg(Bool())
+  // val rdy_fromFIFO = Reg(Bool())
   io.from_fifo.ready := state===s_idle && !io.flush_dcache.valid
   io.flush_dcache.ready := state === s_idle
   val reg_entryID = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
@@ -141,7 +146,7 @@ class AddrCalculate_SMEM(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends
   io.to_mshr.valid := state===s_save & (reg_save.ctrl.mem_cmd.orR)
   io.to_mshr.bits.tag.isWrite := reg_save.ctrl.mem_cmd(1)
   if(SPIKE_OUTPUT){
-    io.to_mshr.bits.tag.spike_info.get:=reg_save.ctrl.spike_info.get
+    io.to_mshr.bits.tag.spike_info.get := reg_save.ctrl.spike_info.get
   }
   //val reg_toShared = Reg(new toShared)
   //val vld_toShared = Reg(Bool())
