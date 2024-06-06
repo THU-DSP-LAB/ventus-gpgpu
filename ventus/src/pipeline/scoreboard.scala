@@ -65,7 +65,7 @@ class CtrlSigs extends Bundle {
 
   //518
   val funct = UInt(3.W)
-  val copysize = UInt(2.W) // only 4 8 16 , may add 32
+  val copysize = UInt(2.W) //
   val dma = Bool()
 }
 class scoreboardIO extends Bundle{

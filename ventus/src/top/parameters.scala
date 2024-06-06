@@ -68,7 +68,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = 32//num_thread//16  // number of words per cacheline(block)
+  def dcache_BlockWords: Int = num_thread//16  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
@@ -149,7 +149,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def VGPR_ID_WIDTH = log2Ceil(NUMBER_VGPR_SLOTS)
   def SGPR_ID_WIDTH = log2Ceil(NUMBER_SGPR_SLOTS)
   def LDS_ID_WIDTH = log2Ceil(NUMBER_LDS_SLOTS)
-  def WG_SLOT_ID_WIDTH = log2Ceil(NUMBER_WF_SLOTS)
+//  def WG_SLOT_ID_WIDTH = log2Ceil(NUMBER_WF_SLOTS) //518
+  def WG_SLOT_ID_WIDTH = log2Up(NUMBER_WF_SLOTS)
   def WF_COUNT_WIDTH = log2Ceil(WF_COUNT_MAX) + 1
   def WF_COUNT_WIDTH_PER_WG = log2Ceil(WF_COUNT_PER_WG_MAX) + 1
   def GDS_ID_WIDTH = log2Ceil(GDS_SIZE)
@@ -181,7 +182,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   var dma_aligned_bulk_bits = dma_aligned_bulk * 8 // bytes
 
-  def max_dma_inst = lsu_nMshrEntry
+  def max_dma_inst = if(num_warp >= 4) num_warp else 4
 
   def max_dma_tag = 8
 

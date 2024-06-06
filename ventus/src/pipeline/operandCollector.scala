@@ -518,7 +518,7 @@ class operandCollector extends Module{
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).bankIn <> crossBar.io.out(i)})
 
   //CU allocation
-  val widReg = RegInit(VecInit.fill(num_collectorUnit)(0.U(log2Ceil(num_collectorUnit).W)))
+  val widReg = RegInit(VecInit.fill(num_collectorUnit)(0.U(log2Up(num_collectorUnit).W))) //518
   val widCmp = Wire(Vec(num_collectorUnit, Bool()))
   //Since arbitration has finished in scoreboard, each instruction in this stage should fetch operand unless there is no more collect unit.
   (0 until num_collectorUnit).foreach( i => {
