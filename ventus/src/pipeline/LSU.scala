@@ -15,6 +15,7 @@ import chisel3._
 import chisel3.util._
 import IDecode._
 import mmu.SV32.asidLen
+import top.cache_spike_info
 
 class toShared extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
@@ -43,6 +44,7 @@ class DCacheCoreReq_np extends Bundle{
   val data = Vec(num_thread, UInt(xLen.W))
   val opcode = UInt(3.W)
   val param= UInt(4.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
 class DCacheCoreRsp_np extends Bundle{
@@ -227,6 +229,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
   io.to_dcache.bits.tag := tag
   io.to_dcache.bits.setIdx := setIdx
+  io.to_dcache.bits.spike_info.foreach{ left =>
+    left.pc := reg_save.ctrl.pc
+    left.vaddr := addr_wire
+  }
   val opcode_wire =Wire(UInt(3.W))
   val param_wire_alt =Wire(UInt(4.W))
   param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,

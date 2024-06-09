@@ -205,6 +205,7 @@ class PTW(
         r1.opcode := 4.U // READ
         r1.size := 0.U // TODO: correct the value
         r1.param := 0.U // TODO: correct the value
+        r1.spike_info.foreach( _ := DontCare )
       }
     }
     io.mem_req(i).bits := req

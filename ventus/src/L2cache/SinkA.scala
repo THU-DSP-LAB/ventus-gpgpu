@@ -89,6 +89,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.req.bits.mask   := a.bits.mask
   io.req.bits.data   :=a.bits.data
   io.req.bits.param :=a.bits.param
+  io.req.bits.spike_info.foreach( _ := a.bits.spike_info.getOrElse(0.U) )
 
   putbuffer.io.push.bits.index := put
   putbuffer.io.push.bits.data.data := a.bits.data

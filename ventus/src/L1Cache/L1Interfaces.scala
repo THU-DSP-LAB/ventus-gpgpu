@@ -7,6 +7,8 @@ import config.config.Parameters
 import mmu.SV32.{asidLen, paLen}
 import top.parameters._
 import mmu._
+import top.cache_spike_info
+
 /*Version Note
 * DCacheCoreReq spec changed, shift some work to LSU
 * //byteEn
@@ -29,7 +31,7 @@ class DCachePerLaneAddr(implicit p: Parameters) extends DCacheBundle{
   val blockOffset = UInt(BlockOffsetBits.W)
   val wordOffset1H = UInt(BytesOfWord.W)
 }
-class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
+class DCacheCoreReq(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends DCacheBundle{
   //val ctrlAddr = new Bundle{
   val instrId = UInt(WIdBits.W)//TODO length unsure
   val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
@@ -39,6 +41,7 @@ class DCacheCoreReq(implicit p: Parameters) extends DCacheBundle{
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
   val data = Vec(NLanes, UInt(WordLength.W))
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(SV.getOrElse(mmu.SV32))) else None
 }
 
 class DCacheCoreRsp(implicit p: Parameters) extends DCacheBundle{
@@ -73,6 +76,14 @@ class L1CacheMemReq extends Bundle{
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
   val a_mask = Vec(dcache_BlockWords,UInt(BytesOfWord.W))
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
+
+  def defaultSpikeInfo: cache_spike_info = {
+    val info = Wire(new cache_spike_info(mmu.SV32))
+    info.pc := 0.U
+    info.vaddr := 0.U
+    info
+  }
 }
 
 class DCacheMemReq extends L1CacheMemReq{
@@ -93,6 +104,7 @@ class L1CacheMemReqArb (implicit p: Parameters) extends DCacheBundle{
   val a_data = Vec(dcache_BlockWords, UInt(xLen.W))
   //there is BW waste, only at most NLanes of a_data elements would be filled, BlockWords is usually larger than NLanes
   val a_mask = Vec(dcache_BlockWords, UInt(BytesOfWord.W))
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
 class L1CacheMemRsp(implicit p: Parameters) extends DCacheMemRsp{

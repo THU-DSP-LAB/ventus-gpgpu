@@ -13,6 +13,8 @@ package L2cache
 
 import chisel3._
 import chisel3.util._
+import top.cache_spike_info
+import top.parameters.SPIKE_OUTPUT
 
 class QueuedRequest(params: InclusiveCacheParameters_lite) extends Bundle
 {
@@ -25,6 +27,7 @@ class QueuedRequest(params: InclusiveCacheParameters_lite) extends Bundle
   val data   = UInt(params.data_bits.W)
   val mask   = UInt(params.mask_bits.W)
   val param  =UInt(3.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
 class ListBufferRequest(params: InclusiveCacheParameters_lite)extends Bundle
