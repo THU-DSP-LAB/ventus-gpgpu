@@ -166,7 +166,7 @@ class WshrMemReq_withMask(NLanes: Int) extends DCacheMemReq{
 
 class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends DCacheModule{
   val io = IO(new Bundle{
-    val coreReq = Flipped(DecoupledIO(new DCacheCoreReq))
+    val coreReq = Flipped(DecoupledIO(new DCacheCoreReq(SV)))
     val coreRsp = DecoupledIO(new DCacheCoreRsp)
     val memRsp = Flipped(DecoupledIO(new DCacheMemRsp))
     val memReq = DecoupledIO(new DCacheMemReq_p)
@@ -362,6 +362,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   }
   writeMissReq.hasCoreRsp := true.B
   writeMissReq.coreRspInstrId := coreReq_st1.instrId
+  writeMissReq.spike_info.foreach( _ := DontCare )
 
   readMissReq.a_opcode := 4.U //Get
   readMissReq.a_param := 0.U //regular read
@@ -372,6 +373,9 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   readMissReq.a_data := DontCare
   readMissReq.hasCoreRsp := false.B
   readMissReq.coreRspInstrId := DontCare
+  readMissReq.spike_info.foreach( left =>
+    left := coreReq_st1.spike_info.getOrElse(0.U)
+  )
 
   missMemReq := Mux(writeMiss_st1, writeMissReq, readMissReq)
   // ******      dataAccess bank enable     ******
@@ -475,6 +479,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   //InvOrFluMemReq.a_data :=
   InvOrFluMemReq.hasCoreRsp := waitforL2flush_st2
   InvOrFluMemReq.coreRspInstrId := coreReq_st1.instrId
+  InvOrFluMemReq.spike_info.foreach( _ := DontCare )
 
   L2flush.a_opcode := TLAOp_Flush
   L2flush.a_param := Mux(coreReqControl_st1_Q.io.deq.bits.isInvalidate,TLAParam_Inv,TLAParam_Flush)
@@ -486,6 +491,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   L2flush.hasCoreRsp := true.B
   L2flush.coreRspInstrId := coreReq_st1.instrId
   L2flush.a_data := DontCare
+  L2flush.spike_info.foreach( _ := DontCare )
 
   TagAccess.io.invalidateAll := coreReq_st1_valid && coreReqControl_st1_Q.io.deq.bits.isInvalidate && !coreReqTagHasDirty_st1
   // ******     l1_data_cache::memRsp_pipe0_cycle      ******
@@ -572,6 +578,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   dirtyReplace_st1.a_data := DontCare//wait for data SRAM in next cycle
   dirtyReplace_st1.hasCoreRsp := false.B
   dirtyReplace_st1.coreRspInstrId := DontCare
+  dirtyReplace_st1.spike_info.foreach{ _ := DontCare }
 
   when(memRsp_Q.io.deq.valid && memRspIsRead){
     memRsp_st1 := memRsp_Q_st0
@@ -809,6 +816,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
     memReq_st3.a_addr := memReq_Q.io.deq.bits.a_addr
     memReq_st3.a_mask := memReq_Q.io.deq.bits.a_mask
     memReq_st3.a_opcode := memReq_Q.io.deq.bits.a_opcode
+    memReq_st3.spike_info.foreach{ _ := memReq_Q.io.deq.bits.spike_info.getOrElse(0.U) }
   }
   when(memReq_st3_valid_tlb){
     memReq_st3_paddr := io.TLBRsp.bits.paddr

@@ -106,6 +106,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
   io.schedule.a.bits.data := request.data
   io.schedule.a.bits.size := request.size
   io.schedule.a.bits.mask := ~(0.U(params.mask_bits.W))
+  io.schedule.a.bits.spike_info.foreach{ _ := request.spike_info.getOrElse(0.U) }
   when(io.schedule.a.fire()) {
     sche_a_valid := false.B
   }.elsewhen(io.allocate.valid) {

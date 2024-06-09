@@ -14,6 +14,9 @@ package L2cache
 import chisel3._
 import chisel3.util._
 import freechips.rocketchip.tilelink._
+import top.parameters.SPIKE_OUTPUT
+import top.cache_spike_info
+
 class TLBundleA_lite(params: InclusiveCacheParameters_lite) extends Bundle
 {
   val opcode = UInt(params.op_bits.W)
@@ -23,6 +26,7 @@ class TLBundleA_lite(params: InclusiveCacheParameters_lite) extends Bundle
   val mask =UInt((params.cache.beatBytes/params.micro.writeBytes).W)
   val data=UInt(params.data_bits.W)
   val param =UInt(3.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
 
@@ -47,4 +51,5 @@ class SourceA(params: InclusiveCacheParameters_lite) extends Module
   io.a.bits.data    := io.req.bits.data
   io.a.bits.size    :=io.req.bits.size
   io.a.bits.param :=0.U
+  io.a.bits.spike_info.foreach{ _ := io.req.bits.spike_info.getOrElse(0.U) }
 }

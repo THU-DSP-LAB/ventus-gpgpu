@@ -13,6 +13,7 @@ package L1Cache
 import L1Cache.{HasL1CacheParameters, L1CacheModule}
 import chisel3._
 import chisel3.util._
+import top.cache_spike_info
 import top.parameters._
 
 //abstract class MSHRBundle extends Bundle with L1CacheParameters

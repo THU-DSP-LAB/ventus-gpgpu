@@ -303,4 +303,5 @@ for(i<- 0 until params.cache.sets){
   //todo what's the function of flush
   io.result.bits.l2cidx := Mux(RegNext(flush_issue),0.U,read_bits_reg.l2cidx)
   io.result.bits.param := Mux(RegNext(flush_issue),0.U,read_bits_reg.param)
+  io.result.bits.spike_info.foreach( _ := read_bits_reg.spike_info.getOrElse(0.U) )
 }

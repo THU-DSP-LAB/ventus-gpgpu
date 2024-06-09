@@ -205,6 +205,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
       m.io.allocate.bits.flush := directory.io.result.bits.flush
 
       m.io.allocate.bits.l2cidx:= directory.io.result.bits.l2cidx
+
+      m.io.allocate.bits.spike_info.foreach{ _ := directory.io.result.bits.spike_info.getOrElse(0.U) }
     }}
   }
 
@@ -270,6 +272,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceD.io.req.bits.dirty :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.dirty,schedule.d.bits.dirty)
   sourceD.io.req.bits.param :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
   sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
+  sourceD.io.req.bits.spike_info.foreach( _ := DontCare )
   bankedStore.io.sinkD_adr.valid := schedule.dir.valid     //now managed by MSHR
   bankedStore.io.sinkD_adr.bits.set := schedule.dir.bits.set
   bankedStore.io.sinkD_adr.bits.way := schedule.dir.bits.way
