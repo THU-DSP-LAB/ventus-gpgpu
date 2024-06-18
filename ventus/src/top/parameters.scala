@@ -218,7 +218,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def warp_align_async = if(num_warp >= 4) 4 else 1
 
-  def num_wgroup = num_warp/warp_align_async
+  def num_wgroup = num_warp_in_a_block/warp_align_async
 
 //  def shared_group = 16 // bytes
 //  def shared_group_num_0 = dcache_BlockWords * BytesOfWord / shared_group

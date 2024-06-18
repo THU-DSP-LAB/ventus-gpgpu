@@ -52,8 +52,8 @@ class warp_scheduler extends Module{
 
   io.branch.ready:= !io.flushCache.valid
   io.warp_control.ready:= !io.branch.fire() & !io.flushCache.valid
-  io.wg_id_lookup_async := io.finished_dma.bits
-  val dma_end_wg_id=io.wg_id_tag_async(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
+  io.wg_id_lookup_async := Mux(io.issued_dma.fire,io.issued_dma.bits,io.finished_dma.bits)
+  val dma_end_wg_id=io.wg_id_tag_async(WF_COUNT_WIDTH_PER_WG-1,0)
   io.warpReq.ready:=true.B
   io.warpRsp.valid:=warp_end // always ready.
   io.warpRsp.bits.wid:=warp_end_id
@@ -114,9 +114,10 @@ class warp_scheduler extends Module{
   val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
   val end_wg_id=io.wg_id_tag(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
   val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
-  val warp_bar_data=RegInit(0.U(num_warp.W))
+  val warp_bar_data=RegInit(0.U(num_warp.W))  //0 means not locked by barrier
   val warp_bar_data_async=RegInit(0.U(num_warp.W)) // 518
-  val warp_bar_data_async_tmp = Wire(Vec(num_wgroup, UInt(warp_align_async.W))) // 518
+//  val warp_bar_data_async_tmp = Wire(Vec(num_warp, UInt(1.W))) // 518
+  val warp_bar_data_async_tmp = Wire(UInt(num_warp.W)) // 518
   val warp_bar_cur_async_tmp=Wire(Vec(num_wgroup,UInt(warp_align_async.W)))
   val warp_dma = RegInit(VecInit(Seq.fill(num_warp)(0.U(max_dma_inst.W))))
   val warp_dmaing = Wire(Vec(num_warp,UInt(max_dma_inst.W)))
@@ -126,86 +127,108 @@ class warp_scheduler extends Module{
     * 2: barrier not done, dma done
     * */
   val warp_dma_judge_wire = Wire(Vec(num_warp,Bool()))
-//  val warp_dma_not_done = Wire(Vec(num_wgroup,Bool()))
+  //  val warp_dma_not_done = Wire(Vec(num_wgroup,Bool()))
   val warp_bar_cur_async=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
+  val warp_bar_belong_async = RegInit(VecInit(Seq.fill(num_block)(VecInit(Seq.fill(num_wgroup)(0.U(num_warp.W))))))
   (0 until(num_wgroup)).foreach( x=> {
     (0 until(warp_align_async)).foreach( y =>{
       warp_dma_judge_wire(x * warp_align_async + y) := warp_dma_judge_reg(x) =/= 0.U
     })
   })
-  (0 until( num_warp)).foreach( x=> {
+  (0 until( num_warp_in_a_block)).foreach( x=> {
     warp_dmaing(x) := warp_dma(x)
-    when(x.asUInt === io.issued_dma.bits.asUInt && io.issued_dma.fire){
+    when(x.asUInt === dma_end_wg_id.asUInt && io.issued_dma.fire){
       warp_dmaing(x) := warp_dma(x) + 1.U
     }
-    when(x.asUInt === io.finished_dma.bits.asUInt && io.finished_dma.fire){
+    when(x.asUInt === dma_end_wg_id.asUInt && io.finished_dma.fire){
       warp_dmaing(x) := warp_dma(x) - 1.U
     }
   })
   (0 until( num_wgroup)).foreach( x=> {
-    when(warp_dmaing.asUInt(x * warp_align_async* max_dma_inst + warp_align_async* max_dma_inst - 1, x * warp_align_async * max_dma_inst) === 0.U && !(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma )){
-//      warp_dma_not_done(x) := true.B
-//      when(warp_dma_judge_reg(x) === 0.U){
-//        warp_dma_judge_reg(x) := 2.U
+    when(warp_dmaing.asUInt(x * warp_align_async* max_dma_inst + warp_align_async* max_dma_inst - 1, x * warp_align_async * max_dma_inst) === 0.U ){//&& !(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma )){
+      //      warp_dma_not_done(x) := true.B
+      //      when(warp_dma_judge_reg(x) === 0.U){
+      //        warp_dma_judge_reg(x) := 2.U
       when(warp_dma_judge_reg(x) === 1.U){
-          warp_dma_judge_reg(x) := 0.U
-        }
+        warp_dma_judge_reg(x) := 0.U
+      }
     }//.otherwise{
-//      warp_dma_not_done(x) := false.B
-//    }
+    //      warp_dma_not_done(x) := false.B
+    //    }
   })
-  (0 until (num_wgroup)).foreach(x => {
-    when(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma ){
-      when(((warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt))(x * warp_align_async + warp_align_async - 1, x * warp_align_async) === warp_bar_exp(end_wg_id)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)) {
+  val warp_bar_cur_async_change = Wire(Vec(num_wgroup,Bool()))
+  when(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma ){
+    (0 until (num_wgroup)).foreach(x => {
+      when(((warp_bar_cur_async(end_wg_id) | (1.U << end_wf_id).asUInt))(x * warp_align_async + warp_align_async - 1, x * warp_align_async) === warp_bar_exp(end_wg_id)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)) {
         warp_bar_cur_async_tmp(x) := 0.U
-        warp_bar_data_async_tmp(x) := warp_bar_data_async(x * warp_align_async + warp_align_async - 1, x * warp_align_async) & (~warp_bar_belong(end_wg_id)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)).asUInt
+        warp_bar_cur_async_change(x) := true.B
         when(warp_dma_judge_reg(x) === 0.U) {
           warp_dma_judge_reg(x) := 1.U
         }
-//          .elsewhen(warp_dma_judge_reg(x) === 2.U) {
-//          warp_dma_judge_reg(x) := 0.U
-//        }
+        //          .elsewhen(warp_dma_judge_reg(x) === 2.U) {
+        //          warp_dma_judge_reg(x) := 0.U
+        //        }
       }.otherwise {
-        warp_bar_cur_async_tmp(x) := (warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
-        warp_bar_data_async_tmp(x) := (warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+        warp_bar_cur_async_tmp(x) := (warp_bar_cur_async(end_wg_id) | (1.U << end_wf_id).asUInt)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+        warp_bar_cur_async_change(x) := false.B
+//        warp_bar_data_async_tmp := (warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
       }
+    })
+  }.otherwise {
+    (0 until (num_wgroup)).foreach(x => {
+      warp_bar_cur_async_change(x) := false.B
+    })
+    warp_bar_cur_async_tmp := (warp_bar_cur_async(end_wg_id)).asTypeOf(warp_bar_cur_async_tmp)
+//    warp_bar_data_async_tmp := warp_bar_data_async(end_wg_id)
+    //      warp_bar_data_async_tmp(x) := (warp_bar_data_async)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+  }
+//  warp_bar_data_async_tmp := (warp_bar_data_async.asUInt & (~warp_bar_belong_async(end_wg_id)(x)).asUInt).asTypeOf(warp_bar_data_async_tmp)
+  when(io.warp_control.fire&&(!io.warp_control.bits.ctrl.simt_stack_op) && io.warp_control.bits.ctrl.dma){
+    when(warp_bar_cur_async_change.asUInt.orR){
+      warp_bar_data_async_tmp := warp_bar_data_async.asUInt & (~warp_bar_belong_async(end_wg_id)((end_wf_id >> 2).asUInt)).asUInt
     }.otherwise{
-      warp_bar_cur_async_tmp(x) := (warp_bar_cur_async(end_wg_id))(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
-      warp_bar_data_async_tmp(x) := (warp_bar_data_async)(x * warp_align_async + warp_align_async - 1, x * warp_align_async)
+      warp_bar_data_async_tmp := warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt
     }
-  })
+  }.otherwise{
+    warp_bar_data_async_tmp := warp_bar_data_async.asTypeOf(warp_bar_data_async_tmp)
+  }
+
+
   io.issued_dma.ready := true.B
   io.finished_dma.ready := !io.issued_dma.fire || !io.warp_control.fire
   when(io.issued_dma.fire || io.finished_dma.fire){
-//    warp_dma(io.issued_dma.bits) := warp_dma(io.issued_dma.bits) + 1.U
+    //    warp_dma(io.issued_dma.bits) := warp_dma(io.issued_dma.bits) + 1.U
     warp_dma := warp_dmaing
   }
-//  when(io.finished_dma.fire){
-//    warp_dma(io.finished_dma.bits) := warp_dma(io.finished_dma.bits) - 1.U
-//  }
+  //  when(io.finished_dma.fire){
+  //    warp_dma(io.finished_dma.bits) := warp_dma(io.finished_dma.bits) - 1.U
+  //  }
   when(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
-      warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
+    //518
+    warp_bar_belong_async(new_wg_id)((io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(WF_COUNT_WIDTH_PER_WG-1,0) >> 2).asUInt) := warp_bar_belong_async(new_wg_id)((io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(WF_COUNT_WIDTH_PER_WG-1,0) >> 2).asUInt)| (1.U<<io.warpReq.bits.wid).asUInt()
+    warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
     when(!warp_bar_lock(new_wg_id)) {
       warp_bar_cur(new_wg_id) := 0.U
+      warp_bar_exp(new_wg_id) := (1.U << new_wg_wf_count).asUInt - 1.U //init to 1 for all future wfs in wg
     }
   }
   when(io.warpRsp.fire){
-    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+    //    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
-  warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
+  warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op) ){ //means barrrier 518
     when(io.warp_control.bits.ctrl.dma){ // 518
-//      warp_bar_cur_async(end_wg_id) := warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt
-//      warp_bar_data_async := warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+      //      warp_bar_cur_async(end_wg_id) := warp_bar_cur_async(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+      //      warp_bar_data_async := warp_bar_data_async | (1.U << io.warp_control.bits.ctrl.wid).asUInt
       warp_bar_cur_async(end_wg_id) := warp_bar_cur_async_tmp.asUInt
       warp_bar_data_async := warp_bar_data_async_tmp.asUInt
     }.otherwise{
-      warp_bar_cur(end_wg_id) := warp_bar_cur(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt
+      warp_bar_cur(end_wg_id) := warp_bar_cur(end_wg_id) | (1.U << end_wf_id).asUInt
       warp_bar_data := warp_bar_data | (1.U << io.warp_control.bits.ctrl.wid).asUInt
-      when((warp_bar_cur(end_wg_id) | (1.U << io.warp_control.bits.ctrl.wid).asUInt()) === warp_bar_exp(end_wg_id)) {
+      when((warp_bar_cur(end_wg_id) | (1.U << end_wf_id).asUInt()) === warp_bar_exp(end_wg_id)) {
         warp_bar_cur(end_wg_id) := 0.U
         warp_bar_data := warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
       }
@@ -239,7 +262,7 @@ class warp_scheduler extends Module{
   val warp_ready=(~(warp_bar_data |warp_bar_data_async|warp_dma_judge_wire.asUInt| io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt //518
   io.warp_ready:=warp_ready
   for (i<- num_warp-1 to 0 by -1){
-    pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 
+    pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i)
     when(pc_ready(i)){next_warp:=i.asUInt()}
   }
   io.pc_req.valid:=pc_ready(next_warp)
@@ -262,7 +285,7 @@ class warp_scheduler extends Module{
     pcControl(io.branch.bits.wid).New_PC:=io.branch.bits.new_pc
     //PC:=io.branch.bits.new_pc
     when(io.branch.bits.wid===next_warp){
-    io.pc_req.valid:=false.B}
+      io.pc_req.valid:=false.B}
   }
 
 

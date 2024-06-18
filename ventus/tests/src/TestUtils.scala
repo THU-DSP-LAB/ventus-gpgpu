@@ -118,12 +118,16 @@ object TestUtils {
 
       rsp_queue = rsp_queue.zipWithIndex.map{ case (e, i) =>
 //        if (e._1 > i) (e._1 - 1, e._2) else (i, e._2)  518
-        if(i == 0 && e._1 > 0){
+        if(i == 0 && e._1 > i){
           (e._1 - 1, e._2)
         }else{
           (e._1, e._2)
         }
       }
+      rsp_queue.zipWithIndex.map{ case (value, index) =>
+        println(s"Index:$index, Value: ${value._1}")
+      }
+
       if(rsp_queue.nonEmpty && rsp_queue.head._1 == 0){
         rspPort.valid.poke(true.B)
         rspPort.bits.poke(rsp_queue.head._2)
