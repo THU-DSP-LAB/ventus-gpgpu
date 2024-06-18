@@ -26,6 +26,7 @@ import axi._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.util.EnhancedChisel3Assign
 import mmu.{AsidLookup, L1TLB, L1TlbAutoReflect, L1ToL2TlbXBar, L2TLB, L2TlbReq, L2TlbRsp, L2TlbToL2CacheXBar}
+import scala.Option.option2Iterable
 
 class host2CTA_data extends Bundle{
   val host_wg_id            = (UInt(WG_ID_WIDTH.W))
@@ -366,6 +367,7 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_data := 0.U.asTypeOf(Vec(dcache_BlockWords, UInt(xLen.W)))
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_mask.foreach{_ := true.B}
   l1Cache2L2Arb.io.memReqVecIn(0).bits.a_param := DontCare
+  l1Cache2L2Arb.io.memReqVecIn(0).bits.spike_info.foreach { left => left := icache.io.memReq.bits.spike_info.getOrElse(0.U.asTypeOf(new cache_spike_info(mmu.SV32))) }
   icache.io.memReq.ready := l1Cache2L2Arb.io.memReqVecIn(0).ready
   // ***********************
   // **** icache coreReq ****
@@ -375,6 +377,7 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   icache.io.coreReq.bits.warpid:=pipe.io.icache_req.bits.warpid
   icache.io.coreReq.bits.mask:=pipe.io.icache_req.bits.mask
   icache.io.coreReq.bits.asid:=pipe.io.icache_req.bits.asid
+  icache.io.coreReq.bits.spike_info.foreach( _ := DontCare )
   // ***********************
   // **** icache coreRsp ****
   pipe.io.icache_rsp.valid:=icache.io.coreRsp.valid
@@ -521,6 +524,7 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
     memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.a_mask).asUInt
     memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.a_data.asUInt
     memReqArb.io.in(i).bits.size := 0.U//log2Up(BlockWords*BytesOfWord).U
+    memReqArb.io.in(i).bits.spike_info.foreach { left => left := io.memReqVecIn(i).bits.spike_info.getOrElse(0.U.asTypeOf(new cache_spike_info(mmu.SV32))) }
     memReqArb.io.in(i).valid := io.memReqVecIn(i).valid
     io.memReqVecIn(i).ready:=memReqArb.io.in(i).ready
     memReqArb.io.in(i).bits.param := io.memReqVecIn(i).bits.a_param
@@ -601,6 +605,7 @@ class cluster2L2Arbiter(L2paramIn: InclusiveCacheParameters_lite, L2paramOut: In
     memReqArb.io.in(i).bits.mask := (io.memReqVecIn(i).bits.mask).asUInt
     memReqArb.io.in(i).bits.data := io.memReqVecIn(i).bits.data.asUInt
     memReqArb.io.in(i).bits.size := 0.U//log2Up(BlockWords*BytesOfWord).U
+    memReqArb.io.in(i).bits.spike_info.foreach { left => left := io.memReqVecIn(i).bits.spike_info.getOrElse(0.U.asTypeOf(new cache_spike_info(mmu.SV32))) }
     memReqArb.io.in(i).valid := io.memReqVecIn(i).valid
     io.memReqVecIn(i).ready:=memReqArb.io.in(i).ready
   }

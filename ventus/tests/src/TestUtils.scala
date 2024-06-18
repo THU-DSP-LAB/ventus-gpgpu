@@ -12,6 +12,11 @@ object TestUtils {
   def checkForValid[T <: Data](port: DecoupledIO[T]): Boolean = port.valid.peek().litToBoolean
   def checkForReady[T <: Data](port: DecoupledIO[T]): Boolean = port.ready.peek().litToBoolean
 
+  class CacheSpikeInfo4Test(var pc: BigInt = 0, var vaddr: BigInt = 0)
+  object CacheSpikeInfo4Test {
+    def default: CacheSpikeInfo4Test = new CacheSpikeInfo4Test()
+  }
+
   abstract class IOTestDriver[+A <: Data, +B <: Data] {
     val reqPort: DecoupledIO[A]
     val rspPort: DecoupledIO[B]
@@ -142,9 +147,17 @@ object TestUtils {
       val source = req.source.peek().litValue
       var data = new Array[Byte](data_byte_count)
 
+      var spike_info = CacheSpikeInfo4Test.default
+      req.spike_info match {
+        case Some(info) =>
+          spike_info.pc =  info.pc.peek().litValue
+          spike_info.vaddr = info.vaddr.peek().litValue
+        case None =>
+      }
+
       opcode_req match {
         case 4 => { // read
-          data = mem.readDataPhysical(addr, data_byte_count)._2
+          data = mem.readDataPhysical(addr, data_byte_count, spike_info.pc, spike_info.vaddr)._2
           opcode_rsp = 1
         }
         case 1 => { // write partial

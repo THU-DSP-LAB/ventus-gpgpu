@@ -18,12 +18,14 @@ import chisel3.util._
 import mmu.{L1TlbIO, L1TlbReq}
 import mmu.SV32.{asidLen, paLen, vaLen}
 import top.parameters._
+import top.cache_spike_info
 
-class ICachePipeReq(implicit p: Parameters) extends ICacheBundle{
+class ICachePipeReq(SV: mmu.SVParam)(implicit p: Parameters) extends ICacheBundle{
   val addr = UInt(WordLength.W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
   val asid = UInt(asidLen.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(SV)) else None
 }
 class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
   val warpid = UInt(WIdBits.W)
@@ -51,19 +53,25 @@ class ICacheMemReq(implicit p: Parameters) extends ICacheBundle{
   val a_source = UInt(WIdBits.W)
   val a_addr = UInt(WordLength.W)
 }
-class ICacheMemReq_p(implicit p: Parameters) extends ICacheBundle{
+class ICacheMemReq_p(SV: mmu.SVParam)(implicit p: Parameters) extends ICacheBundle{
   val a_source = UInt((WIdBits+log2Up(NMshrEntry)).W)
   val a_addr = UInt(paLen.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(SV)) else None
 }
 
 class ICacheExtInf(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheBundle{
-  val coreReq = Flipped(DecoupledIO(new ICachePipeReq))
+  val coreReq = Flipped(DecoupledIO(new ICachePipeReq(SV.getOrElse(mmu.SV32))))
   val externalFlushPipe = Flipped(ValidIO(new ICachePipeFlush))
   val coreRsp = DecoupledIO(new ICachePipeRsp)
   val memRsp = Flipped(DecoupledIO(new ICacheMemRsp))
-  val memReq = DecoupledIO(new ICacheMemReq_p)
+  val memReq = DecoupledIO(new ICacheMemReq_p(SV.getOrElse(mmu.SV32)))
   val TLBRsp = Flipped(DecoupledIO(new mmu.L1TlbRsp(SV.getOrElse(mmu.SV32))))
   val TLBReq = DecoupledIO(new mmu.L1TlbReq(SV.getOrElse(mmu.SV32)))
+}
+
+class ASourceRegBundle(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheBundle {
+  val instrId = UInt(log2Up(NMshrEntry).W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(SV.getOrElse(mmu.SV32))) else None
 }
 
 class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheModule{
@@ -212,14 +220,19 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
   io.TLBReq.bits.vaddr := Cat(mshrAccess.io.miss2mem.bits.blockAddr,0.U((32-bABits).W))
   io.TLBReq.bits.asid := mshrAccess.io.miss2mem.bits.ASID
   mshrAccess.io.miss2mem.ready := io.TLBReq.ready
-  val a_source_reg = Module(new Queue(UInt(2.W),1,true,false))
-  a_source_reg.io.enq.valid := io.TLBReq.fire()
-  a_source_reg.io.enq.bits := mshrAccess.io.miss2mem.bits.instrId
+  val a_source_reg = Module(new Queue(new ASourceRegBundle(SV),1,true,false))
+  a_source_reg.io.enq.valid := io.TLBReq.fire
+  a_source_reg.io.enq.bits.instrId := mshrAccess.io.miss2mem.bits.instrId
+  a_source_reg.io.enq.bits.spike_info.foreach{ left =>
+    left.pc := 0.U
+    left.vaddr := mshrAccess.io.miss2mem.bits.blockAddr
+  }
   a_source_reg.io.deq.ready := io.memReq.ready && io.TLBRsp.valid
   io.TLBRsp.ready := io.memReq.ready
   io.memReq.bits.a_addr := io.TLBRsp.bits.paddr
-  io.memReq.bits.a_source := a_source_reg.io.deq.bits
+  io.memReq.bits.a_source := a_source_reg.io.deq.bits.instrId
   io.memReq.valid := io.TLBRsp.valid && a_source_reg.io.deq.valid
+  io.memReq.bits.spike_info.foreach( _ := a_source_reg.io.deq.bits.spike_info.getOrElse(0.U) )
 
   // ******      core req ready
   //val coreRsp_QAlmstFull = coreRsp_Q.io.count === 2.U

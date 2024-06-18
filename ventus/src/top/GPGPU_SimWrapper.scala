@@ -72,8 +72,8 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
   val io = IO(new Bundle {
     val host_req = Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp = DecoupledIO(new CTA2host_data)
-    val out_a = Decoupled(new TLBundleA_lite(l2cache_params))
-    val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))
+    val out_a = Decoupled(new TLBundleA_lite(l2cache_params))           // L2 cache request
+    val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))  // L2 cache response
     val asid_fill = Flipped(ValidIO(new AsidLookupEntry(SV.getOrElse(mmu.SV32))))
     val cnt = Output(UInt(32.W))
     val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
