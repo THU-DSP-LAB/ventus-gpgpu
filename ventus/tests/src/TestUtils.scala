@@ -157,7 +157,7 @@ object TestUtils {
 
       opcode_req match {
         case 4 => { // read
-          data = mem.readDataPhysical(addr, data_byte_count, spike_info.pc, spike_info.vaddr)._2
+          data = mem.readDataPhysical(addr, data_byte_count,spike_info.pc, spike_info.vaddr)._2
           opcode_rsp = 1
         }
         case 1 => { // write partial
