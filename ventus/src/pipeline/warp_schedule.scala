@@ -37,6 +37,9 @@ class warp_scheduler extends Module{
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
     val flushDCache = Decoupled(Bool())
+    // val inquire_csr_wid = Output(UInt(depth_warp.W))
+    // val inquire_csr_addr = Output(UInt(12.W))
+    // val inquire_csr_data = Input(UInt(xLen.W))
   })
 
   val warp_end=io.warp_control.fire()&io.warp_control.bits.ctrl.simt_stack_op
@@ -98,25 +101,26 @@ class warp_scheduler extends Module{
   val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
   val end_wg_id=io.wg_id_tag(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
   val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
-  val warp_bar_data=RegInit(0.U(num_warp.W))
+  val warp_bar_data=RegInit(0.U(num_warp.W))  // 0 means not locked by barrier
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
 
   when(io.warpReq.fire){
-    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
-      warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
+    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt  //显示warp中有哪些属于wg
+//    warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     when(!warp_bar_lock(new_wg_id)) {
       warp_bar_cur(new_wg_id) := 0.U
+      warp_bar_exp(new_wg_id) := (1.U << new_wg_wf_count).asUInt - 1.U  // init to 1 for all future wfs in wg
     }
   }
   when(io.warpRsp.fire){
-    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+//    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
-  warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
+  warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
-    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
+    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
-    when((warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt())===warp_bar_exp(end_wg_id)){
+    when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id)){
       warp_bar_cur(end_wg_id):=0.U
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
     }
