@@ -15,7 +15,7 @@
 #include <verilated_fst_c.h>
 
 #ifndef SIM_WAVEFORM_FST
-#define SIM_WAVEFORM_FST 1
+#define SIM_WAVEFORM_FST 0
 #endif
 
 // Legacy function required only so linking works on Cygwin and MSVC++

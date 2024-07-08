@@ -85,7 +85,7 @@ class GPGPU_SimTop extends Module {
     val host_rsp = DecoupledIO(new CTA2host_data)
     val mem = new Mem_SimIO(DATA_BYTE_LEN, ADDR_WIDTH = parameters.MEM_ADDR_WIDTH)
     val cnt = Output(UInt(32.W))
-    val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
+    //val inst_cnt = if(INST_CNT_2) Output(Vec(num_sm, Vec(2, UInt(32.W)))) else Output(Vec(num_sm, UInt(32.W)))
   })
 
   val gpgpu = Module{ new GPGPU_SimWrapper(FakeCache = false) }
@@ -94,7 +94,7 @@ class GPGPU_SimTop extends Module {
   io.host_req <> gpgpu.io.host_req
   io.host_rsp <> gpgpu.io.host_rsp
   io.cnt <> gpgpu.io.cnt
-  io.inst_cnt <> gpgpu.io.inst_cnt
+  //io.inst_cnt <> gpgpu.io.inst_cnt
 
   gpgpu.io.out_a <> mem.io.req
   gpgpu.io.out_d <> mem.io.rsp
