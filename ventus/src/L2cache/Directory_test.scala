@@ -133,7 +133,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val flushCount =RegInit(0.U((params.setBits+params.wayBits+1).W))
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
-  when(io.flush || io.invalidate  || (flush_issue_reg&& (io.result.fire || !RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue)))){
+  when(io.flush || io.invalidate  || (flush_issue_reg&& (io.result.fire || !RegNext(status_reg(flush_set).dirty(flush_way))))){
     flushCount := flushCount +1.U
   }.elsewhen(flushDone){
     flushCount :=0.U
