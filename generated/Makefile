@@ -39,9 +39,9 @@ VERILATOR_FLAGS += --assert
 # Add this trace to get a backtrace in gdb
 #VERILATOR_FLAGS += --gdbbt
 
-VERILATOR_FLAGS += --threads $(shell expr $(NPROC) - 4)
-VERILATOR_FLAGS += --trace-threads 2
-VERILATOR_FLAGS += -j $(NPROC)
+#VERILATOR_FLAGS += --threads $(shell expr $(NPROC) - 20)
+#VERILATOR_FLAGS += --trace-threads 2
+#VERILATOR_FLAGS += -j $(NPROC)
 VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0"
 VERILATOR_FLAGS += -LDFLAGS "-fuse-ld=mold"
 

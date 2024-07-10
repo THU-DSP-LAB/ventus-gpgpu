@@ -153,7 +153,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val flush_ready = !issue_flush_invalidate &&  putbuffer_empty
   val invalidate_ready  = !issue_flush_invalidate &&  mshr_empty &&  putbuffer_empty
 
-  request.valid :=(sinkA.io.req.valid)
+  request.valid := sinkA.io.req.valid
   request.bits := sinkA.io.req.bits  
  
   sinkA.io.req.ready := request.ready   //if mshr still have entries and if dir ready

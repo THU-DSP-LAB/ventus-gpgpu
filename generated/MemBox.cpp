@@ -53,8 +53,8 @@ MemBox::MemPage* MemBox::page_find(uint32_t addr) {
         return &*page;
 }
 
-const uint8_t* MemBox::read(uint32_t addr, int len) {
-    uint8_t* buffer = new uint8_t[len];
+bool MemBox::read(uint32_t addr, uint8_t buffer[], int len) {
+    bool success = false;
     int cnt         = 0;
     MemPage* page   = nullptr;
     while (cnt < len) {
@@ -65,38 +65,11 @@ const uint8_t* MemBox::read(uint32_t addr, int len) {
             memset(buffer + cnt, 0, len_this_step);
         } else {
             memcpy(buffer + cnt, page->ptr + (addr + cnt - page->addr), len_this_step);
+            success = true;
         }
         cnt += len_this_step;
     }
-    return buffer;
-
-    /*
-    bool within_single_page = (addr / PAGESIZE == (addr + len - 1) / PAGESIZE);
-    MemBox::MemPage* page1  = page_find(addr);
-    MemBox::MemPage* page2  = within_single_page ? nullptr : page_find(addr + len - 1);
-
-    uint8_t* buffer = new uint8_t[len];
-    if (within_single_page) {
-        if (page1 == nullptr) {
-            memset(buffer, 0, len);
-        } else {
-            memcpy(buffer, page1->ptr + (addr - page1->addr), len);
-        }
-    } else {
-        int len1 = page1->addr + PAGESIZE - addr;
-        if (page1 == nullptr) {
-            memset(buffer, 0, len1);
-        } else {
-            memcpy(buffer, page1->ptr + (addr - page1->addr), len1);
-        }
-        if (page2 == nullptr) {
-            memset(buffer + len1, 0, len - len1);
-        } else {
-            memcpy(buffer + len1, page2->ptr, len - len1);
-        }
-    }
-    return buffer;
-    */
+    return success;
 }
 
 void MemBox::write(uint32_t addr, bool mask[], uint8_t data[], int len) {
@@ -115,31 +88,6 @@ void MemBox::write(uint32_t addr, bool mask[], uint8_t data[], int len) {
         }
         cnt++;
     }
-    /*
-    bool within_single_page = (addr / PAGESIZE == (addr + len - 1) / PAGESIZE);
-
-    MemPage* page1 = page_find(addr);
-    MemPage* page2 = within_single_page ? nullptr : page_find(addr + len - 1);
-    page1          = page1 ? page1 : page_new(addr);
-    page2          = (within_single_page || page2) ? page2 : page_new(addr);
-    assert(page1);
-    assert(within_single_page || page2);
-
-    uint8_t* ptr1 = page1->ptr + (addr - page1->addr);
-    int len1      = within_single_page ? len : page1->addr + PAGESIZE - addr;
-    for (int i = 0; i < len1; i++) {
-        if (mask[i]) {
-            ptr1[i] = data[i];
-        }
-    }
-    if (!within_single_page) {
-        for (int i = 0; i < len - len1; i++) {
-            if (mask[i + len1]) {
-                page2->ptr[i] = data[len1 + i];
-            }
-        }
-    }
-    */
 }
 
 void MemBox::write(uint32_t addr, uint8_t data[], int len) {

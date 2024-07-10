@@ -28,7 +28,7 @@ public:
     }
 
 public:
-    const uint8_t* read(uint32_t addr, int len = MEMACCESS_DATA_BYTE_SIZE);
+    bool read(uint32_t addr, uint8_t buffer[], int len = MEMACCESS_DATA_BYTE_SIZE);
     void write(uint32_t addr, bool mask[], uint8_t data[], int len = MEMACCESS_DATA_BYTE_SIZE);
     void write(uint32_t addr, uint8_t data[], int len = MEMACCESS_DATA_BYTE_SIZE);
 };

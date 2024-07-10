@@ -65,8 +65,8 @@ class collectorUnit extends Module{
   // rsType == 2: Vec
   // rsType == 3: Imm
   val rsType = Reg(Vec(4, UInt(2.W)))
-  val ready = Reg(Vec(4, Bool()))
-  val valid = Reg(Vec(4, Bool()))
+  val ready = RegInit(VecInit.fill(4)(false.B))
+  val valid = RegInit(VecInit.fill(4)(false.B))
   val regIdx = Reg(Vec(4, UInt((regidx_width + regext_width).W)))
   val rsReg = RegInit(VecInit(Seq.fill(3)(VecInit(Seq.fill(num_thread)(0.U(xLen.W)))))) //op1, op2 and op3
   val mask = Reg(Vec(num_thread, Bool()))

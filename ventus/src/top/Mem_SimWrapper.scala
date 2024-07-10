@@ -14,6 +14,7 @@ class Mem_SimIO(DATA_BYTE_LEN: Int, ADDR_WIDTH: Int) extends Bundle {
     val data = Output(UInt((8*DATA_BYTE_LEN).W))
   }
   val rd = new Bundle {
+    val en = Output(Bool())
     val addr = Output(UInt(ADDR_WIDTH.W))
     val data = Input(UInt((8*DATA_BYTE_LEN).W))
   }
@@ -45,6 +46,7 @@ class Mem_SimWrapper(val genA: TLBundleA_lite, genD: TLBundleD_lite, DELAY_LDS: 
   io.mem.wr.addr := io.req.bits.address
   io.mem.wr.data := io.req.bits.data
   io.mem.wr.mask := io.req.bits.mask
+  io.mem.rd.en   := io.req.fire && (io.req.bits.opcode === REQ_OPCODE_READ)
   io.mem.rd.addr := io.req.bits.address
 
   val rsp_gen = Wire(genD.cloneType)
