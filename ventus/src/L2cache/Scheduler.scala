@@ -59,7 +59,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val request = Wire(Decoupled(new FullRequest(params)))
 
   val issue_flush_invalidate= RegInit(false.B)
-  when(request.fire && request.bits.opcode===Hint){
+  when(request.fire && request.bits.opcode===Hint && sinkA.io.empty){
     issue_flush_invalidate :=true.B
   }.elsewhen(sourceD.io.finish_issue){
     issue_flush_invalidate :=false.B
