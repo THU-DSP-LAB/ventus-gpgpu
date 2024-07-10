@@ -103,7 +103,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.pb_beat := putbuffer.io.data
 //  io.pb_beat2:=putbuffer.io.data2.get
 //  putbuffer.io.index.get := io.index
-  io.empty :=(lists | lists_set) & (~lists_clr).asUInt()
+  io.empty := !((lists | lists_set) & (~lists_clr).asUInt()).asBool
   when (io.pb_pop.fire()) {
 
         lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists)
