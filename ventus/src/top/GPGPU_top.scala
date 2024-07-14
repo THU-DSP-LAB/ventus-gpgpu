@@ -506,7 +506,7 @@ class CPUtest(C: TestCase#Props) extends Module{
   io.host2cta.valid:=false.B
   io.host2cta.bits.host_wg_id:=0.U
   io.host2cta.bits.host_num_wf:=C.num_warp.U
-  io.host2cta.bits.host_wf_size:=num_thread.asUInt()
+  io.host2cta.bits.host_wf_size:=num_thread.asUInt
   io.host2cta.bits.host_start_pc:=0.U // start pc
   io.host2cta.bits.host_vgpr_size_total:= (C.num_warp*32).U
   io.host2cta.bits.host_sgpr_size_total:= (C.num_warp*32).U

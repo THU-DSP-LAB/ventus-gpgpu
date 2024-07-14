@@ -108,8 +108,8 @@ class ScalarALU() extends Module{
   //MIN, MAX
   val minu=Mux(io.in1>io.in2,io.in2,io.in1)
   val maxu=Mux(io.in1>io.in2,io.in1,io.in2)
-  val in1s=io.in1.asSInt()
-  val in2s=io.in2.asSInt()
+  val in1s=io.in1.asSInt
+  val in2s=io.in2.asSInt
   val mins=Mux(in1s>in2s,in2s,in1s).asUInt
   val maxs=Mux(in1s>in2s,in1s,in2s).asUInt
   val minmaxout = Mux(io.func===FN_MIN,mins,

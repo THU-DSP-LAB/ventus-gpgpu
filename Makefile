@@ -33,7 +33,7 @@ verilog:
 	./mill ventus.run
 
 clean:
-	rm -rf out test_run_dir/ .idea/
+	rm -rf out/ test_run_dir/ .idea/
 
 clean-git:
 	git clean -fd

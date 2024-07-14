@@ -17,18 +17,18 @@ import $file.common
 object v {
   val scalaVersions = Map(
     "6.4.0" -> "2.13.12",
-    "3.6.0" -> "2.13.10",
-    "3.5.0" -> "2.13.7",
+    // "3.6.0" -> "2.13.10",
+    // "3.5.0" -> "2.13.7",
   )
   val scalaReflect = Map(
     "6.4.0" -> ivy"org.scala-lang:scala-reflect:2.13.12",
-    "3.6.0" -> ivy"org.scala-lang:scala-reflect:2.13.10",
-    "3.5.0" -> ivy"org.scala-lang:scala-reflect:2.13.7",
+    // "3.6.0" -> ivy"org.scala-lang:scala-reflect:2.13.10",
+    // "3.5.0" -> ivy"org.scala-lang:scala-reflect:2.13.7",
   )
   val chiselCrossVersions = Map(
     "6.4.0" -> (ivy"org.chipsalliance::chisel:6.4.0", ivy"org.chipsalliance:::chisel-plugin:6.4.0", ivy"edu.berkeley.cs::chiseltest:6.0.0"),
-    "3.6.0" -> (ivy"edu.berkeley.cs::chisel3:3.6.0", ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0", ivy"edu.berkeley.cs::chiseltest:0.6.2"),
-    "3.5.0" -> (ivy"edu.berkeley.cs::chisel3:3.5.0", ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0", ivy"edu.berkeley.cs::chiseltest:0.5.0"),
+    // "3.6.0" -> (ivy"edu.berkeley.cs::chisel3:3.6.0", ivy"edu.berkeley.cs:::chisel3-plugin:3.6.0", ivy"edu.berkeley.cs::chiseltest:0.6.2"),
+    // "3.5.0" -> (ivy"edu.berkeley.cs::chisel3:3.5.0", ivy"edu.berkeley.cs:::chisel3-plugin:3.5.0", ivy"edu.berkeley.cs::chiseltest:0.5.0"),
   )
 }
 

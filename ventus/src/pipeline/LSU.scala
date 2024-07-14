@@ -147,7 +147,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
                   ),
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
-                      x.asUInt()<<2,
+                      x.asUInt<<2,
                       Mux(reg_save.ctrl.mop===3.U,
                         reg_save.in2(x),
                         x.asUInt*reg_save.in2(x))
@@ -163,8 +163,8 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   )
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
-  val tag = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
-  val setIdx = Mux(reg_save.mask.asUInt()=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
+  val tag = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
+  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
 
   val same_tag = Wire(Vec(num_thread, Bool()))
     (0 until num_thread).foreach( x =>
@@ -215,7 +215,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     io.to_shared.bits.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
     io.to_shared.bits.perLaneAddr(x).activeMask := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
   })
-  io.to_shared.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool(), VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
+  io.to_shared.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool, VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
   io.to_shared.bits.isWrite := reg_save.ctrl.mem_cmd(1)
   io.to_shared.valid := state===s_shared
 
@@ -265,7 +265,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     )
 
   })
-  io.to_dcache.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool(), VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
+  io.to_dcache.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool, VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
  // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
   io.to_dcache.valid := (state===s_dcache) ||(state===s_dcache_1) ||(state===s_dcache_2)
   val mask_next = Wire(Vec(num_thread, Bool()))
@@ -284,9 +284,9 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     is (s_save){
       when(reg_save.ctrl.mem_cmd.orR){ // read or write
         when(all_shared && !is_flush){ // shared memory
-          when(io.to_mshr.fire()){state := s_shared}.otherwise{state := s_save}
+          when(io.to_mshr.fire){state := s_shared}.otherwise{state := s_save}
         }.otherwise{ // dcache
-            when(io.to_mshr.fire()) {
+            when(io.to_mshr.fire) {
               state := s_dcache
             }.otherwise {
               state := s_save
@@ -295,8 +295,8 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
       }.otherwise{ state := s_idle }
     }
     is (s_shared){
-      when(io.to_shared.fire()){
-        when(cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
+      when(io.to_shared.fire){
+        when(cnt.value>=num_thread.U || mask_next.asUInt===0.U){
           cnt.reset(); state := s_idle
         }.otherwise{
           cnt.inc(); state := s_shared
@@ -305,16 +305,16 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     }
     is (s_dcache) {
       when(is_flush) {
-        when(io.to_dcache.fire()) {
+        when(io.to_dcache.fire) {
           state := s_idle
         }.otherwise {
           state := state
         }
       }.otherwise {
-        when(io.to_dcache.fire()) {
+        when(io.to_dcache.fire) {
           when((reg_save.ctrl.atomic && reg_save.ctrl.aq) || (reg_save.ctrl.atomic && reg_save.ctrl.rl)) {
             state := s_dcache_1
-          }.elsewhen(cnt.value >= num_thread.U || mask_next.asUInt() === 0.U) {
+          }.elsewhen(cnt.value >= num_thread.U || mask_next.asUInt === 0.U) {
             cnt.reset();
             state := s_idle
           }.otherwise {
@@ -327,11 +327,11 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
       }
     }
     is(s_dcache_1){
-      when(io.to_dcache.fire()){
+      when(io.to_dcache.fire){
 
           when(reg_save.ctrl.aq && reg_save.ctrl.rl) {
             state := s_dcache_2
-          }.elsewhen(cnt.value>=num_thread.U || mask_next.asUInt()===0.U){
+          }.elsewhen(cnt.value>=num_thread.U || mask_next.asUInt===0.U){
             cnt.reset(); state := s_idle
         }.otherwise{
             cnt.inc(); state :=s_dcache
@@ -341,7 +341,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
       }
     }
     is(s_dcache_2){
-      when(io.to_dcache.fire()){
+      when(io.to_dcache.fire){
         when(cnt.value>=num_thread.U ||mask_next.asUInt===0.U){
           cnt.reset();state:=s_idle
         }.otherwise{
@@ -353,10 +353,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // FSM Operation
   switch(state){
     is (s_idle){
-      when(io.flush_dcache.fire()){
+      when(io.flush_dcache.fire){
         reg_save := RegInit(0.U.asTypeOf(new vExeData))
         reg_save.ctrl.mem_cmd := 1.U
-      }.elsewhen(io.from_fifo.fire()){ // Next: s_save
+      }.elsewhen(io.from_fifo.fire){ // Next: s_save
         reg_save := io.from_fifo.bits   // save data
         when(io.from_fifo.bits.ctrl.atomic){
           reg_save.ctrl.aq := true.B
@@ -368,19 +368,19 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
     }
     is (s_save){
       when(reg_save.ctrl.mem_cmd.orR){//===1.U){  // read
-        when(io.to_mshr.fire()){reg_entryID := io.idx_entry}  // get entryID from MSHR
+        when(io.to_mshr.fire){reg_entryID := io.idx_entry}  // get entryID from MSHR
       }
     }
     is (s_shared){
       // Maybe Nothing here :-)
-      when(io.to_shared.fire()){                                      // request is sent
+      when(io.to_shared.fire){                                      // request is sent
         reg_save.mask := mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
       }
     }
     is (s_dcache){
-      when(io.to_dcache.fire()){                                      // request is sent
+      when(io.to_dcache.fire){                                      // request is sent
         reg_save.mask := mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
@@ -397,7 +397,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
       }
     }
     is(s_dcache){
-      when(io.to_dcache.fire()){
+      when(io.to_dcache.fire){
         is_flush := false.B
       }.otherwise{
         is_flush := is_flush
@@ -536,7 +536,7 @@ class LSUexe() extends Module{
     a.left:=io.lsu_req.fire & io.lsu_req.bits.ctrl.wid===b.asUInt
     a.right:=io.lsu_rsp.fire & io.lsu_rsp.bits.tag.warp_id===b.asUInt
     }}
-  io.fence_end:=VecInit(shiftBoard.map(x=>x.empty)).asUInt()
+  io.fence_end:=VecInit(shiftBoard.map(x=>x.empty)).asUInt
   io.lsu_req.ready:=Mux(shiftBoard(io.lsu_req.bits.ctrl.wid).full,false.B,InputFIFO.io.enq.ready)
   InputFIFO.io.enq.valid:=Mux(shiftBoard(io.lsu_req.bits.ctrl.wid).full,false.B,io.lsu_req.valid)
 

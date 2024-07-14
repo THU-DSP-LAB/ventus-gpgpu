@@ -52,11 +52,11 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
 
   val lists_set = WireInit(0.U(params.putLists.W))
   val lists_clr = WireInit(0.U(params.putLists.W))
-  lists := (lists | lists_set) & (~lists_clr).asUInt()
+  lists := (lists | lists_set) & (~lists_clr).asUInt
 
   val free = !lists.andR()
   val freeOH = Wire(UInt(params.putLists.W))
-  freeOH :=(~(leftOR((~lists).asUInt()) << 1)).asUInt() & (~lists).asUInt()
+  freeOH :=(~(leftOR((~lists).asUInt) << 1)).asUInt & (~lists).asUInt
   val freeIdx = OHToUInt(freeOH)
 
   val hasData = params.hasData(a)
@@ -95,16 +95,16 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   putbuffer.io.push.bits.data.mask := a.bits.mask
   // Grant access to pop the data
   putbuffer.io.pop.bits := io.pb_pop.bits.index
-  putbuffer.io.pop.valid := io.pb_pop.fire()
+  putbuffer.io.pop.valid := io.pb_pop.fire
 //  putbuffer.io.pop2.get.bits:=io.pb_pop2.bits.index
-//  putbuffer.io.pop2.get.valid:=io.pb_pop2.fire()
+//  putbuffer.io.pop2.get.valid:=io.pb_pop2.fire
   io.pb_pop.ready := putbuffer.io.valid(io.pb_pop.bits.index)
 //  io.pb_pop2.ready:= putbuffer.io.valid(io.pb_pop2.bits.index)
   io.pb_beat := putbuffer.io.data
 //  io.pb_beat2:=putbuffer.io.data2.get
 //  putbuffer.io.index.get := io.index
-  io.empty :=(lists | lists_set) & (~lists_clr).asUInt()
-  when (io.pb_pop.fire()) {
+  io.empty :=(lists | lists_set) & (~lists_clr).asUInt
+  when (io.pb_pop.fire) {
 
         lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists)
 

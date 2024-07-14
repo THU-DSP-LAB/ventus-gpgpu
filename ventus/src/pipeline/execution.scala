@@ -434,7 +434,7 @@ class vALUexe extends Module{
       })
     }
     when(io.in.bits.ctrl.alu_fn===FN_VID){
-      result.io.enq.bits.wb_wvd_rd(x):=x.asUInt()
+      result.io.enq.bits.wb_wvd_rd(x):=x.asUInt
     }
     when(io.in.bits.ctrl.alu_fn===FN_VMERGE){
       result.io.enq.bits.wb_wvd_rd(x):=Mux(io.in.bits.mask(x),io.in.bits.in1(x),io.in.bits.in2(x))
@@ -521,7 +521,7 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
         })
       }
       when(io.in.bits.ctrl.alu_fn === FN_VID) {
-        result.io.enq.bits.wb_wvd_rd(x) := x.asUInt()
+        result.io.enq.bits.wb_wvd_rd(x) := x.asUInt
       }
       when(io.in.bits.ctrl.alu_fn === FN_VMERGE) {
         result.io.enq.bits.wb_wvd_rd(x) := Mux(io.in.bits.mask(x), io.in.bits.in1(x), io.in.bits.in2(x))
@@ -886,7 +886,7 @@ class SFUexe extends Module{
   val alu_out_fire = alu_out_arbiter(0).out.fire
   switch(state){
     is(s_idle){
-      when(io.in.fire()){
+      when(io.in.fire){
         state:=s_busy
         mask:=io.in.bits.mask.asUInt
         i_valid:=true.B
@@ -903,7 +903,7 @@ class SFUexe extends Module{
             mask := next_mask
             i_valid:=true.B
             for(j <- 0 until num_sfu) out_data(i*num_sfu+j) := alu_out_arbiter(j).out.bits
-            when(!next_mask.orR()){
+            when(!next_mask.orR){
               state := s_finish
               i_valid:=false.B
             }

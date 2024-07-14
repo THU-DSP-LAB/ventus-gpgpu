@@ -77,7 +77,7 @@ class MSHRv2 extends Module{
           io.from_addr.bits.tag.asUInt
         )
         data.write(valid_entry, VecInit(Seq.fill(num_thread)(0.U)))    // data initialize
-        currentMask(valid_entry) := io.from_addr.bits.tag.mask.asUInt()   // mask initialize
+        currentMask(valid_entry) := io.from_addr.bits.tag.mask.asUInt   // mask initialize
       }
     }
     is(s_add){

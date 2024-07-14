@@ -57,7 +57,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
   val request = RegInit(0.U.asTypeOf(new Status(params)))
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, io.merge.bits.mask)
-  val merge_data = (io.merge.bits.data & full_mask) | (data_reg & (~full_mask).asUInt())
+  val merge_data = (io.merge.bits.data & full_mask) | (data_reg & (~full_mask).asUInt)
 
 
   val sche_a_valid = RegInit(false.B)
@@ -106,7 +106,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
   io.schedule.a.bits.data := request.data
   io.schedule.a.bits.size := request.size
   io.schedule.a.bits.mask := ~(0.U(params.mask_bits.W))
-  when(io.schedule.a.fire()) {
+  when(io.schedule.a.fire) {
     sche_a_valid := false.B
   }.elsewhen(io.allocate.valid) {
     sche_a_valid := true.B
@@ -115,7 +115,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
   }
   when(io.allocate.valid){
     sche_dir_valid :=false.B
-  }.elsewhen(io.schedule.dir.fire()) {
+  }.elsewhen(io.schedule.dir.fire) {
     sche_dir_valid := false.B
   }.elsewhen(io.mixed){
     sche_dir_valid:=false.B

@@ -39,7 +39,7 @@ class Classify(expWidth: Int, fracWidth: Int) extends Module {
 
   val isSubnormalOrZero = exp === 0.U
   val fracIsZero = frac === 0.U
-  val isInfOrNaN = (~exp).asUInt() === 0.U
+  val isInfOrNaN = (~exp).asUInt === 0.U
 
   io.isNegInf := sign && io.isInf
   io.isNegNormal := sign && !isSubnormalOrZero && !isInfOrNaN
@@ -52,7 +52,7 @@ class Classify(expWidth: Int, fracWidth: Int) extends Module {
   io.isPosZero := !sign && io.isZero
 
   io.isSNaN := io.isNaN && !frac.head(1)
-  io.isQNaN := io.isNaN && frac.head(1).asBool()
+  io.isQNaN := io.isNaN && frac.head(1).asBool
 
   io.isNaN := isInfOrNaN && !fracIsZero
   io.isInf := isInfOrNaN && fracIsZero

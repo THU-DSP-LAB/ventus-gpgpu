@@ -11,9 +11,9 @@
 
 package L2cache
 
-import Chisel._
+import chisel3._
 import chisel3.internal.sourceinfo.SourceInfo
-import chisel3.util.log2Up
+import chisel3.util._
 import freechips.rocketchip.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._

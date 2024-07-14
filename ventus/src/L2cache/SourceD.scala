@@ -60,7 +60,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   })
 
 
-  io.pb_pop.valid:=  io.req.fire()&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  //&& !io.req.bits.from_mem && io.req.bits.hit  //all write acknowledgement response are from source D
+  io.pb_pop.valid:=  io.req.fire&& (io.req.bits.opcode===PutFullData|| io.req.bits.opcode===PutPartialData)  //&& !io.req.bits.from_mem && io.req.bits.hit  //all write acknowledgement response are from source D
   io.pb_pop.bits.index:=io.req.bits.put //sink D also support pop,source D only considers write hit pop
   val pb_beat_reg_init=WireInit(0.U.asTypeOf(new PutBufferAEntry(params)))
   val pb_beat_reg=RegInit(pb_beat_reg_init)
@@ -71,14 +71,14 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   s1_req_reg_init.opcode:=5.U
 
   val s1_req_reg = RegInit(s1_req_reg_init)
-  when(io.req.fire()){
+  when(io.req.fire){
     s1_req_reg:=io.req.bits
     pb_beat_reg:=io.pb_beat
   }
   val busy = RegInit(false.B)
 
-  val pb_beat =Mux(io.req.fire(), io.pb_beat, pb_beat_reg)
-  val s1_req =Mux(io.req.fire(), io.req.bits, s1_req_reg)  //stall if busy
+  val pb_beat =Mux(io.req.fire, io.pb_beat, pb_beat_reg)
+  val s1_req =Mux(io.req.fire, io.req.bits, s1_req_reg)  //stall if busy
   val s_final_req=RegNext(s1_req)  ///
   val s1_need_w =(s1_req.opcode===PutFullData || s1_req.opcode===PutPartialData) && !s1_req.from_mem &&s1_req.hit
 
@@ -94,7 +94,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   }.otherwise{
     read_sent_reg:=false.B
   }
-  val read_sent=Mux(io.req.fire(),false.B,read_sent_reg)
+  val read_sent=Mux(io.req.fire,false.B,read_sent_reg)
   io.bs_radr.valid     :=s1_valid_r &&(!read_sent)   //第一个周期就送过去了
   io.bs_radr.bits.way  := s1_req.way
   io.bs_radr.bits.set  := s1_req.set
@@ -111,7 +111,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   }.otherwise{
     sourceA_sent_reg:=false.B
   }
-  val sourceA_sent=Mux(io.req.fire(),false.B,sourceA_sent_reg)
+  val sourceA_sent=Mux(io.req.fire,false.B,sourceA_sent_reg)
 
 
   val write_sent_reg=RegInit(false.B)
@@ -120,7 +120,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   }.otherwise{
     write_sent_reg:=false.B
   }
-  val write_sent=Mux(io.req.fire(),false.B,write_sent_reg)
+  val write_sent=Mux(io.req.fire,false.B,write_sent_reg)
 
 
 
@@ -130,7 +130,7 @@ val mshr_wait_reg =RegInit(false.B)
     is(stage_1){
       busy:=false.B
       mshr_wait_reg :=false.B
-      when (io.req.fire() || tobedone){
+      when (io.req.fire || tobedone){
         mshr_wait_reg :=false.B
         when( !s1_req.hit ){
           when(s1_req.dirty) {
