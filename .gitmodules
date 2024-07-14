@@ -4,13 +4,10 @@
 [submodule "dependencies/rocket-chip-inclusive-cache"]
 	path = dependencies/rocket-chip-inclusive-cache
 	url = git@github.com:chipsalliance/rocket-chip-inclusive-cache.git
-[submodule "dependencies/cde"]
-	path = dependencies/cde
-	url = git@github.com:chipsalliance/cde.git
 [submodule "dependencies/berkeley-hardfloat"]
 	path = dependencies/berkeley-hardfloat
 	url = git@github.com:ucb-bar/berkeley-hardfloat.git
 [submodule "dependencies/fpuv2"]
 	path = dependencies/fpuv2
 	url = git@github.com:liuxd17thu/fpuv2.git
-	branch = master
+	branch = chisel6

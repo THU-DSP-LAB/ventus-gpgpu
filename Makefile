@@ -1,5 +1,5 @@
 init:
-	git submodule update --init --recursive
+	git submodule update --init --recursive --progress
 
 patch:
 	find patches -type f | awk -F/ '{print("(echo "$$0" && cd dependencies/" $$2 " && git apply ../../" $$0 ")")}' | sh
@@ -21,7 +21,7 @@ bsp:
 	./mill -i mill.bsp.BSP/install
 
 idea:
-	./mill -i mill.scalalib.GenIdea/idea
+	./mill -i -j 0 mill.idea.GenIdea/idea
 
 compile:
 	./mill -i -j 0 __.compile
@@ -33,4 +33,7 @@ verilog:
 	./mill ventus.run
 
 clean:
+	rm -rf out test_run_dir/ .idea/
+
+clean-git:
 	git clean -fd
