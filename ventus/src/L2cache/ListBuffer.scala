@@ -64,7 +64,7 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
   val push_tail = tail.read(io.push.bits.index)//对应tail在哪直接加
   val push_valid = valid(io.push.bits.index) //输入index是否之前被push过
 
-  io.push.ready := !used.andR() //是否有新的entry
+  io.push.ready := !used.andR //是否有新的entry
   when (io.push.fire) {
     valid_set := UIntToOH(io.push.bits.index, params.queues) //对应具体push到何处
     used_set := freeOH //

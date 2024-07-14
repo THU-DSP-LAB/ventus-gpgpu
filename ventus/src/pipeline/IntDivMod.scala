@@ -32,7 +32,7 @@ class IntDivMod(xLen: Int) extends Module{
   val unsignedA = Mux(aSign, (~io.in.bits.a).asUInt+1.U, io.in.bits.a)
   val unsignedD = Mux(dSign, (~io.in.bits.d).asUInt+1.U, io.in.bits.d)
   // when a = INT_MIN and d = -1, overflow:
-  val overflow = io.in.bits.signed && io.in.bits.a.head(1).asBool && !io.in.bits.a.tail(1).orR && io.in.bits.d.andR()
+  val overflow = io.in.bits.signed && io.in.bits.a.head(1).asBool && !io.in.bits.a.tail(1).orR && io.in.bits.d.andR
   val divByZero = io.in.bits.d === 0.U
 
   val rawAReg = RegEnable(io.in.bits.a, io.in.fire)
