@@ -483,6 +483,9 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   l1Cache2L2Arb.io.memReqVecIn(2).bits.a_mask.foreach {
     _ := true.B
   }
+  if(SPIKE_OUTPUT){
+    l1Cache2L2Arb.io.memReqVecIn(2).bits.spike_info.foreach { left => left := pipe.io.dma_cache_req.bits.spike_info.getOrElse(0.U.asTypeOf(new cache_spike_info(mmu.SV32))) }
+  }
   l1Cache2L2Arb.io.memReqVecIn(2).bits.a_param := DontCare
   pipe.io.dma_cache_req.ready := l1Cache2L2Arb.io.memReqVecIn(2).ready
 

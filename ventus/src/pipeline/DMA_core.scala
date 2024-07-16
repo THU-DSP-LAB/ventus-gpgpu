@@ -459,6 +459,10 @@ class AddrCalc_l2cache() extends Module{
   io.to_l2cache.bits.a_mask   := VecInit(Seq.fill(dcache_BlockWords)(Fill(BytesOfWord,1.U)))
   io.to_l2cache.bits.a_data   :=  VecInit(Seq.fill(dcache_BlockWords)(0.U(xLen.W)))
   io.to_l2cache.bits.a_param  :=  0.U
+  io.to_l2cache.bits.spike_info.foreach { left =>
+    left.pc := reg_save.ctrl.pc
+    left.vaddr := Cat(reg_save.address(xLen - 1, xLen - 1 - addr_tag_bits + 1), 0.U((xLen - addr_tag_bits).W))
+  }
   io.to_l2cache.valid := (state===s_l2cache)// && !complete_address
 
   io.from_fifo.ready := state === s_idle
