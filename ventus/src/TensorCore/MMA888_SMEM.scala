@@ -54,6 +54,7 @@ class TC_MMA888(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 16, tcCtrl: TCCt
   //    io.out.bits.data_out(m*4+2) := 0.U//Cat(regArray4(m*4+1),regArray4(m*4),regArray2(m*4+1),regArray2(m*4))
   //    io.out.bits.data_out(m*4+3) := 0.U//Cat(regArray4(m*4+3),regArray4(m*4+2),regArray2(m*4+3),regArray2(m*4+2))
   //  }
+
   for(m<-0 until 8){
     io.out.bits.data_out(m*4) := Cat(regArray1(m*4+1),regArray1(m*4))
     io.out.bits.data_out(m*4+1) := Cat(regArray1(m*4+3),regArray1(m*4+2))

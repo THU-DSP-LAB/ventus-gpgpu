@@ -170,6 +170,9 @@ class vTCexeV2 extends Module{
   val tensor = Module(new TC_MMA888(DimM=8, DimN=8, DimK=8, xDatalen=16, new TCCtrlv2(xLen, depth_warp)))
   val result_v = Module(new Queue(new WriteVecCtrl,1,pipe=true))
 
+  // Get ctrl and rm.
+  //  tensor.io.in.bits.ctrl := 0.U.asTypeOf(EmptyFPUCtrl())
+  tensor.io.in.bits.rm := io.rm
   if(SPIKE_OUTPUT){
     val tcctrl_i = Wire(new TCCtrlv2(xLen, depth_warp))
     tcctrl_i.spike_info.get := io.in.bits.ctrl.spike_info.get
@@ -189,9 +192,8 @@ class vTCexeV2 extends Module{
 //  tensor.io.in.bits.data_in.in3 := io.in.bits.in3
 //  tensor.io.in.bits.data_in.mask := io.in.bits.mask
 //  tensor.io.in.bits.data_in.ctrl := io.in.bits.ctrl
-  // Get ctrl and rm.
-  tensor.io.in.bits.ctrl := 0.U.asTypeOf(EmptyFPUCtrl())
-  tensor.io.in.bits.rm := io.rm
+
+
 
   // Get computation results
   (0 until num_thread).foreach(x=>{

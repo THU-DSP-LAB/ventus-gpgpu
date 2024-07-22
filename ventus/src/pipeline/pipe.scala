@@ -107,8 +107,8 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
   val lsu=Module(new LSUexe)
   val sfu=Module(new SFUexe)
   val mul=Module(new vMULv2(num_thread,num_lane))
-//  val tensorcore=Module(new vTCexe)
-  val tensorcore=Module(new vTCexeV2)
+  val tensorcore=Module(new vTCexe)
+//  val tensorcore=Module(new vTCexeV2)
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,6))
 
