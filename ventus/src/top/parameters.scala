@@ -27,7 +27,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = if (num_warp > num_bank)  log2Ceil(num_warp) else log2Ceil(num_bank) //log2Ceil(num_warp)
 
-  var num_thread = 16
+  var num_thread = 32//16
+//  2024.07.21 Modified to 32 to adapt the Tensor Core Input size.
 
   def depth_thread = log2Ceil(num_thread)
 

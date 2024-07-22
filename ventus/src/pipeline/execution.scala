@@ -10,12 +10,13 @@
  * See the Mulan PSL v2 for more details. */
 package pipeline
 
-import FPUv2.TensorCoreFP32
+import FPUv2.{TCCtrl, TensorCoreFP32}
 import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
 import chisel3.util._
 import top.parameters._
 import IDecode._
+import TensorCore.TC_MMA888
 
 class BranchCtrl extends Bundle{
   val wid=UInt(depth_warp.W)
@@ -112,8 +113,10 @@ class vTCexe extends Module{
     //val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
+  // thread = 8: Computation Array = 242; thread = 32: Computation Array = 484
   val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new TCCtrlv2(xLen, depth_warp)))
-
+  // thread = 32: 32bit register; FP16, 888 32 thread; 848 Computation Array
+//  val tensor = Module(new TC_MMA888(8,8,8,16,new TCCtrlv2(xLen, depth_warp)))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
 
   if(SPIKE_OUTPUT){
@@ -153,6 +156,65 @@ class vTCexe extends Module{
   io.out_v<>result_v.io.deq
 
 }
+
+class vTCexeV2 extends Module{
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(new vExeData()))
+    val rm = Input(UInt(3.W))
+    //val out_x = DecoupledIO(new WriteScalarCtrl())
+    val out_v = DecoupledIO(new WriteVecCtrl)
+  })
+  // thread = 8: Computation Array = 242; thread = 32: Computation Array = 484
+  // val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new TCCtrlv2(xLen, depth_warp)))
+  // thread = 32: 32bit register; FP16, 888 32 thread; 848 Computation Array
+  val tensor = Module(new TC_MMA888(DimM=8, DimN=8, DimK=8, xDatalen=16, new TCCtrlv2(xLen, depth_warp)))
+  val result_v = Module(new Queue(new WriteVecCtrl,1,pipe=true))
+
+  if(SPIKE_OUTPUT){
+    val tcctrl_i = Wire(new TCCtrlv2(xLen, depth_warp))
+    tcctrl_i.spike_info.get := io.in.bits.ctrl.spike_info.get
+    tcctrl_i.reg_idxw := io.in.bits.ctrl.reg_idxw
+    tcctrl_i.warpID := io.in.bits.ctrl.wid
+    tensor.io.in.bits.ctrl := tcctrl_i
+  }
+  tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
+  tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
+  tensor.io.in.valid:=io.in.valid
+  io.in.ready:=tensor.io.in.ready
+
+  // Get Input data.
+  tensor.io.in.bits.data_in <> io.in.bits
+//  tensor.io.in.bits.data_in.in1 := io.in.bits.in1
+//  tensor.io.in.bits.data_in.in2 := io.in.bits.in2
+//  tensor.io.in.bits.data_in.in3 := io.in.bits.in3
+//  tensor.io.in.bits.data_in.mask := io.in.bits.mask
+//  tensor.io.in.bits.data_in.ctrl := io.in.bits.ctrl
+  // Get ctrl and rm.
+  tensor.io.in.bits.ctrl := 0.U.asTypeOf(EmptyFPUCtrl())
+  tensor.io.in.bits.rm := io.rm
+
+  // Get computation results
+  (0 until num_thread).foreach(x=>{
+    result_v.io.enq.bits.wb_wvd_rd(x):=tensor.io.out.bits.data_out(x)
+  })
+
+  result_v.io.enq.bits.warp_id:=tensor.io.out.bits.ctrl.warpID
+  result_v.io.enq.bits.reg_idxw:=tensor.io.out.bits.ctrl.reg_idxw
+  result_v.io.enq.bits.wvd:=tensor.io.out.valid
+//  TODO: now is all valid.
+  result_v.io.enq.bits.wvd_mask.foreach(_:=true.B)
+  result_v.io.enq.valid:=tensor.io.out.valid
+  tensor.io.out.ready:=result_v.io.enq.ready
+
+  if (SPIKE_OUTPUT) {
+    val tcctrl_o = Wire(new TCCtrlv2(xLen, depth_warp))
+    tcctrl_o := tensor.io.out.bits.ctrl
+    result_v.io.enq.bits.spike_info.get := tcctrl_o.spike_info.get
+  }
+// Queue Res->out
+  io.out_v<>result_v.io.deq
+}
+
 
 class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
   assert(softThread % hardThread == 0)
