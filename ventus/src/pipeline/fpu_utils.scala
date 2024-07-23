@@ -120,7 +120,7 @@ class RoundingUnit(fracWidth: Int) extends Module{
 
   val inexact = io.in.guard | io.in.round | io.in.sticky
   val lsb = io.in.frac(0)
-  val roundUp = MuxLookup(io.in.rm, false.B, Seq(
+  val roundUp = MuxLookup(io.in.rm, false.B)(Seq(
     RNE -> (io.in.guard && (io.in.round | io.in.sticky | lsb)),
     RTZ -> false.B,
     RUP -> (inexact & (!io.in.sign)),
@@ -197,7 +197,7 @@ class SrtTable extends Module{
       if(!ge.contains(k)) ge = ge + (k -> (io.y.asSInt >= k.S(8.W)))
     }
   }
-  io.q := MuxLookup(io.d, 0.S,
+  io.q := MuxLookup(io.d, 0.S)(
     qSelTable.map(x =>
       MuxCase((-2).S(3.W), Seq(
         ge(x(0)) -> 2.S(3.W),
@@ -255,7 +255,7 @@ class OnTheFlyConv(len: Int) extends Module{    // len = 28 + 3 = 31
       ( (m._2._1 << Mux(io.qi(0), 1.U, 2.U)).asUInt & (mask >> io.qi(0)).asUInt ) | m._2._2
       )
   )
-  val sqrtToCsa = MuxLookup(io.qi.asUInt, 0.U, sqrtToCsaMap)
+  val sqrtToCsa = MuxLookup(io.qi.asUInt, 0.U)(sqrtToCsaMap)
 
   val Q_load_00 = Q | b_00
   val Q_load_01 = Q | b_01
@@ -285,8 +285,8 @@ class OnTheFlyConv(len: Int) extends Module{    // len = 28 + 3 = 31
       -1 -> QM_load_10, // B[j+1] = B[j] ::: (r-|q|-1)
       -2 -> QM_load_01
     ).map(m => m._1.S(3.W).asUInt -> m._2)
-    Q := MuxLookup(io.qi.asUInt, DontCare, QConvMap)
-    QM := MuxLookup(io.qi.asUInt, DontCare, QMConvMap)
+    Q := MuxLookup(io.qi.asUInt, 0.U)(QConvMap)
+    QM := MuxLookup(io.qi.asUInt, 0.U)(QMConvMap)
   }
   io.F := sqrtToCsa
   io.QM := QM

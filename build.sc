@@ -56,6 +56,7 @@ trait FPUv2 extends SbtModule
   def chiselPluginIvy = Some(v.chiselCrossVersions(chiselVersion)._2)
   override def millSourcePath = os.pwd / "dependencies" / "fpuv2"
   def fudianModule = fudian(crossValue)
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 
   object fudian extends Cross[FuDian](crossValue)
   trait FuDian extends SbtModule
@@ -175,21 +176,20 @@ trait Ventus
   def inclusivecacheModule = inclusivecache(crossValue)
 
   override def forkArgs = Seq("-Xmx32G", "-Xss192m")
-  override def scalacOptions = Seq(
+  override def scalacOptions = super.scalacOptions() ++ Seq(
     "-language:reflectiveCalls",
     "-deprecation",
     "-feature",
     "-Xcheckinit"
   )
 
-  override def ivyDeps = super.ivyDeps() ++ Agg(
-    v.chiselCrossVersions(chiselVersion)._3
-  )
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 
   // Define tests module
   object tests extends ScalaTests with TestModule.ScalaTest {
     override def forkArgs = Seq("-Xmx32G", "-Xss192m")
     override def ivyDeps = super.ivyDeps() ++ Agg(
+      v.chiselCrossVersions(chiselVersion)._2,
       v.chiselCrossVersions(chiselVersion)._3
     )
   }

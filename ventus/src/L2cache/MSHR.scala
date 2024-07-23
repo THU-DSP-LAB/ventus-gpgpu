@@ -13,7 +13,7 @@ package L2cache
 
 import chisel3._
 import chisel3.util._
-import chisel3.internal.sourceinfo.SourceInfo
+import chisel3.experimental.SourceInfo
 import freechips.rocketchip.tilelink._
 import TLPermissions._
 import TLMessages._

@@ -214,7 +214,13 @@ class CSRFile extends Module {
   io.simt_rpc:=rpc
 
   val wen=io.ctrl.csr.orR&io.write
-  val csr_wdata = MuxLookup(io.ctrl.csr, 0.U, Seq( CSR.W -> csr_input, CSR.S -> (csr_rdata | csr_input),  CSR.C -> (csr_rdata & (~csr_input).asUInt)))
+  val csr_wdata = MuxLookup(io.ctrl.csr, 0.U)(
+    Seq(
+      CSR.W -> csr_input,
+      CSR.S -> (csr_rdata | csr_input),
+      CSR.C -> (csr_rdata & (~csr_input).asUInt)
+    )
+  )
 
   val csrFile = Seq(
     BitPat(CSR.mstatus)         -> mstatus,

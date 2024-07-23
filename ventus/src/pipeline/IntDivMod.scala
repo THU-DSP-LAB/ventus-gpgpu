@@ -41,8 +41,8 @@ class IntDivMod(xLen: Int) extends Module{
   val overflowReg = RegEnable(overflow, io.in.fire)
   val divByZeroReg = RegEnable(divByZero, io.in.fire)
   // ---------------- pre phase -------------------
-  val aLez = PriorityEncoder(unsignedAReg.asBools().reverse)
-  val dLez = PriorityEncoder(unsignedDReg.asBools().reverse)
+  val aLez = PriorityEncoder(unsignedAReg.asBools.reverse)
+  val dLez = PriorityEncoder(unsignedDReg.asBools.reverse)
   val iter = Mux(aLez > dLez, 0.U, dLez - aLez + 1.U)
 
   val aReg = RegInit(0.U((xLen+2).W))

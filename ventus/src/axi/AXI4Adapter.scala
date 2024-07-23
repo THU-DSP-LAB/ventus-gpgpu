@@ -17,7 +17,7 @@ import TLMessages._
 //import Chisel._
 import chisel3._
 import chisel3.util._
-import chisel3.internal.sourceinfo.SourceInfo
+import chisel3.experimental.SourceInfo
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import L2cache.InclusiveCacheParameters_lite

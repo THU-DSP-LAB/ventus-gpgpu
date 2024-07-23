@@ -21,7 +21,7 @@ import pipeline.Scoreboard
 object GPGPU_gen extends App{
   val L1param = (new MyConfig).toInstance
   val L2param = InclusiveCacheParameters_lite(CacheParameters(2, l2cache_NSets, l2cache_NWays, blockBytes = (l2cache_BlockWords << 2), beatBytes = (l2cache_BlockWords << 2),l2cs = num_l2cache), InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets), false)
-  (new chisel3.stage.ChiselStage).emitVerilog(new GPGPU_top()(L1param),Array("--emission-options=disableMemRandomization,disableRegisterRandomization"))
+  chisel3.emitVerilog(new GPGPU_top()(L1param),Array("--emission-options=disableMemRandomization,disableRegisterRandomization"))
 }
 
 

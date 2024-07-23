@@ -47,11 +47,11 @@ class ALUexe extends Module{
     result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
     result_br.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   }
-  io.in.ready:=MuxLookup(io.in.bits.ctrl.branch,result_br.io.enq.ready&result.io.enq.ready,Seq(B_B->result_br.io.enq.ready,B_N->result.io.enq.ready))
+  io.in.ready:=MuxLookup(io.in.bits.ctrl.branch,result_br.io.enq.ready&result.io.enq.ready)(Seq(B_B->result_br.io.enq.ready,B_N->result.io.enq.ready))
 
   result_br.io.enq.bits.wid:=io.in.bits.ctrl.wid
   result_br.io.enq.bits.new_pc:=io.in.bits.in3
-  result_br.io.enq.bits.jump:=MuxLookup(io.in.bits.ctrl.branch,false.B,Seq(B_B->alu.io.cmp_out,B_J->true.B,B_R->true.B))
+  result_br.io.enq.bits.jump:=MuxLookup(io.in.bits.ctrl.branch,false.B)(Seq(B_B->alu.io.cmp_out,B_J->true.B,B_R->true.B))
 
   result_br.io.enq.valid:=io.in.valid&(io.in.bits.ctrl.branch=/=B_N)
   result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wxd

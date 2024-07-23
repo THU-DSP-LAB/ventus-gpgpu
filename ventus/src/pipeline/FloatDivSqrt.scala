@@ -58,7 +58,7 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
 
   //sqrt
   val S = conv.io.Q >> 2
-  val s0 :: s1 :: s2 :: s3 :: s4 :: Nil = S(len-2, len-6).asBools().reverse
+  val s0 :: s1 :: s2 :: s3 :: s4 :: Nil = S(len-2, len-6).asBools.reverse
   val sqrt_d = Mux(firstCycle, "b101".U(3.W), Mux(s0, "b111".U(3.W), Cat(s2, s3, s4)))
   val div_d = divisor(len-2, len-4)
   val sqrt_y = ws(len+3, len-4) + wc(len+3, len-4)
@@ -78,7 +78,7 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
   neg_dx1 := ~dx1
   neg_dx2 := neg_dx1 << 1
 
-  val divCsaIn = MuxLookup(table.io.q.asUInt, 0.U, Seq(
+  val divCsaIn = MuxLookup(table.io.q.asUInt, 0.U)(Seq(
     -1 -> dx1,
     -2 -> dx2,
     1 ->  neg_dx1,
@@ -197,7 +197,7 @@ class FloatDivSqrt extends FPUSubModule{
   val specialCase = divSpecial || sqrtSpecial
   val specialCaseReg = RegEnable(specialCase, io.in.fire)
   val specialResSel = Mux(sqrtSpecial, sqrtSpecialResSel, divSpecialResSel)
-  val sel_NaN :: sel_Zero :: sel_Inf :: Nil = specialResSel.asBools().reverse
+  val sel_NaN :: sel_Zero :: sel_Inf :: Nil = specialResSel.asBools.reverse
   val specialResult = RegEnable(
     Mux(sel_NaN,
       Float32.defaultNaN,
@@ -209,8 +209,8 @@ class FloatDivSqrt extends FPUSubModule{
     io.in.fire
   )
 
-  val aFracLEZ = PriorityEncoder(aFracReg(22, 0).asBools().reverse)
-  val bFracLEZ = PriorityEncoder(bFracReg(22, 0).asBools().reverse)
+  val aFracLEZ = PriorityEncoder(aFracReg(22, 0).asBools.reverse)
+  val bFracLEZ = PriorityEncoder(bFracReg(22, 0).asBools.reverse)
 
   val fracDivSqrt = Module(new FracDivSqrt(F_FRAC_WIDTH+4))
   fracDivSqrt.io.out.ready := true.B
@@ -263,7 +263,7 @@ class FloatDivSqrt extends FPUSubModule{
     0.S,
     aExpReg + Float32.expBias.toSInt
   ) + fracCout.toSInt
-  val roundingInc = MuxLookup(rmReg, "b10".U(2.W), Seq(
+  val roundingInc = MuxLookup(rmReg, "b10".U(2.W))(Seq(
     RDN -> Mux(resSign, "b11".U, "b00".U),
     RUP -> Mux(resSign, "b00".U, "b11".U),
     RTZ -> "b00".U

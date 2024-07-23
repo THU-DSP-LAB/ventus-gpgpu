@@ -5,9 +5,10 @@ trait HasChisel
   extends ScalaModule {
   // Define these for building chisel from ivy
   def chiselIvy: Option[Dep]
-  override def ivyDeps = T(super.ivyDeps() ++ chiselIvy)
   def chiselPluginIvy: Option[Dep]
-  override def scalacPluginIvyDeps: T[Agg[Dep]] = T(super.scalacPluginIvyDeps() ++ chiselPluginIvy.map(Agg(_)).getOrElse(Agg.empty[Dep]))
+  override def ivyDeps = super.ivyDeps() ++ Agg(chiselIvy.get) ++ Agg(chiselPluginIvy.get)
+  override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
+  // override def scalacPluginIvyDeps: T[Agg[Dep]] = T(super.scalacPluginIvyDeps() ++ chiselPluginIvy.map(Agg(_)).getOrElse(Agg.empty[Dep]))
 }
 
 trait VentusModule extends HasChisel {
