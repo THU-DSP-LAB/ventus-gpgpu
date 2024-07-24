@@ -133,6 +133,10 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val flushCount =RegInit(0.U((params.setBits+params.wayBits+1).W))
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
+  val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
+  val flush_set =flushCount/params.cache.ways.asUInt
+  val flush_way =(flushCount%params.cache.ways.asUInt)
+
   when(io.flush || io.invalidate  || (flush_issue_reg&& (io.result.fire || !RegNext(status_reg(flush_set).dirty(flush_way))))){
     flushCount := flushCount +1.U
   }.elsewhen(flushDone){
@@ -163,7 +167,6 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   //not replace victim when write miss or when multi mergeable miss
 
 
-val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
   for(i <-0 until params.cache.sets) {
     for (j <-0 until params.cache.ways) {
       when(!wipeDone) {
@@ -235,8 +238,6 @@ for(i<- 0 until params.cache.sets){
   }.reverse)
 
 
-  val flush_set =flushCount/params.cache.ways.asUInt
-  val flush_way =(flushCount%params.cache.ways.asUInt)
   val flush_tag =ways(flush_way).tag
   cc_dir.io.r.req.valid := ren && (!(setQuash_1&&tagMatch_1)) //在非bypass情况下fire才会读
   cc_dir.io.r.req.bits.apply(setIdx=Mux(flush_issue,flush_set,io.read.bits.set))  //读了一个set的所有数据
