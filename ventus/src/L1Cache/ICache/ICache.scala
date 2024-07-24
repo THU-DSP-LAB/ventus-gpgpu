@@ -83,7 +83,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   //val ShouldFlushCoreRsp_st2 = Wire(Bool())
   val ShouldFlushCoreRsp_st1 = Wire(Bool())
   val ShouldFlushCoreRsp_st0 = Wire(Bool())
-  val coreReqFire_st1 = RegNext(io.coreReq.fire() && !ShouldFlushCoreRsp_st0)
+  val coreReqFire_st1 = RegNext(io.coreReq.fire && !ShouldFlushCoreRsp_st0)
   val coreReqFire_st2 = RegNext(coreReqFire_st1 && !ShouldFlushCoreRsp_st1)
   //ljz: need to know if cachemiss is sent
   val coreRespFire_st2 =io.coreRsp.fire
@@ -110,18 +110,18 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
-  tagAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
+  tagAccess.io.r.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
   tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
   tagAccess.io.coreReqReady := io.coreReq.ready
   // ******      tag write, to handle mem rsp st1 & st2      ******
-  tagAccess.io.w.req.valid := memRsp_Q.io.deq.fire()
+  tagAccess.io.w.req.valid := memRsp_Q.io.deq.fire
   tagAccess.io.w.req.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
 
   // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp
   val memRsp_QData = Wire(UInt((WordLength*BlockWords).W))
-  memRsp_QData := memRsp_Q.io.deq.bits.d_data.asUInt()
+  memRsp_QData := memRsp_Q.io.deq.bits.d_data.asUInt
   //deq coupled with mshr missRsp
   // ******     mshrAccess      ******
   mshrAccess.io.missReq.valid := cacheMiss_st1
@@ -137,11 +137,11 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   //coreRsp_Q.io.enq.ready TODO 将来版本可能重新启用信号，如果core前端需要MSHR返回信息的话
 
   // ******      data write, to handle mem rsp st2      ******
-  dataAccess.io.w.req.valid := memRsp_Q.io.deq.fire()
+  dataAccess.io.w.req.valid := memRsp_Q.io.deq.fire
   dataAccess.io.w.req.bits.apply(data=memRsp_QData, setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask=waymask_replace_st0)
 
   // ******      data read, to handle pipe req st2     ******
-  dataAccess.io.r.req.valid := io.coreReq.fire() && !ShouldFlushCoreRsp_st0
+  dataAccess.io.r.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
   dataAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
   val dataAccess_data = dataAccess.io.r.resp.asTypeOf(Vec(NWays,UInt(BlockBits.W)))
   val data_after_wayidx_st1 = dataAccess_data(wayidx_hit_st1)//dontTouch(dataAccess.io.r.resp.data(0.U(1.W)))
@@ -180,7 +180,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
     //hit
     addr_st1)*/
   val Status_st1 = Mux(RegNext(ShouldFlushCoreRsp_st0),"b10".U, Cat(
-    (cacheMiss_st1 && !mshrAccess.io.missReq.fire()) || OrderViolation_st1,
+    (cacheMiss_st1 && !mshrAccess.io.missReq.fire) || OrderViolation_st1,
     cacheMiss_st1))//Reg数量看起来虚多，但这样才可以让st0信号能把b10传递过来
   val Status_st2 = Mux(RegNext(ShouldFlushCoreRsp_st1),"b10".U,RegNext(Status_st1))
   io.coreRsp.bits.status := Status_st2//Mux(ShouldFlushCoreRsp_st2,"b10".U,Status_st2)

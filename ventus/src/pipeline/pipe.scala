@@ -140,8 +140,8 @@ class pipe(val sm_id: Int = 0) extends Module{
   warp_sche.io.pc_req<>io.icache_req
   warp_sche.io.warp_control<>issueX.io.out_warpscheduler
   warp_sche.io.issued_warp.bits:=exe_dataX.io.enq.bits.ctrl.wid // not used
-  warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire() // not used
-  warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt()
+  warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
+  warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
   operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
@@ -153,7 +153,7 @@ class pipe(val sm_id: Int = 0) extends Module{
    lsu.io.flush_dcache.bits := warp_sche.io.flushDCache.bits
    warp_sche.io.flushDCache.ready := lsu.io.flush_dcache.ready
 
-  //flush:=(warp_sche.io.branch.fire()&warp_sche.io.branch.bits.jump) | ()
+  //flush:=(warp_sche.io.branch.fire&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
 
   control.io.sm_id := sm_id.U(8.W)
@@ -192,7 +192,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   io.icache_rsp.ready:=ibuffer.io.in.ready
 
   //val ibuffer_ready=Wire(Vec(num_warp,Bool()))
-  warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt()
+  warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
@@ -203,7 +203,7 @@ class pipe(val sm_id: Int = 0) extends Module{
     val ctrl=ibuffer.io.out(i).bits
     /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
-        Mux(ctrl.csr.orR(),csrfile.io.in.ready,
+        Mux(ctrl.csr.orR,csrfile.io.in.ready,
           Mux(ctrl.mem,lsu.io.lsu_req.ready,
             Mux(ctrl.isvec&ctrl.simt_stack&ctrl.simt_stack_op===0.U,valu.io.in.ready&simt_stack.io.branch_ctl.ready,
               Mux(ctrl.isvec&ctrl.simt_stack,simt_stack.io.branch_ctl.ready,
@@ -286,7 +286,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   //    }
   //  }
   //输出所有发射的指令
-  //when( exe_data.io.deq.fire()){
+  //when( exe_data.io.deq.fire){
   //  printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
   //  //exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
   //  printf(p"mask ${exe_data.io.deq.bits.mask} with${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
@@ -294,7 +294,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   //}
 
   //输出特定指令的操作数
-  //when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire() ){
+  //when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire ){
   //    printf(p"0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc+0x348.U-0xc.U) },${exe_data.io.deq.bits.ctrl.wid} operand is =")
   //  exe_data.io.deq.bits.in2.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
   //  exe_data.io.deq.bits.in1.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})

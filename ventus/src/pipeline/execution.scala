@@ -47,11 +47,11 @@ class ALUexe extends Module{
     result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
     result_br.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   }
-  io.in.ready:=MuxLookup(io.in.bits.ctrl.branch,result_br.io.enq.ready&result.io.enq.ready,Seq(B_B->result_br.io.enq.ready,B_N->result.io.enq.ready))
+  io.in.ready:=MuxLookup(io.in.bits.ctrl.branch,result_br.io.enq.ready&result.io.enq.ready)(Seq(B_B->result_br.io.enq.ready,B_N->result.io.enq.ready))
 
   result_br.io.enq.bits.wid:=io.in.bits.ctrl.wid
   result_br.io.enq.bits.new_pc:=io.in.bits.in3
-  result_br.io.enq.bits.jump:=MuxLookup(io.in.bits.ctrl.branch,false.B,Seq(B_B->alu.io.cmp_out,B_J->true.B,B_R->true.B))
+  result_br.io.enq.bits.jump:=MuxLookup(io.in.bits.ctrl.branch,false.B)(Seq(B_B->alu.io.cmp_out,B_J->true.B,B_R->true.B))
 
   result_br.io.enq.valid:=io.in.valid&(io.in.bits.ctrl.branch=/=B_N)
   result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wxd
@@ -434,7 +434,7 @@ class vALUexe extends Module{
       })
     }
     when(io.in.bits.ctrl.alu_fn===FN_VID){
-      result.io.enq.bits.wb_wvd_rd(x):=x.asUInt()
+      result.io.enq.bits.wb_wvd_rd(x):=x.asUInt
     }
     when(io.in.bits.ctrl.alu_fn===FN_VMERGE){
       result.io.enq.bits.wb_wvd_rd(x):=Mux(io.in.bits.mask(x),io.in.bits.in1(x),io.in.bits.in2(x))
@@ -521,7 +521,7 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
         })
       }
       when(io.in.bits.ctrl.alu_fn === FN_VID) {
-        result.io.enq.bits.wb_wvd_rd(x) := x.asUInt()
+        result.io.enq.bits.wb_wvd_rd(x) := x.asUInt
       }
       when(io.in.bits.ctrl.alu_fn === FN_VMERGE) {
         result.io.enq.bits.wb_wvd_rd(x) := Mux(io.in.bits.mask(x), io.in.bits.in1(x), io.in.bits.in2(x))
@@ -886,7 +886,7 @@ class SFUexe extends Module{
   val alu_out_fire = alu_out_arbiter(0).out.fire
   switch(state){
     is(s_idle){
-      when(io.in.fire()){
+      when(io.in.fire){
         state:=s_busy
         mask:=io.in.bits.mask.asUInt
         i_valid:=true.B
@@ -903,7 +903,7 @@ class SFUexe extends Module{
             mask := next_mask
             i_valid:=true.B
             for(j <- 0 until num_sfu) out_data(i*num_sfu+j) := alu_out_arbiter(j).out.bits
-            when(!next_mask.orR()){
+            when(!next_mask.orR){
               state := s_finish
               i_valid:=false.B
             }

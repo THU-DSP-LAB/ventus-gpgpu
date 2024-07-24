@@ -164,7 +164,7 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
   val ActiveLaneWhenConflict1H = Wire(Vec(NLanes, Bool()))
   (0 until NBanks).foreach{ i =>
     ActiveLaneWhenConflict1H(i) := Cat(perBankActiveLaneWhenConflict1H.map(_(i))).orR}
-  val ReserveLaneWhenConflict1H = VecInit(((~Cat(ActiveLaneWhenConflict1H)).asUInt() & Cat(laneActiveMask)).asBools.reverse)
+  val ReserveLaneWhenConflict1H = VecInit(((~Cat(ActiveLaneWhenConflict1H)).asUInt & Cat(laneActiveMask)).asBools.reverse)
 
   perLaneConflictReq := Mux(bankConflict_reg,perLaneConflictReq_reg,perLaneReq)
   //to determine current arb source: during a conflict, use Reg, otherwise use Input

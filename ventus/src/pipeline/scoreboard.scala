@@ -116,9 +116,9 @@ class Scoreboard extends Module{
   OpColRegX.clear(io.op_colX_out_fire, 0.U)
   fenceReg.set(io.if_fire & io.if_ctrl.fence,0.U)
   fenceReg.clear(io.fence_end,0.U)
-  val read1=MuxLookup(io.ibuffer_if_ctrl.sel_alu1,false.B,Array(A1_RS1->scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),A1_VRS1->vectorReg.read(io.ibuffer_if_ctrl.reg_idx1)))
-  val read2=MuxLookup(io.ibuffer_if_ctrl.sel_alu2,false.B,Array(A2_RS2->scalarReg.read(io.ibuffer_if_ctrl.reg_idx2),A2_VRS2->vectorReg.read(io.ibuffer_if_ctrl.reg_idx2)))
-  val read3=MuxLookup(io.ibuffer_if_ctrl.sel_alu3,false.B,Array(A3_VRS3->vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),
+  val read1=MuxLookup(io.ibuffer_if_ctrl.sel_alu1,false.B)(Array(A1_RS1->scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),A1_VRS1->vectorReg.read(io.ibuffer_if_ctrl.reg_idx1)))
+  val read2=MuxLookup(io.ibuffer_if_ctrl.sel_alu2,false.B)(Array(A2_RS2->scalarReg.read(io.ibuffer_if_ctrl.reg_idx2),A2_VRS2->vectorReg.read(io.ibuffer_if_ctrl.reg_idx2)))
+  val read3=MuxLookup(io.ibuffer_if_ctrl.sel_alu3,false.B)(Array(A3_VRS3->vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),
     A3_SD->Mux(io.ibuffer_if_ctrl.isvec& (!io.ibuffer_if_ctrl.readmask),vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),Mux(io.ibuffer_if_ctrl.isvec,vectorReg.read(io.ibuffer_if_ctrl.reg_idx2),scalarReg.read(io.ibuffer_if_ctrl.reg_idx2))),
     A3_FRS3->scalarReg.read(io.ibuffer_if_ctrl.reg_idx3),
     A3_PC-> Mux(io.ibuffer_if_ctrl.branch===B_R, scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),false.B)

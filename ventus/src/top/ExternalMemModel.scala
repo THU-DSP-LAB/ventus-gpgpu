@@ -40,7 +40,7 @@ class ExternalMemModel(C: TestCase#Props, params: InclusiveCacheParameters_lite)
   assert(ExtMemBase1 <= ExtMemBase2,"ExtMemBase1 > ExtMemBase2")
   assert(ExtMemBase1 + ExtMemSize1 <= ExtMemBase2,"space overlap in ExtMem")
 
-  def get_ExtMemBlockAddr(addr: UInt) = (addr >> (log2Up(ExtMemBlockWords)+2)).asUInt()
+  def get_ExtMemBlockAddr(addr: UInt) = (addr >> (log2Up(ExtMemBlockWords)+2)).asUInt
   val ExtMemLatency = 20
 
   val memory1 = Mem(ExtMemSize1*ExtMemBlockWords,UInt(ExtMemWordLength.W))
@@ -77,13 +77,13 @@ class ExternalMemModel(C: TestCase#Props, params: InclusiveCacheParameters_lite)
 
   for (i<- 0 until ExtMemBlockWords){
     wordAddr(i) := Cat(perMemoryBlockAddr,i.U(log2Up(ExtMemBlockWords).W))
-    when(io.memReq.fire() && io.memReq.bits.opcode === TLAOp_PutFull){
+    when(io.memReq.fire && io.memReq.bits.opcode === TLAOp_PutFull){
       when(isSpace1){
         memory1(wordAddr(i)) := writeVec(i)
       }.elsewhen(isSpace2){
         memory2(wordAddr(i)) := writeVec(i)
       }
-    }.elsewhen(io.memReq.fire() && io.memReq.bits.opcode === TLAOp_PutPart &&
+    }.elsewhen(io.memReq.fire && io.memReq.bits.opcode === TLAOp_PutPart &&
       io.memReq.bits.mask(i)){//TODO check order
       when(isSpace1) {
         memory1(wordAddr(i)) := writeVec(i)
@@ -104,9 +104,9 @@ val RspOpCode = Wire(UInt(3.W))
   RspOpCode := Mux(io.memReq.bits.opcode===4.U(4.W),1.U(3.W),0.U(3.W))
 
   val memRsp_Q = Module(new Queue(new TLBundleD_lite(params), 4))
-  memRsp_Q.io.enq.valid := (io.memReq.fire())
+  memRsp_Q.io.enq.valid := (io.memReq.fire)
   memRsp_Q.io.enq.bits.opcode := (RspOpCode)
-  memRsp_Q.io.enq.bits.data := readVec.asUInt()
+  memRsp_Q.io.enq.bits.data := readVec.asUInt
   memRsp_Q.io.enq.bits.source := (io.memReq.bits.source)
   memRsp_Q.io.enq.bits.size := 0.U
   io.memReq.ready := memRsp_Q.io.enq.ready

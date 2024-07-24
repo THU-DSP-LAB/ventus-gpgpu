@@ -51,7 +51,7 @@ trait HasL1CacheParameters extends HasRVGParameters{
   def tIBits = WIdBits+NLanes*(BlockOffsetBits+1+BytesOfWord)
 
   //for addr with full width or just block addr
-  def get_tag(addr: UInt) = (addr >> (addr.getWidth-TagBits)).asUInt()
+  def get_tag(addr: UInt) = (addr >> (addr.getWidth-TagBits)).asUInt
   def get_setIdx(addr: UInt) = if (addr.getWidth == WordLength) {
     addr(SetIdxBits + BlockOffsetBits + WordOffsetBits-1,BlockOffsetBits + WordOffsetBits)
   } else if (addr.getWidth == bABits) {//blockAddr
@@ -63,7 +63,7 @@ trait HasL1CacheParameters extends HasRVGParameters{
   def get_blockOffset(addr: UInt)= addr(BlockOffsetBits + WordOffsetBits-1,WordOffsetBits)
 
   def get_offsets(addr: UInt)= addr(BlockOffsetBits + WordOffsetBits-1,0)//blockOffset + workOffset
-  def get_blockAddr(addr: UInt) = (addr >> (WordLength-(TagBits+SetIdxBits))).asUInt()//tag + setIdx
+  def get_blockAddr(addr: UInt) = (addr >> (WordLength-(TagBits+SetIdxBits))).asUInt//tag + setIdx
 }
 
 abstract class L1CacheModule extends Module with HasL1CacheParameters
