@@ -282,7 +282,7 @@ for(i<- 0 until params.cache.sets){
   val timely_hit = (RegNext(io.read.bits.tag) ===io.write.bits.data.tag) && io.write.fire && (RegNext(io.read.bits.set)===io.write.bits.set)
 
   io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
-  io.result.valid := Mux(RegNext(flush_issue), RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
+  io.result.valid := Mux(RegNext(flush_issue), io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
   io.result.bits.hit := (hit || (setQuash && tagMatch )|| timely_hit) && (!about_replace)
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,RegNext(io.write.bits.way),Mux(timely_hit,io.write.bits.way,victimWay))))
   io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,read_bits_reg.put)
