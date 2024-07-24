@@ -55,7 +55,7 @@ class CtrlSigs extends Bundle {
   val writemask = Bool()
   val wxd = Bool()
   val pc=UInt(32.W)
-  val imm_ext = UInt(6.W) // new! immext
+  val imm_ext = UInt((1+6).W) // new! immext
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
   val atomic= Bool()
   val aq = Bool()
