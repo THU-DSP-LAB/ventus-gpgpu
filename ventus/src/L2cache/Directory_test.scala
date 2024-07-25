@@ -89,6 +89,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     val flush  = Input(Bool())
     val invalidate =Input(Bool())
     val tag_match = Input(Bool())
+    val flush_invalidate_src=Input(UInt(params.source_bits.W))
  //   val finish_issue =Output(Bool())
   })
 
@@ -128,7 +129,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val is_invalidate_reg =RegInit(false.B)
   val is_invalidate =Mux(io.invalidate, io.invalidate,is_invalidate_reg)
 
-
+ val flush_source_reg=RegInit(0.U(params.source_bits.W))
 
   val flushCount =RegInit(0.U((params.setBits+params.wayBits+1).W))
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
@@ -148,10 +149,12 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
   when(io.flush || io.invalidate){
     flush_issue_reg:= true.B
+    flush_source_reg:=io.flush_invalidate_src
     is_invalidate_reg:=  io.invalidate
   }.elsewhen(flushDone){
     flush_issue_reg:= false.B
     is_invalidate_reg :=false.B
+    flush_source_reg:=0.U
   }
 
 
@@ -290,7 +293,7 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.offset :=Mux(RegNext(flush_issue),0.U,read_bits_reg.offset)
   io.result.bits.size   :=Mux(RegNext(flush_issue),log2Up(params.cache.beatBytes).asUInt,read_bits_reg.size)
   io.result.bits.set    :=Mux(RegNext(flush_issue),RegNext(flush_set),read_bits_reg.set)
-  io.result.bits.source :=Mux(RegNext(flush_issue),0.U,read_bits_reg.source)
+  io.result.bits.source :=Mux(RegNext(flush_issue),RegNext(flush_source_reg),read_bits_reg.source)
   io.result.bits.tag    :=Mux(RegNext(flush_issue),RegNext(flush_tag),read_bits_reg.tag)
   //victim tag should be transfered when miss dirty
   io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,read_bits_reg.opcode)
