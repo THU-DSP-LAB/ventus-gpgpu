@@ -1,11 +1,10 @@
 package cta
 
 /**
- * @see doc/Resource_table.md
+ * @see docs/cta_scheduler/Resource_table.md
  */
 
 import chisel3._
-import chisel3.experimental.ChiselEnum
 import chisel3.util._
 import cta.utils.sort3
 import cta.utils.DecoupledIO_1_to_3
@@ -395,7 +394,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
   val fsm_a_output_ok = !fsm_a_output_valid || io.baseaddr.fire
 
   // Sub-FSM ALLOC state transition logic
-  fsm_a_next := MuxLookup(fsm_a.asUInt, FSM_A.IDLE, Seq(
+  fsm_a_next := MuxLookup(fsm_a.asUInt, FSM_A.IDLE)(Seq(
     FSM_A.IDLE.asUInt -> Mux(fsm_next === FSM.ALLOC && fsm_next =/= fsm, FSM_A.FIND, fsm_a),
     FSM_A.FIND.asUInt -> Mux(wgsize === 0.U || fsm_a_cnt > io.rtram_data.cnt(), FSM_A.WRITE_OUTPUT, fsm_a),   // if wgsize==0, no need to scan the linked-list
     FSM_A.WRITE_OUTPUT.asUInt -> MuxCase(FSM_A.IDLE, Seq(

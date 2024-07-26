@@ -177,7 +177,7 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 }
 
 object emitVerilog extends App {
-  (new chisel3.stage.ChiselStage).emitVerilog(
+  chisel3.emitVerilog(
     new cta_scheduler_top(CONFIG.GPU.NUM_CU),
     //new cta_util.RRPriorityEncoder(4),
     //new wg_buffer(),

@@ -11,10 +11,10 @@
 
 package L2cache
 
-import Chisel._
-import chisel3.internal.sourceinfo.SourceInfo
-import chisel3.util.log2Up
-import freechips.rocketchip.config._
+import chisel3._
+import chisel3.experimental.SourceInfo
+import chisel3.util._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util._
@@ -222,7 +222,7 @@ case class InclusiveCacheParameters_lite(
   }
 
   def widen(x: UInt, width: Int): UInt = {
-    val y = x | UInt(0, width=width)
+    val y = x | 0.U(width.W)
     //assert (y >> width === UInt(0))
     y(width-1, 0)
   }
@@ -230,7 +230,7 @@ case class InclusiveCacheParameters_lite(
   def expandAddress(tag: UInt, l2c:UInt, set: UInt, offset: UInt): UInt = {
     val base = if(l2cBits != 0) Cat(widen(tag, tagBits), widen(l2c,l2cBits), widen(set, setBits), widen(offset, offsetBits))
     else Cat(widen(tag, tagBits), widen(set, setBits), widen(offset, offsetBits))
-    var bits = Array.fill(addressBits) { UInt(0, width=1) }
+    var bits = Array.fill(addressBits) { 0.U(1.W) }
  //   addressMapping.zipWithIndex.foreach { case (a, i) => bits(a) = base(i,i) }
     base
   }
@@ -252,7 +252,7 @@ case class InclusiveCacheParameters_lite(
 //    expanded | Mux1H(mux)
 //  }
 
-  def dirReg[T <: Data](x: T, en: Bool = Bool(true)): T = {
+  def dirReg[T <: Data](x: T, en: Bool = true.B): T = {
     if (micro.dirReg) RegEnable(x, en) else x
   }
 
@@ -325,7 +325,7 @@ case class InclusiveCacheParameters(
 
   def clientBit(source: UInt): UInt = {
     if (clientBitsRaw == 0) {
-      UInt(0)
+      0.U
     } else {
       Cat(inner.client.clients.filter(_.supports.probe).map(_.sourceId.contains(source)).reverse)
     }
@@ -333,9 +333,9 @@ case class InclusiveCacheParameters(
 
   def clientSource(bit: UInt): UInt = {
     if (clientBitsRaw == 0) {
-      UInt(0)
+      0.asUInt
     } else {
-      Mux1H(bit, inner.client.clients.filter(_.supports.probe).map(c => UInt(c.sourceId.start)))
+      Mux1H(bit, inner.client.clients.filter(_.supports.probe).map(c => c.sourceId.start.U))
     }
   }
 
@@ -347,14 +347,14 @@ case class InclusiveCacheParameters(
   }
 
   def widen(x: UInt, width: Int): UInt = {
-    val y = x | UInt(0, width=width)
+    val y = x | 0.U(width.W)
     //assert (y >> width === UInt(0))
     y(width-1, 0)
   }
 
   def expandAddress(tag: UInt, set: UInt, offset: UInt): UInt = {
     val base = Cat(widen(tag, tagBits), widen(set, setBits), widen(offset, offsetBits))
-    var bits = Array.fill(outer.bundle.addressBits) { UInt(0, width=1) }
+    var bits = Array.fill(outer.bundle.addressBits) { 0.U(1.W) }
     addressMapping.zipWithIndex.foreach { case (a, i) => bits(a) = base(i,i) }
     Cat(bits.reverse)
   }
@@ -371,12 +371,12 @@ case class InclusiveCacheParameters(
         .unify(widen.distinct)
         .map(_.contains(expanded))
         .reduce(_ || _)
-      (matches, UInt(bits))
+      (matches, bits.U)
     }
     expanded | Mux1H(mux)
   }
 
-  def dirReg[T <: Data](x: T, en: Bool = Bool(true)): T = {
+  def dirReg[T <: Data](x: T, en: Bool = true.B): T = {
     if (micro.dirReg) RegEnable(x, en) else x
   }
 
@@ -387,10 +387,10 @@ case class InclusiveCacheParameters(
 object MetaData
 {
   val stateBits = 2
-  def INVALID: UInt = UInt(0, width = stateBits) // way is empty
-  def BRANCH:  UInt = UInt(1, width = stateBits) // outer slave cache is trunk
-  def TRUNK:   UInt = UInt(2, width = stateBits) // unique inner master cache is trunk
-  def TIP:     UInt = UInt(3, width = stateBits) // we are trunk, inner masters are branch
+  def INVALID: UInt = 0.U(stateBits.W) // way is empty
+  def BRANCH:  UInt = 1.U(stateBits.W) // outer slave cache is trunk
+  def TRUNK:   UInt = 2.U(stateBits.W) // unique inner master cache is trunk
+  def TIP:     UInt = 3.U(stateBits.W) // we are trunk, inner masters are branch
 
   // Does a request need trunk?
   def needT(opcode: UInt, param: UInt): Bool = {

@@ -29,7 +29,7 @@ package L2cache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.ReplacementPolicy
@@ -162,10 +162,10 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  val ren = io.read.fire() || flush_issue
+  val ren = io.read.fire || flush_issue
 
-  val wen_new = (!wipeDone && !wipeOff) || io.write.fire()
-  val wen =io.write.fire()
+  val wen_new = (!wipeDone && !wipeOff) || io.write.fire
+  val wen =io.write.fire
   require (codeBits <= 256)
 
   val not_replace= ((io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) && !io.result.bits.hit) ||io.tag_match
@@ -246,7 +246,7 @@ for(i<- 0 until params.cache.sets){
 
 
 
-  val hit = hits.orR()
+  val hit = hits.orR
   val hitWay = Wire(UInt(params.cache.ways.W))
   hitWay:= OHToUInt(hits)
   val writeSet1 = RegNext(io.write.bits.set)
@@ -284,7 +284,7 @@ for(i<- 0 until params.cache.sets){
 
   val timely_hit = (RegNext(io.read.bits.tag) ===io.write.bits.data.tag) && io.write.fire && (RegNext(io.read.bits.set)===io.write.bits.set)
 
-  io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
+  io.read.ready := ((wipeDone && !io.write.fire) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
   io.result.valid := Mux(RegNext(flush_issue), io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
   io.result.bits.hit := (hit || (setQuash && tagMatch )|| timely_hit) && (!about_replace)
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,RegNext(io.write.bits.way),Mux(timely_hit,io.write.bits.way,victimWay))))

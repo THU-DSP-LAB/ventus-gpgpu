@@ -63,10 +63,10 @@ VERILATED_MKFILE = $(VERILATED_DIR)/Vdut.mk
 VERILATED_FILES = $(VERILATED_MKFILE) $(VERILATED_CXXFILES) $(VERILATED_HFILES)
 
 ######################################################################
-default: run
+default: $(VERILATED_DIR)/Vdut
 
 $(SRC_V): $(SRC_SCALA)
-	cd .. && ./mill ventus.runMain top.emitVerilog
+	cd .. && ./mill ventus[6.4.0].runMain top.emitVerilog
 	mv GPGPU_SimTop.v $(SRC_V)
 	sed -i "1i\`define PRINTF_COND 0" $(SRC_V)
 

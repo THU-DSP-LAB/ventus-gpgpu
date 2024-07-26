@@ -1,11 +1,10 @@
 package cta
 
 /**
- * @see doc/Allocator.md
+ * @see docs/cta_schedulers/Allocator.md
  */
 
 import chisel3._
-import chisel3.experimental.ChiselEnum
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.experimental.VecLiterals.{AddObjectLiteralConstructor, AddVecLiteralConstructor}
 import chisel3.util._
@@ -346,7 +345,7 @@ class allocator extends Module {
   io.wgbuffer_result.bits.accept := (fsm === FSM.ALLOC)
   io.wgbuffer_result.bits.wgram_addr := wg.wgram_addr
   if(CONFIG.DEBUG) { io.wgbuffer_result.bits.wg_id.get :=  wg.wg_id.get }
-  alloc_task_wgram2_reg := MuxLookup(fsm.asUInt, false.B, Seq(
+  alloc_task_wgram2_reg := MuxLookup(fsm.asUInt, false.B)(Seq(
     FSM.ALLOC.asUInt  -> (alloc_task_wgram2_reg || (io.wgbuffer_result.fire && !alloc_task_ok)),
     FSM.REJECT.asUInt -> (alloc_task_wgram2_reg || (io.wgbuffer_result.fire && !alloc_task_ok)),
   ))

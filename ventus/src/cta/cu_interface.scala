@@ -1,7 +1,6 @@
 package cta
 
 import chisel3._
-import chisel3.experimental.ChiselEnum
 import chisel3.util._
 import chisel3.experimental.dataview._
 
@@ -9,7 +8,7 @@ import chisel3.experimental.dataview._
  * CU interface:
  * 1. split WG into WF and send them to CU one-by-one
  * 2. gather WF of WG. After all WF of a WG finish, send dealloc request to ResourceTable and report to Host
- * @see doc/CU_interface.md
+ * @see docs/cta_scheduler/CU_interface.md
  */
 class cu_interface extends Module {
   val NUM_CU: Int = CONFIG.GPU.NUM_CU
@@ -172,9 +171,9 @@ class cu_interface extends Module {
   when(init_wf_gather_cnt_idx =/= (NUM_CU * NUM_WG_SLOT).U) {
     wf_gather_cnt.write(init_wf_gather_cnt_idx, 0.U)    // Module init
   } .elsewhen(fsm === FSM.UPDATE) {
-    wf_gather_cnt.write( idx = global_wgslot_calc(wf_cu_reg, wf_wgslot_reg),
+    wf_gather_cnt.write(global_wgslot_calc(wf_cu_reg, wf_wgslot_reg),
       // if all WF of this WG has finished, reset WF counter for next-time using
-      data = Mux(wf_gather_finish, 0.U, wf_gather_cnt_read_data + 1.U)
+      Mux(wf_gather_finish, 0.U, wf_gather_cnt_read_data + 1.U)
     )
     if(DEBUG) {
       assert((wf_gather_ram_valid.get)(wf_cu_reg)(wf_wgslot_reg))
@@ -215,7 +214,7 @@ class cu_interface extends Module {
   // FSM state transition logic
   // =
 
-  fsm := MuxLookup(fsm.asUInt, FSM.GET_WF, Seq(
+  fsm := MuxLookup(fsm.asUInt, FSM.GET_WF)(Seq(
     FSM.GET_WF.asUInt -> Mux(arb_inst.io.out.fire, FSM.UPDATE, fsm),
     FSM.UPDATE.asUInt -> MuxCase(FSM.DEALLOC, Seq(
       !wf_gather_finish -> FSM.GET_WF,

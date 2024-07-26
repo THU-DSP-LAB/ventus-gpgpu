@@ -102,7 +102,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val robin_filter = RegInit(0.U(params.mshrs.W))  
   val robin_request = Cat(mshr_request, mshr_request & robin_filter)
-  val mshr_selectOH2 = (~(leftOR(robin_request) << 1)).asUInt() & robin_request
+  val mshr_selectOH2 = (~(leftOR(robin_request) << 1)).asUInt & robin_request
   val mshr_selectOH = mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
   val mshr_select = OHToUInt(mshr_selectOH)
 
@@ -118,17 +118,17 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sinkD.io.sche_dir_fire.bits :=mshr_select
 
 
-  when (mshr_request.orR()) { robin_filter := ~rightOR(mshr_selectOH) }
+  when (mshr_request.orR) { robin_filter := ~rightOR(mshr_selectOH) }
 
   
   schedule.a.bits.source := mshr_select
   val write_buffer =Module(new Queue(new FullRequest(params),8,false,true))
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt())&&(sinkD.io.resp.bits.opcode===AccessAckData)
+    m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt)&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
-    m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt()) && !write_buffer.io.deq.valid
-    m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt())&& requests.io.valid(i)
-    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt())
+    m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) && !write_buffer.io.deq.valid
+    m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i)
+    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt)
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
     m.io.merge.valid:= m.io.schedule.d.valid && ((requests.io.data.opcode===PutFullData) ||(requests.io.data.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
@@ -147,7 +147,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val mshr_validOH = requests.io.valid
 
-  val mshr_free = (~mshr_validOH).asUInt.orR()
+  val mshr_free = (~mshr_validOH).asUInt.orR
   val mshr_empty = (~mshr_validOH).asUInt.andR.asBool
   val putbuffer_empty= sinkA.io.empty
   val flush_ready = !issue_flush_invalidate &&  putbuffer_empty
@@ -177,12 +177,12 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  val alloc = !(tagMatches.orR() )//write miss after write miss is not allowed to alloc, WRW, RWR also not,
+  val alloc = !(tagMatches.orR )//write miss after write miss is not allowed to alloc, WRW, RWR also not,
   val is_pending = tagMatches.orR && alloc// write miss can alloc but need to wait read miss finish and vice versa.
   val pending_index = OHToUInt(Mux(is_pending,tagMatches,0.U))
 
 
-  val mshr_insertOH_init=( (~(leftOR((~mshr_validOH).asUInt())<< 1)).asUInt() & (~mshr_validOH ).asUInt())
+  val mshr_insertOH_init=( (~(leftOR((~mshr_validOH).asUInt)<< 1)).asUInt & (~mshr_validOH ).asUInt)
   val mshr_insertOH =mshr_insertOH_init
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>{
     m.io.allocate.valid:=false.B
@@ -227,8 +227,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   directory.io.write.bits.way := schedule.dir.bits.way
   directory.io.write.bits.set := schedule.dir.bits.set
   directory.io.write.bits.data.tag := schedule.dir.bits.data.tag
-  directory.io.invalidate := request.fire() && (request.bits.opcode === Hint) && (request.bits.param === 1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
-  directory.io.flush := request.fire() && (request.bits.opcode === Hint) && (request.bits.param === 0.U)
+  directory.io.invalidate := request.fire && (request.bits.opcode === Hint) && (request.bits.param === 1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
+  directory.io.flush := request.fire && (request.bits.opcode === Hint) && (request.bits.param === 0.U)
   directory.io.flush_invalidate_src:= request.bits.source
   requests.io.pop.valid := requests.io.valid(mshr_select)&&schedule.d.valid&&sourceD.io.req.ready
   requests.io.pop.bits  := mshr_select
@@ -251,7 +251,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)
-  val merge_data = (requests.io.data.data & full_mask) | (schedule.d.bits.data & (~full_mask).asUInt())
+  val merge_data = (requests.io.data.data & full_mask) | (schedule.d.bits.data & (~full_mask).asUInt)
   sourceD.io.req.bits.way:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
   sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,Mux((requests.io.data.opcode===PutPartialData)||(requests.io.data.opcode===PutFullData),merge_data,schedule.d.bits.data))
   sourceD.io.req.bits.from_mem:=Mux(!schedule.d.valid ,false.B,true.B)

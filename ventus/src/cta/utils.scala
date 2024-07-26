@@ -1,7 +1,7 @@
 package cta.utils
 
 /**
- * @see doc/Utilities.md
+ * @see docs/cta_scheduler/Utilities.md
  */
 
 import chisel3._

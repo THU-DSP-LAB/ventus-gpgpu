@@ -153,7 +153,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   // ******      mshr::probe_vec    ******
   entryMatchProbe := Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid
   assert(PopCount(entryMatchProbe) <= 1.U)
-  val entryMatchProbeid_reg = OHToUInt(Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) & entry_valid)//RegEnable(OHToUInt(entryMatchProbe),io.missReq.fire())
+  val entryMatchProbeid_reg = OHToUInt(Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) & entry_valid)//RegEnable(OHToUInt(entryMatchProbe),io.missReq.fire)
   val secondaryMiss = MSHR_st1.io.deq.bits.entryMatchProbe.orR
   val secondaryMiss_st0 = entryMatchProbe.orR
   val primaryMiss_st0 = !secondaryMiss_st0
@@ -238,12 +238,12 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     mshrStatus_st1_w := mshrStatus_st1_r
   }
   io.probeOut_st1.probeStatus := mshrStatus_st1_w
-  when(io.probe.fire() && !probestatus) {
+  when(io.probe.fire && !probestatus) {
     probestatus := true.B
   }.elsewhen(probestatus) {
-    when(io.probe.bits.blockAddr =/= io.missReq.bits.blockAddr && io.missReq.fire()) {
-      probestatus := io.probe.fire()
-    }.elsewhen(io.missReq.fire()) {
+    when(io.probe.bits.blockAddr =/= io.missReq.bits.blockAddr && io.missReq.fire) {
+      probestatus := io.probe.fire
+    }.elsewhen(io.missReq.fire) {
       probestatus := false.B
     }
   }
@@ -297,14 +297,14 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   for (iofEn <- 0 until NMshrEntry) {
     for (iofSubEn <- 0 until NMshrSubEntry) {
       when(iofEn.asUInt === entryStatus.io.next &&
-        iofSubEn.asUInt === 0.U && io.missReq.fire  && MSHR_st1.io.deq.fire() && primaryMiss) {
+        iofSubEn.asUInt === 0.U && io.missReq.fire  && MSHR_st1.io.deq.fire && primaryMiss) {
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt === entryMatchMissRsp && iofSubEn.asUInt === subentry_next2cancel &&
         io.missRspIn.valid) {
         subentry_valid(iofEn)(iofSubEn) := false.B
       }
     }.elsewhen(iofSubEn.asUInt === subEntryIdx_st1 &&
-      io.missReq.fire && secondaryMiss && MSHR_st1.io.deq.fire() && iofEn.asUInt === entryMatchProbeid_reg) {
+      io.missReq.fire && secondaryMiss && MSHR_st1.io.deq.fire && iofEn.asUInt === entryMatchProbeid_reg) {
       subentry_valid(iofEn)(iofSubEn) := true.B
     } //order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
   }

@@ -168,7 +168,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
 
 
   if (!readOnly) {
-    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool && RegNext(io.allocateWrite.fire())
+    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool && RegNext(io.allocateWrite.fire)
   }
   // ******      tag_array::allocate    ******
   Replacement.io.validOfSet := Reverse(Cat(way_valid(allocateWrite_st1.setIdx)))//Reverse(Cat(way_valid(io.allocateWrite.bits.setIdx)))

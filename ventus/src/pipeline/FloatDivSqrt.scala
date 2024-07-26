@@ -58,7 +58,7 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
 
   //sqrt
   val S = conv.io.Q >> 2
-  val s0 :: s1 :: s2 :: s3 :: s4 :: Nil = S(len-2, len-6).asBools().reverse
+  val s0 :: s1 :: s2 :: s3 :: s4 :: Nil = S(len-2, len-6).asBools.reverse
   val sqrt_d = Mux(firstCycle, "b101".U(3.W), Mux(s0, "b111".U(3.W), Cat(s2, s3, s4)))
   val div_d = divisor(len-2, len-4)
   val sqrt_y = ws(len+3, len-4) + wc(len+3, len-4)
@@ -78,12 +78,12 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
   neg_dx1 := ~dx1
   neg_dx2 := neg_dx1 << 1
 
-  val divCsaIn = MuxLookup(table.io.q.asUInt(), 0.U, Seq(
+  val divCsaIn = MuxLookup(table.io.q.asUInt, 0.U)(Seq(
     -1 -> dx1,
     -2 -> dx2,
     1 ->  neg_dx1,
     2 ->  neg_dx2
-  ).map(m => m._1.S(3.W).asUInt() -> m._2))
+  ).map(m => m._1.S(3.W).asUInt -> m._2))
 
   csa.io.in(0) := ws
   csa.io.in(1) := Mux(isDivReg & !table.io.q(2), wc|table.io.q(1,0), wc)
@@ -94,7 +94,7 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
   val sqrtWsInit = Cat( Cat(0.U(2.W), a) - Cat(1.U(2.W), 0.U(len.W)), 0.U(2.W))
   // SQRT:        1 1 A A . . . . .
 
-  when(io.in.fire()){
+  when(io.in.fire){
     ws := Mux(isDiv, divWsInit, sqrtWsInit)
     wc := 0.U
   }.elsewhen(state===s_recurrence){
@@ -102,7 +102,7 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
     wc := Mux(cnt_next===0.U, csa.io.out(1)<<1, csa.io.out(1)<<3)
   }
   val rem = ws + wc
-  val remSignReg = RegEnable(rem.head(1).asBool(), state===s_recovery)
+  val remSignReg = RegEnable(rem.head(1).asBool, state===s_recovery)
   val isZeroRemReg = RegEnable(rem===0.U, state===s_recovery)
   io.in.ready := state === s_idle
   io.out.valid := state === s_finish
@@ -113,8 +113,8 @@ class FracDivSqrt(len: Int) extends Module{ // len = 28 for FLOAT32
 class FloatDivSqrt extends FPUSubModule{
   def F_EXP_WIDTH: Int = Float32.expWidth + 2
   def F_FRAC_WIDTH: Int = Float32.fracWidth + 1
-  def expOverflow(sexp: SInt, expWidth: Int): Bool = sexp >= Cat(0.U(1.W), Fill(expWidth, 1.U(1.W))).asSInt()
-  def expOverflow(uexp: UInt, expWidth: Int): Bool = expOverflow(Cat(0.U(1.W), uexp).asSInt(), expWidth)
+  def expOverflow(sexp: SInt, expWidth: Int): Bool = sexp >= Cat(0.U(1.W), Fill(expWidth, 1.U(1.W))).asSInt
+  def expOverflow(uexp: UInt, expWidth: Int): Bool = expOverflow(Cat(0.U(1.W), uexp).asSInt, expWidth)
 
   val s_idle :: s_norm :: s_start :: s_compute :: s_round :: s_finish :: Nil = Enum(6)
   val state = RegInit(s_idle)
@@ -156,7 +156,7 @@ class FloatDivSqrt extends FPUSubModule{
   val aIsPosInf = classify_a.io.isPosInf
   val aIsInfOrNaN = classify_a.io.isInfOrNaN
   val aIsSubnormal = classify_a.io.isSubnormal
-  val aIsSubnormalReg = RegEnable(aIsSubnormal, io.in.fire())
+  val aIsSubnormalReg = RegEnable(aIsSubnormal, io.in.fire)
   val aIsZero = classify_a.io.isZero
 
   val sel_NaN_OH = UIntToOH(2.U, 3)
@@ -167,7 +167,7 @@ class FloatDivSqrt extends FPUSubModule{
   val bIsNaN = classify_b.io.isNaN
   val bIsSNaN = classify_b.io.isSNaN
   val bIsSubnormal = classify_b.io.isSubnormal
-  val bIsSubnormalReg = RegEnable(bIsSubnormal, io.in.fire())
+  val bIsSubnormalReg = RegEnable(bIsSubnormal, io.in.fire)
   val bIsInf = classify_b.io.isInf
 
   val hasNaN = aIsNaN || bIsNaN
@@ -176,13 +176,13 @@ class FloatDivSqrt extends FPUSubModule{
 
   val sqrtInvalid = ((aSign && !aIsNaN && !aIsZero) || aIsSNaN) && !isDiv
   val sqrtSpecial = (aSign || aIsInfOrNaN || aIsZero) && !isDiv
-  val sqrtInvalidReg = RegEnable(sqrtInvalid, io.in.fire())
+  val sqrtInvalidReg = RegEnable(sqrtInvalid, io.in.fire)
   val divInvalid = (bothZero || aIsSNaN || bIsSNaN || bothInf) && isDiv
   val divInf = (!divInvalid && !aIsNaN && bIsZero && !aIsInf) && isDiv
   val divSpecial = (aIsZero || bIsZero || hasNaN || bIsInf || aIsInf) && isDiv
-  val divZeroReg = RegEnable(bIsZero, io.in.fire())
-  val divInvalidReg = RegEnable(divInvalid, io.in.fire())
-  val divInfReg = RegEnable(divInf, io.in.fire())
+  val divZeroReg = RegEnable(bIsZero, io.in.fire)
+  val divInvalidReg = RegEnable(divInvalid, io.in.fire)
+  val divInfReg = RegEnable(divInf, io.in.fire)
 
   val divSpecialResSel = PriorityMux(Seq(
     (divInvalid || hasNaN) -> sel_NaN_OH,
@@ -197,7 +197,7 @@ class FloatDivSqrt extends FPUSubModule{
   val specialCase = divSpecial || sqrtSpecial
   val specialCaseReg = RegEnable(specialCase, io.in.fire)
   val specialResSel = Mux(sqrtSpecial, sqrtSpecialResSel, divSpecialResSel)
-  val sel_NaN :: sel_Zero :: sel_Inf :: Nil = specialResSel.asBools().reverse
+  val sel_NaN :: sel_Zero :: sel_Inf :: Nil = specialResSel.asBools.reverse
   val specialResult = RegEnable(
     Mux(sel_NaN,
       Float32.defaultNaN,
@@ -209,8 +209,8 @@ class FloatDivSqrt extends FPUSubModule{
     io.in.fire
   )
 
-  val aFracLEZ = PriorityEncoder(aFracReg(22, 0).asBools().reverse)
-  val bFracLEZ = PriorityEncoder(bFracReg(22, 0).asBools().reverse)
+  val aFracLEZ = PriorityEncoder(aFracReg(22, 0).asBools.reverse)
+  val bFracLEZ = PriorityEncoder(bFracReg(22, 0).asBools.reverse)
 
   val fracDivSqrt = Module(new FracDivSqrt(F_FRAC_WIDTH+4))
   fracDivSqrt.io.out.ready := true.B
@@ -229,16 +229,16 @@ class FloatDivSqrt extends FPUSubModule{
   // DIV OUT: 3/4 => 0  0. 1  1  0  .  .  .  .  x| x  x  x
   val needNormalize = !fracDivSqrtResult(26)
   val fracNorm = Mux(needNormalize, fracDivSqrtResult<<1, fracDivSqrtResult)(26, 0)
-  val expNorm = ( aExpReg.asUInt() - Mux(isDivReg, Mux(needNormalize, 1.U, 0.U), Mux(needNormalize, 2.U, 1.U)) ).asSInt()
+  val expNorm = ( aExpReg.asUInt - Mux(isDivReg, Mux(needNormalize, 1.U, 0.U), Mux(needNormalize, 2.U, 1.U)) ).asSInt
 
   val denormShift = (-Float32.expBiasInt+1).S - expNorm
-  val denormShiftReg = RegEnable(denormShift, fracDivSqrt.io.out.fire())
-  val fracShifted = ShiftRightJam(fracNorm, Mux(denormShift.head(1).asBool(), 0.U, denormShift.asUInt()), F_FRAC_WIDTH+3)
+  val denormShiftReg = RegEnable(denormShift, fracDivSqrt.io.out.fire)
+  val fracShifted = ShiftRightJam(fracNorm, Mux(denormShift.head(1).asBool, 0.U, denormShift.asUInt), F_FRAC_WIDTH+3)
 
   val fracPostNorm = fracShifted.head(F_FRAC_WIDTH)
-  val g = fracShifted.tail(F_FRAC_WIDTH).head(1).asBool()
-  val r = fracShifted.tail(F_FRAC_WIDTH+1).head(1).asBool()
-  val s = !fracDivSqrt.io.out.bits.isZeroRem || fracShifted.tail(F_FRAC_WIDTH+2).orR()
+  val g = fracShifted.tail(F_FRAC_WIDTH).head(1).asBool
+  val r = fracShifted.tail(F_FRAC_WIDTH+1).head(1).asBool
+  val s = !fracDivSqrt.io.out.bits.isZeroRem || fracShifted.tail(F_FRAC_WIDTH+2).orR
   val gReg = RegNext(g)
   val rReg = RegNext(r)
   val sReg = RegNext(s)
@@ -258,12 +258,12 @@ class FloatDivSqrt extends FPUSubModule{
     fracRounded(F_FRAC_WIDTH-1),
     rounding.io.out.fracCout
   )
-  val isZeroResult = !(Cat(fracCout, fracRounded).orR())
+  val isZeroResult = !(Cat(fracCout, fracRounded).orR)
   val expRounded = Mux(denormShift > 0.S || isZeroResult,
     0.S,
     aExpReg + Float32.expBias.toSInt
   ) + fracCout.toSInt
-  val roundingInc = MuxLookup(rmReg, "b10".U(2.W), Seq(
+  val roundingInc = MuxLookup(rmReg, "b10".U(2.W))(Seq(
     RDN -> Mux(resSign, "b11".U, "b00".U),
     RUP -> Mux(resSign, "b00".U, "b11".U),
     RTZ -> "b00".U
@@ -284,7 +284,7 @@ class FloatDivSqrt extends FPUSubModule{
 
   switch(state){
     is(s_idle){
-      when(io.in.fire()){
+      when(io.in.fire){
         when(sqrtSpecial || divSpecial){
           state := s_finish
         }.elsewhen(aIsSubnormal || bIsSubnormal){
@@ -297,15 +297,15 @@ class FloatDivSqrt extends FPUSubModule{
     is(s_norm){ state := s_start }
     is(s_start){ state := s_compute }
     is(s_compute){
-      when(fracDivSqrt.io.out.fire()){ state := s_round }
+      when(fracDivSqrt.io.out.fire){ state := s_round }
     }
     is(s_round){ state := s_finish }
-    is(s_finish){ when(io.out.fire()) {state := s_idle }}
+    is(s_finish){ when(io.out.fire) {state := s_idle }}
   }
 
   switch(state){
     is(s_idle){
-      when(io.in.fire()){
+      when(io.in.fire){
         aExpReg := aExp
         aFracReg := aFrac
         bExpReg := bExp
@@ -314,19 +314,19 @@ class FloatDivSqrt extends FPUSubModule{
     }
     is(s_norm){
       when(aIsSubnormalReg){
-        aExpReg := (aExpReg.asUInt() - aFracLEZ).asSInt()
+        aExpReg := (aExpReg.asUInt - aFracLEZ).asSInt
         aFracReg := (aFracReg << aFracLEZ) << 1
       }
       when(bIsSubnormalReg){
-        bExpReg := (bExpReg.asUInt() - bFracLEZ).asSInt()
+        bExpReg := (bExpReg.asUInt - bFracLEZ).asSInt
         bFracReg := (bFracReg << bFracLEZ) << 1
       }
     }
     is(s_start){
-      aExpReg := Mux(isDivReg, aExpReg - bExpReg, (aExpReg>>1).asSInt()+1.S)
+      aExpReg := Mux(isDivReg, aExpReg - bExpReg, (aExpReg>>1).asSInt+1.S)
     }
     is(s_compute){
-      when(fracDivSqrt.io.out.fire()){
+      when(fracDivSqrt.io.out.fire){
         aExpReg := expNorm
         aFracReg := fracPostNorm
       }

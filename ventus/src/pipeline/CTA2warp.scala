@@ -52,14 +52,14 @@ class CTA2warp extends Module{
   })
   val idx_using = RegInit(0.U(num_warp.W))  // current active warps in sm
 
-  io.CTAreq.ready:=(~idx_using.andR())
+  io.CTAreq.ready:=(~idx_using.andR)
   val data = Reg(Vec(num_warp,UInt(TAG_WIDTH.W))) // every hw_warp record its wg&wf id
   io.wg_id_tag:=data(io.wg_id_lookup)
   val idx_next_allocate = PriorityEncoder(~idx_using)
-  //idx_using:=Mux(io.warpRsp.fire()&io.CTAreq.fire(),idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt()&(1.U<<idx_next_allocate).asUInt(),
-  //  Mux(io.warpRsp.fire(),idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt(),
-  //  Mux(io.CTAreq.fire(),idx_using&(1.U<<idx_next_allocate).asUInt(),idx_using)))
-  idx_using:=(idx_using | ((1.U<<idx_next_allocate).asUInt & Fill(num_warp,io.CTAreq.fire))) & (~((Fill(num_warp,io.warpRsp.fire)).asUInt() & ((1.U<<io.warpRsp.bits.wid)).asUInt())).asUInt()
+  //idx_using:=Mux(io.warpRsp.fire&io.CTAreq.fire,idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt&(1.U<<idx_next_allocate).asUInt,
+  //  Mux(io.warpRsp.fire,idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt,
+  //  Mux(io.CTAreq.fire,idx_using&(1.U<<idx_next_allocate).asUInt,idx_using)))
+  idx_using:=(idx_using | ((1.U<<idx_next_allocate).asUInt & Fill(num_warp,io.CTAreq.fire))) & (~((Fill(num_warp,io.warpRsp.fire)).asUInt & ((1.U<<io.warpRsp.bits.wid)).asUInt)).asUInt
   when(io.CTAreq.fire) {
     data(idx_next_allocate):=io.CTAreq.bits.dispatch2cu_wf_tag_dispatch
   }

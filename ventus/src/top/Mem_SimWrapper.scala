@@ -2,7 +2,6 @@ package top
 
 import L2cache.{TLBundleA_lite, TLBundleD_lite}
 import chisel3._
-import chisel3.stage.ChiselStage
 import chisel3.util._
 import top.parameters.{INST_CNT_2, l2cache_params, num_sm}
 
@@ -104,10 +103,10 @@ class GPGPU_SimTop extends Module {
 }
 
 object emitVerilog extends App {
-  (new ChiselStage).emitVerilog(
+  chisel3.emitVerilog(
     //new GPGPU_SimWrapper(FakeCache = false),
     new GPGPU_SimTop,
-    Array("--target-dir", "generated/")
+    Array("--target-dir", "generated/", "--target", "verilog")
   )
 }
 
