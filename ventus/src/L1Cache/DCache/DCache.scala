@@ -16,7 +16,7 @@ import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import top.parameters.{NUMBER_CU, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, num_thread}
+import top.parameters.{NUMBER_CU, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, num_block, num_thread}
 //import pipeline.parameters._
 
 class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
@@ -196,6 +196,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   val remapDataPerWord = Module(new genDataMapSameWord)
   val coreReqControl_st0_noen = Wire(new DCacheControl)
   val coreRsp_st2_valid_from_coreReq_Reg = Module(new Queue(Bool(),1,true,false))
+  val coreRsp_st2_coreRsp_data = Module(new Queue(Vec(dcache_BlockWords, UInt(WordLength.W)),1,true,false))
   //val recData = Module(new relocateDataByte(BlockWords,WordLength))
   //val recDataMemRsp = Module(new relocateDataByte(BlockWords,WordLength))
   val waitforL2flush = RegInit(false.B)
@@ -407,7 +408,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   coreReq_st1_ready := false.B
   when(coreReqControl_st1_Q.io.deq.bits.isRead || coreReqControl_st1_Q.io.deq.bits.isWrite){
     when(TagAccess.io.hit_st1) {
-      when(coreRsp_st2.io.enq.ready && coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready&& !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)) {
+      when(coreRsp_st2.io.enq.ready &&  coreRsp_st2_valid_from_coreReq_Reg.io.enq.ready&& !(MshrAccess.io.missRspOut.valid && !secondaryFullReturn)) {
         coreReq_st1_ready := true.B
       }
     }.otherwise{//Miss
@@ -608,8 +609,12 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      data crossbar(Mem order to Core order)     ******
   val coreRsp_st2_dataMemOrder = Wire(Vec(BlockWords, UInt(WordLength.W)))
   val coreRsp_st2_dataCoreOrder = Wire(Vec(NLanes, UInt(WordLength.W)))
+  coreRsp_st2_coreRsp_data.io.enq.valid := coreRsp_st2_valid_from_coreReq_Reg.io.deq.valid && !coreRsp_st2_valid_from_coreReq_Reg.io.deq.ready
+  coreRsp_st2_coreRsp_data.io.enq.bits := DataAccessReadSRAMRRsp
+  coreRsp_st2_coreRsp_data.io.deq.ready := coreRsp_Q.io.enq.ready
+  val DataAccessReadHit = Mux(coreRsp_st2_coreRsp_data.io.deq.valid,coreRsp_st2_coreRsp_data.io.deq.bits,DataAccessReadSRAMRRsp)
 
-  coreRsp_st2_dataMemOrder := Mux(readHit_st2_valid, DataAccessReadSRAMRRsp, coreRsp_st2.io.deq.bits.data) //memRsp for latter
+  coreRsp_st2_dataMemOrder := Mux(readHit_st2_valid, DataAccessReadHit, coreRsp_st2.io.deq.bits.data) //memRsp for latter
   for (i <- 0 until NLanes) {
     coreRsp_st2_dataCoreOrder(i) := coreRsp_st2_dataMemOrder(coreRsp_st2_perLaneAddr(i).blockOffset)
   }
