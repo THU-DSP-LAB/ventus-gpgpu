@@ -95,7 +95,7 @@ class MMUSystem(NL1Cache: Int, NL1TlbWays: Int, SV: SVParam) extends Module{
 }
 
 object MMUGen extends App{
-  (new chisel3.stage.ChiselStage).emitVerilog(new MMUSystem(2, 4, mmu.SV32),Array("--emission-options=disableMemRandomization,disableRegisterRandomization"))
+  chisel3.emitVerilog(new MMUSystem(2, 4, mmu.SV32),Array("--emission-options=disableMemRandomization,disableRegisterRandomization"))
 }
 
 case class TLBRequest(

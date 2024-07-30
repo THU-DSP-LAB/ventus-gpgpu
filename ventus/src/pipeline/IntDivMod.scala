@@ -25,31 +25,31 @@ class IntDivMod(xLen: Int) extends Module{
   val s_idle :: s_pre :: s_compute :: s_recovery :: s_finish :: Nil = Enum(5)
   val state = RegInit(s_idle)
 
-  val aSign = io.in.bits.signed && io.in.bits.a.head(1).asBool()
-  val dSign = io.in.bits.signed && io.in.bits.d.head(1).asBool()
-  val qSignReg = RegEnable(aSign ^ dSign, io.in.fire())
-  val rSignReg = RegEnable(aSign, io.in.fire())
-  val unsignedA = Mux(aSign, (~io.in.bits.a).asUInt()+1.U, io.in.bits.a)
-  val unsignedD = Mux(dSign, (~io.in.bits.d).asUInt()+1.U, io.in.bits.d)
+  val aSign = io.in.bits.signed && io.in.bits.a.head(1).asBool
+  val dSign = io.in.bits.signed && io.in.bits.d.head(1).asBool
+  val qSignReg = RegEnable(aSign ^ dSign, io.in.fire)
+  val rSignReg = RegEnable(aSign, io.in.fire)
+  val unsignedA = Mux(aSign, (~io.in.bits.a).asUInt+1.U, io.in.bits.a)
+  val unsignedD = Mux(dSign, (~io.in.bits.d).asUInt+1.U, io.in.bits.d)
   // when a = INT_MIN and d = -1, overflow:
-  val overflow = io.in.bits.signed && io.in.bits.a.head(1).asBool() && !io.in.bits.a.tail(1).orR() && io.in.bits.d.andR()
+  val overflow = io.in.bits.signed && io.in.bits.a.head(1).asBool && !io.in.bits.a.tail(1).orR && io.in.bits.d.andR
   val divByZero = io.in.bits.d === 0.U
 
-  val rawAReg = RegEnable(io.in.bits.a, io.in.fire())
-  val unsignedAReg = RegEnable(unsignedA, io.in.fire())
-  val unsignedDReg = RegEnable(unsignedD, io.in.fire())
-  val overflowReg = RegEnable(overflow, io.in.fire())
-  val divByZeroReg = RegEnable(divByZero, io.in.fire())
+  val rawAReg = RegEnable(io.in.bits.a, io.in.fire)
+  val unsignedAReg = RegEnable(unsignedA, io.in.fire)
+  val unsignedDReg = RegEnable(unsignedD, io.in.fire)
+  val overflowReg = RegEnable(overflow, io.in.fire)
+  val divByZeroReg = RegEnable(divByZero, io.in.fire)
   // ---------------- pre phase -------------------
-  val aLez = PriorityEncoder(unsignedAReg.asBools().reverse)
-  val dLez = PriorityEncoder(unsignedDReg.asBools().reverse)
+  val aLez = PriorityEncoder(unsignedAReg.asBools.reverse)
+  val dLez = PriorityEncoder(unsignedDReg.asBools.reverse)
   val iter = Mux(aLez > dLez, 0.U, dLez - aLez + 1.U)
 
   val aReg = RegInit(0.U((xLen+2).W))
   val dReg = RegInit(0.U((xLen+2).W))
   val aNorm = Cat(0.U(2.W), (unsignedAReg<<aLez)(xLen-1, 0))
   val dNorm = Cat(0.U(1.W), (unsignedDReg<<dLez)(xLen-1, 0), 0.U(1.W))
-  val dNegNorm = Cat(1.U(1.W), (((~unsignedDReg).asUInt() + 1.U)<<dLez)(xLen-1, 0), 0.U(1.W))
+  val dNegNorm = Cat(1.U(1.W), (((~unsignedDReg).asUInt + 1.U)<<dLez)(xLen-1, 0), 0.U(1.W))
   val iterReg = RegEnable(iter, state===s_pre)
   val zeroQReg = RegEnable(unsignedAReg < unsignedDReg, state===s_pre)
 // ---------------- compute phase ---------------
@@ -66,13 +66,13 @@ class IntDivMod(xLen: Int) extends Module{
   val aNext = Mux(sel_pos, aShift + dNegNorm, Mux(sel_neg, aShift + dNorm, aShift))
 // --------------- recovery phase -------------------
   val remIsNeg = aReg.head(1)
-  val commonQReg = RegEnable(Mux(remIsNeg.asBool(), Q + (~QN).asUInt(), Q - QN), state===s_recovery)
-  val recoveryR = Mux(remIsNeg.asBool(), aReg.tail(1).head(xLen)+dReg.tail(1).head(xLen), aReg.tail(1).head(xLen))
+  val commonQReg = RegEnable(Mux(remIsNeg.asBool, Q + (~QN).asUInt, Q - QN), state===s_recovery)
+  val recoveryR = Mux(remIsNeg.asBool, aReg.tail(1).head(xLen)+dReg.tail(1).head(xLen), aReg.tail(1).head(xLen))
   val commonRReg = RegEnable((recoveryR>>dLez)(xLen-1, 0), state===s_recovery)
 // -------------- finish phase ------------------------
-  val signedQ = Mux(qSignReg, (~commonQReg).asUInt() + 1.U, commonQReg)
-  val signedR = Mux(rSignReg, (~commonRReg).asUInt() + 1.U, commonRReg)
-  val specialQ = Mux(divByZeroReg, (-1).S(xLen.W).asUInt(), Mux(overflowReg, Cat(1.U(1.W), 0.U((xLen-1).W)), 0.U(xLen.W)))
+  val signedQ = Mux(qSignReg, (~commonQReg).asUInt + 1.U, commonQReg)
+  val signedR = Mux(rSignReg, (~commonRReg).asUInt + 1.U, commonRReg)
+  val specialQ = Mux(divByZeroReg, (-1).S(xLen.W).asUInt, Mux(overflowReg, Cat(1.U(1.W), 0.U((xLen-1).W)), 0.U(xLen.W)))
   // divByZero|zeroDivSth -> overflow
   val specialR = Mux(divByZeroReg||zeroQReg, rawAReg, 0.U(xLen.W))
 
@@ -84,7 +84,7 @@ class IntDivMod(xLen: Int) extends Module{
 // ------ FSM
   switch(state){
     is(s_idle){
-      when(io.in.fire()){
+      when(io.in.fire){
         when(overflow || divByZero){ state := s_finish
         }.otherwise{ state := s_pre }
       }
@@ -99,7 +99,7 @@ class IntDivMod(xLen: Int) extends Module{
     }
     is(s_recovery){ state := s_finish }
     is(s_finish){
-      when(io.out.fire()){ state := s_idle }
+      when(io.out.fire){ state := s_idle }
     }
   }
 
@@ -123,8 +123,8 @@ class IntDivMod(xLen: Int) extends Module{
     is(s_compute){
       cnt := cnt_next
       aReg := aNext
-      Q := Cat(Q.tail(1), sel_pos.asUInt())
-      QN := Cat(QN.tail(1), sel_neg.asUInt())
+      Q := Cat(Q.tail(1), sel_pos.asUInt)
+      QN := Cat(QN.tail(1), sel_neg.asUInt)
     }
     is(s_recovery){
       cnt := 0.U

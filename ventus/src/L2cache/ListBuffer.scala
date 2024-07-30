@@ -49,7 +49,7 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
   val next  = Mem(params.entries, UInt(params.entryBits.W))
   val data  = Mem(params.entries, UInt(params.data_width.W))//对应具体entries
 
-  val freeOH = (~(leftOR((~used).asUInt()) << 1)).asUInt() & (~used).asUInt()
+  val freeOH = (~(leftOR((~used).asUInt) << 1)).asUInt & (~used).asUInt
   val freeIdx = OHToUInt(freeOH)
 
   val valid_set = WireInit(0.U(params.queues.W))
@@ -64,11 +64,11 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
   val push_tail = tail.read(io.push.bits.index)//对应tail在哪直接加
   val push_valid = valid(io.push.bits.index) //输入index是否之前被push过
 
-  io.push.ready := !used.andR() //是否有新的entry
-  when (io.push.fire()) {
+  io.push.ready := !used.andR //是否有新的entry
+  when (io.push.fire) {
     valid_set := UIntToOH(io.push.bits.index, params.queues) //对应具体push到何处
     used_set := freeOH //
-    data.write(freeIdx, io.push.bits.data.asUInt())
+    data.write(freeIdx, io.push.bits.data.asUInt)
     when (push_valid) {
       next.write(push_tail, freeIdx)//原先的尾部写入next
     } .otherwise {
@@ -93,30 +93,30 @@ class ListBuffer[T <: Data](params: ListBufferParameters[T]) extends Module
   io.valid := (if (!params.bypass) valid else (valid | valid_set))  //如果考虑bypass可能要重写
 
   // It is an error to pop something that is not valid
-  assert (!io.pop.fire() || (io.valid)(io.pop.bits))
+  assert (!io.pop.fire || (io.valid)(io.pop.bits))
   if(!params.singleport){
-    assert(!io.pop2.get.fire()||(io.valid)(io.pop2.get.bits))
+    assert(!io.pop2.get.fire||(io.valid)(io.pop2.get.bits))
   }
 
-  when (io.pop.fire()) {
+  when (io.pop.fire) {
     used_clr := UIntToOH(pop_head, params.entries)
     when (pop_head === tail.read(io.pop.bits)) {
       valid_clr := UIntToOH(io.pop.bits, params.queues)
     }
-    head.write(io.pop.bits, Mux(io.push.fire() && push_valid && push_tail === pop_head, freeIdx, next.read(pop_head))) //还剩一个的时候，既要push又要pop，下一个的head就在freeidx那里
+    head.write(io.pop.bits, Mux(io.push.fire && push_valid && push_tail === pop_head, freeIdx, next.read(pop_head))) //还剩一个的时候，既要push又要pop，下一个的head就在freeidx那里
   }
   if(!params.singleport) {
-    when(io.pop2.get.fire()) {
+    when(io.pop2.get.fire) {
       used_clr_2 := UIntToOH(pop_head2, params.entries)
       when(pop_head2 === tail.read(io.pop2.get.bits)) {
         valid_clr_2 := UIntToOH(io.pop2.get.bits, params.queues)
       }
-      head.write(io.pop2.get.bits, Mux(io.push.fire() && push_valid && push_tail === pop_head2, freeIdx, next.read(pop_head2)))
+      head.write(io.pop2.get.bits, Mux(io.push.fire && push_valid && push_tail === pop_head2, freeIdx, next.read(pop_head2)))
     } 
   }
   // Empty bypass changes no state
-  when ((!params.bypass).asBool() || !io.pop.valid || pop_valid || pop_valid2.orR()) {
-    used  := (used  & (~used_clr).asUInt() &(~used_clr_2).asUInt())  | used_set
-    valid := (valid & (~valid_clr).asUInt()&(~valid_clr_2).asUInt())  | valid_set
+  when ((!params.bypass).asBool || !io.pop.valid || pop_valid || pop_valid2.orR) {
+    used  := (used  & (~used_clr).asUInt &(~used_clr_2).asUInt)  | used_set
+    valid := (valid & (~valid_clr).asUInt&(~valid_clr_2).asUInt)  | valid_set
   }
 }

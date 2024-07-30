@@ -213,8 +213,14 @@ class CSRFile extends Module {
 
   io.simt_rpc:=rpc
 
-  val wen=io.ctrl.csr.orR()&io.write
-  val csr_wdata = MuxLookup(io.ctrl.csr, 0.U, Seq( CSR.W -> csr_input, CSR.S -> (csr_rdata | csr_input),  CSR.C -> (csr_rdata & (~csr_input).asUInt)))
+  val wen=io.ctrl.csr.orR&io.write
+  val csr_wdata = MuxLookup(io.ctrl.csr, 0.U)(
+    Seq(
+      CSR.W -> csr_input,
+      CSR.S -> (csr_rdata | csr_input),
+      CSR.C -> (csr_rdata & (~csr_input).asUInt)
+    )
+  )
 
   val csrFile = Seq(
     BitPat(CSR.mstatus)         -> mstatus,
@@ -255,7 +261,7 @@ class CSRFile extends Module {
       }
       .elsewhen(io.ctrl.isvec){
         wdata:=Mux(AVL<VLMAX,AVL,VLMAX)
-//               Mux(AVL>(VLMAX<<1.U).asUInt(),VLMAX,AVL>>1.U))
+//               Mux(AVL>(VLMAX<<1.U).asUInt,VLMAX,AVL>>1.U))
       } .elsewhen (csr_addr === CSR.csr_print){
         csr_print:=csr_wdata
       } .elsewhen(csr_addr === CSR.fflags){
@@ -345,7 +351,7 @@ class CSRexe extends Module {
   io.lsu_numw:=vCSR(io.lsu_wid).lsu_numw
   io.simt_rpc:=vCSR(io.simt_wid).simt_rpc
 
-  vCSR(io.in.bits.ctrl.wid).write:=io.in.fire()
+  vCSR(io.in.bits.ctrl.wid).write:=io.in.fire
   vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
   result.io.deq<>io.out

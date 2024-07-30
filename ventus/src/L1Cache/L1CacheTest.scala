@@ -59,19 +59,18 @@ class L2ROM(implicit p: Parameters) extends DCacheModule {
   for (i<- 0 until BlockWords){
     data_write_in_vec(i) := Mux(io.memReq.bits.a_mask(i).orR,io.memReq.bits.a_data(i),raw_vec(i))
     when(io.memReq.fire && (a_opcode === TLAOp_PutPart || a_opcode === TLAOp_PutFull)) {
-      memory.write(idx = Cat(get_blockAddr(io.memReq.bits.a_addr),i.U(BlockOffsetBits.W)),
-        data = data_write_in_vec(i))
+      memory.write(Cat(get_blockAddr(io.memReq.bits.a_addr),i.U(BlockOffsetBits.W)), data_write_in_vec(i))
     }
   }
 
   val data_out = Wire(Vec(BlockWords,UInt(WordLength.W)))
   data_out := raw_vec
 
-  val opcode_out1 = RegEnable(d_opcode_1,io.memReq.fire())
-  val instrIdx_out1 = RegEnable(io.memReq.bits.a_source,io.memReq.fire())
-  val data_out1 = RegEnable(data_out,io.memReq.fire())
+  val opcode_out1 = RegEnable(d_opcode_1,io.memReq.fire)
+  val instrIdx_out1 = RegEnable(io.memReq.bits.a_source,io.memReq.fire)
+  val data_out1 = RegEnable(data_out,io.memReq.fire)
   val addr_out1 = RegEnable(Cat(get_blockAddr(io.memReq.bits.a_addr),
-    Fill(32-(TagBits+SetIdxBits),0.U(1.W))),io.memReq.fire())
+    Fill(32-(TagBits+SetIdxBits),0.U(1.W))),io.memReq.fire)
   val fire_out1 = RegNext(io.memReq.fire)
 
   val opcode_out2 = RegNext(opcode_out1)

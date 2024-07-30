@@ -17,7 +17,7 @@ import TLMessages._
 //import Chisel._
 import chisel3._
 import chisel3.util._
-import chisel3.internal.sourceinfo.SourceInfo
+import chisel3.experimental.SourceInfo
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util._
 import L2cache.InclusiveCacheParameters_lite
@@ -67,7 +67,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   io.AXI_master_bundle.ar.valid:=(io.l2cache_outa.bits.opcode === Get) && io.l2cache_outa.valid
 
   io.AXI_master_bundle.ar.bits.addr := io.l2cache_outa.bits.address
-  io.AXI_master_bundle.ar.bits.size:= (log2Up( params.AXI_params.dataBits/8)).asUInt()
+  io.AXI_master_bundle.ar.bits.size:= (log2Up( params.AXI_params.dataBits/8)).asUInt
   io.AXI_master_bundle.ar.bits.burst:= 1.U
 
   io.AXI_master_bundle.ar.bits.cache:= 1110.U
@@ -80,7 +80,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
 //  io.AXI_master_bundle.ar.bits.echo:=()
 
   io.AXI_master_bundle.aw.bits.addr := io.l2cache_outa.bits.address
-  io.AXI_master_bundle.aw.bits.size:= (log2Up( params.AXI_params.dataBits/8)).asUInt()
+  io.AXI_master_bundle.aw.bits.size:= (log2Up( params.AXI_params.dataBits/8)).asUInt
   io.AXI_master_bundle.aw.bits.burst:= 1.U
   io.AXI_master_bundle.aw.bits.cache:=1110.U
   io.AXI_master_bundle.aw.bits.id:=io.l2cache_outa.bits.source
@@ -111,7 +111,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
     }
     for(i <- 0 until  total_times) {
 
-        when(io.AXI_master_bundle.r.fire() && i.asUInt()===counter_read) {
+        when(io.AXI_master_bundle.r.fire && i.asUInt===counter_read) {
           buffer_read(i).data := io.AXI_master_bundle.r.bits.data
           buffer_read(i).id := io.AXI_master_bundle.r.bits.id
         }
@@ -122,19 +122,19 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   //buffer_write
   when(io.AXI_master_bundle.aw.fire) {
     buffer_write_valid := true.B //AXI write valid & data prepared at the same time
-  }.elsewhen(counter_write===(total_times-1).asUInt()&&io.AXI_master_bundle.w.fire()){
+  }.elsewhen(counter_write===(total_times-1).asUInt&&io.AXI_master_bundle.w.fire){
     buffer_write_valid:= false.B
   }
   val write_busy_reg=RegInit(false.B)
 
-  when(io.AXI_master_bundle.aw.fire()){
+  when(io.AXI_master_bundle.aw.fire){
     write_busy_reg:=true.B
   }.elsewhen(io.AXI_master_bundle.w.fire){
     write_busy_reg:=false.B
   }
 
 
-  buffer_write_busy:= write_busy_reg|| (counter_write=/=0.U && counter_write=/=(total_times-1).asUInt())
+  buffer_write_busy:= write_busy_reg|| (counter_write=/=0.U && counter_write=/=(total_times-1).asUInt)
   when(io.AXI_master_bundle.w.fire){
     when(io.AXI_master_bundle.w.bits.last){
       counter_write :=0.U
@@ -155,7 +155,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   //write channel
   io.AXI_master_bundle.w.valid:=buffer_write_valid
   io.AXI_master_bundle.w.bits.data:= buffer_write(counter_write).data
-  io.AXI_master_bundle.w.bits.last:= (counter_write===(total_times-1).asUInt()).asBool()
+  io.AXI_master_bundle.w.bits.last:= (counter_write===(total_times-1).asUInt).asBool
   io.AXI_master_bundle.w.bits.strb:= buffer_write(counter_write).mask
 
   //read channel ready
@@ -167,7 +167,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   io.l2cache_outd.valid:= io.AXI_master_bundle.b.valid || buffer_read_valid
   io.l2cache_outd.bits.source:= Mux(io.AXI_master_bundle.b.valid,io.AXI_master_bundle.b.bits.id,buffer_read(0).asTypeOf(new BufferBundle_read(params)).id)
   io.l2cache_outd.bits.opcode:=Mux(io.AXI_master_bundle.b.valid,AccessAck,AccessAckData)
-  io.l2cache_outd.bits.data:=Mux(io.AXI_master_bundle.b.valid,0.U,buffer_read.map(_.asTypeOf(new BufferBundle_read(params)).data).asUInt())
+  io.l2cache_outd.bits.data:=Mux(io.AXI_master_bundle.b.valid,0.U,buffer_read.map(_.asTypeOf(new BufferBundle_read(params)).data).asUInt)
   io.l2cache_outd.bits.size:= 0.U //todo undefined unused
   io.l2cache_outd.bits.param:= DontCare  //sourceA
   io.l2cache_outa.ready:= !buffer_write_busy && io.AXI_master_bundle.aw.ready && !buffer_read_busy &&io.AXI_master_bundle.ar.ready//Mux(io.l2cache_outa.bits.opcode===PutFullData,!buffer_write_busy && io.AXI_master_bundle.aw.ready, !buffer_read_busy &&io.AXI_master_bundle.ar.ready)

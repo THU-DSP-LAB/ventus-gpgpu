@@ -62,7 +62,7 @@ class SinkD(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  io.resp.valid       := RegNext(d.fire())
+  io.resp.valid       := RegNext(d.fire)
   d.ready             := true.B//!(refill_buffer.io.valid.andR) //可以把数据存进来了
 
   io.resp.bits.opcode := RegNext(d.bits.opcode)

@@ -83,7 +83,7 @@ object Float32 extends FloatPoint(8, 23)
 
 trait HasUIntToSIntHelper {
   implicit class UIntToSIntHelper(x: UInt){
-    def toSInt: SInt = Cat(0.U(1.W), x).asSInt()
+    def toSInt: SInt = Cat(0.U(1.W), x).asSInt
   }
 }
 class FPUoutput extends Bundle{
@@ -120,7 +120,7 @@ class RoundingUnit(fracWidth: Int) extends Module{
 
   val inexact = io.in.guard | io.in.round | io.in.sticky
   val lsb = io.in.frac(0)
-  val roundUp = MuxLookup(io.in.rm, false.B, Seq(
+  val roundUp = MuxLookup(io.in.rm, false.B)(Seq(
     RNE -> (io.in.guard && (io.in.round | io.in.sticky | lsb)),
     RTZ -> false.B,
     RUP -> (inexact & (!io.in.sign)),
@@ -157,10 +157,10 @@ object ShiftRightJam{
       w.U,
       shiftAmt(log2Up(w)-1,0)
     )
-    val mask = ((-1).S(xLen.W).asUInt() >> (w.U-realShiftAmt)).asUInt()
+    val mask = ((-1).S(xLen.W).asUInt >> (w.U-realShiftAmt)).asUInt
     val x_shifted = Wire(UInt(xLen.W))
     x_shifted := x_ext >> realShiftAmt
-    x_shifted.head(w) | ((mask & x_ext).orR())
+    x_shifted.head(w) | ((mask & x_ext).orR)
   }
 }
 object ShiftLeftJam{
@@ -171,7 +171,7 @@ object ShiftLeftJam{
       0.U,
       x << shiftAmt(log2Up(xLen)-1, 0)
     )
-    x_shifted.head(w) | (x_shifted.tail(w).orR())
+    x_shifted.head(w) | (x_shifted.tail(w).orR)
   }
 }
 
@@ -194,10 +194,10 @@ class SrtTable extends Module{
   var ge = Map[Int, Bool]()
   for(row <- qSelTable){
     for(k <- row){
-      if(!ge.contains(k)) ge = ge + (k -> (io.y.asSInt() >= k.S(8.W)))
+      if(!ge.contains(k)) ge = ge + (k -> (io.y.asSInt >= k.S(8.W)))
     }
   }
-  io.q := MuxLookup(io.d, 0.S,
+  io.q := MuxLookup(io.d, 0.S)(
     qSelTable.map(x =>
       MuxCase((-2).S(3.W), Seq(
         ge(x(0)) -> 2.S(3.W),
@@ -224,7 +224,7 @@ class OnTheFlyConv(len: Int) extends Module{    // len = 28 + 3 = 31
   val mask = Reg(SInt(len.W))
   val b_111, b_1100 = Reg(UInt(len.W))
   when(io.resetSqrt){
-    mask := Cat("b1".U(1.W), 0.U((len-1).W)).asSInt()
+    mask := Cat("b1".U(1.W), 0.U((len-1).W)).asSInt
     b_111 := "b111".U(3.W) << (len-5)   // 001.11....
     b_1100 := "b1100".U(4.W) << (len-5) // 011.00....
   }.elsewhen(io.enable){
@@ -251,11 +251,11 @@ class OnTheFlyConv(len: Int) extends Module{    // len = 28 + 3 = 31
     -1 -> (QM, b_111),
     -2 -> (QM, b_1100)
   ).map(
-    m => m._1.S(3.W).asUInt() -> (
-      ( (m._2._1 << Mux(io.qi(0), 1.U, 2.U)).asUInt() & (mask >> io.qi(0)).asUInt() ) | m._2._2
+    m => m._1.S(3.W).asUInt -> (
+      ( (m._2._1 << Mux(io.qi(0), 1.U, 2.U)).asUInt & (mask >> io.qi(0)).asUInt ) | m._2._2
       )
   )
-  val sqrtToCsa = MuxLookup(io.qi.asUInt(), 0.U, sqrtToCsaMap)
+  val sqrtToCsa = MuxLookup(io.qi.asUInt, 0.U)(sqrtToCsaMap)
 
   val Q_load_00 = Q | b_00
   val Q_load_01 = Q | b_01
@@ -277,16 +277,16 @@ class OnTheFlyConv(len: Int) extends Module{    // len = 28 + 3 = 31
       2 -> Q_load_10,
       -1 -> QM_load_11,   // A[j+1] = B[j] ::: (r-|q|)
       -2 -> QM_load_10
-    ).map(m => m._1.S(3.W).asUInt() -> m._2)
+    ).map(m => m._1.S(3.W).asUInt -> m._2)
     val QMConvMap = Seq(
       1 -> Q_load_00,   // B[j+1] = A[j] ::: (q-1)
       2 -> Q_load_01,
       0 -> QM_load_11,
       -1 -> QM_load_10, // B[j+1] = B[j] ::: (r-|q|-1)
       -2 -> QM_load_01
-    ).map(m => m._1.S(3.W).asUInt() -> m._2)
-    Q := MuxLookup(io.qi.asUInt(), DontCare, QConvMap)
-    QM := MuxLookup(io.qi.asUInt(), DontCare, QMConvMap)
+    ).map(m => m._1.S(3.W).asUInt -> m._2)
+    Q := MuxLookup(io.qi.asUInt, 0.U)(QConvMap)
+    QM := MuxLookup(io.qi.asUInt, 0.U)(QMConvMap)
   }
   io.F := sqrtToCsa
   io.QM := QM

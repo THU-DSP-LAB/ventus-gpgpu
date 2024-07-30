@@ -70,7 +70,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
 
   // ******      Arbiter      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.ready)
-  BankConfArb.io.coreReqArb.enable := io.coreReq.fire()
+  BankConfArb.io.coreReqArb.enable := io.coreReq.fire
   BankConfArb.io.coreReqArb.isWrite := Mux(RegNext(BankConfArb.io.bankConflict),coreReq_st1.isWrite,io.coreReq.bits.isWrite)
   BankConfArb.io.coreReqArb.perLaneAddr := io.coreReq.bits.perLaneAddr
 
@@ -95,13 +95,13 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   for (iofS <- 0 until NSets) {
     for (iofW <- 0 until BlockWords) { //iofW index of word
       for (iofB <- 0 until BytesOfWord) { //iofB index of byte
-        when(io.coreReq.fire() && io.coreReq.bits.isWrite &&
+        when(io.coreReq.fire && io.coreReq.bits.isWrite &&
           io.coreReq.bits.setIdx === iofS.asUInt) {
           when(activeByteMaskArray(iofW)(iofB)) {
             EntryValidArray(iofS)(iofW)(iofB) := true.B
           }
         }
-        when(io.coreReq.fire() && !io.coreReq.bits.isWrite &&
+        when(io.coreReq.fire && !io.coreReq.bits.isWrite &&
           io.coreReq.bits.setIdx === iofS.asUInt) {
           when(activeByteMaskArray(iofW)(iofB)) {
             assert(EntryValidArray(iofS)(iofW)(iofB) === true.B)
@@ -113,9 +113,9 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
 
   // ******     pipeline regs      ******
   val coreReqisValidWrite_st1 = RegInit(false.B)
-  coreReqisValidWrite_st1 := (io.coreReq.fire() && io.coreReq.bits.isWrite) || (coreReqisValidWrite_st1 && RegNext(BankConfArb.io.bankConflict))
+  coreReqisValidWrite_st1 := (io.coreReq.fire && io.coreReq.bits.isWrite) || (coreReqisValidWrite_st1 && RegNext(BankConfArb.io.bankConflict))
   val coreReqisValidRead_st1  = RegInit(false.B)
-  coreReqisValidRead_st1 := (io.coreReq.fire() && !io.coreReq.bits.isWrite) || (coreReqisValidRead_st1 && RegNext(BankConfArb.io.bankConflict))//这个信号不是给Data Array用的哈
+  coreReqisValidRead_st1 := (io.coreReq.fire && !io.coreReq.bits.isWrite) || (coreReqisValidRead_st1 && RegNext(BankConfArb.io.bankConflict))//这个信号不是给Data Array用的哈
   val coreReqisValidRead_st2 = RegNext(coreReqisValidRead_st1)//TODO verification for bank conflict
   val coreReqisValidWrite_st2 = RegNext(coreReqisValidWrite_st1)
 
@@ -152,7 +152,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
     DataAccess.io.w.req.bits.waymask.foreach(_ :=
       arbAddrCrsbarOut_st1(i).wordOffset1H)
 
-    DataAccess.io.r.req.valid := io.coreReq.fire() && !io.coreReq.bits.isWrite
+    DataAccess.io.r.req.valid := io.coreReq.fire && !io.coreReq.bits.isWrite
     if(BlockOffsetBits-BankIdxBits>0)
       DataAccess.io.r.req.bits.setIdx := Cat(
       io.coreReq.bits.setIdx,//setIdx

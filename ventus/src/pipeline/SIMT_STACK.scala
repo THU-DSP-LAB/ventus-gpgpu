@@ -75,7 +75,7 @@ class ipdom_stack(val width:Int,val depth:Int) extends Module{//width = wtm+wpc 
   }
 
   dout    := stack_mem(rd_ptr)
-  io.index := is_part(rd_ptr).asBool()
+  io.index := is_part(rd_ptr).asBool
   io.d     := Mux(io.index,dout(width*2-1,width),dout(width,0))//index=0, diverge path
   io.empty := wr_ptr===0.U
   io.pairo := pair_mem(rd_ptr)
@@ -179,15 +179,15 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
   warp_id  := branch_ctl_buf.bits.wid
   when(fetch_ctl_buf.io.enq.ready){
   when(branch_ctl_buf.valid & (opcode === 0.U) & (branch_ctl_buf.bits.wid === if_mask_buf.bits.wid)) {
-    branch_ctl_buf.ready := if_mask_buf.fire()
+    branch_ctl_buf.ready := if_mask_buf.fire
     //when(opcode === 0.U) {
      // when(branch_ctl_buf.bits.wid === if_mask_buf.bits.wid) {
-    //    branch_ctl_buf.ready := if_mask_buf.fire()
+    //    branch_ctl_buf.ready := if_mask_buf.fire
      // }.otherwise {
      //   branch_ctl_buf.ready := false.B
       //}
     //}.elsewhen(opcode === 1.U) {
-    //  branch_ctl_buf.ready := io.fetch_ctl.fire()
+    //  branch_ctl_buf.ready := io.fetch_ctl.fire
    // }.otherwise {
    //   branch_ctl_buf.ready := true.B//branch_ctl_buf.valid
    // }
@@ -199,22 +199,22 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
 
   val elseOnly = Wire(Bool())
   if_mask  := if_mask_buf.bits.if_mask &branch_ctl_buf.bits.mask_init
-  else_mask:= (~if_mask_buf.bits.if_mask).asUInt()&branch_ctl_buf.bits.mask_init
-  diverge  := true.B //~no else & thread_masks(warp_id).asUInt()
+  else_mask:= (~if_mask_buf.bits.if_mask).asUInt&branch_ctl_buf.bits.mask_init
+  diverge  := true.B //~no else & thread_masks(warp_id).asUInt
   elseOnly := false.B
-  when(if_mask_buf.fire() ){
-    elseOnly:= else_mask === thread_masks(warp_id).asUInt()
-    diverge := ((else_mask& thread_masks(warp_id).asUInt())  =/= 0.U)//& thread_masks(warp_id).asUInt()
+  when(if_mask_buf.fire ){
+    elseOnly:= else_mask === thread_masks(warp_id).asUInt
+    diverge := ((else_mask& thread_masks(warp_id).asUInt)  =/= 0.U)//& thread_masks(warp_id).asUInt
   }
-  // elseOnly := if_mask.asUInt() === 0.U //no if
+  // elseOnly := if_mask.asUInt === 0.U //no if
   if_mask_buf.ready := fetch_ctl_buf.io.enq.ready//true.B//if_mask_buf.valid
-  io.complete.valid:=(if_mask_buf.fire()&opcode===0.U&branch_ctl_buf.valid&(!elseOnly))
+  io.complete.valid:=(if_mask_buf.fire&opcode===0.U&branch_ctl_buf.valid&(!elseOnly))
   io.complete.bits:=branch_ctl_buf.bits.wid
 
   for(x <- 0 until num_warp ){
-    push(x) := (opcode === 0.U) && (branch_ctl_buf.fire()) && (x.asUInt() === warp_id)
-    pop(x)  := (opcode === 1.U) && (branch_ctl_buf.fire()) && (x.asUInt() === warp_id)
-    // when(x.asUInt() === warp_id) {
+    push(x) := (opcode === 0.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id)
+    pop(x)  := (opcode === 1.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id)
+    // when(x.asUInt === warp_id) {
     //   //split or join will cause issue stall
     //   when(opcode === 1.U) {
     //     when(if_mask_buf.ready) {
@@ -223,7 +223,7 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
     //       issue_stall(x) := 1.U
     //     }
     //   }.elsewhen(opcode === 2.U) {
-    //     when(io.fetch_ctl.fire()) {
+    //     when(io.fetch_ctl.fire) {
     //       issue_stall(x) := 0.U
     //     }.otherwise {
     //       issue_stall(x) := 1.U
@@ -231,7 +231,7 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
     //   }
     // }
     q_end(x)   :=  Cat(0.U(32.W),thread_masks(warp_id))
-    q_else(x)  :=  Cat(PC_branch,else_mask & thread_masks(warp_id).asUInt())
+    q_else(x)  :=  Cat(PC_branch,else_mask & thread_masks(warp_id).asUInt)
 
     //ipdom stack connection
     ipdom_stack(x).push := push(x)
@@ -299,11 +299,11 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
   fetch_ctl_buf.io.enq.valid := fetch_ctl_valid
   io.fetch_ctl <> fetch_ctl_buf.io.deq
 
-  when(if_mask_buf.fire()){
+  when(if_mask_buf.fire){
     when(!elseOnly) {
       thread_masks(warp_id) := if_mask
     }.otherwise{
-      thread_masks(warp_id) := else_mask & thread_masks(warp_id).asUInt()
+      thread_masks(warp_id) := else_mask & thread_masks(warp_id).asUInt
     }
   }.elsewhen(opcode === 1.U & branch_ctl_buf.valid){
     thread_masks(warp_id) := join_tm
@@ -364,7 +364,7 @@ class ipdom_stack(val width:Int,val depth:Int) extends Module{//width = wtm+wpc 
 
 
   dout    := stack_mem(rd_ptr)
-  io.index := is_part(rd_ptr).asBool()
+  io.index := is_part(rd_ptr).asBool
   io.d     := Mux(io.index,dout(width*2-1,width),dout(width,0))//index=0, diverge path
   io.empty := wr_ptr===0.U
   io.pairo := pair_mem(rd_ptr)
@@ -434,12 +434,12 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
   when(branch_ctl_buf.valid) {
     when(opcode === 0.U) {
       when(branch_ctl_buf.bits.wid === if_mask_buf.bits.wid) {
-        branch_ctl_buf.ready := if_mask_buf.fire()
+        branch_ctl_buf.ready := if_mask_buf.fire
       }.otherwise {
         branch_ctl_buf.ready := false.B
       }
     }.elsewhen(opcode === 1.U) {
-      branch_ctl_buf.ready := io.fetch_ctl.fire()
+      branch_ctl_buf.ready := io.fetch_ctl.fire
     }.otherwise {
       branch_ctl_buf.ready := true.B//branch_ctl_buf.valid
     }
@@ -447,22 +447,22 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
 
   val elseOnly = Wire(Bool())
   if_mask  := if_mask_buf.bits.if_mask //&branch_ctl_buf.bits.mask_init
-  else_mask:= (~if_mask).asUInt()//&branch_ctl_buf.bits.mask_init
-  diverge  := true.B //~no else & thread_masks(warp_id).asUInt()
+  else_mask:= (~if_mask).asUInt//&branch_ctl_buf.bits.mask_init
+  diverge  := true.B //~no else & thread_masks(warp_id).asUInt
   elseOnly := false.B
   when(if_mask_buf.valid ){
-    elseOnly:= else_mask === thread_masks(warp_id).asUInt()
-    diverge := ((else_mask& thread_masks(warp_id).asUInt())  =/= 0.U)//& thread_masks(warp_id).asUInt()
+    elseOnly:= else_mask === thread_masks(warp_id).asUInt
+    diverge := ((else_mask& thread_masks(warp_id).asUInt)  =/= 0.U)//& thread_masks(warp_id).asUInt
   }
- // elseOnly := if_mask.asUInt() === 0.U //no if
+ // elseOnly := if_mask.asUInt === 0.U //no if
   if_mask_buf.ready := true.B//if_mask_buf.valid
-  io.complete.valid:=(if_mask_buf.fire()&opcode===0.U&branch_ctl_buf.valid)
+  io.complete.valid:=(if_mask_buf.fire&opcode===0.U&branch_ctl_buf.valid)
   io.complete.bits:=branch_ctl_buf.bits.wid
 
   for(x <- 0 until num_warp ){
-    push(x) := (opcode === 0.U) && (branch_ctl_buf.fire()) && (x.asUInt() === warp_id)
-    pop(x)  := (opcode === 1.U) && (branch_ctl_buf.fire()) && (x.asUInt() === warp_id)
-    // when(x.asUInt() === warp_id) {
+    push(x) := (opcode === 0.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id)
+    pop(x)  := (opcode === 1.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id)
+    // when(x.asUInt === warp_id) {
     //   //split or join will cause issue stall
     //   when(opcode === 1.U) {
     //     when(if_mask_buf.ready) {
@@ -471,7 +471,7 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
     //       issue_stall(x) := 1.U
     //     }
     //   }.elsewhen(opcode === 2.U) {
-    //     when(io.fetch_ctl.fire()) {
+    //     when(io.fetch_ctl.fire) {
     //       issue_stall(x) := 0.U
     //     }.otherwise {
     //       issue_stall(x) := 1.U
@@ -479,7 +479,7 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
     //   }
     // }
     q_end(x)   :=  Cat(0.U(32.W),thread_masks(warp_id))
-    q_else(x)  :=  Cat(PC_branch,else_mask & thread_masks(warp_id).asUInt())
+    q_else(x)  :=  Cat(PC_branch,else_mask & thread_masks(warp_id).asUInt)
 
 
     //ipdom stack connection
@@ -523,11 +523,11 @@ class SIMT_STACK(val depth_stack : Int) extends Module{
     }
   }
 
-  when(if_mask_buf.fire()){
+  when(if_mask_buf.fire){
     when(!elseOnly) {
       thread_masks(warp_id) := if_mask
     }.otherwise{
-      thread_masks(warp_id) := else_mask & thread_masks(warp_id).asUInt()
+      thread_masks(warp_id) := else_mask & thread_masks(warp_id).asUInt
     }
   }.elsewhen(opcode === 1.U & branch_ctl_buf.valid){
     thread_masks(warp_id) := join_tm

@@ -22,10 +22,12 @@ class prefer_select(val RANGE: Int, val ID_WIDTH: Int) extends RawModule{
     })
     val found = Wire(Bool())
     val found_id = Wire(UInt((ID_WIDTH + 1).W))
-    val prefer_pre = Wire(UInt((log2Ceil(RANGE)).W))
+    val prefer_pre = if (RANGE == 1) 0.U else Wire(UInt(log2Ceil(RANGE).W))
 
 
-    prefer_pre := io.prefer(log2Ceil(RANGE)-1,0)
+    if (RANGE > 1) {
+        prefer_pre := io.prefer(log2Ceil(RANGE)-1, 0)
+    }
 
     found := false.B
     found_id := 0.U
@@ -43,11 +45,25 @@ class prefer_select(val RANGE: Int, val ID_WIDTH: Int) extends RawModule{
 //            }
 //        }
 //    }
-        for(i <- 0 until RANGE ){
-                when(io.signal((i.U + prefer_pre)(log2Ceil(RANGE)-1,0))){
+        // for(i <- 0 until RANGE ){
+        //         when(io.signal((i.U + prefer_pre)(log2Ceil(RANGE)-1,0))){
+        //             found := true.B
+        //             found_id := (i.U + prefer_pre)(log2Ceil(RANGE)-1,0)
+        //         }
+        // }
+        if (RANGE > 1) {
+            for (i <- 0 until RANGE) {
+                when(io.signal((i.U + prefer_pre)(log2Ceil(RANGE) - 1, 0))) {
                     found := true.B
-                    found_id := (i.U + prefer_pre)(log2Ceil(RANGE)-1,0)
+                    found_id := (i.U + prefer_pre)(log2Ceil(RANGE) - 1, 0)
                 }
+            }
+        } else {
+            // When RANGE is 1, simply check the only possible index 0
+            when(io.signal(0.U)) {
+                found := true.B
+                found_id := 0.U
+            }
         }
 
 

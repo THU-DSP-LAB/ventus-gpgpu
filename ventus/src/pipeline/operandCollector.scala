@@ -128,7 +128,7 @@ class collectorUnit extends Module{
   })
   for (i <- 0 until 4) {
     io.outArbiterIO(i).valid :=
-      MuxLookup(state, false.B,
+      MuxLookup(state, false.B)(
         Array(s_idle->(io.control.fire && (readyWire(i)===0.U)),
           s_add->((valid(i) === true.B) && (ready(i)===false.B))
         ))
@@ -163,15 +163,15 @@ class collectorUnit extends Module{
 
   customCtrlWire := false.B
 
-  imm.io.inst := MuxLookup(state, 0.U,
+  imm.io.inst := MuxLookup(state, 0.U)(
     Array(s_idle->io.control.bits.inst,
       s_add->controlReg.inst
     ))
-  imm.io.imm_ext := MuxLookup(state, 0.U,
+  imm.io.imm_ext := MuxLookup(state, 0.U)(
     Array(s_idle -> io.control.bits.imm_ext,
       s_add -> controlReg.imm_ext
     ))
-  imm.io.sel := MuxLookup(state, 0.U,
+  imm.io.sel := MuxLookup(state, 0.U)(
     Array(s_idle -> io.control.bits.sel_imm,
       s_add -> controlReg.sel_imm
     ))
@@ -184,7 +184,7 @@ class collectorUnit extends Module{
         //using an iterable variable to indicate reg_idx signals
         regIdxWire(0) := io.control.bits.reg_idx1
         regIdxWire(1) := io.control.bits.reg_idx2
-        regIdxWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U,
+        regIdxWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U)(
           Array(
             A3_PC -> Mux(io.control.bits.branch===B_R, io.control.bits.reg_idx1, io.control.bits.reg_idx3),
             A3_VRS3 -> io.control.bits.reg_idx3,
@@ -202,7 +202,7 @@ class collectorUnit extends Module{
         //using an iterable variable to indicate sel_alu signals
         rsTypeWire(0) := io.control.bits.sel_alu1
         rsTypeWire(1) := io.control.bits.sel_alu2
-        rsTypeWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U,
+        rsTypeWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U)(
           Array(
             A3_PC -> Mux(io.control.bits.branch===B_R, 1.U, 3.U),
             A3_VRS3 -> 2.U,
@@ -263,10 +263,10 @@ class collectorUnit extends Module{
   for (i <- 0 until 4) {
     when(io.bankIn(i).fire) {
       when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
-        rsRead := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsRead := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(
             A1_RS1 -> Mux(
-              MuxLookup(state, false.B, 
+              MuxLookup(state, false.B)(
                 Array(
                   s_idle -> regIdxWire(0).orR,
                   s_add -> regIdx(0).orR
@@ -283,10 +283,10 @@ class collectorUnit extends Module{
         }
         ready(0) := 1.U
       }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
-        rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(
             A2_RS2 -> Mux(
-              MuxLookup(state, false.B, 
+              MuxLookup(state, false.B)(
                 Array(
                   s_idle -> regIdxWire(1).orR,
                   s_add -> regIdx(1).orR
@@ -298,7 +298,7 @@ class collectorUnit extends Module{
         )
         ready(1) := 1.U
       }.elsewhen(io.bankIn(i).bits.regOrder === 2.U) { //operand3
-        rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(A3_PC -> VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)),
             A3_VRS3 -> io.bankIn(i).bits.data,
             A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))),
