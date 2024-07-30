@@ -4,9 +4,9 @@ GPGPU processor supporting RISCV-V extension, developed with Chisel HDL.
 
 Copyright 2021-2023 by International Innovation Center of Tsinghua University, Shanghai
 
-We are calling for contributors. If you are interested in Ventus GPGPU, please contact <yang-zx21@mails.tsinghua.edu.cn>
+We are calling for contributors. If you are interested in Ventus GPGPU, please contact yff22@mails.tsinghua.edu.cn
 
-“乘影”在RVV编译器工具链、验证环境开发和硬件设计方面还有很多不足，如果您有意愿参与到“乘影”的开发中，欢迎在github上pull request，也欢迎联系 <yang-zx21@mails.tsinghua.edu.cn>
+“乘影”在RVV编译器工具链、验证环境开发和硬件设计方面还有很多不足，如果您有意愿参与到“乘影”的开发中，欢迎在github上pull request，也欢迎联系 yff22@mails.tsinghua.edu.cn
 
 乘影2.0架构文档在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/乘影GPGPU架构文档手册v2.0.pdf)，添加了对OpenCL支持所需的改动。如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
 

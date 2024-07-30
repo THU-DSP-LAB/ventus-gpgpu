@@ -38,13 +38,16 @@ class warp_scheduler extends Module{
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
     val flushDCache = Decoupled(Bool())
+    // val inquire_csr_wid = Output(UInt(depth_warp.W))
+    // val inquire_csr_addr = Output(UInt(12.W))
+    // val inquire_csr_data = Input(UInt(xLen.W))
   })
 
-  val warp_end=io.warp_control.fire()&io.warp_control.bits.ctrl.simt_stack_op
+  val warp_end=io.warp_control.fire&io.warp_control.bits.ctrl.simt_stack_op
   val warp_end_id=io.warp_control.bits.ctrl.wid
 
   io.branch.ready:= !io.flushCache.valid
-  io.warp_control.ready:= !io.branch.fire() & !io.flushCache.valid
+  io.warp_control.ready:= !io.branch.fire & !io.flushCache.valid
 
   io.warpReq.ready:=true.B
   io.warpRsp.valid:=warp_end // always ready.
@@ -60,8 +63,8 @@ class warp_scheduler extends Module{
   io.asid := asidReg(io.pc_rsp.bits.warpid)
 
 
-  io.flush.valid:=(io.branch.fire()&io.branch.bits.jump) | warp_end//(暂定barrier不flush)
-  io.flush.bits:=Mux((io.branch.fire()&io.branch.bits.jump),io.branch.bits.wid,warp_end_id)
+  io.flush.valid:=(io.branch.fire&io.branch.bits.jump) | warp_end//(暂定barrier不flush)
+  io.flush.bits:=Mux((io.branch.fire&io.branch.bits.jump),io.branch.bits.wid,warp_end_id)
   io.flushCache.valid:=io.pc_rsp.valid&io.pc_rsp.bits.status(0)
   io.flushCache.bits:=io.pc_rsp.bits.warpid
 
@@ -106,32 +109,33 @@ class warp_scheduler extends Module{
   val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
   val end_wg_id=io.wg_id_tag(TAG_WIDTH-1,WF_COUNT_WIDTH_PER_WG)
   val end_wf_id=io.wg_id_tag(WF_COUNT_WIDTH_PER_WG-1,0)
-  val warp_bar_data=RegInit(0.U(num_warp.W))
+  val warp_bar_data=RegInit(0.U(num_warp.W))  // 0 means not locked by barrier
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
 
   when(io.warpReq.fire){
-    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
-      warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt//显示warp中有哪些属于wg
+    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt  //显示warp中有哪些属于wg
+//    warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     when(!warp_bar_lock(new_wg_id)) {
       warp_bar_cur(new_wg_id) := 0.U
+      warp_bar_exp(new_wg_id) := (1.U << new_wg_wf_count).asUInt - 1.U  // init to 1 for all future wfs in wg
     }
   }
   when(io.warpRsp.fire){
-    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+//    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
-  warp_bar_lock:=warp_bar_exp.map(x=>x.orR)
+  warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
-    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
+    warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
-    when((warp_bar_cur(end_wg_id) | (1.U<<io.warp_control.bits.ctrl.wid).asUInt())===warp_bar_exp(end_wg_id)){
+    when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id)){
       warp_bar_cur(end_wg_id):=0.U
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
     }
   }
   // collect endprg in one wg and issue flush request
   when(io.warpReq.fire){
-    warp_endprg_cnt(new_wg_id):=warp_endprg_cnt(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt()
+    warp_endprg_cnt(new_wg_id):=warp_endprg_cnt(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     warp_wg_valid(new_wg_id):=true.B
   }
   when(io.warpRsp.fire){
@@ -153,12 +157,12 @@ class warp_scheduler extends Module{
 
 
 
-  warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt()&Fill(num_warp,io.warpReq.fire()))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt() )).asUInt
+  warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt&Fill(num_warp,io.warpReq.fire))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt )).asUInt
   val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
   io.warp_ready:=warp_ready
   for (i<- num_warp-1 to 0 by -1){
     pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 
-    when(pc_ready(i)){next_warp:=i.asUInt()}
+    when(pc_ready(i)){next_warp:=i.asUInt}
   }
   io.pc_req.valid:=pc_ready(next_warp)
   //lock one warp to execute
@@ -174,7 +178,7 @@ class warp_scheduler extends Module{
     pcControl(io.pc_rsp.bits.warpid).mask_i:=io.pc_rsp.bits.mask
   }
 
-  when(io.branch.fire()&io.branch.bits.jump){
+  when(io.branch.fire&io.branch.bits.jump){
     pcControl(io.branch.bits.wid).PC_replay:=false.B
     pcControl(io.branch.bits.wid).PC_src:=1.U
     pcControl(io.branch.bits.wid).New_PC:=io.branch.bits.new_pc
@@ -184,7 +188,7 @@ class warp_scheduler extends Module{
   }
 
 
-  when(io.warpReq.fire()){
+  when(io.warpReq.fire){
     pcControl(io.warpReq.bits.wid).PC_replay:=false.B
     pcControl(io.warpReq.bits.wid).PC_src:=1.U
     pcControl(io.warpReq.bits.wid).New_PC:=io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch
