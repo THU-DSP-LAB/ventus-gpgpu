@@ -326,7 +326,7 @@ class L2TLB(
       accelStorageArray(j).io.invalidate.valid := io.invalidate.valid
       accelStorageArray(j).io.invalidate.bits := io.invalidate.bits.asid
     }
-    val accelPA = MuxLookup(accelLevel, 0.U,
+    val accelPA = MuxLookup(accelLevel, 0.U)(
       (1 to SV.levels).map(_.U) zip
         (accelOut_delay.map{a => Cat(a(i).bits, 0.U(SV.offsetLen.W))} :+ ptbr_rsp.bits)
     )

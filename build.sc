@@ -158,8 +158,13 @@ trait InclusiveCache
   override def moduleDeps = super.moduleDeps ++ Seq(rocketchipModule)
 }
 
-object MemboxS extends CommonModule with SbtModule{
-  override def scalaVersion = ivys.sv
+object MemboxS extends Cross[MemboxS](v.chiselCrossVersions.keys.toSeq)
+trait MemboxS extends millbuild.common.HasChisel
+  with SbtModule with Cross.Module[String] {
+  def chiselVersion: String = crossValue
+  def scalaVersion = v.scalaVersions(chiselVersion)
+  def chiselIvy = Some(v.chiselCrossVersions(chiselVersion)._1)
+  def chiselPluginIvy = Some(v.chiselCrossVersions(chiselVersion)._2)
   override def millSourcePath = os.pwd / "dependencies" / "Membox2.Scala"
 }
 
@@ -179,6 +184,7 @@ trait Ventus
   def fpuv2Module = fpuv2(crossValue)
   def rocketchipModule = rocketchip(crossValue)
   def inclusivecacheModule = inclusivecache(crossValue)
+  def memboxModule = MemboxS(crossValue)
 
   override def forkArgs = Seq("-Xmx32G", "-Xss192m")
   override def scalacOptions = super.scalacOptions() ++ Seq(
@@ -187,8 +193,6 @@ trait Ventus
     "-feature",
     "-Xcheckinit"
   )
-
-  override def moduleDeps = super.moduleDeps ++ Seq(MemboxS)
 
   override def scalacPluginIvyDeps = super.scalacPluginIvyDeps() ++ Agg(chiselPluginIvy.get)
 

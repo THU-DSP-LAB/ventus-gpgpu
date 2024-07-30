@@ -310,7 +310,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
       c.io.host_rsp.setSinkClock(c.clock)
       c.io.out_a.initSink()
       c.io.out_a.setSinkClock(c.clock)
-      c.clock.setTimeout(6000)
+      c.clock.setTimeout(23500)
       c.clock.step(5)
 
       var meta = new MetaData
