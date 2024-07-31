@@ -1,5 +1,3 @@
-SHELL := /bin/bash
-
 init:
 	git submodule update --init --recursive --progress
 
@@ -29,7 +27,7 @@ compile:
 	./mill -i -j 0 __.compile
 
 test:
-	./mill -i ventus[6.4.0].tests.testOnly play.AdvancedTest 2>&1 | tee test_run_dir/test.log
+	./mill -i ventus[6.4.0].tests.testOnly play.AdvancedTest
 
 verilog:
 	./mill ventus.run

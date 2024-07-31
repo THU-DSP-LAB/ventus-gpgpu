@@ -451,61 +451,28 @@ class instDemux extends Module{
   io.out.foreach(_.valid := 0.U)
 
   // For those out port ready, selecting one by bitwise priority.
-  val priorityXorV = RegInit(true.B)
-  priorityXorV := ~priorityXorV
   val outReady1 = VecInit(io.out.map(_.ready)).asUInt
-  val outX_sel = Wire(UInt(num_collectorUnit.W))
-  val outV_sel = Wire(UInt(num_collectorUnit.W))
   val outV_sel_oh = Wire(UInt(num_collectorUnit.W))
-  val outReady2 = Wire(UInt(num_collectorUnit.W))
+  outV_sel_oh :=  PriorityEncoderOH(outReady1)
+  val outV_sel = OHToUInt(outV_sel_oh)
+  val outReady2 = outReady1 & (~outV_sel_oh)
+  val outX_sel = Wire(UInt(num_collectorUnit.W))
+  outX_sel := PriorityEncoder(outReady2)
+  io.in(0).ready := outReady1.orR
+  io.in(1).ready := outReady2.orR
 
-  if (num_warp == 1) {
-    val outX_sel_oh = Wire(UInt(num_collectorUnit.W))
-    // Alternate priority between V and X to ensure instructions are not blocked when num_warp = 1
-    when(priorityXorV) {
-      // V has priority
-      outV_sel_oh := PriorityEncoderOH(outReady1)
-      outV_sel := PriorityEncoder(outReady1)
-      outReady2 := outReady1 & (~outV_sel_oh).asUInt
-      outX_sel := PriorityEncoder(outReady2)
-      io.in(0).ready := outReady1.orR
-      io.in(1).ready := outReady2.orR
-      outX_sel_oh := 0.U
-    }.otherwise {
-      // X has priority
-      outX_sel_oh := PriorityEncoderOH(outReady1)
-      outX_sel := PriorityEncoder(outReady1)
-      outReady2 := outReady1 & (~outX_sel_oh).asUInt
-      outV_sel := PriorityEncoder(outReady2)
-      io.in(1).ready := outReady1.orR
-      io.in(0).ready := outReady2.orR
-      outV_sel_oh := 0.U
-    }
-    
-    when((priorityXorV && outReady1.orR) || ((!priorityXorV).asBool && outReady2.orR)) {
-      io.out(outV_sel).bits := io.in(0).bits
-      io.out(outV_sel).valid := io.in(0).valid
-    }
-    when((priorityXorV && outReady2.orR) || ((!priorityXorV).asBool && outReady1.orR)) {
-      io.out(outX_sel).bits := io.in(1).bits
-      io.out(outX_sel).valid := io.in(1).valid
-    }
-  } else {
-    // num_warp > 1, do not need complex priority logic
-    outV_sel_oh := PriorityEncoderOH(outReady1)
-    outV_sel := OHToUInt(outV_sel_oh)
-    outReady2 := outReady1 & (~outV_sel_oh).asUInt
-    outX_sel := PriorityEncoder(outReady2)
-    io.in(0).ready := outReady1.orR
-    io.in(1).ready := outReady2.orR
 
-    when(outReady1.orR) {
-      io.out(outV_sel).bits := io.in(0).bits
-      io.out(outV_sel).valid := io.in(0).valid
+
+  for (i <- (0 until num_collectorUnit).reverse) {
+    when(outReady1.asUInt.orR) {
+      io.out(outV_sel).bits :=  io.in(0).bits
+      io.out(outV_sel).valid :=  io.in(0).valid
+
     }
-    when(outReady2.orR) {
-      io.out(outX_sel).bits := io.in(1).bits
-      io.out(outX_sel).valid := io.in(1).valid
+    when(outReady2.asUInt.orR) {
+      io.out(outX_sel).bits :=  io.in(1).bits
+      io.out(outX_sel).valid :=  io.in(1).valid
+
     }
   }
 
