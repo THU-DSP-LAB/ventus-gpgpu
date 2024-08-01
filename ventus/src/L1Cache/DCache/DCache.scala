@@ -711,7 +711,13 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
 
   InvOrFluMemReq.a_data := DataAccessReadSRAMRRsp
   val flushL2 = Wire(Bool())
-  val flushL2_Reg = RegEnable(flushL2,MemReqArb.io.in(2).fire)
+  val flushL2_Reg = RegInit(false.B)
+  when(MemReqArb.io.in(2).fire){
+    flushL2_Reg := flushL2
+  }.elsewhen(memRspIsFluOrInv){
+    flushL2_Reg := false.B
+  }
+
   flushL2 :=  (invalidatenodirty && MemReqArb.io.in(2).ready && !flushL2_Reg)
   when(flushL2){
     InvOrFluAlreadyflush := true.B
