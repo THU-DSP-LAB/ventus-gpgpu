@@ -609,9 +609,10 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   // ******      data crossbar(Mem order to Core order)     ******
   val coreRsp_st2_dataMemOrder = Wire(Vec(BlockWords, UInt(WordLength.W)))
   val coreRsp_st2_dataCoreOrder = Wire(Vec(NLanes, UInt(WordLength.W)))
-  coreRsp_st2_coreRsp_data.io.enq.valid := coreRsp_st2_valid_from_coreReq_Reg.io.deq.valid && !coreRsp_st2_valid_from_coreReq_Reg.io.deq.ready
+  // hold dataaccess rsp data, when coreRsp CAN'T handle coreReq rsp (memreq conflict)
+  coreRsp_st2_coreRsp_data.io.enq.valid := coreRsp_st2_valid_from_coreReq_Reg.io.deq.valid && !coreRsp_st2_valid_from_coreReq_Reg.io.deq.ready && RegNext(readHit_st1)
   coreRsp_st2_coreRsp_data.io.enq.bits := DataAccessReadSRAMRRsp
-  coreRsp_st2_coreRsp_data.io.deq.ready := coreRsp_Q.io.enq.ready
+  coreRsp_st2_coreRsp_data.io.deq.ready := coreRsp_st2_valid_from_coreReq_Reg.io.deq.ready
   val DataAccessReadHit = Mux(coreRsp_st2_coreRsp_data.io.deq.valid,coreRsp_st2_coreRsp_data.io.deq.bits,DataAccessReadSRAMRRsp)
 
   coreRsp_st2_dataMemOrder := Mux(readHit_st2_valid, DataAccessReadHit, coreRsp_st2.io.deq.bits.data) //memRsp for latter
