@@ -226,8 +226,8 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   io.to_dcache.bits.setIdx := setIdx
   val opcode_wire =Wire(UInt(3.W))
   val param_wire_alt =Wire(UInt(4.W))
-  param_wire_alt:= Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
-  Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
+  param_wire_alt := Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
+    Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
     Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
   val param_wire=Wire(UInt(4.W))
   when(reg_save.ctrl.atomic){
