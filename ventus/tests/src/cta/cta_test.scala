@@ -54,9 +54,9 @@ class Wf_slot {
   var vgpr: (Int, Int) = _
   var csr: Int = _
   var time: Int = _
-  assert(CONFIG.WG.NUM_WF_MAX == 32 && CONFIG.GPU.NUM_WG_SLOT == 8)
-  def wf_id: Int = (wf_tag & 0x1F)
-  def wg_slot: Int = (wf_tag >> 5) & 0x7
+  assert(CONFIG.WG.NUM_WF_MAX == 8 && CONFIG.GPU.NUM_WG_SLOT == 8)
+  def wf_id: Int = (wf_tag & 0x7)
+  def wg_slot: Int = (wf_tag >> 3) & 0x7
   def :=(that: Wf_slot): Unit = {
     valid = that.valid
     wg_id = that.wg_id

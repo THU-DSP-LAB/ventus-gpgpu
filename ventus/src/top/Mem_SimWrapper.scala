@@ -106,7 +106,7 @@ object emitVerilog extends App {
   chisel3.emitVerilog(
     //new GPGPU_SimWrapper(FakeCache = false),
     new GPGPU_SimTop,
-    Array("--target-dir", "generated/", "--target", "verilog")
+    Array("--target-dir", "sim-verilator/", "--target", "verilog")
   )
 }
 
