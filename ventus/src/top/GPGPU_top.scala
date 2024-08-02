@@ -21,7 +21,8 @@ import L1Cache.ShareMem._
 import config.config._
 import pipeline._
 import L2cache._
-import CTA._
+//import CTA._
+import cta.cta_scheduler_top
 import axi._
 import freechips.rocketchip.amba.axi4._
 
@@ -46,64 +47,57 @@ class CTA2host_data extends Bundle{
 }
 class CTAinterface extends Module{
   val io=IO(new Bundle{
-    val host2CTA=Flipped(DecoupledIO(new host2CTA_data))
-    val CTA2host=DecoupledIO(new CTA2host_data)
-    val CTA2warp=Vec(NUMBER_CU,DecoupledIO(new CTAreqData))
-    val warp2CTA=Vec(NUMBER_CU,Flipped(DecoupledIO(new CTArspData)))
+    val host2CTA = Flipped(DecoupledIO(new host2CTA_data))
+    val CTA2host = DecoupledIO(new CTA2host_data)
+    val CTA2warp = Vec(NUMBER_CU,DecoupledIO(new CTAreqData))
+    val warp2CTA = Vec(NUMBER_CU,Flipped(DecoupledIO(new CTArspData)))
   })
-  val cta_sche=Module(new cta_scheduler( NUMBER_CU: Int,  CU_ID_WIDTH: Int,  RES_TABLE_ADDR_WIDTH: Int,  VGPR_ID_WIDTH: Int,  NUMBER_VGPR_SLOTS: Int,  SGPR_ID_WIDTH: Int,  NUMBER_SGPR_SLOTS: Int,  LDS_ID_WIDTH: Int,  NUMBER_LDS_SLOTS: Int,  WG_ID_WIDTH: Int,  WF_COUNT_WIDTH: Int,  WG_SLOT_ID_WIDTH: Int,  NUMBER_WF_SLOTS: Int,  WF_COUNT_MAX: Int,  NUMBER_RES_TABLE: Int,  GDS_ID_WIDTH: Int,  GDS_SIZE: Int,  ENTRY_ADDR_WIDTH: Int,  NUMBER_ENTRIES: Int,  WAVE_ITEM_WIDTH: Int,  MEM_ADDR_WIDTH: Int,  TAG_WIDTH: Int,  INIT_MAX_WG_COUNT: Int,WF_COUNT_WIDTH_PER_WG: Int))
-  cta_sche.io.host_wg_valid         := io.host2CTA.valid
-  cta_sche.io.host_wg_id            := io.host2CTA.bits.host_wg_id
-  cta_sche.io.host_num_wf           := io.host2CTA.bits.host_num_wf
-  cta_sche.io.host_wf_size          := io.host2CTA.bits.host_wf_size
-  cta_sche.io.host_start_pc         := io.host2CTA.bits.host_start_pc
-  cta_sche.io.host_kernel_size_3d   := io.host2CTA.bits.host_kernel_size_3d
-  cta_sche.io.host_pds_baseaddr     := io.host2CTA.bits.host_pds_baseaddr
-  cta_sche.io.host_csr_knl          := io.host2CTA.bits.host_csr_knl
-  cta_sche.io.host_vgpr_size_total  := io.host2CTA.bits.host_vgpr_size_total
-  cta_sche.io.host_sgpr_size_total  := io.host2CTA.bits.host_sgpr_size_total
-  cta_sche.io.host_lds_size_total   := io.host2CTA.bits.host_lds_size_total
-  cta_sche.io.host_gds_size_total   := io.host2CTA.bits.host_gds_size_total
-  cta_sche.io.host_vgpr_size_per_wf := io.host2CTA.bits.host_vgpr_size_per_wf
-  cta_sche.io.host_sgpr_size_per_wf := io.host2CTA.bits.host_sgpr_size_per_wf
-  cta_sche.io.host_gds_baseaddr := io.host2CTA.bits.host_gds_baseaddr
-  io.host2CTA.ready:=cta_sche.io.inflight_wg_buffer_host_rcvd_ack
+  val cta_sche = Module(new cta_scheduler_top)
+  cta_sche.io.host_wg_new.valid <> io.host2CTA.valid
+  cta_sche.io.host_wg_new.ready <> io.host2CTA.ready
+  cta_sche.io.host_wg_new.bits.wg_id              := io.host2CTA.bits.host_wg_id
+  cta_sche.io.host_wg_new.bits.num_wf             := io.host2CTA.bits.host_num_wf
+  cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wf_size
+  cta_sche.io.host_wg_new.bits.start_pc           := io.host2CTA.bits.host_start_pc
+  cta_sche.io.host_wg_new.bits.num_wg_x           := io.host2CTA.bits.host_kernel_size_3d(0)
+  cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_3d(1)
+  cta_sche.io.host_wg_new.bits.num_wg_z           := io.host2CTA.bits.host_kernel_size_3d(2)
+  cta_sche.io.host_wg_new.bits.pds_base           := io.host2CTA.bits.host_pds_baseaddr
+  cta_sche.io.host_wg_new.bits.csr_kernel         := io.host2CTA.bits.host_csr_knl
+  cta_sche.io.host_wg_new.bits.num_lds            := io.host2CTA.bits.host_lds_size_total
+  cta_sche.io.host_wg_new.bits.num_sgpr           := io.host2CTA.bits.host_sgpr_size_total
+  cta_sche.io.host_wg_new.bits.num_vgpr           := io.host2CTA.bits.host_vgpr_size_total
+  cta_sche.io.host_wg_new.bits.num_sgpr_per_wf    := io.host2CTA.bits.host_sgpr_size_per_wf
+  cta_sche.io.host_wg_new.bits.num_vgpr_per_wf    := io.host2CTA.bits.host_vgpr_size_per_wf
+  cta_sche.io.host_wg_new.bits.gds_base           := io.host2CTA.bits.host_gds_baseaddr
+  cta_sche.io.host_wg_new.bits.asid_kernel        := 0.U
+  
+  io.CTA2host.bits.inflight_wg_buffer_host_wf_done_wg_id := cta_sche.io.host_wg_done.bits.wg_id
+  io.CTA2host.valid := cta_sche.io.host_wg_done.valid
+  cta_sche.io.host_wg_done.ready := io.CTA2host.ready
 
-  val wf_done_interface=Module(new wf_done_interface_single(WG_ID_WIDTH:Int,NUM_SCHEDULER: Int,WG_NUM_MAX: Int))
-  wf_done_interface.io.wf_done:=cta_sche.io.inflight_wg_buffer_host_wf_done
-  wf_done_interface.io.wf_done_wg_id:=cta_sche.io.inflight_wg_buffer_host_wf_done_wg_id
-
-  io.CTA2host.bits.inflight_wg_buffer_host_wf_done_wg_id:=wf_done_interface.io.host_wf_done_wg_id
-  io.CTA2host.valid:=wf_done_interface.io.host_wf_done_valid
-  wf_done_interface.io.host_wf_done_ready:=io.CTA2host.ready
-
-  val cu2dispatch_wf_done=Wire(Vec(NUMBER_CU,Bool()))
   for (i <- 0 until NUMBER_CU){
-    io.CTA2warp(i).valid:=cta_sche.io.dispatch2cu_wf_dispatch(i)
-    io.CTA2warp(i).bits.dispatch2cu_wg_wf_count:= cta_sche.io.dispatch2cu_wg_wf_count
-    io.CTA2warp(i).bits.dispatch2cu_wf_size_dispatch   := cta_sche.io.dispatch2cu_wf_size_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_sgpr_base_dispatch := cta_sche.io.dispatch2cu_sgpr_base_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_vgpr_base_dispatch := cta_sche.io.dispatch2cu_vgpr_base_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_wf_tag_dispatch    := cta_sche.io.dispatch2cu_wf_tag_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_lds_base_dispatch  := cta_sche.io.dispatch2cu_lds_base_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_start_pc_dispatch  := cta_sche.io.dispatch2cu_start_pc_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch := cta_sche.io.dispatch2cu_gds_base_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch := cta_sche.io.dispatch2cu_pds_baseaddr_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch := cta_sche.io.dispatch2cu_csr_knl_dispatch
-    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(0)
-    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(1)
-    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.dispatch2cu_kernel_size_3d_dispatch(2)
-    io.CTA2warp(i).bits.dispatch2cu_wg_id := 0.U
-    cta_sche.io.cu2dispatch_ready_for_dispatch(i):=io.CTA2warp(i).ready
+    io.CTA2warp(i).valid := cta_sche.io.cu_wf_new(i).valid
+    io.CTA2warp(i).bits.dispatch2cu_wg_wf_count := cta_sche.io.cu_wf_new(i).bits.num_wf
+    io.CTA2warp(i).bits.dispatch2cu_wf_size_dispatch   := cta_sche.io.cu_wf_new(i).bits.num_thread_per_wf
+    io.CTA2warp(i).bits.dispatch2cu_lds_base_dispatch  := cta_sche.io.cu_wf_new(i).bits.lds_base
+    io.CTA2warp(i).bits.dispatch2cu_sgpr_base_dispatch := cta_sche.io.cu_wf_new(i).bits.sgpr_base
+    io.CTA2warp(i).bits.dispatch2cu_vgpr_base_dispatch := cta_sche.io.cu_wf_new(i).bits.vgpr_base
+    io.CTA2warp(i).bits.dispatch2cu_wf_tag_dispatch    := cta_sche.io.cu_wf_new(i).bits.wf_tag
+    io.CTA2warp(i).bits.dispatch2cu_start_pc_dispatch  := cta_sche.io.cu_wf_new(i).bits.start_pc
+    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch := cta_sche.io.cu_wf_new(i).bits.gds_base
+    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch := cta_sche.io.cu_wf_new(i).bits.pds_base
+    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch := cta_sche.io.cu_wf_new(i).bits.csr_kernel
+    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_x
+    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_y
+    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_z
+    io.CTA2warp(i).bits.dispatch2cu_wg_id := cta_sche.io.cu_wf_new(i).bits.wg_id
+    cta_sche.io.cu_wf_new(i).ready := io.CTA2warp(i).ready
 
-    cta_sche.io.cu2dispatch_wf_tag_done(i):=io.warp2CTA(i).bits.cu2dispatch_wf_tag_done
-    cu2dispatch_wf_done(i):=io.warp2CTA(i).valid
-    io.warp2CTA(i).ready:=true.B
+    cta_sche.io.cu_wf_done(i).bits.wf_tag := io.warp2CTA(i).bits.cu2dispatch_wf_tag_done
+    cta_sche.io.cu_wf_done(i).valid := io.warp2CTA(i).valid
+    io.warp2CTA(i).ready := cta_sche.io.cu_wf_done(i).ready
   }
-  cta_sche.io.cu2dispatch_wf_done:=cu2dispatch_wf_done.asUInt
-
-  //val sm=VecInit(Seq.fill(NUMBER_CU)(Module(new SM_wrapper).io))
-  //for (i <- 0 until NUMBER_CU){}
 }
 class GPGPU_axi_top extends Module{
   val l2cache_axi_params=AXI4BundleParameters(32,64,l2cache_params.source_bits)
@@ -534,3 +528,4 @@ class CPUtest(C: TestCase#Props) extends Module{
   }
   //io.cta2host<>DontCare
 }
+

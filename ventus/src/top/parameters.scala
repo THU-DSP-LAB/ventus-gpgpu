@@ -13,8 +13,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   val wid_to_check = 2
   def num_bank = 4
   def num_collectorUnit = num_warp
-  def num_vgpr:Int = 1024
-  def num_sgpr:Int = 1024
+  def num_vgpr:Int = 4096
+  def num_sgpr:Int = 4096
   def depth_regBank = log2Ceil(num_vgpr/num_bank)
   def regidx_width = 5
 
@@ -27,7 +27,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_sm_in_cluster = num_sm / num_cluster
   def depth_warp = log2Ceil(num_warp)
 
-  var num_thread = 4
+  var num_thread = 8
 
   def depth_thread = log2Ceil(num_thread)
 
@@ -46,7 +46,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def addrLen = 32
 
-  def num_block = num_warp // not bigger than num_warp
+  def num_block = 8// not bigger than num_warp
 
   def num_warp_in_a_block = num_warp
 
@@ -68,7 +68,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_NWays: Int = 2
 
-  def dcache_BlockWords: Int = 8  // number of words per cacheline(block)
+  def dcache_BlockWords: Int = 32  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
@@ -148,11 +148,11 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def SGPR_ID_WIDTH = log2Ceil(NUMBER_SGPR_SLOTS)
   def LDS_ID_WIDTH = log2Ceil(NUMBER_LDS_SLOTS)
   def WG_SLOT_ID_WIDTH = log2Ceil(NUMBER_WF_SLOTS)
-  def WF_COUNT_WIDTH = log2Ceil(WF_COUNT_MAX) + 1
-  def WF_COUNT_WIDTH_PER_WG = log2Ceil(WF_COUNT_PER_WG_MAX) + 1
+  def WF_COUNT_WIDTH = log2Ceil(WF_COUNT_MAX + 1)
+  def WF_COUNT_WIDTH_PER_WG = log2Ceil(WF_COUNT_PER_WG_MAX + 1)
   def GDS_ID_WIDTH = log2Ceil(GDS_SIZE)
   def ENTRY_ADDR_WIDTH = log2Ceil(NUMBER_ENTRIES)
-  def TAG_WIDTH = WG_SLOT_ID_WIDTH + WF_COUNT_WIDTH_PER_WG
+  def TAG_WIDTH = WG_SLOT_ID_WIDTH + log2Ceil(num_warp_in_a_block)
   def INIT_MAX_WG_COUNT = NUMBER_WF_SLOTS
   def NUM_SCHEDULER_WIDTH = log2Ceil(NUM_SCHEDULER)
   def NUM_WG_X=1024 // max wg num in kernel
