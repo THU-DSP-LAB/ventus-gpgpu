@@ -20,9 +20,9 @@ VERILATOR_COVERAGE = $(VERILATOR_ROOT)/bin/verilator_coverage
 endif
 
 # Generate C++ in executable form
-VERILATOR_FLAGS += -cc --exe
+VERILATOR_FLAGS += -cc --build --binary
 # Generate makefile dependencies (not shown as complicates the Makefile)
-#VERILATOR_FLAGS += -MMD
+VERILATOR_FLAGS += -MMD
 # Optimize
 VERILATOR_FLAGS += -x-assign fast
 # Warn abount lint issues; may not want this on less solid designs
@@ -40,8 +40,9 @@ VERILATOR_FLAGS += --assert
 #VERILATOR_FLAGS += --gdbbt
 
 #VERILATOR_FLAGS += --threads $(shell expr $(NPROC) - 20)
-#VERILATOR_FLAGS += --trace-threads 2
-#VERILATOR_FLAGS += -j $(NPROC)
+VERILATOR_FLAGS += --threads 10
+VERILATOR_FLAGS += --trace-threads 2
+VERILATOR_FLAGS += -j $(NPROC)
 VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0"
 VERILATOR_FLAGS += -LDFLAGS "-fuse-ld=mold"
 
@@ -63,7 +64,7 @@ VERILATED_MKFILE = $(VERILATED_DIR)/Vdut.mk
 VERILATED_FILES = $(VERILATED_MKFILE) $(VERILATED_CXXFILES) $(VERILATED_HFILES)
 
 ######################################################################
-default: $(VERILATED_DIR)/Vdut
+default: verilator
 
 $(SRC_V): $(SRC_SCALA)
 	cd .. && ./mill ventus[6.4.0].runMain top.emitVerilog
@@ -75,13 +76,7 @@ verilog: $(SRC_V)
 verilator: verilog
 	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
 
-#$(VERILATED_FILES): $(SRC_V)
-#	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
-
-$(VERILATED_DIR)/Vdut: verilator
-	$(MAKE) -j $(NPROC) -C $(VERILATED_DIR) -f Vdut.mk
-
-run: $(VERILATED_DIR)/Vdut
+run: verilator
 	@-rm -f Vdut.fst
 	@-rm -rf logs
 	@mkdir -p logs
@@ -107,7 +102,7 @@ clean_cpp: clean
 	-rm -f $(VERILATED_DIR)/*
 
 clean_verilog: clean_cpp
-	-rm dut.V
+	-rm -f dut.v
 
 clean_all: clean_verilog
 

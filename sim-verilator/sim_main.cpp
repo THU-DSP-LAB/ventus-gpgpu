@@ -14,7 +14,7 @@
 #include <verilated_fst_c.h>
 
 #ifndef SIM_WAVEFORM_FST
-#define SIM_WAVEFORM_FST 1
+#define SIM_WAVEFORM_FST 0
 #endif
 
 // Legacy function required only so linking works on Cygwin and MSVC++
@@ -132,7 +132,7 @@ int main(int argc, char** argv) {
 #endif
     );
 
-    constexpr int CLK_MAX = 10000;
+    constexpr int CLK_MAX = 200000;
     int clk_cnt           = 0;
     while (!contextp->gotFinish() && clk_cnt < CLK_MAX && !kernel1.kernel_finished()) {
         contextp->timeInc(1); // 1 timeprecision period passes...
