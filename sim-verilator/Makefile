@@ -53,8 +53,8 @@ DIR_SCALA = $(abspath ../ventus/src)
 
 SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
 SRC_V = dut.v
-SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp testcase.cpp
-SRC_HEADER_CXX = kernel.hpp MemBox.hpp testcase.hpp
+SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp testcase.cpp cta_sche_wrapper.cpp
+#SRC_HEADER_CXX = kernel.hpp MemBox.hpp testcase.hpp
 VERILATOR_INPUT = $(SRC_V) $(SRC_CXX)
 
 VERILATED_DIR = $(abspath obj_dir)

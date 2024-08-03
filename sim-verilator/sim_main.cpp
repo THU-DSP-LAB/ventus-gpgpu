@@ -1,4 +1,5 @@
 #include "Vdut.h"
+#include "cta_sche_wrapper.hpp"
 #include "kernel.hpp"
 #include "testcase.hpp"
 #include <cinttypes>
@@ -20,76 +21,6 @@
 // Legacy function required only so linking works on Cygwin and MSVC++
 double sc_time_stamp() { return 0; }
 
-class Cta {
-public:
-    Cta()
-        : valid(false) {};
-
-    bool get_new(const Kernel& kernel) {
-        valid = !kernel.no_more_ctas_to_run();
-        if (valid) {
-            id                    = kernel.get_next_cta_id_single();
-            dim3_t kernel_size_3d = kernel.get_next_cta_id();
-            num_wg_x              = kernel_size_3d.x;
-            num_wg_y              = kernel_size_3d.y;
-            num_wg_z              = kernel_size_3d.z;
-            num_wf                = kernel.get_num_wf();
-            num_thread            = kernel.get_num_thread();
-            num_sgpr_per_thread   = kernel.get_num_sgpr_per_thread();
-            num_vgpr_per_thread   = kernel.get_num_vgpr_per_thread();
-            num_lds               = kernel.get_num_lds();
-            num_sgpr              = num_sgpr_per_thread * num_wf;
-            num_vgpr              = num_vgpr_per_thread * num_wf;
-            start_pc              = kernel.get_start_pc();
-            csr_baseaddr          = kernel.get_csr_baseaddr();
-            pds_baseaddr          = kernel.get_gds_baseaddr();
-            gds_baseaddr          = kernel.get_gds_baseaddr();
-        }
-        return valid;
-    }
-
-    void apply_to_dut(Vdut& dut) {
-        dut.io_host_req_valid = valid;
-        if (!valid)
-            return;
-        dut.io_host_req_bits_host_wg_id            = id;
-        dut.io_host_req_bits_host_kernel_size_3d_0 = num_wg_x;
-        dut.io_host_req_bits_host_kernel_size_3d_1 = num_wg_y;
-        dut.io_host_req_bits_host_kernel_size_3d_2 = num_wg_z;
-        dut.io_host_req_bits_host_num_wf           = num_wf;
-        dut.io_host_req_bits_host_wf_size          = num_thread;
-        dut.io_host_req_bits_host_lds_size_total   = num_lds;
-        dut.io_host_req_bits_host_sgpr_size_total  = num_sgpr;
-        dut.io_host_req_bits_host_vgpr_size_total  = num_vgpr;
-        dut.io_host_req_bits_host_sgpr_size_per_wf = num_sgpr_per_thread;
-        dut.io_host_req_bits_host_vgpr_size_per_wf = num_vgpr_per_thread;
-        dut.io_host_req_bits_host_start_pc         = start_pc;
-        dut.io_host_req_bits_host_csr_knl          = csr_baseaddr;
-        dut.io_host_req_bits_host_pds_baseaddr     = pds_baseaddr;
-        dut.io_host_req_bits_host_gds_baseaddr     = gds_baseaddr;
-        dut.io_host_req_bits_host_gds_size_total   = 0; // useless
-    }
-
-private:
-    // CTA info
-    bool valid;
-    uint32_t id;
-    uint32_t num_wg_x;
-    uint32_t num_wg_y;
-    uint32_t num_wg_z;
-    uint32_t num_wf;
-    uint32_t num_thread;
-    uint32_t num_lds;
-    uint32_t num_sgpr;
-    uint32_t num_vgpr;
-    uint32_t num_sgpr_per_thread;
-    uint32_t num_vgpr_per_thread;
-    uint32_t start_pc;
-    uint32_t csr_baseaddr;
-    uint32_t pds_baseaddr;
-    uint32_t gds_baseaddr;
-};
-
 void dut_reset(Vdut* dut, VerilatedContext* contextp
 #if (SIM_WAVEFORM_FST)
     ,
@@ -108,7 +39,7 @@ int main(int argc, char** argv) {
     contextp->commandArgs(argc, argv);
 
     // Hardware construct
-    const std::unique_ptr<Vdut> dut { new Vdut { contextp.get(), "DUT" } };
+    Vdut* dut   = new Vdut(contextp.get(), "DUT");
     MemBox* mem = new MemBox;
 
 #if (SIM_WAVEFORM_FST)
@@ -119,38 +50,36 @@ int main(int argc, char** argv) {
 #endif
 
     // Load workload kernel
-    // Kernel kernel1("kernel1", "testcase/matadd/matadd.metadata", "testcase/matadd/matadd.data", *mem);
-    Kernel kernel1 = tc_matadd.get_kernel(0, *mem);
+    // Kernel kernel1 = tc_matadd.get_kernel(0);
     // Kernel kernel1 = tc_vecadd.get_kernel(0, *mem);
-    Cta cta;
+    Cta cta(mem);
+    cta.kernel_add(std::make_shared<Kernel>(tc_matadd.get_kernel(0)));
+    cta.kernel_add(std::make_shared<Kernel>(tc_vecadd.get_kernel(0)));
 
     // DUT initial reset
-    dut_reset(dut.get(), contextp.get()
+    dut_reset(dut, contextp.get()
 #if (SIM_WAVEFORM_FST)
-                             ,
+                       ,
         tfp
 #endif
     );
 
     constexpr int CLK_MAX = 200000;
     int clk_cnt           = 0;
-    while (!contextp->gotFinish() && clk_cnt < CLK_MAX && !kernel1.kernel_finished()) {
+    while (!contextp->gotFinish() && clk_cnt < CLK_MAX && !cta.is_idle()) {
         contextp->timeInc(1); // 1 timeprecision period passes...
         dut->clock = !dut->clock;
         clk_cnt += dut->clock ? 1 : 0;
 
         //
-        // Input stimulus apply to hardware
+        // Delta time before clock edge
         //
 
         dut->io_host_rsp_ready = 1;
         if (dut->clock == 0) {
+            // Input stimulus apply to hardware at negedge clk
             // Host WG new
-            if (cta.get_new(kernel1)) {
-                cta.apply_to_dut(*dut);
-            } else {
-                dut->io_host_req_valid = false;
-            }
+            cta.apply_to_dut(dut);
         }
 
         //
@@ -163,18 +92,24 @@ int main(int argc, char** argv) {
 #endif
 
         //
+        // time after clock edge
+        // DUT outputs will not change until next clock edge
         // React to new output & prepare for new input stimulus
         //
         if (dut->clock == 0) {
             if (dut->io_host_req_valid && dut->io_host_req_ready) {
                 int cta_id = dut->io_host_req_bits_host_wg_id;
-                std::cout << "CTA " << cta_id << " dispatched to GPU\n";
-                kernel1.increment_cta_id();
+                std::cout << "Block " << cta_id << " dispatched to GPU" << std::endl;
+                cta.wg_dispatched();
             }
             if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
-                int cta_id = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
-                std::cout << "CTA " << cta_id << " finished\n";
-                kernel1.cta_finish(cta_id);
+                int cta_id                     = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
+                std::shared_ptr<Kernel> kernel = cta.wg_finish(cta_id);
+                std::cout << "Block " << cta_id << " finished" << std::endl;
+                if (kernel) {
+                    std::cout << "Kernel" << kernel->get_kid() << " " << kernel->get_kname() << " finished"
+                              << std::endl;
+                }
             }
         } else {
             // Memory access: read
@@ -182,10 +117,10 @@ int main(int argc, char** argv) {
                 volatile uint32_t rd_addr = dut->io_mem_rd_addr;
                 uint8_t* rd_data          = new uint8_t[MEMACCESS_DATA_BYTE_SIZE];
                 if (!mem->read(dut->io_mem_rd_addr, rd_data)) {
-                    //std::cerr << "Read uninitialized memory: 0x" << std::hex << dut->io_mem_rd_addr << std::dec
-                    //          << " @ time " << clk_cnt << std::endl;
-                    //getchar();
-                    //break;
+                    // std::cerr << "Read uninitialized memory: 0x" << std::hex << dut->io_mem_rd_addr << std::dec
+                    //           << " @ time " << clk_cnt << std::endl;
+                    // getchar();
+                    // break;
                 }
                 memcpy(dut->io_mem_rd_data.data(), rd_data, MEMACCESS_DATA_BYTE_SIZE);
                 delete[] rd_data;
@@ -214,6 +149,7 @@ int main(int argc, char** argv) {
 #endif
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
+    delete dut;
     return 0;
 }
 

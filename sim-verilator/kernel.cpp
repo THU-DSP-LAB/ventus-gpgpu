@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-void increment_x_then_y_then_z(dim3_t& i, const dim3_t& bound) {
+static void increment_x_then_y_then_z(dim3_t& i, const dim3_t& bound) {
     i.x++;
     if (i.x >= bound.x) {
         i.x = 0;
@@ -20,17 +20,44 @@ void increment_x_then_y_then_z(dim3_t& i, const dim3_t& bound) {
     }
 }
 
-Kernel::Kernel(
-    const std::string& kernel_name, const std::string& metadata_file, const std::string& data_file, MemBox& mem) {
-    // Set kernel name
-    m_kernel_name = kernel_name;
+int Kernel::charToHex(char c) const {
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    else if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    else if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    else
+        return -1; // Invalid character
+}
+bool Kernel::isHexCharacter(char c) const {
+    return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+}
+bool Kernel::no_more_wg_to_dispatch() const {
+    return (m_next_wg.x >= m_grid_dim.x || m_next_wg.y >= m_grid_dim.y || m_next_wg.z >= m_grid_dim.z);
+}
+uint32_t Kernel::get_next_wg_idx_in_kernel() const {
+    return m_next_wg.x + m_grid_dim.x * m_next_wg.y + m_grid_dim.x * m_grid_dim.y * m_next_wg.z;
+}
+uint32_t Kernel::get_next_wgid() const { return m_wgid_base + get_next_wg_idx_in_kernel(); }
+void Kernel::wg_dispatched() {
+    assert(is_dispatching());
+    uint32_t idx = get_next_wg_idx_in_kernel();
+    assert(m_wg_status[idx] == WG_STATUS_WAITING);
+    m_wg_status[idx] = WG_STATUS_RUNNING;
+    increment_x_then_y_then_z(m_next_wg, m_grid_dim);
+}
+
+Kernel::Kernel(const std::string& kernel_name, const std::string& metadata_file, const std::string& data_file)
+    : m_datafile(data_file)
+    , m_kernel_id(-1)
+    , m_kernel_name(kernel_name) {
     // Get metadata of this kernel
     initMetaData(metadata_file);
-    // Load initial data of this kernel
-    readDataFile(data_file, mem, m_metadata);
-    // Init finished-CTA record vector
-    cta_finished.resize(m_metadata.kernel_size[0] * m_metadata.kernel_size[1] * m_metadata.kernel_size[2]);
-    std::fill(cta_finished.begin(), cta_finished.end(), false);
+    // Init thread-block status record vector
+    m_wg_status.resize(m_metadata.kernel_size[0] * m_metadata.kernel_size[1] * m_metadata.kernel_size[2]);
+    std::fill(m_wg_status.begin(), m_wg_status.end(), WG_STATUS_WAITING);
+    m_is_activated = false;
 }
 
 void Kernel::readHexFile(const std::string& filename, std::vector<uint64_t>& items, int itemSize) const {
@@ -129,7 +156,16 @@ void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& m
     }
 }
 
-void Kernel::readDataFile(const std::string& filename, MemBox& mem, metadata_t mtd) {
+void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem) {
+    m_kernel_id                 = kernel_id;
+    m_wgid_base                 = wgid_base;
+    metadata_t& mtd             = m_metadata;
+    const std::string& filename = m_datafile;
+
+    for (const auto wg_status : m_wg_status) {
+        assert(wg_status == WG_STATUS_WAITING);
+    }
+
     std::ifstream file(filename);
     if (!file.is_open()) {
         std::cerr << "Failed to open file: " << filename << std::endl;
@@ -152,7 +188,7 @@ void Kernel::readDataFile(const std::string& filename, MemBox& mem, metadata_t m
             readbytes += 4;
         }
         assert(mtd.buffer_size[bufferIndex] == readbytes);
-        mem.write(mtd.buffer_base[bufferIndex], buffer.data(), readbytes);
+        mem->write(mtd.buffer_base[bufferIndex], buffer.data(), readbytes);
         buffer.clear();
     }
     std::getline(file, line);
@@ -162,12 +198,45 @@ void Kernel::readDataFile(const std::string& filename, MemBox& mem, metadata_t m
     assert(file.eof());
 
     file.close();
+    m_is_activated = true;
+}
+void Kernel::deactivate(MemBox* mem) {
+    assert(is_activated());
+    assert(!is_running());
+    m_is_activated = false;
 }
 
-bool Kernel::kernel_finished() const {
-    for (const auto& i : cta_finished) {
-        if (i == false)
+bool Kernel::is_finished() const {
+    for (const auto wg_status : m_wg_status) {
+        if (wg_status != WG_STATUS_FINISHED)
             return false;
     }
     return true;
+}
+bool Kernel::is_running() const {
+    if (!is_activated())
+        return false;
+    for (const auto wg_status : m_wg_status) {
+        if (wg_status == WG_STATUS_RUNNING)
+            return true;
+    }
+    return false;
+}
+bool Kernel::is_dispatching() const { return is_activated() && !no_more_wg_to_dispatch(); }
+
+void Kernel::wg_finish(uint32_t wgid) {
+    assert(is_wg_belonging(wgid));
+    uint32_t idx = wgid - m_wgid_base;
+    assert(m_wg_status[idx] == WG_STATUS_RUNNING);
+    m_wg_status[idx] = WG_STATUS_FINISHED;
+}
+
+bool Kernel::is_wg_belonging(uint32_t wg_id) const {
+    if (!is_running() || is_finished())
+        return false;
+
+    if (wg_id >= m_wgid_base && wg_id < m_wgid_base + get_num_wg())
+        return true;
+    else
+        return false;
 }

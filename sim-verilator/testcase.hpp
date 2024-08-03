@@ -3,6 +3,7 @@
 #include "MemBox.hpp"
 #include "kernel.hpp"
 #include <cstdarg>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -15,8 +16,8 @@ private:
     std::vector<std::string> kernel_name;
 
 public:
-    Testcase(const char* name, int num_kernel_, ...);
-    Kernel get_kernel(int kernel_id, MemBox& mem) const;
+    Testcase(const char* name, uint32_t num_kernel_, ...);
+    Kernel get_kernel(int kernel_idx) const;
 };
 
 extern const Testcase tc_matadd;
