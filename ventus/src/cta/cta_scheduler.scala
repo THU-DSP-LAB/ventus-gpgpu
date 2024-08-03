@@ -2,37 +2,7 @@ package cta
 
 import chisel3._
 import chisel3.util._
-
-object CONFIG {
-  import top.parameters
-  object GPU {
-    val NUM_CU = parameters.num_sm
-    val MEM_ADDR_WIDTH = parameters.MEM_ADDR_WIDTH.W
-    val NUM_WG_SLOT = parameters.num_block                  // Number of WG slot in each CU
-    val NUM_WF_SLOT = parameters.num_warp                   // Number of WG slot in each CU
-    val ASID_WIDTH = 32.W
-  }
-  object WG {
-    val WG_ID_WIDTH = 32.W
-    val NUM_WG_DIM_MAX = parameters.NUM_WG_X                // Max number of wg in a single dimension in each kernel
-    val NUM_THREAD_MAX = 1 << parameters.WAVE_ITEM_WIDTH    // Max number of thread in each wavefront(warp)
-    val NUM_WF_MAX = parameters.num_warp_in_a_block         // Max number of wavefront in each workgroup(block)
-    val NUM_LDS_MAX = parameters.NUMBER_LDS_SLOTS           // Max number of LDS  occupied by a workgroup
-    val NUM_SGPR_MAX = parameters.num_sgpr                  // Max number of sgpr occupied by a workgroup
-    val NUM_VGPR_MAX = parameters.num_vgpr                  // Max number of vgpr occupied by a workgroup
-    //val NUM_GDS_MAX = 1024                                // Max number of GDS  occupied by a workgroup, useless
-
-    // WF tag = cat(wg_slot_id_in_cu, wf_id_in_wg)
-    val WF_TAG_WIDTH = (log2Ceil(GPU.NUM_WG_SLOT) + log2Ceil(NUM_WF_MAX)).W
-  }
-  object WG_BUFFER {
-    val NUM_ENTRIES = 16
-  }
-  object RESOURCE_TABLE {
-    val NUM_RESULT = 2
-  }
-  val DEBUG = true
-}
+import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
 /** IO Bundle: CTA information
  *  Data producer: host
@@ -179,9 +149,6 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 object emitVerilog extends App {
   chisel3.emitVerilog(
     new cta_scheduler_top(CONFIG.GPU.NUM_CU),
-    //new cta_util.RRPriorityEncoder(4),
-    //new wg_buffer(),
-    //new allocator(),
     Array("--target-dir", "generated/")
   )
 }

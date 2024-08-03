@@ -27,20 +27,20 @@ import axi._
 import freechips.rocketchip.amba.axi4._
 
 class host2CTA_data extends Bundle{
-  val host_wg_id            = (UInt(WG_ID_WIDTH.W))
-  val host_num_wf           = (UInt(WF_COUNT_WIDTH.W))
-  val host_wf_size          = (UInt(WAVE_ITEM_WIDTH.W))
-  val host_start_pc         = (UInt(MEM_ADDR_WIDTH.W))
-  val host_kernel_size_3d   = Vec(3, UInt(WG_SIZE_X_WIDTH.W))
-  val host_pds_baseaddr     = (UInt(MEM_ADDR_WIDTH.W))
-  val host_csr_knl          = (UInt(MEM_ADDR_WIDTH.W))
-  val host_vgpr_size_total  = (UInt((VGPR_ID_WIDTH + 1).W))
-  val host_sgpr_size_total  = (UInt((SGPR_ID_WIDTH + 1).W))
-  val host_lds_size_total   = (UInt((LDS_ID_WIDTH + 1).W))
-  val host_gds_size_total   = (UInt((GDS_ID_WIDTH + 1).W))
-  val host_vgpr_size_per_wf = (UInt((VGPR_ID_WIDTH + 1).W))
-  val host_sgpr_size_per_wf = (UInt((SGPR_ID_WIDTH + 1).W))
-  val host_gds_baseaddr = UInt(MEM_ADDR_WIDTH.W)
+  val host_wg_id            = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
+  val host_num_wf           = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)
+  val host_wf_size          = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX+1).W)
+  val host_start_pc         = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_kernel_size_3d   = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W))
+  val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_csr_knl          = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_vgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
+  val host_sgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
+  val host_lds_size_total   = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_LDS_MAX+1).W)
+  val host_vgpr_size_per_wf = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
+  val host_sgpr_size_per_wf = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
+  val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
 }
 class CTA2host_data extends Bundle{
   val inflight_wg_buffer_host_wf_done_wg_id = (UInt(WG_ID_WIDTH.W))

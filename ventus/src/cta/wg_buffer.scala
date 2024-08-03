@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
 import cta.utils.RRPriorityEncoder
+import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
 class io_alloc2buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Bundle {
   val accept = Bool()   // true.B: it is ok to send this wg to CU.      false.B: rejected

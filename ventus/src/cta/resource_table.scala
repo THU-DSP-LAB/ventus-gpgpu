@@ -8,6 +8,7 @@ import chisel3._
 import chisel3.util._
 import cta.utils.sort3
 import cta.utils.DecoupledIO_1_to_3
+import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
 // =
 // Abbreviations:

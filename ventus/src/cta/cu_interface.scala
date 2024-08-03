@@ -3,6 +3,7 @@ package cta
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
+import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
 /**
  * CU interface:

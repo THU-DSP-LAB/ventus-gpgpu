@@ -8,6 +8,7 @@ import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.experimental.VecLiterals.{AddObjectLiteralConstructor, AddVecLiteralConstructor}
 import chisel3.util._
+import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
 // =
 // Abbreviations:
