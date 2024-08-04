@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -204,6 +205,7 @@ void Kernel::deactivate(MemBox* mem) {
     assert(is_activated());
     assert(!is_running());
     m_is_activated = false;
+    // TODO: when MMU is enabled, release memory usage
 }
 
 bool Kernel::is_finished() const {

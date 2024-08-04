@@ -41,6 +41,7 @@ bool Cta::apply_to_dut(Vdut* dut) {
             // 激活下一个kernel，准备分派其线程块
             kernel = m_kernels[++m_kernel_idx_dispatching];
             assert(kernel && !kernel->is_activated() && !kernel->is_finished());
+            assert(m_kernel_wgid_base_next <= 0xEFFFFFFF); // 当前实现中线程块ID不会回收，需防止其溢出
             kernel->activate(m_kernel_id_next++, m_kernel_wgid_base_next, m_mem);
             m_kernel_wgid_base_next += kernel->get_num_wg();
         }
@@ -62,6 +63,7 @@ bool Cta::apply_to_dut(Vdut* dut) {
         dut->io_host_req_bits_host_vgpr_size_total  = kernel->get_num_vgpr_per_wf() * kernel->get_num_wf();
         dut->io_host_req_bits_host_sgpr_size_per_wf = kernel->get_num_sgpr_per_wf();
         dut->io_host_req_bits_host_vgpr_size_per_wf = kernel->get_num_vgpr_per_wf();
+        dut->io_host_req_bits_host_pds_size_per_wf  = kernel->get_num_pds_per_thread() * kernel->get_num_thread();
         dut->io_host_req_bits_host_start_pc         = kernel->get_start_pc();
         dut->io_host_req_bits_host_csr_knl          = kernel->get_csr_baseaddr();
         dut->io_host_req_bits_host_gds_baseaddr     = kernel->get_gds_baseaddr();

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <functional>
 
 struct dim3_t {
     uint32_t x, y, z;
@@ -79,7 +80,6 @@ private:
     metadata_t m_metadata;
     const std::string m_datafile;
     uint32_t m_wgid_base;
-    // unsigned m_running_cta; // 当前正在运行的cta数量
 
     // Helpers
     bool isHexCharacter(char c) const;
@@ -98,6 +98,6 @@ private:
     enum { WG_STATUS_WAITING, WG_STATUS_RUNNING, WG_STATUS_FINISHED };
     std::vector<int> m_wg_status;
 
-    //
-    bool m_is_activated;
+    // Kernel status
+    bool m_is_activated;        // activated: data loaded to memory and ready to run
 };

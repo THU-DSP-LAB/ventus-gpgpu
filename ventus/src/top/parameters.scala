@@ -169,6 +169,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
       val NUM_LDS_MAX = sharemem_size              // Max number of LDS  occupied by a workgroup
       val NUM_SGPR_MAX = num_sgpr                  // Max number of sgpr occupied by a workgroup
       val NUM_VGPR_MAX = num_vgpr                  // Max number of vgpr occupied by a workgroup
+      val NUM_PDS_MAX = 1024*num_thread            // Max number of PDS  occupied by a *wavefront*
       //val NUM_GDS_MAX = 1024                     // Max number of GDS  occupied by a workgroup, useless
 
       // WF tag = cat(wg_slot_id_in_cu, wf_id_in_wg)

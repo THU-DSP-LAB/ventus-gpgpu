@@ -32,13 +32,14 @@ class host2CTA_data extends Bundle{
   val host_wf_size          = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX+1).W)
   val host_start_pc         = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_kernel_size_3d   = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W))
-  val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_csr_knl          = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_vgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
   val host_sgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
   val host_lds_size_total   = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_LDS_MAX+1).W)
   val host_vgpr_size_per_wf = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
   val host_sgpr_size_per_wf = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
+  val host_pds_size_per_wf  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_PDS_MAX+1).W)
+  val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
 }
@@ -63,6 +64,7 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_3d(1)
   cta_sche.io.host_wg_new.bits.num_wg_z           := io.host2CTA.bits.host_kernel_size_3d(2)
   cta_sche.io.host_wg_new.bits.pds_base           := io.host2CTA.bits.host_pds_baseaddr
+  cta_sche.io.host_wg_new.bits.num_pds_per_wf     := io.host2CTA.bits.host_pds_size_per_wf
   cta_sche.io.host_wg_new.bits.csr_kernel         := io.host2CTA.bits.host_csr_knl
   cta_sche.io.host_wg_new.bits.num_lds            := io.host2CTA.bits.host_lds_size_total
   cta_sche.io.host_wg_new.bits.num_sgpr           := io.host2CTA.bits.host_sgpr_size_total

@@ -15,7 +15,7 @@
 #include <verilated_fst_c.h>
 
 #ifndef SIM_WAVEFORM_FST
-#define SIM_WAVEFORM_FST 0
+#define SIM_WAVEFORM_FST 1
 #endif
 
 // Legacy function required only so linking works on Cygwin and MSVC++
@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
     // Hardware construct
     Vdut* dut   = new Vdut(contextp.get(), "DUT");
     MemBox* mem = new MemBox;
+    Cta cta(mem);
 
 #if (SIM_WAVEFORM_FST)
     // waveform traces (FST)
@@ -50,9 +51,6 @@ int main(int argc, char** argv) {
 #endif
 
     // Load workload kernel
-    // Kernel kernel1 = tc_matadd.get_kernel(0);
-    // Kernel kernel1 = tc_vecadd.get_kernel(0, *mem);
-    Cta cta(mem);
     cta.kernel_add(std::make_shared<Kernel>(tc_matadd.get_kernel(0)));
     cta.kernel_add(std::make_shared<Kernel>(tc_vecadd.get_kernel(0)));
 
@@ -98,12 +96,12 @@ int main(int argc, char** argv) {
         //
         if (dut->clock == 0) {
             if (dut->io_host_req_valid && dut->io_host_req_ready) {
-                int cta_id = dut->io_host_req_bits_host_wg_id;
+                uint32_t cta_id = dut->io_host_req_bits_host_wg_id;
                 std::cout << "Block " << cta_id << " dispatched to GPU" << std::endl;
                 cta.wg_dispatched();
             }
             if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
-                int cta_id                     = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
+                uint32_t cta_id                = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
                 std::shared_ptr<Kernel> kernel = cta.wg_finish(cta_id);
                 std::cout << "Block " << cta_id << " finished" << std::endl;
                 if (kernel) {

@@ -84,6 +84,10 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
     wgram1.write(wgram_wr_next.bits, wgram1_wr_data)
     wgram2.write(wgram_wr_next.bits, wgram2_wr_data)
   }
+  dontTouch(wgram_wr_act)
+  dontTouch(wgram_wr_next.bits)
+  dontTouch(wgram1_wr_data)
+  dontTouch(wgram2_wr_data)
 
   // =
   // Main function 2
@@ -122,7 +126,8 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   io.cuinterface_wg_new.valid := cuinterface_new_wg_valid_r
   cuinterface_new_wg_valid_r := Mux(wgram_rd2_clear_act, true.B,
                                 Mux(io.cuinterface_wg_new.ready, false.B, cuinterface_new_wg_valid_r))
-  val wgram2_rd_data = RegEnable(wgram2.read(wgram_rd2_clear_addr), wgram_rd2_clear_act)
+  val wgram2_rd_data_raw = WireInit(wgram2.read(wgram_rd2_clear_addr))
+  val wgram2_rd_data = RegEnable(wgram2_rd_data_raw, wgram_rd2_clear_act)
   io.cuinterface_wg_new.bits := wgram2_rd_data
 
   if(DEBUG) {
@@ -131,6 +136,12 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
     when(wgram_rd2_clear_act_r1) {
       assert(wgram2_rd_data.wg_id === alloc_result_wgid)
     }
+    dontTouch(wgram_rd2_clear_addr)
+    dontTouch(wgram_rd2_clear_act)
+    dontTouch(wgram_rd2_clear_act_r1)
+    dontTouch(alloc_result_wgid)
+    dontTouch(wgram2_rd_data.wg_id)
+    dontTouch(wgram2_rd_data_raw)
   }
 
   // operation is allowed by internal of this Module when downstream datapath is not blocked: (valid == false) || (valid == ready == true)

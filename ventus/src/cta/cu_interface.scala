@@ -28,6 +28,7 @@ class cu_interface extends Module {
   val NUM_LDS  = CONFIG.WG.NUM_LDS_MAX
   val NUM_SGPR = CONFIG.WG.NUM_SGPR_MAX
   val NUM_VGPR = CONFIG.WG.NUM_VGPR_MAX
+  val NUM_PDS  = CONFIG.WG.NUM_PDS_MAX
   val DEBUG = CONFIG.DEBUG
   class wftag_datatype extends Bundle {
     val wg_slot_id = UInt(log2Ceil(NUM_WG_SLOT).W)
@@ -70,6 +71,7 @@ class cu_interface extends Module {
   val splitter_lds_addr = WireInit(fifo.io.deq.bits.lds_base)
   val splitter_sgpr_addr = Reg(UInt(log2Ceil(NUM_SGPR).W)) // sgpr base of WF, its value steps num_sgpr_per_wf every time
   val splitter_vgpr_addr = Reg(UInt(log2Ceil(NUM_VGPR).W)) // vgpr base of WF, its value steps num_vgpr_per_wf every time
+  val splitter_pds_addr  = Reg(UInt(log2Ceil(NUM_PDS ).W)) // pds  base of WF, its value steps num_pds_per_wf  every time
   val splitter_load_new = (splitter_cnt === 0.U) && fifo.io.deq.valid   // A new WG will be loaded to splitter
   fifo.io.deq.ready := (splitter_cnt === 1.U) && io.cu_wf_new(fifo.io.deq.bits.cu_id).ready
 
@@ -85,6 +87,10 @@ class cu_interface extends Module {
     splitter_load_new -> fifo.io.deq.bits.vgpr_base,
     io.cu_wf_new(fifo.io.deq.bits.cu_id).fire -> (splitter_vgpr_addr + fifo.io.deq.bits.num_vgpr_per_wf),
   ))
+  splitter_pds_addr := MuxCase(splitter_pds_addr, Seq(
+    splitter_load_new -> fifo.io.deq.bits.pds_base,
+    io.cu_wf_new(fifo.io.deq.bits.cu_id).fire -> (splitter_pds_addr + fifo.io.deq.bits.num_pds_per_wf),
+  ))
   assert(splitter_cnt <= 1.U || NUM_SGPR.U - splitter_sgpr_addr > fifo.io.deq.bits.num_sgpr_per_wf)
   assert(splitter_cnt <= 1.U || NUM_VGPR.U - splitter_vgpr_addr > fifo.io.deq.bits.num_vgpr_per_wf)
   assert(splitter_cnt === 0.U || fifo.io.deq.valid)
@@ -92,6 +98,7 @@ class cu_interface extends Module {
   for(i <- 0 until NUM_CU) {
     io.cu_wf_new(i).valid := (splitter_cnt =/= 0.U) && (fifo.io.deq.bits.cu_id === i.U)
     io.cu_wf_new(i).bits.viewAsSupertype(new ctainfo_host_to_cu {}) := fifo.io.deq.bits
+    io.cu_wf_new(i).bits.pds_base := splitter_pds_addr
     io.cu_wf_new(i).bits.lds_base := splitter_lds_addr
     io.cu_wf_new(i).bits.sgpr_base := splitter_sgpr_addr
     io.cu_wf_new(i).bits.vgpr_base := splitter_vgpr_addr
