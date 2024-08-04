@@ -147,9 +147,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def NUM_WG_X = NUM_WG_DIM // max wg num in kernel
   def NUM_WG_Y = NUM_WG_DIM
   def NUM_WG_Z = NUM_WG_DIM
-  def WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X)
-  def WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y)
-  def WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z)
+  def WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X + 1)
+  def WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y + 1)
+  def WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z + 1)
 
   object CTA_SCHE_CONFIG {
     import chisel3._
