@@ -6,6 +6,7 @@ import chisel3.util._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import cta._
+import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
 import scala.util.Random
 
@@ -238,6 +239,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.csr_kernel-> test.in.csr(i).U(CONFIG.GPU.MEM_ADDR_WIDTH),
         _.num_sgpr_per_wf -> test.in.sgpr(i).U,
         _.num_vgpr_per_wf -> test.in.vgpr(i).U,
+        _.num_pds_per_wf -> i.U,
         _.num_sgpr -> (test.in.sgpr(i) * test.in.wf(i)).U,
         _.num_vgpr -> (test.in.vgpr(i) * test.in.wf(i)).U,
         _.num_lds -> test.in.lds(i).U,

@@ -5,7 +5,6 @@
 #include <iostream>
 #include <string>
 #include <vector>
-#include <functional>
 
 struct dim3_t {
     uint32_t x, y, z;
