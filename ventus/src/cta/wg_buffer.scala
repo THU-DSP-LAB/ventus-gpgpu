@@ -18,6 +18,7 @@ class io_buffer2alloc(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends c
 }
 
 class io_buffer2cuinterface extends Bundle with ctainfo_host_to_cu with ctainfo_host_to_cuinterface {
+  val useless = UInt(1.W)
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
 }
 
@@ -59,7 +60,13 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   val wgram1_wr_data = Wire(new ram1datatype)
   val wgram2_wr_data = Wire(new io_buffer2cuinterface)
   wgram1_wr_data := io.host_wg_new.bits    // TODO: check if the connection is right
-  wgram2_wr_data := io.host_wg_new.bits
+  wgram2_wr_data.viewAsSupertype(new ctainfo_host_to_cu{}) :<= io.host_wg_new.bits.viewAsSupertype(new ctainfo_host_to_cu{})
+  wgram2_wr_data.viewAsSupertype(new ctainfo_host_to_cuinterface{}) :<= io.host_wg_new.bits.viewAsSupertype(new ctainfo_host_to_cuinterface{})
+  wgram2_wr_data.wg_id := io.host_wg_new.bits.wg_id
+  wgram2_wr_data.useless := 0.U
+  dontTouch(wgram2_wr_data)
+  // 出于未知原因，Verilator仿真时wgram2实际写入端口的第238bit总为1，这里使用一个无作用的信号置于第238bit处防止bug扩散
+  // 若仿真表明第238bit恢复正常，可放心删除此信号
 
   // Next preferred writable/readable address of wg_ram
   val wgram_wr_next = RRPriorityEncoder(~wgram_valid)
@@ -84,10 +91,6 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
     wgram1.write(wgram_wr_next.bits, wgram1_wr_data)
     wgram2.write(wgram_wr_next.bits, wgram2_wr_data)
   }
-  dontTouch(wgram_wr_act)
-  dontTouch(wgram_wr_next.bits)
-  dontTouch(wgram1_wr_data)
-  dontTouch(wgram2_wr_data)
 
   // =
   // Main function 2
@@ -129,6 +132,9 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   val wgram2_rd_data_raw = WireInit(wgram2.read(wgram_rd2_clear_addr))
   val wgram2_rd_data = RegEnable(wgram2_rd_data_raw, wgram_rd2_clear_act)
   io.cuinterface_wg_new.bits := wgram2_rd_data
+  dontTouch(wgram2_rd_data)
+  // 出于未知原因，Verilator仿真时wgram2实际写入端口的第238bit总为1，这里使用一个无作用的信号useless置于第238bit处防止bug扩散
+  // 若仿真表明第238bit恢复正常，可放心删除此信号
 
   if(DEBUG) {
     val alloc_result_wgid = RegEnable(io.alloc_result.bits.wg_id.get, wgram_rd2_clear_act)
@@ -136,12 +142,6 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
     when(wgram_rd2_clear_act_r1) {
       assert(wgram2_rd_data.wg_id === alloc_result_wgid)
     }
-    dontTouch(wgram_rd2_clear_addr)
-    dontTouch(wgram_rd2_clear_act)
-    dontTouch(wgram_rd2_clear_act_r1)
-    dontTouch(alloc_result_wgid)
-    dontTouch(wgram2_rd_data.wg_id)
-    dontTouch(wgram2_rd_data_raw)
   }
 
   // operation is allowed by internal of this Module when downstream datapath is not blocked: (valid == false) || (valid == ready == true)
