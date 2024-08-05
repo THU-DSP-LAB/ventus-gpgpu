@@ -4,8 +4,19 @@ ifneq ($(words $(CURDIR)),1)
 endif
 
 ######################################################################
+# Helpers
+
+# Choose the smaller one between two numbers
+define MIN_FUNC
+$(strip $(shell if [ $(1) -lt $(2) ]; then echo $(1); else echo $(2); fi))
+endef
+
+######################################################################
 # Set up variables
-NPROC = $(shell nproc)
+NPROC_CPU = $(shell nproc)
+NPROC_DUT = 10
+NPROC_SIM = $(call MIN_FUNC, $(NPROC_CPU), $(NPROC_DUT))
+NPROC_TRACE_FST = $(call MIN_FUNC, $(NPROC_SIM), 2)
 
 # If $VERILATOR_ROOT isn't in the environment, we assume it is part of a
 # package install, and verilator is in your path. Otherwise find the
@@ -39,25 +50,26 @@ VERILATOR_FLAGS += --assert
 # Add this trace to get a backtrace in gdb
 #VERILATOR_FLAGS += --gdbbt
 
-#VERILATOR_FLAGS += --threads $(shell expr $(NPROC) - 20)
-VERILATOR_FLAGS += --threads 10
-VERILATOR_FLAGS += --trace-threads 2
-VERILATOR_FLAGS += -j $(NPROC)
-VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0"
+VERILATOR_FLAGS += --threads $(NPROC_SIM)
+VERILATOR_FLAGS += --trace-threads $(NPROC_TRACE_FST)
+VERILATOR_FLAGS += -j $(NPROC_CPU)
+VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0 -DSIM_LOG_ENABLE"
 VERILATOR_FLAGS += -LDFLAGS "-fuse-ld=mold"
 
 CHISEL_VERILOG_ENABLE_PRINT = 0
 
 ######################################################################
-DIR_SCALA = $(abspath ../ventus/src)
+DIR_SCALA = ../ventus/src
+DIR_OBJ = obj_dir
 
 SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
 SRC_V = dut.v
 SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp testcase.cpp cta_sche_wrapper.cpp
-#SRC_HEADER_CXX = kernel.hpp MemBox.hpp testcase.hpp
-VERILATOR_INPUT = $(SRC_V) $(SRC_CXX)
+SRC_C = log.c
+OBJ_C = $(SRC_C:%.c=$(DIR_OBJ)/%.o)
+VERILATOR_INPUT = $(SRC_V) $(SRC_CXX) $(notdir $(OBJ_C))
 
-VERILATED_DIR = $(abspath obj_dir)
+VERILATED_DIR = $(DIR_OBJ)
 VERILATED_CXXFILES = $(shell find $(VERILATED_DIR) -name "*.cpp")
 VERILATED_HFILES = $(shell find $(VERILATED_DIR) -name "*.h")
 VERILATED_MKFILE = $(VERILATED_DIR)/Vdut.mk
@@ -73,14 +85,19 @@ $(SRC_V): $(SRC_SCALA)
 
 verilog: $(SRC_V)
 
-verilator: verilog
+$(DIR_OBJ)/%.o: %.c
+	@mkdir -p $(DIR_OBJ)
+	gcc -c -o $@ $<
+
+verilator: verilog $(OBJ_C)
+	@mkdir -p $(DIR_OBJ)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
 
 run: verilator
-	@-rm -f Vdut.fst
+	@-rm -f $(VERILATED_DIR)/Vdut.fst
 	@-rm -rf logs
 	@mkdir -p logs
-	@$(VERILATED_DIR)/Vdut
+	$(VERILATED_DIR)/Vdut
 
 gdb: ${VERILATED_DIR}/Vdut
 	gdb --tui $(VERILATED_DIR)/Vdut
@@ -99,7 +116,7 @@ clean:
 	-rm -rf logs
 
 clean_cpp: clean
-	-rm -f $(VERILATED_DIR)/*
+	-rm -rf $(VERILATED_DIR)
 
 clean_verilog: clean_cpp
 	-rm -f dut.v

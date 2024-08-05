@@ -1,6 +1,7 @@
 #include "Vdut.h"
 #include "cta_sche_wrapper.hpp"
 #include "kernel.hpp"
+#include "log.h"
 #include "testcase.hpp"
 #include <cinttypes>
 #include <cstdint>
@@ -15,8 +16,9 @@
 #include <verilated_fst_c.h>
 
 #ifndef SIM_WAVEFORM_FST
-#define SIM_WAVEFORM_FST 1
+#define SIM_WAVEFORM_FST 0
 #endif
+constexpr int CLK_MAX = 2000000;
 
 // Legacy function required only so linking works on Cygwin and MSVC++
 double sc_time_stamp() { return 0; }
@@ -52,7 +54,13 @@ int main(int argc, char** argv) {
 
     // Load workload kernel
     cta.kernel_add(std::make_shared<Kernel>(tc_matadd.get_kernel(0)));
-    cta.kernel_add(std::make_shared<Kernel>(tc_vecadd.get_kernel(0)));
+    //cta.kernel_add(std::make_shared<Kernel>(tc_vecadd.get_kernel(0)));
+    //for (int i = 0; i < tc_gaussian.get_num_kernel(); i++) {
+    //   cta.kernel_add(std::make_shared<Kernel>(tc_gaussian.get_kernel(i)));
+    //}
+    //for (int i = 0; i < tc_bfs.get_num_kernel(); i++) {
+    //    cta.kernel_add(std::make_shared<Kernel>(tc_bfs.get_kernel(i)));
+    //}
 
     // DUT initial reset
     dut_reset(dut, contextp.get()
@@ -62,8 +70,8 @@ int main(int argc, char** argv) {
 #endif
     );
 
-    constexpr int CLK_MAX = 200000;
-    int clk_cnt           = 0;
+    uint32_t clk_cnt = 0;
+    log_set_timeptr(&clk_cnt);
     while (!contextp->gotFinish() && clk_cnt < CLK_MAX && !cta.is_idle()) {
         contextp->timeInc(1); // 1 timeprecision period passes...
         dut->clock = !dut->clock;
@@ -96,17 +104,24 @@ int main(int argc, char** argv) {
         //
         if (dut->clock == 0) {
             if (dut->io_host_req_valid && dut->io_host_req_ready) {
-                uint32_t cta_id = dut->io_host_req_bits_host_wg_id;
-                std::cout << "Block " << cta_id << " dispatched to GPU" << std::endl;
+                uint32_t wg_id = dut->io_host_req_bits_host_wg_id;
+                uint32_t wg_idx, kernel_id;
+                std::string kernel_name;
+                assert(cta.wg_get_info(kernel_name, kernel_id, wg_idx));
+                log_debug(
+                    "block%2d dispatched to GPU (kernel%2d %s block%2d) ", wg_id, kernel_id, kernel_name.c_str(), wg_idx);
                 cta.wg_dispatched();
             }
             if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
-                uint32_t cta_id                = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
-                std::shared_ptr<Kernel> kernel = cta.wg_finish(cta_id);
-                std::cout << "Block " << cta_id << " finished" << std::endl;
-                if (kernel) {
-                    std::cout << "Kernel" << kernel->get_kid() << " " << kernel->get_kname() << " finished"
-                              << std::endl;
+                uint32_t wg_id                       = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
+                std::shared_ptr<const Kernel> kernel = cta.wg_finish(wg_id);
+                assert(kernel);
+                uint32_t wg_idx;
+                kernel->is_wg_belonging(wg_id, &wg_idx);
+                log_debug("block%2d finished (kernel%2d %s block%2d)", wg_id, kernel->get_kid(),
+                    kernel->get_kname().c_str(), wg_idx);
+                if (kernel->is_finished()) {
+                    log_info("kernel%2d %s finished", kernel->get_kid(), kernel->get_kname().c_str());
                 }
             }
         } else {
@@ -136,12 +151,11 @@ int main(int argc, char** argv) {
                 mem->write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
             }
             // Clock output
-            if (clk_cnt % 5000 == 0)
-                std::cout << "Simulation cycles: " << clk_cnt << std::endl;
+            //    log_debug("Simulation cycles: %d", clk_cnt);
         }
     }
 
-    std::cout << "Simulation finished in " << clk_cnt << " cycles\n";
+    log_info("Simulation finished in %d cycles", clk_cnt);
 #if (SIM_WAVEFORM_FST)
     tfp->close();
 #endif

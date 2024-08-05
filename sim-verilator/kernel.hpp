@@ -60,7 +60,7 @@ public:
     uint32_t get_num_pds_per_thread() const { return m_metadata.pdsSize; }
 
     // 判断一个线程块是否属于本kernel
-    bool is_wg_belonging(uint32_t wgid) const;
+    bool is_wg_belonging(uint32_t wg_id, uint32_t *wg_idx_in_kernel = nullptr) const;
 
     // kernel and thread-block(workgroup) status
     void wg_finish(uint32_t wgid);

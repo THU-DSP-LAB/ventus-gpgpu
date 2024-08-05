@@ -22,6 +22,21 @@ void Cta::wg_dispatched() {
     kernel->wg_dispatched();
 }
 
+bool Cta::wg_get_info(std::string& kernel_name, uint32_t &kernel_id, uint32_t& wg_idx_in_kernel) {
+    assert(m_kernel_idx_dispatching < 0 || m_kernel_idx_dispatching < m_kernels.size());
+    std::shared_ptr<Kernel> kernel = (m_kernel_idx_dispatching == -1) ? nullptr : m_kernels[m_kernel_idx_dispatching];
+    assert(m_kernel_idx_dispatching == -1 || kernel);
+    
+    if (kernel == nullptr || !kernel->is_dispatching()) {
+        return false;
+    }
+
+    kernel_name = kernel->get_kname();
+    kernel_id = kernel->get_kid();
+    wg_idx_in_kernel = kernel->get_next_wg_idx_in_kernel();
+    return true;
+}
+
 bool Cta::is_idle() const { return m_kernels.size() == 0; }
 
 bool Cta::apply_to_dut(Vdut* dut) {
@@ -75,7 +90,7 @@ bool Cta::apply_to_dut(Vdut* dut) {
     assert(0);
 }
 
-std::shared_ptr<Kernel> Cta::wg_finish(uint32_t wgid) {
+std::shared_ptr<const Kernel> Cta::wg_finish(uint32_t wgid) {
     for (auto it = m_kernels.begin(); it != m_kernels.end(); it++) {
         std::shared_ptr<Kernel> kernel = *it;
         if (kernel->is_running() && kernel->is_wg_belonging(wgid)) { // 寻找wg所属kernel
@@ -85,9 +100,8 @@ std::shared_ptr<Kernel> Cta::wg_finish(uint32_t wgid) {
                 kernel->deactivate(m_mem);
                 m_kernels.erase(it);
                 m_kernel_idx_dispatching--; // 可能会减至-1
-                return kernel;              // 若Kernel运行完毕，返回此Kernel供输出日志等作用
             }
-            return nullptr; // 若Kernel未运行完毕，返回nullptr
+            return kernel;
         }
     }
     assert(0); // 总应当可以找到WG所属的Kernel

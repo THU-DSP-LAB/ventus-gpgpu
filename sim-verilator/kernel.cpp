@@ -1,4 +1,5 @@
 #include "kernel.hpp"
+#include "log.h"
 #include <cassert>
 #include <cstdint>
 #include <fstream>
@@ -187,7 +188,6 @@ void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem) {
             }
             readbytes += 4;
         }
-        assert(mtd.buffer_size[bufferIndex] == readbytes);
         mem->write(mtd.buffer_base[bufferIndex], buffer.data(), readbytes);
         buffer.clear();
     }
@@ -199,6 +199,7 @@ void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem) {
 
     file.close();
     m_is_activated = true;
+    log_info("kernel%2d %s activate", get_kid(), get_kname().c_str());
 }
 void Kernel::deactivate(MemBox* mem) {
     assert(is_activated());
@@ -232,12 +233,16 @@ void Kernel::wg_finish(uint32_t wgid) {
     m_wg_status[idx] = WG_STATUS_FINISHED;
 }
 
-bool Kernel::is_wg_belonging(uint32_t wg_id) const {
+bool Kernel::is_wg_belonging(uint32_t wg_id, uint32_t* wg_idx_in_kernel) const {
     if (!is_running() || is_finished())
         return false;
 
-    if (wg_id >= m_wgid_base && wg_id < m_wgid_base + get_num_wg())
+    if (wg_id >= m_wgid_base && wg_id < m_wgid_base + get_num_wg()) {
+        if (wg_idx_in_kernel) {
+            *wg_idx_in_kernel = wg_id - m_wgid_base;
+        }
         return true;
-    else
+    } else {
         return false;
+    }
 }

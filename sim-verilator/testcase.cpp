@@ -4,6 +4,19 @@
 
 const Testcase tc_matadd("matadd", 1, "matadd");
 const Testcase tc_vecadd("vecadd", 1, "vecadd");
+const Testcase tc_bfs("bfs", 12,
+        "BFS_1_0", "BFS_2_0",
+        "BFS_1_1", "BFS_2_1",
+        "BFS_1_2", "BFS_2_2",
+        "BFS_1_3", "BFS_2_3",
+        "BFS_1_4", "BFS_2_4",
+        "BFS_1_5", "BFS_2_5" 
+        );
+const Testcase tc_gaussian("gaussian", 6,
+        "Fan1_0", "Fan2_0",
+        "Fan1_1", "Fan2_1",
+        "Fan1_2", "Fan2_2"
+        );
 
 Testcase::Testcase(const char* name, uint32_t num_kernel_, ...)
     : testcase_name(name)
@@ -19,9 +32,9 @@ Testcase::Testcase(const char* name, uint32_t num_kernel_, ...)
 
 Kernel Testcase::get_kernel(int kernel_idx) const {
     Kernel k(kernel_name[kernel_idx],
-        std::string(TESTCASE_DIR) + kernel_name[kernel_idx] + std::string("/") + kernel_name[kernel_idx]
+        std::string(TESTCASE_DIR) + testcase_name + std::string("/") + kernel_name[kernel_idx]
             + std::string(".metadata"),
-        std::string(TESTCASE_DIR) + kernel_name[kernel_idx] + std::string("/") + kernel_name[kernel_idx]
+        std::string(TESTCASE_DIR) + testcase_name + std::string("/") + kernel_name[kernel_idx]
             + std::string(".data"));
     return k;
 }
