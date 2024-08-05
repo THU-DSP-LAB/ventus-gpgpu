@@ -83,8 +83,8 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   //val ShouldFlushCoreRsp_st2 = Wire(Bool())
   val ShouldFlushCoreRsp_st1 = Wire(Bool())
   val ShouldFlushCoreRsp_st0 = Wire(Bool())
-  val coreReqFire_st1 = RegNext(io.coreReq.fire && !ShouldFlushCoreRsp_st0)
-  val coreReqFire_st2 = RegNext(coreReqFire_st1 && !ShouldFlushCoreRsp_st1)
+  val coreReqFire_st1 = RegNext(io.coreReq.fire && !ShouldFlushCoreRsp_st0, false.B)
+  val coreReqFire_st2 = RegNext(coreReqFire_st1 && !ShouldFlushCoreRsp_st1, false.B)
   //ljz: need to know if cachemiss is sent
   val coreRespFire_st2 =io.coreRsp.fire
   val coreRespFire_st3 =RegNext(coreRespFire_st2)
@@ -108,7 +108,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
   ShouldFlushCoreRsp_st1 := warpid_st1 === io.externalFlushPipe.bits.warpid && io.externalFlushPipe.valid
   ShouldFlushCoreRsp_st0 := io.coreReq.bits.warpid === io.externalFlushPipe.bits.warpid && io.externalFlushPipe.valid
 
-  val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
+  val pipeReqAddr_st1 = RegEnable(io.coreReq.bits.addr, 0.U(io.coreReq.bits.addr.getWidth.W), io.coreReq.fire)
   // ******      tag read, to handle mem rsp st1 & pipe req st1      ******
   tagAccess.io.r.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
   tagAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
@@ -162,7 +162,7 @@ class InstructionCache(implicit p: Parameters) extends ICacheModule{
 
   // ******      core rsp
   val OrderViolation_st1 = Wire(Bool())
-  val OrderViolation_st2 = RegNext(OrderViolation_st1)
+  val OrderViolation_st2 = RegNext(OrderViolation_st1, false.B)
   io.coreRsp.valid := coreReqFire_st2 && !OrderViolation_st2 //&& !ShouldFlushCoreRsp_st2// || missRsp_from_mshr
   io.coreRsp.bits.data := data_after_blockOffset_st2
   io.coreRsp.bits.warpid := warpid_st2

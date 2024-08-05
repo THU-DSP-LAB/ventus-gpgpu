@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="20.100006mm"
+   height="9.2415848mm"
+   viewBox="0 0 20.100006 9.2415848"
+   version="1.1"
+   id="svg34433"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   sodipodi:docname="allocator.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview34435"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     showgrid="true"
+     inkscape:zoom="3.1785634"
+     inkscape:cx="396.87741"
+     inkscape:cy="191.28138"
+     inkscape:window-width="1920"
+     inkscape:window-height="1043"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1">
+    <inkscape:grid
+       type="xygrid"
+       id="grid34554"
+       originx="0"
+       originy="0"
+       units="mm"
+       spacingx="2"
+       spacingy="2" />
+  </sodipodi:namedview>
+  <defs
+     id="defs34430" />
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1"
+     transform="translate(-169.94999,-38.808412)">
+    <g
+       id="g44069">
+      <rect
+         style="fill:#ff6600;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43286"
+         width="8"
+         height="4"
+         x="170"
+         y="40" />
+      <rect
+         style="fill:#0000ff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43550"
+         width="12"
+         height="4"
+         x="178"
+         y="40" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="174.07338"
+         y="42.435459"
+         id="text43712"><tspan
+           sodipodi:role="line"
+           id="tspan43710"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="174.07338"
+           y="42.435459">Valid0</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="184.01515"
+         y="42.435459"
+         id="text43868"><tspan
+           sodipodi:role="line"
+           id="tspan43866"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="184.01515"
+           y="42.435459">Size0</tspan></text>
+      <rect
+         style="fill:#ff6600;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43870"
+         width="8"
+         height="4"
+         x="170"
+         y="44" />
+      <rect
+         style="fill:#0000ff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43872"
+         width="12"
+         height="4"
+         x="178"
+         y="44" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="174.07338"
+         y="46.435459"
+         id="text43876"><tspan
+           sodipodi:role="line"
+           id="tspan43874"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="174.07338"
+           y="46.435459">Valid1</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="184.01515"
+         y="46.435459"
+         id="text43880"><tspan
+           sodipodi:role="line"
+           id="tspan43878"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="184.01515"
+           y="46.435459">Size1</tspan></text>
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:start;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.1;stroke-dasharray:none"
+       x="169.91815"
+       y="39.931656"
+       id="text43884"><tspan
+         sodipodi:role="line"
+         id="tspan43882"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:sans-serif;-inkscape-font-specification:sans-serif;text-align:start;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.1"
+         x="169.91815"
+         y="39.931656">CUx Resouce Table cache</tspan></text>
+  </g>
+</svg>

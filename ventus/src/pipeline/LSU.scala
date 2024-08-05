@@ -278,7 +278,10 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   // FSM State Transfer
   switch(state){
     is (s_idle){
-      when(io.from_fifo.valid || io.flush_dcache.valid){ state := s_save }.otherwise{ state := state }
+      state := MuxCase(state, Seq(
+        io.flush_dcache.fire -> s_dcache,
+        io.from_fifo.fire -> s_save,
+      ))
       cnt.reset()
     }
     is (s_save){
