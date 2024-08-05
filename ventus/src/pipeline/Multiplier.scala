@@ -36,7 +36,7 @@ class ArrayMulDataModule(len: Int) extends Module {
   val b_sext, bx2, neg_b, neg_bx2 = Wire(UInt((len+1).W))
   b_sext := SignExt(b, len+1)
   bx2 := b_sext << 1
-  neg_b := (~b_sext).asUInt()
+  neg_b := (~b_sext).asUInt
   neg_bx2 := neg_b << 1
 
   val columns: Array[Seq[Bool]] = Array.fill(2*len)(Seq())
@@ -44,7 +44,7 @@ class ArrayMulDataModule(len: Int) extends Module {
   var last_x = WireInit(0.U(3.W))
   for(i <- Range(0, len, 2)){
     val x = if(i==0) Cat(a(1,0), 0.U(1.W)) else if(i+1==len) SignExt(a(i, i-1), 3) else a(i+1, i-1)
-    val pp_temp = MuxLookup(x, 0.U, Seq(
+    val pp_temp = MuxLookup(x, 0.U)(Seq(
       1.U -> b_sext,
       2.U -> b_sext,
       3.U -> bx2,
@@ -53,7 +53,7 @@ class ArrayMulDataModule(len: Int) extends Module {
       6.U -> neg_b
     ))
     val s = pp_temp(len)
-    val t = MuxLookup(last_x, 0.U(2.W), Seq(
+    val t = MuxLookup(last_x, 0.U(2.W))(Seq(
       4.U -> 2.U(2.W),
       5.U -> 1.U(2.W),
       6.U -> 1.U(2.W)
@@ -84,22 +84,22 @@ class ArrayMulDataModule(len: Int) extends Module {
       case 2 =>
         val c22 = Module(new C22)
         c22.io.in := col
-        sum = c22.io.out(0).asBool() +: cin
-        cout2 = Seq(c22.io.out(1).asBool())
+        sum = c22.io.out(0).asBool +: cin
+        cout2 = Seq(c22.io.out(1).asBool)
       case 3 =>
         val c32 = Module(new C32)
         c32.io.in := col
-        sum = c32.io.out(0).asBool() +: cin
-        cout2 = Seq(c32.io.out(1).asBool())
+        sum = c32.io.out(0).asBool +: cin
+        cout2 = Seq(c32.io.out(1).asBool)
       case 4 =>
         val c53 = Module(new C53)
         for((x, y) <- c53.io.in.take(4) zip col){
           x := y
         }
         c53.io.in.last := (if(cin.nonEmpty) cin.head else 0.U)
-        sum = Seq(c53.io.out(0).asBool()) ++ (if(cin.nonEmpty) cin.drop(1) else Nil)
-        cout1 = Seq(c53.io.out(1).asBool())
-        cout2 = Seq(c53.io.out(2).asBool())
+        sum = Seq(c53.io.out(0).asBool) ++ (if(cin.nonEmpty) cin.drop(1) else Nil)
+        cout1 = Seq(c53.io.out(1).asBool)
+        cout2 = Seq(c53.io.out(2).asBool)
       case n =>
         val cin_1 = if(cin.nonEmpty) Seq(cin.head) else Nil
         val cin_2 = if(cin.nonEmpty) cin.drop(1) else Nil

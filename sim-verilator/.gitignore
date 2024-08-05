@@ -1,0 +1,7 @@
+logs/
+obj_dir/
+.cache/
+*.json
+*.fir
+*.v
+*.fst

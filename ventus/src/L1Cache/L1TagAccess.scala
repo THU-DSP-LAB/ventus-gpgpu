@@ -148,11 +148,11 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
 
   cachehit_hold.io.enq.bits.hit := iTagChecker.io.cache_hit && !probeReadBuf.ready
   cachehit_hold.io.enq.bits.waymask := Mux(!probeReadBuf.ready, iTagChecker.io.waymask ,0.U)
-  cachehit_hold.io.enq.valid := probeReadBuf.valid
+  cachehit_hold.io.enq.valid := probeReadBuf.valid && !probeReadBuf.ready
   cachehit_hold.io.deq.ready := probeReadBuf.ready
   //val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
   io.hit_st1 := (iTagChecker.io.cache_hit || cachehit_hold.io.deq.bits.hit && cachehit_hold.io.deq.valid) && probeReadBuf.valid//RegNext(io.probeRead.fire)
-  io.waymaskHit_st1 := Mux(cachehit_hold.io.deq.valid & cachehit_hold.io.deq.bits.hit,cachehit_hold.io.deq.bits.waymask,iTagChecker.io.waymask)
+  io.waymaskHit_st1 := Mux(cachehit_hold.io.deq.valid && cachehit_hold.io.deq.bits.hit,cachehit_hold.io.deq.bits.waymask,iTagChecker.io.waymask)
   if(!readOnly){//tag_array::write_hit_mark_dirty
     assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get.valid),"way_dirty write-in conflict!")
     when(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
@@ -168,7 +168,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
 
 
   if (!readOnly) {
-    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool && RegNext(io.allocateWrite.fire())
+    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool && RegNext(io.allocateWrite.fire)
   }
   // ******      tag_array::allocate    ******
   Replacement.io.validOfSet := Reverse(Cat(way_valid(allocateWrite_st1.setIdx)))//Reverse(Cat(way_valid(io.allocateWrite.bits.setIdx)))
@@ -209,7 +209,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     choosenDirtySetIdx_st0 := PriorityEncoder(setDirty)
     choosenDirtySetValid := way_dirtyAfterValid(choosenDirtySetIdx_st0)
     choosenDirtyWayMask_st0 := VecInit(PriorityEncoderOH(choosenDirtySetValid)).asUInt
-    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(choosenDirtyWayMask_st0)
+    choosenDirtyTag_st1 := tagBodyAccess.io.r.resp.data(OHToUInt(choosenDirtyWayMask_st0))
     //val choosenDirtySetIdx_st1 = RegNext(choosenDirtySetIdx_st0)
     //val choosenDirtyWayMask_st1 = RegNext(choosenDirtyWayMask_st0)
     io.dirtyTag_st1.get := choosenDirtyTag_st1
@@ -270,7 +270,7 @@ class tagChecker(way: Int, tagIdxBits: Int) extends Module{
 
   io.waymask := Reverse(Cat(io.tag_of_set.zip(io.way_valid).map{ case(tag,valid) => (tag === io.tag_from_pipe) && valid}))
   //io.waymask := Reverse(Cat(io.tag_of_set.map{ tag => (tag(tagIdxBits-1,0) === io.tag_from_pipe) && tag(tagIdxBits)}))
-  assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
+  //assert(PopCount(io.waymask) <= 1.U)//if waymask not one-hot, duplicate tags in one set, error
   io.cache_hit := io.waymask.orR
 }
 

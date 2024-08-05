@@ -501,6 +501,7 @@ class InstrDecodeV2 extends Module {
     val inst_mask = Input(Vec(num_fetch, Bool()))
     val pc = Input(UInt(addrLen.W))
     val wid = Input(UInt(depth_warp.W))
+    val sm_id = Input(UInt(8.W))
     val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
     val control = Output(Vec(num_fetch, new CtrlSigs))
     val control_mask = Output(Vec(num_fetch, Bool()))
@@ -608,6 +609,7 @@ class InstrDecodeV2 extends Module {
     c.reg_idxw := Cat(regextInfo(i).regPrefix(0), io.inst(i)(11, 7))
     c.imm_ext := Cat(regextInfo(i).isExtI, regextInfo(i).immHigh) // pack exti valid bit at MSB
     if (SPIKE_OUTPUT) {
+      c.spike_info.get.sm_id := io.sm_id
       c.spike_info.get.inst := io.inst(i)
       c.spike_info.get.pc := io.pc+ (i.U << 2.U)
     }

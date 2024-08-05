@@ -28,13 +28,15 @@ class MetaData{
   var num_buffer: BigInt = 1
   var buffer_base = new Array[BigInt](0)
   var buffer_size = new Array[BigInt](0)
-  var lds_mem_base = new Array[BigInt](0)
-  var lds_mem_size = new Array[BigInt](0)
+  // var lds_mem_base = new Array[BigInt](0)
+  // var lds_mem_size = new Array[BigInt](0)
+    var lds_mem_index = new Array[Int](0)
 
   def generateHostReq(i: BigInt, j: BigInt, k: BigInt) = {
     val blockID = (i * kernel_size(1) + j) * kernel_size(2) + k
     (new host2CTA_data).Lit(
-      _.host_wg_id -> ("b" + blockID.toString(2) + "0" * CU_ID_WIDTH).U,
+      //_.host_wg_id -> ("b" + blockID.toString(2) + "0" * CU_ID_WIDTH).U,
+      _.host_wg_id -> blockID.U,
       _.host_num_wf -> wg_size.U,
       _.host_wf_size -> wf_size.U,
       _.host_start_pc -> "h80000000".U,
@@ -47,7 +49,8 @@ class MetaData{
       _.host_gds_baseaddr -> 0.U,
       _.host_pds_baseaddr -> (pdsBaseAddr + blockID * pdsSize * wf_size * wg_size).U,
       _.host_csr_knl -> metaDataBaseAddr.U,
-      _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U)
+      _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U),
+      _.host_pds_size_per_wf -> 0.U
     )
   }
 }
@@ -79,16 +82,15 @@ object MetaData{
       for( i <- 0 until num_buffer.toInt){
         val parsed = parseHex(buf, 64)
         if(parsed < BigInt("80000000", 16) && parsed >= BigInt("70000000", 16))
-          lds_mem_base = lds_mem_base :+ parsed
-        else
-          buffer_base = buffer_base :+ parsed
+          lds_mem_index = lds_mem_index :+ i
+        buffer_base = buffer_base :+ parsed
       }
       for (i <- 0 until num_buffer.toInt) {
         val parsed = (parseHex(buf, 64) + 3) / 4 * 4 // padding buffer size to 4byte alignment
-        if(i < lds_mem_base.length)
-          lds_mem_size = lds_mem_size :+ parsed
-        else
-          buffer_size = buffer_size :+ parsed
+        // if(i < lds_mem_base.length)
+        //   lds_mem_size = lds_mem_size :+ parsed
+        // else
+        buffer_size = buffer_size :+ parsed
       }
     }
   }
@@ -161,17 +163,24 @@ class MemBox{
       var fileBytes = file.getLines().map(Hex2ByteArray(_, 4)).reduce(_ ++ _)
 
       for (i <- metaData.buffer_base.indices) { // load data
-        mem = mem :+ new MemBuffer(metaData.buffer_base(i), metaData.buffer_size(i))
-        mem.last.data = fileBytes.take(metaData.buffer_size(i).toInt)
+        if(metaData.lds_mem_index.exists(_ == i)){ // is dynamic ram
+          val cut = fileBytes.take(metaData.buffer_size(i).toInt)
+          lds_memory.writeMem(metaData.buffer_base(i), metaData.buffer_size(i).toInt,
+            cut, IndexedSeq.fill(metaData.buffer_size(i).toInt)(true))
+        }
+        else{
+          mem = mem :+ new MemBuffer(metaData.buffer_base(i), metaData.buffer_size(i))
+          mem.last.data = fileBytes.take(metaData.buffer_size(i).toInt)
+        }
         fileBytes = fileBytes.drop(metaData.buffer_size(i).toInt)
       }
       // move lds data from datafile to dynamic ram
-      for (i <- metaData.lds_mem_base.indices) {
-        val cut = memory.head
-        lds_memory.writeMem(metaData.lds_mem_base(i), metaData.lds_mem_size(i).toInt,
-          cut.data, IndexedSeq.fill(metaData.lds_mem_size(i).toInt)(true))
-        mem = mem.drop(1)
-      }
+      // for (i <- metaData.lds_mem_base.indices) {
+      //   val cut = memory.head
+      //   lds_memory.writeMem(metaData.lds_mem_base(i), metaData.lds_mem_size(i).toInt,
+      //     cut.data, IndexedSeq.fill(metaData.lds_mem_size(i).toInt)(true))
+      //   mem = mem.drop(1)
+      // }
       mem
     }).sortWith(_.base < _.base)
 
@@ -233,6 +242,7 @@ case class DelayFIFOEntry(
 class DelayFIFO[T<: DelayFIFOEntry](val latency: Int, val depth: Int){
   class EntryWithTime(var ttl: Int, val entry: T){
     def step(minpos: Int): Unit = {
+      if(ttl < 0) return
       if(ttl > minpos) ttl = ttl - 1 else ttl = minpos
     }
   }

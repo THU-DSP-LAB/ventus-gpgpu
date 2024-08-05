@@ -28,7 +28,7 @@ class ICachePipeRsp_np extends Bundle{
   val status = UInt(2.W)
 }
 
-class pipe extends Module{
+class pipe(val sm_id: Int = 0) extends Module{
   val io = IO(new Bundle{
     val icache_req = (DecoupledIO(new ICachePipeReq_np))
     val icache_rsp = Flipped(DecoupledIO(new ICachePipeRsp_np))
@@ -43,6 +43,8 @@ class pipe extends Module{
     val wg_id_lookup=Output(UInt(depth_warp.W))
     val wg_id_tag=Input(UInt(TAG_WIDTH.W))
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
+    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
+    val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -51,8 +53,11 @@ class pipe extends Module{
   val warp_sche=Module(new warp_scheduler)
   //val pcfifo=Module(new PCfifo)
   val control=Module(new InstrDecodeV2)
+  control.io.sm_id := sm_id.U
   val operand_collector=Module(new operandCollector)
-  val issue=Module(new Issue)
+  //val issue=Module(new Issue)
+  val issueX = Module(new Issue)
+  val issueV = Module(new Issue)
   val alu=Module(new ALUexe)
   val valu=Module(new vALUv2(num_thread, num_lane))
   val fpu=Module(new FPUexe(num_thread,num_lane))
@@ -63,12 +68,44 @@ class pipe extends Module{
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,6))
 
+  val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
+  if(INST_CNT_2){
+    when(issueX.io.in.fire){
+      when(issueV.io.in.fire && !issueV.io.in.bits.ctrl.isvec){
+        inst_cnt_xv(0) := inst_cnt_xv(0) + 2.U
+      }.otherwise{
+        inst_cnt_xv(0) := inst_cnt_xv(0) + 1.U
+      }
+    }
+    when(issueV.io.in.fire){
+      when(issueV.io.in.bits.ctrl.isvec){
+        inst_cnt_xv(1) := inst_cnt_xv(1) + PopCount(issueV.io.in.bits.mask)
+      }
+    }
+  }
+
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
-//  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
-  val exe_data=Module(new Module{
+  if(INST_CNT) {
+    io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
+  }
+  if(INST_CNT_2){
+    io.inst_cnt2.foreach( _ := inst_cnt_xv)
+  }
+  else{
+    io.inst_cnt.foreach( _ := 0.U)
+  }
+  //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
+  val exe_dataX=Module(new Module{
     val io = IO(new Bundle{
+      val enq = Flipped(DecoupledIO(new vExeData))
+      val deq = DecoupledIO(Output(new vExeData))
+    })
+    io.deq <> io.enq
+  })
+  val exe_dataV = Module(new Module {
+    val io = IO(new Bundle {
       val enq = Flipped(DecoupledIO(new vExeData))
       val deq = DecoupledIO(Output(new vExeData))
     })
@@ -86,7 +123,7 @@ class pipe extends Module{
   lsu.io.csr_tid:=csrfile.io.lsu_tid
   lsu.io.csr_numw:=csrfile.io.lsu_numw
   when(csrfile.io.in.valid && csrfile.io.in.bits.ctrl.custom_signal_0){
-    printf(p"warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
+    printf(p"sm ${sm_id} warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} ")
     printf(p"0x${Hexadecimal(csrfile.io.in.bits.ctrl.pc)} 0x${Hexadecimal(csrfile.io.in.bits.ctrl.inst)}  setrpc 0x${Hexadecimal(csrfile.io.in.bits.in1)} \n")
   }
 
@@ -101,21 +138,25 @@ class pipe extends Module{
   warp_sche.io.pc_rsp.bits.status:=Mux(ibuffer.io.in.ready,io.icache_rsp.bits.status,1.U(2.W))
 
   warp_sche.io.pc_req<>io.icache_req
-  warp_sche.io.warp_control<>issue.io.out_warpscheduler
-  warp_sche.io.issued_warp.bits:=exe_data.io.enq.bits.ctrl.wid
-  warp_sche.io.issued_warp.valid:=exe_data.io.enq.fire()
-  warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt()
+  warp_sche.io.warp_control<>issueX.io.out_warpscheduler
+  warp_sche.io.issued_warp.bits:=exe_dataX.io.enq.bits.ctrl.wid // not used
+  warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
+  warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
   operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
   operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
+  //warp_sche.io.flushDCache<>lsu.io.flush_dcache
+  lsu.io.flush_dcache.valid := warp_sche.io.flushDCache.valid
+   lsu.io.flush_dcache.bits := warp_sche.io.flushDCache.bits
+   warp_sche.io.flushDCache.ready := lsu.io.flush_dcache.ready
 
-  //flush:=(warp_sche.io.branch.fire()&warp_sche.io.branch.bits.jump) | ()
+  //flush:=(warp_sche.io.branch.fire&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
 
-
+  control.io.sm_id := sm_id.U(8.W)
   control.io.pc:=io.icache_rsp.bits.addr
   control.io.inst.zipWithIndex.foreach{ case (ins, i) =>
     ins := (io.icache_rsp.bits.data >> (xLen * i))(xLen - 1, 0)
@@ -131,7 +172,7 @@ class pipe extends Module{
 
   (control.io.control zip control.io.control_mask).foreach{ case (ctrl, mask) =>
     when(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask) {
-      printf(p"warp ${Decimal(ctrl.wid)} ")
+      printf(p"sm ${sm_id} warp ${Decimal(ctrl.wid)} ")
       printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
     assert (!(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask), s"undefined instruction")
@@ -151,18 +192,18 @@ class pipe extends Module{
   io.icache_rsp.ready:=ibuffer.io.in.ready
 
   //val ibuffer_ready=Wire(Vec(num_warp,Bool()))
-  warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt()
+  warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
     ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i)
     ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
     if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
-    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
+      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
     val ctrl=ibuffer.io.out(i).bits
     /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
-        Mux(ctrl.csr.orR(),csrfile.io.in.ready,
+        Mux(ctrl.csr.orR,csrfile.io.in.ready,
           Mux(ctrl.mem,lsu.io.lsu_req.ready,
             Mux(ctrl.isvec&ctrl.simt_stack&ctrl.simt_stack_op===0.U,valu.io.in.ready&simt_stack.io.branch_ctl.ready,
               Mux(ctrl.isvec&ctrl.simt_stack,simt_stack.io.branch_ctl.ready,
@@ -170,39 +211,50 @@ class pipe extends Module{
                   Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))*/
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
     scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
-    scoreb(i).if_ctrl:= (ibuffer2issue.io.out.bits)
+    scoreb(i).if_ctrl:= Mux((i.asUInt === ibuffer2issue.io.out_x.bits.wid) && ibuffer2issue.io.out_x.fire, ibuffer2issue.io.out_x.bits,ibuffer2issue.io.out_v.bits)
     scoreb(i).wb_v_ctrl:=wb.io.out_v.bits
     scoreb(i).wb_x_ctrl:=wb.io.out_x.bits
     scoreb(i).fence_end:=lsu.io.fence_end(i)
-    scoreb(i).if_fire:=false.B
+    scoreb(i).if_fire:=Mux(((i.asUInt===ibuffer2issue.io.out_x.bits.wid)&&ibuffer2issue.io.out_x.fire) ||
+      ((i.asUInt===ibuffer2issue.io.out_v.bits.wid)&&ibuffer2issue.io.out_v.fire), true.B,false.B)
     scoreb(i).wb_v_fire:=false.B
     scoreb(i).wb_x_fire:=false.B
     scoreb(i).br_ctrl:=false.B
-    scoreb(i).op_col_in_fire:=false.B
-    scoreb(i).op_col_out_fire:=false.B
+    scoreb(i).op_colX_in_fire:=false.B
+    scoreb(i).op_colX_out_fire:=false.B
+    scoreb(i).op_colV_in_fire := false.B
+    scoreb(i).op_colV_out_fire := false.B
 
     when(warp_sche.io.branch.fire&(warp_sche.io.branch.bits.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(warp_sche.io.warp_control.fire&(warp_sche.io.warp_control.bits.ctrl.wid===i.asUInt)){scoreb(i).br_ctrl:=true.B}.
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
- }
-  val op_col_in_wid = Wire(UInt(depth_warp.W))
-  val op_col_out_wid = Wire(UInt(depth_warp.W))
-  op_col_in_wid := operand_collector.io.control.bits.wid
-  op_col_out_wid := operand_collector.io.out.bits.control.wid
-  scoreb(op_col_in_wid).op_col_in_fire:=operand_collector.io.control.fire
-  scoreb(op_col_out_wid).op_col_out_fire:=operand_collector.io.out.fire
+  }
+  val op_colV_in_wid = Wire(UInt(depth_warp.W))
+  val op_colV_out_wid = Wire(UInt(depth_warp.W))
+  val op_colX_in_wid = Wire(UInt(depth_warp.W))
+  val op_colX_out_wid = Wire(UInt(depth_warp.W))
+  op_colV_in_wid := operand_collector.io.controlV.bits.wid
+  op_colV_out_wid := operand_collector.io.out(0).bits.control.wid
+  scoreb(op_colV_in_wid).op_colV_in_fire:=operand_collector.io.controlV.fire
+  scoreb(op_colV_out_wid).op_colV_out_fire:=operand_collector.io.out(0).fire
 
-  scoreb(ibuffer2issue.io.out.bits.wid).if_fire:=(ibuffer2issue.io.out.fire)
+  op_colX_in_wid := operand_collector.io.controlX.bits.wid
+  op_colX_out_wid := operand_collector.io.out(1).bits.control.wid
+  scoreb(op_colX_in_wid).op_colX_in_fire := operand_collector.io.controlX.fire
+  scoreb(op_colX_out_wid).op_colX_out_fire := operand_collector.io.out(1).fire
+
+
   scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
   scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
 
 
-  operand_collector.io.control<>ibuffer2issue.io.out//ibuffer2issue.io.out.bits
+  operand_collector.io.controlV<>ibuffer2issue.io.out_v//ibuffer2issue.io.out.bits
+  operand_collector.io.controlX<>ibuffer2issue.io.out_x//ibuffer2issue.io.out.bits
   operand_collector.io.writeVecCtrl<>wb.io.out_v
   operand_collector.io.writeScalarCtrl<>wb.io.out_x
 
-  simt_stack.io.input_wid:=operand_collector.io.out.bits.control.wid//ibuffer2issue.io.out.bits.wid
-  csrfile.io.simt_wid := operand_collector.io.out.bits.control.wid // todo check this
+  simt_stack.io.input_wid:=operand_collector.io.out(0).bits.control.wid//ibuffer2issue.io.out.bits.wid
+  csrfile.io.simt_wid := operand_collector.io.out(0).bits.control.wid // todo check this
 
   when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
@@ -210,28 +262,31 @@ class pipe extends Module{
   when(io.icache_rsp.fire&(io.icache_rsp.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_rsp.bits.warpid},pc=0x${Hexadecimal(io.icache_rsp.bits.addr)},inst=0x${Hexadecimal(io.icache_rsp.bits.data)}\n")
   }
-  when(exe_data.io.deq.fire&(exe_data.io.deq.bits.ctrl.wid===2.U)){
-    //printf(p"wid=${exe_data.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)}\n")
+  when(exe_dataX.io.deq.fire&(exe_dataX.io.deq.bits.ctrl.wid===2.U)){
+    //printf(p"wid=${exe_dataX.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.inst)}\n")
+  }
+  when(exe_dataV.io.deq.fire&(exe_dataV.io.deq.bits.ctrl.wid===2.U)) {
+    //printf(p"wid=${exe_dataV.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.inst)}\n")
   }
 
 
   //输出所有write mem的操作
   //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
-//  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
-//    when(exe_data.io.deq.bits.ctrl.isvec){
-//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
-//      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
-//      printf(p"mask ${Binary(exe_data.io.deq.bits.mask.asUInt)} @")
-//      (exe_data.io.deq.bits.in1 zip exe_data.io.deq.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
-//      printf("\n")
-//    }.otherwise{
-//      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w x${exe_data.io.deq.bits.ctrl.reg_idxw} ")
-//      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0))} ")
-//      printf(p"@ ${Hexadecimal(exe_data.io.deq.bits.in1(0))}+${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
-//    }
-//  }
+  //  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
+  //    when(exe_data.io.deq.bits.ctrl.isvec){
+  //      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
+  //      exe_data.io.deq.bits.in3.reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)} "))
+  //      printf(p"mask ${Binary(exe_data.io.deq.bits.mask.asUInt)} @")
+  //      (exe_data.io.deq.bits.in1 zip exe_data.io.deq.bits.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
+  //      printf("\n")
+  //    }.otherwise{
+  //      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w x${exe_data.io.deq.bits.ctrl.reg_idxw} ")
+  //      printf(p"${Hexadecimal(exe_data.io.deq.bits.in3(0))} ")
+  //      printf(p"@ ${Hexadecimal(exe_data.io.deq.bits.in1(0))}+${Hexadecimal(exe_data.io.deq.bits.in2(0))}\n")
+  //    }
+  //  }
   //输出所有发射的指令
-  //when( exe_data.io.deq.fire()){
+  //when( exe_data.io.deq.fire){
   //  printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
   //  //exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
   //  printf(p"mask ${exe_data.io.deq.bits.mask} with${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
@@ -239,7 +294,7 @@ class pipe extends Module{
   //}
 
   //输出特定指令的操作数
-  //when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire() ){
+  //when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire ){
   //    printf(p"0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc+0x348.U-0xc.U) },${exe_data.io.deq.bits.ctrl.wid} operand is =")
   //  exe_data.io.deq.bits.in2.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
   //  exe_data.io.deq.bits.in1.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
@@ -248,46 +303,66 @@ class pipe extends Module{
   //  printf(p"\n")
   //}
   //输出写入向量寄存器的
-//  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
-//    printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
-//    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
-//    printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
-//  }
-//  ////输出写入标量寄存器的
-//  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
-//    printf(p"write x${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
-//  }
+  //  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
+  //    printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
+  //    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
+  //    printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
+  //  }
+  //  ////输出写入标量寄存器的
+  //  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
+  //    printf(p"write x${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")
+  //  }
 
   {
-    exe_data.io.enq.bits.ctrl := operand_collector.io.out.bits.control
-    exe_data.io.enq.bits.in1 := operand_collector.io.out.bits.alu_src1
-    exe_data.io.enq.bits.in2 := operand_collector.io.out.bits.alu_src2
-    exe_data.io.enq.bits.in3 := operand_collector.io.out.bits.alu_src3
-    exe_data.io.enq.bits.mask := (operand_collector.io.out.bits.mask.zipWithIndex.map{case(x,y)=>x&simt_stack.io.out_mask(y)})
-    exe_data.io.enq.valid:=operand_collector.io.out.valid
-    operand_collector.io.out.ready := exe_data.io.enq.ready
-  }
-//  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
-  issue.io.in<>exe_data.io.deq
+    exe_dataX.io.enq.bits.ctrl := operand_collector.io.out(1).bits.control
+    exe_dataX.io.enq.bits.in1 := operand_collector.io.out(1).bits.alu_src1
+    exe_dataX.io.enq.bits.in2 := operand_collector.io.out(1).bits.alu_src2
+    exe_dataX.io.enq.bits.in3 := operand_collector.io.out(1).bits.alu_src3
+    exe_dataX.io.enq.bits.mask.foreach(_ := true.B)
+    exe_dataX.io.enq.valid:=operand_collector.io.out(1).valid
+    operand_collector.io.out(1).ready := exe_dataX.io.enq.ready
 
-  issue.io.out_vALU<>valu.io.in
-  issue.io.out_LSU<>lsu.io.lsu_req
-  issue.io.out_sALU<>alu.io.in
-  issue.io.out_CSR<>csrfile.io.in
-  issue.io.out_SIMT<>simt_stack.io.branch_ctl
-  issue.io.out_SFU<>sfu.io.in
+    exe_dataV.io.enq.bits.ctrl := operand_collector.io.out(0).bits.control
+    exe_dataV.io.enq.bits.in1 := operand_collector.io.out(0).bits.alu_src1
+    exe_dataV.io.enq.bits.in2 := operand_collector.io.out(0).bits.alu_src2
+    exe_dataV.io.enq.bits.in3 := operand_collector.io.out(0).bits.alu_src3
+    exe_dataV.io.enq.bits.mask := (operand_collector.io.out(0).bits.mask.zipWithIndex.map { case (x, y) => x & simt_stack.io.out_mask(y) })
+    exe_dataV.io.enq.valid := operand_collector.io.out(0).valid
+    operand_collector.io.out(0).ready := exe_dataV.io.enq.ready
+  }
+  //  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
+  issueV.io.in<>exe_dataV.io.deq
+  issueX.io.in<>exe_dataX.io.deq
+
+  issueV.io.out_vALU<>valu.io.in
+  issueX.io.out_vALU.ready := false.B
+  issueV.io.out_LSU<>lsu.io.lsu_req
+  issueX.io.out_LSU.ready := false.B
+  issueX.io.out_sALU<>alu.io.in
+  issueV.io.out_sALU.ready := false.B
+  issueX.io.out_CSR<>csrfile.io.in
+  issueV.io.out_CSR.ready := false.B
+  issueV.io.out_SIMT<>simt_stack.io.branch_ctl
+  issueX.io.out_SIMT.ready := false.B
+  issueV.io.out_SFU<>sfu.io.in
+  issueX.io.out_SFU.ready := false.B
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
   simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
-  simt_stack.io.pc_reconv.valid := issue.io.out_SIMT.valid//true.B //todo check this
+  simt_stack.io.pc_reconv.valid := issueV.io.out_SIMT.valid//true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 
-  issue.io.out_MUL<>mul.io.in
-  issue.io.out_TC<>tensorcore.io.in
+  issueV.io.out_MUL<>mul.io.in
+  issueX.io.out_MUL.ready := false.B
+  issueV.io.out_TC<>tensorcore.io.in
+  issueX.io.out_TC.ready := false.B
+  issueV.io.out_vFPU<>fpu.io.in
+  issueX.io.out_vFPU.ready := false.B
+  issueX.io.out_warpscheduler <> warp_sche.io.warp_control
+  issueV.io.out_warpscheduler.ready := false.B
 
-  issue.io.out_vFPU<>fpu.io.in
   fpu.io.rm := Mux(fpu.io.in.bits.ctrl.force_rm_rtz, RoundingMode.RTZ, csrfile.io.rm(0))
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
   sfu.io.rm := csrfile.io.rm(1)
@@ -314,5 +389,5 @@ class pipe extends Module{
   wb.io.in_v(4)<>mul.io.out_v
   wb.io.in_v(5)<>tensorcore.io.out_v
 
-  issue_stall:=(~issue.io.in.ready).asBool()//scoreb.io.delay | issue.io.in.ready
+  issue_stall:=(~issueX.io.in.ready).asBool | (~issueV.io.in.ready).asBool//scoreb.io.delay | issue.io.in.ready
 }

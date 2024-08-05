@@ -1,0 +1,698 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+
+<svg
+   width="297mm"
+   height="210mm"
+   viewBox="0 0 297 210"
+   version="1.1"
+   id="svg34433"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
+   sodipodi:docname="allocator.svg"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview34435"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:document-units="mm"
+     showgrid="true"
+     inkscape:zoom="2.2475837"
+     inkscape:cx="396.20326"
+     inkscape:cy="161.06186"
+     inkscape:window-width="1920"
+     inkscape:window-height="1043"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="layer1">
+    <inkscape:grid
+       type="xygrid"
+       id="grid34554"
+       originx="0"
+       originy="0"
+       units="mm"
+       spacingx="2"
+       spacingy="2" />
+  </sodipodi:namedview>
+  <defs
+     id="defs34430">
+    <marker
+       style="overflow:visible"
+       id="marker39916"
+       refX="0"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Arrow2"
+       markerWidth="7.6999998"
+       markerHeight="5.5999999"
+       viewBox="0 0 7.7 5.6"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.7)"
+         d="M -2,-4 9,0 -2,4 c 2,-2.33 2,-5.66 0,-8 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+         id="path39914" />
+    </marker>
+    <marker
+       style="overflow:visible"
+       id="Arrow2"
+       refX="5.5"
+       refY="0"
+       orient="auto-start-reverse"
+       inkscape:stockid="Arrow2"
+       markerWidth="7.6999998"
+       markerHeight="5.5999999"
+       viewBox="0 0 7.7 5.6"
+       inkscape:isstock="true"
+       inkscape:collect="always"
+       preserveAspectRatio="xMidYMid">
+      <path
+         transform="scale(0.7)"
+         d="M -2,-4 9,0 -2,4 c 2,-2.33 2,-5.66 0,-8 z"
+         style="fill:context-stroke;fill-rule:evenodd;stroke:none"
+         id="arrow2L" />
+    </marker>
+  </defs>
+  <g
+     inkscape:label="Layer 1"
+     inkscape:groupmode="layer"
+     id="layer1">
+    <path
+       style="fill:none;stroke:#0000ff;stroke-width:0.264583;stroke-dasharray:none;marker-end:url(#marker39916)"
+       id="path42098"
+       sodipodi:type="arc"
+       sodipodi:cx="-51.903004"
+       sodipodi:cy="-83.217232"
+       sodipodi:rx="5"
+       sodipodi:ry="5"
+       sodipodi:start="0"
+       sodipodi:end="4.7658844"
+       sodipodi:open="true"
+       sodipodi:arc-type="arc"
+       d="m -46.903004,-83.217232 a 5,5 0 0 1 -3.148531,4.644574 5,5 0 0 1 -5.480294,-1.204861 5,5 0 0 1 -0.910106,-5.536878 5,5 0 0 1 4.806281,-2.895682"
+       transform="matrix(0.23297643,-0.97248238,-0.97248238,-0.23297643,0,0)"
+       inkscape:export-filename="export/allocator_fsm.png"
+       inkscape:export-xdpi="600"
+       inkscape:export-ydpi="600" />
+    <path
+       style="fill:none;stroke:#0000ff;stroke-width:0.264583;stroke-dasharray:none;marker-end:url(#marker39916)"
+       id="path42086"
+       sodipodi:type="arc"
+       sodipodi:cx="64.808784"
+       sodipodi:cy="-42.87027"
+       sodipodi:rx="5"
+       sodipodi:ry="5"
+       sodipodi:start="6.0213859"
+       sodipodi:end="4.0495689"
+       sodipodi:open="true"
+       sodipodi:arc-type="arc"
+       d="m 69.638414,-44.164365 a 5,5 0 0 1 -2.903406,5.908168 5,5 0 0 1 -6.242415,-2.090089 5,5 0 0 1 1.23948,-6.465284"
+       transform="matrix(0.94917067,-0.31476189,-0.31476189,-0.94917067,0,0)"
+       inkscape:export-filename="../../../Downloads/text42944.png"
+       inkscape:export-xdpi="600"
+       inkscape:export-ydpi="600" />
+    <path
+       style="fill:none;stroke:#0000ff;stroke-width:0.264583;stroke-dasharray:none;marker-end:url(#marker39916)"
+       id="path40806"
+       sodipodi:type="arc"
+       sodipodi:cx="-125.02534"
+       sodipodi:cy="20.082109"
+       sodipodi:rx="5"
+       sodipodi:ry="5"
+       sodipodi:start="6.0213859"
+       sodipodi:end="4.0495689"
+       sodipodi:open="true"
+       sodipodi:arc-type="arc"
+       d="m -120.19571,18.788014 a 5,5 0 0 1 -2.9034,5.908168 5,5 0 0 1 -6.24242,-2.090089 5,5 0 0 1 1.23948,-6.465284"
+       transform="rotate(-161.65356)" />
+    <circle
+       style="fill:none;stroke:#000000;stroke-width:0.264583;stroke-dasharray:none"
+       id="path39329"
+       cx="80"
+       cy="25"
+       r="5" />
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="79.951317"
+       y="25.775759"
+       id="text39333"><tspan
+         sodipodi:role="line"
+         id="tspan39331"
+         style="font-size:2.11667px;text-align:center;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="79.951317"
+         y="25.775759">IDLE</tspan></text>
+    <circle
+       style="fill:none;stroke:#000000;stroke-width:0.264583;stroke-dasharray:none"
+       id="circle39335"
+       cx="120"
+       cy="25"
+       r="5" />
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="119.9365"
+       y="25.613834"
+       id="text39339"><tspan
+         sodipodi:role="line"
+         style="font-size:2.11667px;text-align:center;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="119.9365"
+         y="25.613834"
+         id="tspan39341">CU prefer</tspan></text>
+    <ellipse
+       style="fill:none;stroke:#000000;stroke-width:0.26458333;stroke-dasharray:none"
+       id="circle39343"
+       cx="120"
+       cy="65"
+       rx="10"
+       ry="5" />
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="119.95343"
+       y="64.50576"
+       id="text39349"><tspan
+         sodipodi:role="line"
+         style="font-size:2.11667px;text-align:center;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="119.95343"
+         y="64.50576"
+         id="tspan39347">Resouce check,</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:2.11667px;text-align:center;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="119.95343"
+         y="67.151596"
+         id="tspan39353">CUcnt</tspan></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       d="m 85,25 h 30"
+       id="path39355"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#path39329"
+       inkscape:connection-end="#circle39335" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="85.085724"
+       y="22.476936"
+       id="text39588"><tspan
+         sodipodi:role="line"
+         id="tspan39584"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="85.085724"
+         y="22.476936">Receive WG</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="85.085724"
+         y="24.240824"
+         id="tspan39586">from buffer</tspan></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       d="M 120,30 V 60"
+       id="path39646"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#circle39335"
+       inkscape:connection-end="#circle39343" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       d="m 128,43.999999 v 0"
+       id="path39666"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0" />
+    <circle
+       style="fill:none;stroke:#000000;stroke-width:0.264583;stroke-dasharray:none"
+       id="circle39668"
+       cx="100"
+       cy="45"
+       r="5" />
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="99.951317"
+       y="45.775757"
+       id="text39672"><tspan
+         sodipodi:role="line"
+         id="tspan39670"
+         style="font-size:2.11667px;text-align:center;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="99.951317"
+         y="45.775757">Reject</tspan></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       d="M 115.52792,60.527922 103.53553,48.535534"
+       id="path39674"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#circle39343"
+       inkscape:connection-end="#circle39668" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;text-align:center;text-anchor:middle;fill:#0000ff;stroke:#0000ff;stroke-width:0.264583;stroke-dasharray:none"
+       x="123.99999"
+       y="38"
+       id="text39696"><tspan
+         sodipodi:role="line"
+         id="tspan39694"
+         style="stroke-width:0.264583"
+         x="123.99999"
+         y="38" /></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="120.59831"
+       y="31.255535"
+       id="text39702"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="120.59831"
+         y="31.255535"
+         id="tspan39700">Finished</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="105.7154"
+       y="58.923321"
+       id="text39724"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="105.7154"
+         y="58.923321"
+         id="tspan39722">invalid,</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="105.7154"
+         y="60.68721"
+         id="tspan39728">CUcnt ≥ Max</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="105.7154"
+         y="62.451096"
+         id="tspan39726" /></text>
+    <path
+       style="fill:none;stroke:#0000ff;stroke-width:0.264583;stroke-dasharray:none;marker-end:url(#marker39916)"
+       id="path39782"
+       sodipodi:type="arc"
+       sodipodi:cx="-98.498291"
+       sodipodi:cy="111.27924"
+       sodipodi:rx="5"
+       sodipodi:ry="5"
+       sodipodi:start="0"
+       sodipodi:end="4.7658844"
+       sodipodi:open="true"
+       sodipodi:arc-type="arc"
+       d="m -93.498291,111.27924 a 5,5 0 0 1 -3.148531,4.64458 5,5 0 0 1 -5.480298,-1.20486 5,5 0 0 1 -0.9101,-5.53688 5,5 0 0 1 4.806279,-2.89568"
+       transform="rotate(-103.47237)" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="130.05045"
+       y="64.608063"
+       id="text40004"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="130.05045"
+         y="64.608063"
+         id="tspan39998">invalid</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="130.05045"
+         y="66.371948"
+         id="tspan40000" /><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="130.05045"
+         y="68.135841"
+         id="tspan40002" /></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="113.67219"
+       y="72.181084"
+       id="text40764"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#000000;stroke:none;stroke-width:0.264583"
+         x="113.67219"
+         y="72.181084"
+         id="tspan40760">CUcnt += step</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#000000;stroke:none;stroke-width:0.264583"
+         x="113.67219"
+         y="73.944969"
+         id="tspan40762" /></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       d="M 96.464466,41.464466 83.535534,28.535534"
+       id="path40768"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#circle39668"
+       inkscape:connection-end="#path39329" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="112.85046"
+       y="19.320196"
+       id="text40834"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="112.85046"
+         y="19.320196"
+         id="tspan40832">Unfinished</tspan></text>
+    <ellipse
+       style="fill:none;stroke:#000000;stroke-width:0.264583;stroke-dasharray:none"
+       id="ellipse40846"
+       cx="80"
+       cy="65"
+       rx="10"
+       ry="5" />
+    <text
+       xml:space="preserve"
+       style="font-size:2.11667px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="80.010582"
+       y="65.600075"
+       id="text40852"><tspan
+         sodipodi:role="line"
+         style="font-size:2.11667px;text-align:center;text-anchor:middle;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="80.010582"
+         y="65.600075"
+         id="tspan40856">Alloc</tspan></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       d="M 110,65 90,65"
+       id="path40858"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#circle39343"
+       inkscape:connection-end="#ellipse40846" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="106.83524"
+       y="66.864075"
+       id="text40999"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="106.83524"
+         y="66.864075"
+         id="tspan40997">valid</tspan></text>
+    <path
+       style="fill:none;stroke:#0000ff;stroke-width:0.231806;stroke-dasharray:none;marker-end:url(#marker39916)"
+       id="path41012"
+       sodipodi:type="arc"
+       sodipodi:cx="131.11958"
+       sodipodi:cy="72.504227"
+       sodipodi:rx="7.4140778"
+       sodipodi:ry="7.6550803"
+       sodipodi:start="4.7116977"
+       sodipodi:end="3.3265177"
+       sodipodi:arc-type="arc"
+       d="m 131.11446,64.849148 a 7.4140778,7.6550803 0 0 1 6.97734,5.051852 7.4140778,7.6550803 0 0 1 -2.23414,8.491156 7.4140778,7.6550803 0 0 1 -8.49394,0.712202 7.4140778,7.6550803 0 0 1 -3.5318,-8.007693"
+       sodipodi:open="true" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="129.43436"
+       y="67.775375"
+       id="text41020"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="129.43436"
+         y="67.775375"
+         id="tspan41014">cache</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="129.43436"
+         y="69.539261"
+         id="tspan41056">updated</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="129.43436"
+         y="71.303154"
+         id="tspan41016" /><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="129.43436"
+         y="73.067039"
+         id="tspan41018" /></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#000000;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="127.48653"
+       y="71.184982"
+       id="text41062"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#000000;stroke:none;stroke-width:0.264583"
+         x="127.48653"
+         y="71.184982"
+         id="tspan41058">CUcnt += 0</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#000000;stroke:none;stroke-width:0.264583"
+         x="127.48653"
+         y="72.948868"
+         id="tspan41060" /></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="76.872169"
+       y="72.346329"
+       id="text41076"><tspan
+         sodipodi:role="line"
+         id="tspan41074"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="76.872169"
+         y="72.346329">CUx RTcache locked</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="76.872169"
+         y="74.110214"
+         id="tspan41182">rt result cleared</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="76.872169"
+         y="75.874107"
+         id="tspan41184">rt scan aborted</tspan></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       d="m 132.48141,40.305392 v 0"
+       id="path41218"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0" />
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#000000;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1"
+       d="m 132.48141,40.305392 v 0"
+       id="path41220"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0" />
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="122.10517"
+       y="57.379566"
+       id="text41228"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="122.10517"
+         y="57.379566"
+         id="tspan41235">如果这里不设计cache updated后重新resouce check的机制，</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="122.10517"
+         y="59.143452"
+         id="tspan41239">就必须锁定CUx RT cache暂时禁止写入</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="69.931236"
+       y="78.191154"
+       id="text41997"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="69.931236"
+         y="78.191154"
+         id="tspan41995">CUx RTcache锁只是暂时不接收rt result（ready=0）</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="69.931236"
+         y="79.95504"
+         id="tspan42004">Alloc req状态的最后一个周期必须将rt中所有已经生成与正在生成的result全部清除</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="45.554684"
+       y="43.71624"
+       id="text42954"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="43.71624"
+         id="tspan42952">等待RT返回三个baseaddr</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="45.480129"
+         id="tspan42958">向CU interface输出valid与data</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="47.244015"
+         id="tspan42960">等待DecoupledIO.fire后完成</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="45.554684"
+       y="52.334846"
+       id="text43059"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="52.334846"
+         id="tspan43057">这里本想alloc后将后续工作交给流水线下一级</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="54.098736"
+         id="tspan43066">本级直接开始处理下一个线程块</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="55.862621"
+         id="tspan43068">但是RT result的先后顺序不定，难以确定返回的</tspan><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;text-align:start;text-anchor:start;fill:#800080;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+         x="45.554684"
+         y="57.626511"
+         id="tspan43070">baseaddr属于哪个已alloc的线程块，只能阻塞</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="80.329575"
+       y="59.421444"
+       id="text43198"
+       inkscape:export-filename="../../../Downloads/text42944.png"
+       inkscape:export-xdpi="600"
+       inkscape:export-ydpi="600"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="80.329575"
+         y="59.421444"
+         id="tspan43202">ok</tspan></text>
+    <g
+       id="g44069"
+       inkscape:export-filename="export/allocator_rtcache.png"
+       inkscape:export-xdpi="600"
+       inkscape:export-ydpi="600">
+      <rect
+         style="fill:#ff6600;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43286"
+         width="8"
+         height="4"
+         x="170"
+         y="40" />
+      <rect
+         style="fill:#0000ff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43550"
+         width="12"
+         height="4"
+         x="178"
+         y="40" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="174.07338"
+         y="42.435459"
+         id="text43712"><tspan
+           sodipodi:role="line"
+           id="tspan43710"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="174.07338"
+           y="42.435459">Valid0</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="184.01515"
+         y="42.435459"
+         id="text43868"><tspan
+           sodipodi:role="line"
+           id="tspan43866"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="184.01515"
+           y="42.435459">Size0</tspan></text>
+      <rect
+         style="fill:#ff6600;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43870"
+         width="8"
+         height="4"
+         x="170"
+         y="44" />
+      <rect
+         style="fill:#0000ff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         id="rect43872"
+         width="12"
+         height="4"
+         x="178"
+         y="44" />
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="174.07338"
+         y="46.435459"
+         id="text43876"><tspan
+           sodipodi:role="line"
+           id="tspan43874"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="174.07338"
+           y="46.435459">Valid1</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Andale Mono';-inkscape-font-specification:'Andale Mono';text-align:start;text-anchor:start;fill:#ffffff;stroke:#ffffff;stroke-width:0.1;stroke-dasharray:none"
+         x="184.01515"
+         y="46.435459"
+         id="text43880"><tspan
+           sodipodi:role="line"
+           id="tspan43878"
+           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:center;text-anchor:middle;fill:#ffffff;stroke-width:0.1"
+           x="184.01515"
+           y="46.435459">Size1</tspan></text>
+    </g>
+    <text
+       xml:space="preserve"
+       style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:1.41111px;font-family:'Courier New';-inkscape-font-specification:'Courier New';text-align:start;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.1;stroke-dasharray:none"
+       x="169.91815"
+       y="39.931656"
+       id="text43884"><tspan
+         sodipodi:role="line"
+         id="tspan43882"
+         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-family:sans-serif;-inkscape-font-specification:sans-serif;text-align:start;text-anchor:start;fill:#000000;stroke:none;stroke-width:0.1"
+         x="169.91815"
+         y="39.931656">CUx Resouce Table cache</tspan></text>
+    <text
+       xml:space="preserve"
+       style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583;stroke-dasharray:none"
+       x="137.80431"
+       y="67.775375"
+       id="text44363"><tspan
+         sodipodi:role="line"
+         style="font-size:1.41111px;fill:#0000ff;stroke:none;stroke-width:0.264583"
+         x="137.80431"
+         y="67.775375"
+         id="tspan44361">CUcnt &lt; Max</tspan></text>
+    <path
+       style="fill:none;fill-rule:evenodd;stroke:#0000ff;stroke-width:0.264583px;stroke-linecap:butt;stroke-linejoin:miter;stroke-opacity:1;marker-end:url(#Arrow2)"
+       d="M 80,60 80,30"
+       id="path510"
+       inkscape:connector-type="polyline"
+       inkscape:connector-curvature="0"
+       inkscape:connection-start="#ellipse40846"
+       inkscape:connection-end="#path39329" />
+  </g>
+</svg>

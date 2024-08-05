@@ -117,14 +117,14 @@ class branch_join(val depth_stack: Int) extends Module{
   warp_id  := branch_ctl_buf.bits.wid
   if_mask_buf.ready := fetch_ctl_buf.io.enq.ready //true.B//if_mask_buf.valid
   //PC_reconv_buf.ready := fetch_ctl_buf.io.enq.ready
-  io.complete.valid := (if_mask_buf.fire() & opcode === 0.U & branch_ctl_buf.valid & takeif)
+  io.complete.valid := (if_mask_buf.fire & opcode === 0.U & branch_ctl_buf.valid & takeif)
 
   io.complete.bits := branch_ctl_buf.bits.wid
 
   when(fetch_ctl_buf.io.enq.ready) {
     when(branch_ctl_buf.valid & (opcode === 0.U) & (branch_ctl_buf.bits.wid === if_mask_buf.bits.wid)) {
-      branch_ctl_buf.ready := if_mask_buf.fire()
-      PC_reconv_buf.ready := if_mask_buf.fire()
+      branch_ctl_buf.ready := if_mask_buf.fire
+      PC_reconv_buf.ready := if_mask_buf.fire
     }.elsewhen(branch_ctl_buf.valid & (opcode === 1.U)) {
       branch_ctl_buf.ready := true.B
       PC_reconv_buf.ready := true.B
@@ -139,12 +139,12 @@ class branch_join(val depth_stack: Int) extends Module{
 
   PC_reconv := PC_reconv_buf.bits
   if_mask := if_mask_buf.bits.if_mask & branch_ctl_buf.bits.mask_init
-  else_mask := (~if_mask_buf.bits.if_mask).asUInt() & branch_ctl_buf.bits.mask_init
+  else_mask := (~if_mask_buf.bits.if_mask).asUInt & branch_ctl_buf.bits.mask_init
   ifCnt := PopCount(if_mask)
   elseCnt := PopCount(else_mask)
   takeif := ((ifCnt < elseCnt) && divOccur) || ifOnly  // take if first if thread take if path is less than thread take else
   ifOnly :=   else_mask === 0.U
-  elseOnly := if_mask.asUInt() === 0.U
+  elseOnly := if_mask.asUInt === 0.U
   divOccur := ~(ifOnly | elseOnly)
   pushentry.reconPC := PC_reconv
   when(takeif){
@@ -156,8 +156,8 @@ class branch_join(val depth_stack: Int) extends Module{
   }
 
   for(x <- 0 until num_warp){
-    push(x)  :=  (opcode === 0.U) && (branch_ctl_buf.fire()) && (x.asUInt() === warp_id ) && divOccur
-    pop(x) := (opcode === 1.U) && (branch_ctl_buf.fire()) && (x.asUInt() === warp_id) //just indicating this is join, maybe not pop, depends on whether TOS rPC match current executing PC
+    push(x)  :=  (opcode === 0.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id ) && divOccur
+    pop(x) := (opcode === 1.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id) //just indicating this is join, maybe not pop, depends on whether TOS rPC match current executing PC
     bjstack(x).push := push(x)
     bjstack(x).pop := pop(x)
     bjstack(x).threadMask := thread_masks(x)
@@ -204,7 +204,7 @@ class branch_join(val depth_stack: Int) extends Module{
   if (SPIKE_OUTPUT) {
     fetch_ctl.spike_info.get := branch_ctl_buf.bits.spike_info.get
     when(io.complete.valid /*&&io.complete.bits===wid_to_check.U*/ && !io.branch_ctl.fire) {
-      printf(p"warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p"sm ${branch_ctl_buf.bits.spike_info.get.sm_id} warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
       when(branch_ctl_buf.bits.opcode === 0.U){
         printf(p" vbranch     current mask and npc:   ")
         when(takeif){
@@ -218,7 +218,7 @@ class branch_join(val depth_stack: Int) extends Module{
       printf(p"\n")
     }
     when(branch_ctl_buf.bits.opcode === 1.U && branch_ctl_buf.valid ) {
-      printf(p"warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
+      printf(p"sm ${branch_ctl_buf.bits.spike_info.get.sm_id} warp ${Decimal(io.complete.bits)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.pc)} 0x${Hexadecimal(branch_ctl_buf.bits.spike_info.get.inst)}")
       printf(p" join    mask and npc:    ")
       popMask.asTypeOf(Vec(num_thread, Bool())).reverse.foreach(x => printf(p"${Hexadecimal(x.asUInt)}"))
       printf(p" 0x${Hexadecimal(popPC)}")
@@ -232,7 +232,7 @@ class branch_join(val depth_stack: Int) extends Module{
   //***** thread mask register control******
   //when branch indeed happened, put executing mask into corresponding register
   //when join indeed happened, put new mask into corresponding register
-  when(if_mask_buf.fire()){
+  when(if_mask_buf.fire){
     when(divOccur){
       when(takeif){
         thread_masks(warp_id) := if_mask

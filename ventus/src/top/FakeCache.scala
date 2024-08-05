@@ -4,7 +4,7 @@ import chisel3.util._
 import L1Cache.DCache._
 import L1Cache._
 import L2cache._
-import chisel3.experimental.dataview.BundleUpcastable
+import chisel3.experimental.dataview._
 import config.config.Parameters
 
 /*class FakeL1DCache(implicit p: Parameters) extends DataCacheIO {

@@ -127,21 +127,21 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   val tAEntryIdx = Mux(secondary_miss,OHToUInt(entryMatchMissReq),entryStatus.io.next)
   val tASubEntryIdx = Mux(secondary_miss,subentryStatus.io.next,0.U)
 
-  when (io.missReq.fire()){
+  when (io.missReq.fire){
     targetInfo_Accesss(tAEntryIdx)(tASubEntryIdx) := io.missReq.bits.targetInfo
   }
 
   //  ******      update MSHR when missRsp    ******
-  assert(!io.missRspIn.fire() || (io.missRspIn.fire() && subentryStatus.io.used >= 1.U))
+  assert(!io.missRspIn.fire || (io.missRspIn.fire && subentryStatus.io.used >= 1.U))
 
-  when(io.missRspIn.fire() && (subentryStatus.io.used =/= 1.U || !io.missRspOut.ready)){
+  when(io.missRspIn.fire && (subentryStatus.io.used =/= 1.U || !io.missRspOut.ready)){
     missRsqBusy := true.B
   }.elsewhen(missRsqBusy && subentryStatus.io.used === 1.U && io.missRspOut.ready){
     missRsqBusy := false.B
   }
 
   io.missRspIn.ready := !missRsqBusy && io.missRspOut.ready
-  io.missRspOut.valid := io.missRspIn.fire() || missRsqBusy
+  io.missRspOut.valid := io.missRspIn.fire || missRsqBusy
 
   io.missRspOut.bits.targetInfo := targetInfo_Accesss(OHToUInt(entryMatchMissRsp))(subentry_next2cancel)
   io.missRspOut.bits.blockAddr := blockAddr_Access(OHToUInt(entryMatchMissRsp))
@@ -149,7 +149,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   //  ******     maintain subentries    ******
   for (iofEn <- 0 until NMshrEntry){
     for (iofSubEn <- 0 until NMshrSubEntry){
-      when(io.missReq.fire()){
+      when(io.missReq.fire){
         when(iofEn.asUInt===entryStatus.io.next &&
           iofSubEn.asUInt===0.U && primary_miss){
           subentry_valid(iofEn)(iofSubEn) := true.B
@@ -161,7 +161,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
           iofSubEn.asUInt === subentry_next2cancel){
           subentry_valid(iofEn)(iofSubEn) := false.B
         }
-      }.elsewhen(io.missRspOut.fire() &&
+      }.elsewhen(io.missRspOut.fire &&
         iofEn.asUInt===OHToUInt(entryMatchMissRsp) &&
         iofSubEn.asUInt===subentry_next2cancel){
         subentry_valid(iofEn)(iofSubEn) := false.B
@@ -170,7 +170,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   }
 
   //  ******   update blockAddr Reg *****
-  when(io.missReq.fire() && primary_miss){
+  when(io.missReq.fire && primary_miss){
     blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
   }
 
@@ -184,7 +184,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   for (i <- 0 to NMshrEntry){
     when(miss2mem_fire && i.U === hasSendStatus.io.next){
       has_send2mem(i.U) := true.B
-    }.elsewhen((missRsqBusy || io.missRspIn.fire) && io.missRspOut.fire() && subentryStatus.io.used===1.U && i.U === OHToUInt(entryMatchMissRsp)){
+    }.elsewhen((missRsqBusy || io.missRspIn.fire) && io.missRspOut.fire && subentryStatus.io.used===1.U && i.U === OHToUInt(entryMatchMissRsp)){
       has_send2mem(i.U) := false.B//missRsp, L2 to core
     }
   }
@@ -194,6 +194,6 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
   //  ******    ReqConflictWithRsp
   //missRspIn fire或者busy时，missReq来了block addr相同的请求，置高此信号
   ReqConflictWithRsp := io.missReq.valid &&
-    ((io.missRspIn.fire() && io.missRspIn.bits.blockAddr === io.missReq.bits.blockAddr) ||
+    ((io.missRspIn.fire && io.missRspIn.bits.blockAddr === io.missReq.bits.blockAddr) ||
       (missRsqBusy && io.missRspOut.bits.blockAddr === io.missReq.bits.blockAddr))
 }
