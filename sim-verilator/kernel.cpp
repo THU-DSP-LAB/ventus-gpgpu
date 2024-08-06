@@ -49,7 +49,7 @@ void Kernel::wg_dispatched() {
     increment_x_then_y_then_z(m_next_wg, m_grid_dim);
 }
 
-Kernel::Kernel(const std::string& kernel_name, const std::string& metadata_file, const std::string& data_file)
+Kernel::Kernel(const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file)
     : m_datafile(data_file)
     , m_kernel_id(-1)
     , m_kernel_name(kernel_name) {

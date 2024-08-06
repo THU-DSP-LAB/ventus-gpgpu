@@ -1,5 +1,6 @@
 #pragma once
 #include "MemBox.hpp"
+#include <filesystem>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -32,7 +33,7 @@ struct metadata_t { // 这个metadata是供驱动使用的，而不是给硬件�
 
 class Kernel {
 public:
-    Kernel(const std::string& kernel_name, const std::string& metadata_file, const std::string& data_file);
+    Kernel(const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file);
 
     // Basic kernel info
     uint32_t get_kid() const { return m_kernel_id; }
@@ -77,7 +78,7 @@ private:
     uint32_t m_kernel_id;
     const std::string m_kernel_name;
     metadata_t m_metadata;
-    const std::string m_datafile;
+    const std::filesystem::path m_datafile;
     uint32_t m_wgid_base;
 
     // Helpers

@@ -3,6 +3,7 @@
 #include "kernel.hpp"
 #include <cassert>
 #include <memory>
+#include "log.h"
 
 Cta::Cta(MemBox* mem)
     : m_kernel_idx_dispatching(-1)
@@ -13,6 +14,7 @@ Cta::Cta(MemBox* mem)
 void Cta::kernel_add(std::shared_ptr<Kernel> kernel) {
     assert(kernel && !kernel->is_running());
     m_kernels.push_back(kernel);
+    //log_debug("CTA_sche receive Kernel %s", kernel->get_kname().c_str());
 }
 
 void Cta::wg_dispatched() {
