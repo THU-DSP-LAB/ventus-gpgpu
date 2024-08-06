@@ -107,8 +107,8 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
   val lsu=Module(new LSUexe)
   val sfu=Module(new SFUexe)
   val mul=Module(new vMULv2(num_thread,num_lane))
-  val tensorcore=Module(new vTCexe)
-//  val tensorcore=Module(new vTCexeV2)
+//  val tensorcore=Module(new vTCexe)
+  val tensorcore=Module(new vTCexeV2)
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,6))
 
@@ -313,12 +313,12 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
     //printf(p"wid=${exe_dataX.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.inst)}\n")
   }
   when(exe_dataV.io.deq.fire&(exe_dataV.io.deq.bits.ctrl.wid===2.U)) {
-    //printf(p"wid=${exe_dataV.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.inst)}\n")
+    printf(p"wid=${exe_dataV.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.inst)}\n")
   }
 
 
   //输出所有write mem的操作
-  //val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
+//  val wid_to_check = 2.U //exe_data.io.deq.bits.ctrl.wid===wid_to_check&
   //  when( exe_data.io.deq.fire&exe_data.io.deq.bits.ctrl.mem_cmd===2.U){
   //    when(exe_data.io.deq.bits.ctrl.isvec){
   //      printf(p"warp${exe_data.io.deq.bits.ctrl.wid} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)} 0x${Hexadecimal(exe_data.io.deq.bits.ctrl.inst)} w v${exe_data.io.deq.bits.ctrl.reg_idx3} ")
@@ -333,12 +333,12 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
   //    }
   //  }
   //输出所有发射的指令
-  //when( exe_data.io.deq.fire()){
-  //  printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
-  //  //exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
-  //  printf(p"mask ${exe_data.io.deq.bits.mask} with${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
-  //  printf(p"\n")
-  //}
+//  when( exe_data.io.deq.fire()){
+//    printf(p"${exe_data.io.deq.bits.ctrl.wid},0x${Hexadecimal(exe_data.io.deq.bits.ctrl.pc)},writedata=")
+//    //exe_data.io.deq.bits.in3.foreach(x=>{printf(p"${Hexadecimal(x.asUInt)} ")})
+//    printf(p"mask ${exe_data.io.deq.bits.mask} with${Hexadecimal(exe_data.io.deq.bits.in1(0))},${Hexadecimal(exe_data.io.deq.bits.in2(0))}")
+//    printf(p"\n")
+//  }
 
   //输出特定指令的操作数
   //when((exe_data.io.deq.bits.ctrl.wid===wid_to_check)& exe_data.io.deq.fire() ){
@@ -350,11 +350,11 @@ class pipe(val sm_id: Int = 0,SV: Option[mmu.SVParam] = None)(implicit p: Parame
   //  printf(p"\n")
   //}
   //输出写入向量寄存器的
-  //  when(wb.io.out_v.fire&wb.io.out_v.bits.warp_id===wid_to_check){
-  //    printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
-  //    wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
-  //    printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
-  //  }
+//    when(wb.io.out_v.fire){//&wb.io.out_v.bits.warp_id===wid_to_check){
+//      printf(p"write v${wb.io.out_v.bits.reg_idxw} ")
+//      wb.io.out_v.bits.wb_wvd_rd.foreach(x=>printf(p"${Hexadecimal(x.asUInt)} "))
+//      printf(p"mask ${wb.io.out_v.bits.wvd_mask}\n")
+//    }
   //  ////输出写入标量寄存器的
   //  when(wb.io.out_x.fire&wb.io.out_x.bits.warp_id===wid_to_check){
   //    printf(p"write x${wb.io.out_x.bits.reg_idxw} 0x${Hexadecimal(wb.io.out_x.bits.wb_wxd_rd)}\n")

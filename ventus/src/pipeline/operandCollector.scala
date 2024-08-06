@@ -396,7 +396,7 @@ class crossBar  extends Module{
   val regOrderVector = Wire(Vec(num_bank, UInt(2.W)))
 
   // There is not conflict from crossbar to collector units, so don't need to deal with stall.
-  // However, in situation bank conflict occurs, some banks may have invalid output.
+//   However, in situation bank conflict occurs, some banks may have invalid output.
   (0 until num_bank).foreach(i=>{
     CUIdScalar(i) := io.chosenScalar(i) >> 2.U
     regOrderScalar(i) := io.chosenScalar(i) % 4.U

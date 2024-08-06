@@ -207,5 +207,5 @@ class ArrayMultiplier(num_thread: Int, len: Int)
   io.out.bits.ctrl:=ctrlVec.last
   io.out.bits.mask:=maskVec.last
   //io.out.bits.data := Mux(ctrlVec.last.isW, SignExt(res(31,0),xlen), res)
-  //控制信号应该合并为一个去流。不然这么多信号还是很浪费的。先验证功能吧
+  //TODO:控制信号应该合并为一个去流。不然这么多信号还是很浪费的。先验证功能吧
 }

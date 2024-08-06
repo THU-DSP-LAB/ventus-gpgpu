@@ -128,6 +128,12 @@ class DotProdCtrl(len: Int, tcCtrl: Data = EmptyFPUCtrl()) extends Bundle{
   val ctrl = FPUCtrlFac(tcCtrl)
 }
 
+class DotProdCtrl_mix(len: Int, tcCtrl: Data = EmptyFPUCtrl()) extends Bundle{
+  val rm = UInt(3.W)
+  val c = UInt((2*len).W)
+  val ctrl = FPUCtrlFac(tcCtrl)
+}
+
 class TCDotProductInput(DimN: Int, len: Int, tcCtrl: Data = EmptyFPUCtrl()) extends Bundle{
   val a = Vec(DimN, UInt(len.W))
   val b = Vec(DimN, UInt(len.W))
@@ -135,6 +141,16 @@ class TCDotProductInput(DimN: Int, len: Int, tcCtrl: Data = EmptyFPUCtrl()) exte
   val c = UInt(len.W)
   val rm = UInt(3.W)
   val ctrl = FPUCtrlFac(tcCtrl) // for TCCtrl
+}
+
+class TCDotProductInput_MixedPrecision(DimN: Int, len: Int, tcCtrl: Data = EmptyFPUCtrl()) extends Bundle{
+  val a = Vec(DimN, UInt(len.W))
+  val b = Vec(DimN, UInt(len.W))
+  //val ctrl = FPUCtrlFac(ctrlGen)
+  val c = UInt((2*len).W)
+  val rm = UInt(3.W)
+  val ctrl = FPUCtrlFac(tcCtrl) // for TCCtrl
+  val isMixedPrecisionMode = Bool()
 }
 
 class TCDotProductBinaryInput(DimN: Int, tcCtrl: Data = EmptyFPUCtrl()) extends Bundle{
@@ -155,6 +171,150 @@ class TCDotProductInput_Reuse(DimN: Int, len: Int, tcCtrl: Data = EmptyFPUCtrl()
 }
 
 class TCDotProductOutput(len: Int, ctrlGen: Data) extends FPUOutput(len, ctrlGen)
+
+class FP16toFP32Converter extends Module {
+  val io = IO(new Bundle {
+    val in = Input(UInt(16.W)) // 输入FP16
+    val out = Output(UInt(32.W)) // 输出FP32
+  })
+
+  // FP16格式: 1 bit sign, 5 bits exponent, 10 bits mantissa
+  // FP32格式: 1 bit sign, 8 bits exponent, 23 bits mantissa
+
+  // 提取FP16的各个部分
+  val sign = io.in(15)
+  val exp = io.in(14, 10)
+  val frac = io.in(9, 0)
+
+  // 检测零值
+  val isZero = (exp === 0.U) && (frac === 0.U)
+
+  // FP32的各个部分
+  val fp32Sign = sign
+  val fp32Exp = Mux(isZero, 0.U(8.W), (exp + 112.U).asUInt)
+  val fp32Frac = Mux(isZero, 0.U(23.W), Cat(0.U(13.W), frac))
+
+  // 构建FP32
+  io.out := Cat(fp32Sign, fp32Exp, fp32Frac)
+}
+
+class TCDotProduct_MixedPrecision(DimN: Int, expWidth: Int, precision: Int,
+                   tcCtrl: Data = EmptyFPUCtrl()) extends Module{
+  assert(isPow2(DimN) && DimN > 1)
+
+  val len = expWidth + precision
+  val io = IO(new Bundle{
+    val in = Flipped(DecoupledIO(new TCDotProductInput_MixedPrecision(DimN, len, tcCtrl)))
+    val out = DecoupledIO(new TCDotProductOutput(2*len, tcCtrl))
+  })
+
+  def addTree = {
+    var vl = DimN
+    var adds: Seq[Seq[TCAddPipe]] = Nil
+    while (vl > 1) {
+      vl = vl / 2
+      adds = adds :+ Seq(Module(new TCAddPipe(expWidth, precision, new DotProdCtrl_mix(len, tcCtrl)))) ++
+        Seq.fill(vl - 1)(Module(new TCAddPipe(expWidth, precision)))
+    }
+    adds
+  }
+
+  val muls = Seq(Module(new TCMulPipe(expWidth, precision, new DotProdCtrl_mix(len, tcCtrl)))) ++
+    Seq.fill(DimN - 1)(Module(new TCMulPipe(expWidth, precision)))
+  // connect IN and MULS
+  val mctrl = Wire(new DotProdCtrl_mix(len, tcCtrl))
+  mctrl.rm := io.in.bits.rm
+  mctrl.c := io.in.bits.c
+  mctrl.ctrl.foreach( _ := io.in.bits.ctrl.get )
+  (0 until DimN).foreach{ i =>
+    muls(i).io.in.bits.a := io.in.bits.a(i)
+    muls(i).io.in.bits.b := io.in.bits.b(i)
+    muls(i).io.in.bits.c := DontCare
+    muls(i).io.in.bits.op := DontCare
+    muls(i).io.in.bits.rm := mctrl.rm
+    muls(i).io.in.bits.ctrl.foreach{ _ := mctrl }
+    muls(i).io.in.valid := io.in.valid
+    io.in.ready := muls(i).io.in.ready
+  }
+  val adds = addTree
+  val actrls = Seq.fill(log2Ceil(DimN))(Wire(new DotProdCtrl_mix(len, tcCtrl)))
+  // connect MULS and ADDS
+  (0 until DimN / 2).foreach{ i =>
+    adds(0)(i).io.in.bits.a := muls(i).io.out.bits.result
+    adds(0)(i).io.in.bits.b := muls(i + DimN/2).io.out.bits.result
+    adds(0)(i).io.in.bits.c := DontCare
+    adds(0)(i).io.in.bits.op := DontCare
+    adds(0)(i).io.in.bits.rm := actrls(0).rm
+    adds(0)(i).io.in.bits.ctrl.foreach( _ := muls(i).io.out.bits.ctrl.get )
+    adds(0)(i).io.in.valid := muls(i).io.out.valid
+    muls(i).io.out.ready := adds(0)(i).io.in.ready
+    muls(i + DimN/2).io.out.ready := adds(0)(i).io.in.ready
+  }
+  private var vl = DimN; private var i = 0;
+  while(vl > 1) {
+    vl = vl / 2
+    actrls(i) := adds(i)(0).io.in.bits.ctrl.get
+    if (i != 0) {
+      // connect ADDS
+      (0 until vl).foreach { j =>
+        adds(i)(j).io.in.bits.a := adds(i - 1)(j).io.out.bits.result
+        adds(i)(j).io.in.bits.b := adds(i - 1)(j + vl).io.out.bits.result
+        adds(i)(j).io.in.bits.c := DontCare
+        adds(i)(j).io.in.bits.op := DontCare
+        adds(i)(j).io.in.bits.rm := actrls(i).rm
+        adds(i)(j).io.in.bits.ctrl.foreach(_ := adds(i - 1)(j).io.out.bits.ctrl.get)
+
+        adds(i)(j).io.in.valid := adds(i - 1)(j).io.out.valid
+        adds(i - 1)(j).io.out.ready := adds(i)(j).io.in.ready
+        adds(i - 1)(j + vl).io.out.ready := adds(i)(j).io.in.ready
+      }
+    }
+    i = i + 1
+  }
+
+  // TODO: transfer FP16->FP32.
+  //  Done.
+  val fp16to32 = Module(new FP16toFP32Converter)
+
+  val finalAdd = Module(new TCAddPipe(8, 24, new DotProdCtrl_mix(len, tcCtrl)))
+  val finalAdd_FP16 = Module(new TCAddPipe(5, 11, new DotProdCtrl_mix(len, tcCtrl)))
+
+  val outpack = Wire(new DotProdCtrl_mix(len, tcCtrl))
+  outpack := adds.last.head.io.out.bits.ctrl.get
+
+  fp16to32.io.in := adds.last.head.io.out.bits.result
+  finalAdd.io.in.bits.a := fp16to32.io.out//adds.last.head.io.out.bits.result
+
+  finalAdd.io.in.bits.b := outpack.c
+  finalAdd.io.in.bits.c := DontCare
+  finalAdd.io.in.bits.op := DontCare
+  finalAdd.io.in.bits.rm := outpack.rm
+  finalAdd.io.in.bits.ctrl.foreach( _ := outpack )
+  finalAdd.io.in.valid := adds.last.head.io.out.valid && io.in.bits.isMixedPrecisionMode
+
+  finalAdd_FP16.io.in.bits.a := adds.last.head.io.out.bits.result
+  finalAdd_FP16.io.in.bits.b := outpack.c(15,0)
+  finalAdd_FP16.io.in.bits.c := DontCare
+  finalAdd_FP16.io.in.bits.op := DontCare
+  finalAdd_FP16.io.in.bits.rm := outpack.rm
+  finalAdd_FP16.io.in.bits.ctrl.foreach( _ := outpack )
+  finalAdd_FP16.io.in.valid := adds.last.head.io.out.valid  && (! io.in.bits.isMixedPrecisionMode)
+
+  adds.last.head.io.out.ready := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.in.ready,finalAdd_FP16.io.in.ready)
+
+  val fifo = Module(new Queue(new TCDotProductOutput(len, tcCtrl), entries = 1, pipe = true))
+  fifo.io.enq.bits.result := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.bits.result,Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result))
+  fifo.io.enq.bits.fflags := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.bits.fflags,finalAdd_FP16.io.out.bits.fflags)
+
+  val outpack2 = Wire(new DotProdCtrl_mix(len, tcCtrl))
+  outpack2 := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.bits.ctrl.get,finalAdd_FP16.io.out.bits.ctrl.get)
+  fifo.io.enq.bits.ctrl.foreach( _ := outpack2.ctrl.get )
+  fifo.io.enq.valid := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.valid,finalAdd_FP16.io.out.valid)
+  finalAdd.io.out.ready := fifo.io.enq.ready
+  finalAdd_FP16.io.out.ready := fifo.io.enq.ready
+  io.out <> fifo.io.deq
+}
+
 
 class TCDotProduct(DimN: Int, expWidth: Int, precision: Int,
                    tcCtrl: Data = EmptyFPUCtrl()) extends Module{
@@ -229,7 +389,6 @@ class TCDotProduct(DimN: Int, expWidth: Int, precision: Int,
     }
     i = i + 1
   }
-
   val finalAdd = Module(new TCAddPipe(expWidth, precision, new DotProdCtrl(len, tcCtrl)))
   val outpack = Wire(new DotProdCtrl(len, tcCtrl))
   outpack := adds.last.head.io.out.bits.ctrl.get
@@ -425,12 +584,23 @@ class TCDotProductBinary(DimN: Int,
   io.in.ready := io.out.ready
 }
 
+//################################## TCComputation ##################################
 class TCComputationInput(DimM:Int,DimN:Int,DimK:Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
   val A = Vec(DimM*DimK, UInt(len.W))
   val B = Vec(DimN*DimK, UInt(len.W))
   val C = Vec(DimM*DimN, UInt(len.W))
 //  val op = UInt(3.W)
 //  val ctrl = FPUCtrlFac(new EmptyFPUCtrl())
+  val rm = UInt(3.W)
+  val ctrl = tcCtrl.cloneType
+}
+
+class TCComputationInput_MixedPrecision(DimM:Int,DimN:Int,DimK:Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
+  val A = Vec(DimM*DimK, UInt(len.W))//FP16
+  val B = Vec(DimN*DimK, UInt(len.W))//FP16
+  val C = Vec(DimM*DimN, UInt((2*len).W))//mixedPrecision FP32
+  //  val op = UInt(3.W)
+  //  val ctrl = FPUCtrlFac(new EmptyFPUCtrl())
   val rm = UInt(3.W)
   val ctrl = tcCtrl.cloneType
 }
@@ -459,6 +629,49 @@ class TCComputationBinaryInput(DimM:Int,DimN:Int,DimK:Int, tcCtrl: TCCtrl) exten
 class TensorCoreOutput(vl:Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
   val data = Vec(vl, new FPUOutput(len, EmptyFPUCtrl()))
   val ctrl = tcCtrl.cloneType
+}
+
+
+class TC_ComputationArray_MixedPrecision(xDatalen: Int=16, DimM: Int=8, DimN: Int=4, DimK:Int=8, tcCtrl: TCCtrl) extends Module {
+  //  mnk defined as cuda.
+  //  m8n4k8
+  //  xDatalen: data bit len. Here: A\B=FP16; C\D=FP32
+  //  TC_ComputationArray_MixedPrecision(16,8,4,8)
+  //  Compute: D[m8n4] = A[m8k8] * B[k8n4] + C[m8n4]
+
+  val io = IO(new Bundle{
+    val in = Flipped(DecoupledIO(new TCComputationInput_MixedPrecision(DimM, DimN, DimK, xDatalen, tcCtrl)))
+    val out = DecoupledIO(new TensorCoreOutput(DimM * DimN, 2*xDatalen, tcCtrl))// out matrix dim=[8,4]
+  })
+  dontTouch(io.in.bits)
+  val TCArray = Seq(Module(new TCDotProduct_MixedPrecision(DimK, 5, 11, tcCtrl))) ++
+    Seq.fill(DimM*DimN-1)(Module(new TCDotProduct_MixedPrecision(DimK, 5, 11)))
+  // control sig only claim 1 times
+  for (i <- 0 until  DimM * DimN) {
+    io.out.bits.data(i).result := 0.U
+    io.out.bits.data(i).fflags := 0.U
+  }
+  io.in.ready := TCArray.head.io.in.ready
+  io.out.valid := TCArray.head.io.out.valid
+
+  for(m <- 0 until DimM){
+    for(n <- 0 until DimN){
+      for(k <- 0 until DimK){
+        TCArray(m * DimN + n).io.in.bits.a(k) := io.in.bits.A(m*DimK+k)
+        TCArray(m * DimN + n).io.in.bits.b(k) := io.in.bits.B(n*DimK+k)//col first
+      }
+      TCArray(m * DimN + n).io.in.bits.c := io.in.bits.C(m * DimN + n)
+
+      TCArray(m * DimN + n).io.in.bits.rm := io.in.bits.rm
+      TCArray(m * DimN + n).io.in.bits.ctrl.foreach(_ := io.in.bits.ctrl)
+      TCArray(m * DimN + n).io.in.valid := io.in.valid
+      TCArray(m * DimN + n).io.out.ready := io.out.ready
+
+      io.out.bits.data(m * DimN + n).result := TCArray(m * DimN + n).io.out.bits.result
+      io.out.bits.data(m * DimN + n).fflags := TCArray(m * DimN + n).io.out.bits.fflags
+    }
+  }
+  io.out.bits.ctrl := TCArray.head.io.out.bits.ctrl.get
 }
 
 

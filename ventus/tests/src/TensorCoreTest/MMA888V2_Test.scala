@@ -1,21 +1,21 @@
 package TensorCoreTest
 
-import FPUv2.utils.RoundingModes
 import FPUv2.TCCtrl
-import TensorCore.{TC_MMA888, TC_MMAInput, TC_MMAOutput, vTCData}
+import FPUv2.utils.RoundingModes
+import TensorCore.{TC_MMA888,TC_MMA888_V2, TC_MMAInput, TC_MMAOutput, vTCData}
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
-import pipeline.{CtrlSigs, InstWriteBack, vExeData}
+import pipeline.{CtrlSigs, InstWriteBack}
 import play.TestUtils.RequestSender
 //import chisel3.util.Hexadecimal
 import top.parameters._
 
 import scala.io.Source
 
-class MMA888_Test extends AnyFlatSpec with ChiselScalatestTester {
+class MMA888V2_Test extends AnyFlatSpec with ChiselScalatestTester {
 //  import FPUv2.TestArgs._
   object TCMMA888Input{
     var count = 0
@@ -118,9 +118,9 @@ class MMA888_Test extends AnyFlatSpec with ChiselScalatestTester {
   }
   }
 
-  behavior of "Tensor Core"
+  behavior of "Tensor Core MMA888 V2"
   it should "TCComputationArray 888 FP16" in {
-    test(new TC_MMA888(8,8,8,16,new TCCtrl(32, 1))).withAnnotations(Seq(WriteVcdAnnotation)) { d =>
+    test(new TC_MMA888_V2(8,8,8,16,new TCCtrl(32, 1))).withAnnotations(Seq(WriteVcdAnnotation)) { d =>
       TCMMA888Input.reset
       d.io.in.initSource()
       d.io.in.setSourceClock(d.clock)
@@ -137,6 +137,7 @@ class MMA888_Test extends AnyFlatSpec with ChiselScalatestTester {
       var clock_cnt = 0
 
       while(clock_cnt <= 100){
+        d.clock.step(1)
         TC_input_sender.eval()
         d.io.out.ready.poke(true.B)
         d.clock.step()

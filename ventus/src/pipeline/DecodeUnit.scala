@@ -484,7 +484,7 @@ object IDecodeLUT_VC{
 
     VADD12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
     VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
-    VFTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
+    VFTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),//tc
     VFEXP_V ->          List(Y,Y,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_EXP,N,M_X,N,N,Y,Y,N,N,N,N,N,N,N),
     //VHTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTH,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
     //VBTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTB,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
@@ -494,7 +494,8 @@ object IDecodeLUT_VC{
     CP_ASYNC_TENSOR ->    List(N, N, N, B_N, N, N, CSR.N, N, A3_VRS3, A2_VRS2, A1_VRS1, IMM_S, MEM_X, FN_ADD, N, M_X, N, N, N, N, N, N, N, N, N, N, N),
     CP_ASYNC_FENCE ->     List(N,N,Y,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,N,N,N,N,N),
 
-    TC_MMA            ->  List(N, N, N, B_N, N, N, CSR.N, N, A3_VRS3, A2_RS2, A1_RS1, IMM_S, MEM_X, FN_ADD, N, M_X, N, N, N, N, N, N, N, N, N, N, N),
+    TC_MMA            ->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,Y,N,N),//TODO check its meaning.
+//                        List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N)
   )
 }
 
@@ -573,7 +574,8 @@ class InstrDecodeV2 extends Module {
         BitPat("b1011011") -> lut(3),
         BitPat("b0001011") -> lut(3),
         //518
-        BitPat("b1000001") -> lut(3)
+        BitPat("b1000001") -> lut(3),
+        BitPat("b1100001") -> lut(3)
       ))
   })
   (ctrlSignals zip io.control).zipWithIndex.foreach{ case((s, c), i) =>
@@ -589,7 +591,7 @@ class InstrDecodeV2 extends Module {
     c.simt_stack_op := s(5)
     c.csr := s(6)
     c.reverse := s(7) //for some vector inst,change in1 and in2, e.g. subr
-    c.isvec := s(0) //isvec=1->vALU/vFPU
+    c.isvec := s(0) //isvec=1->vALU/vFPU/TC
     c.sel_alu3 := s(8)
     c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
     c.sel_alu2 := s(9)
@@ -609,7 +611,7 @@ class InstrDecodeV2 extends Module {
     c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
     c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
-    c.tc := s(23)
+    c.tc := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt, true.B, false.B)//s(23)//
     c.disable_mask := s(24)
     c.custom_signal_0 := s(25)
     c.reg_idx1 := Cat(regextInfo(i).regPrefix(1), io.inst(i)(19, 15))

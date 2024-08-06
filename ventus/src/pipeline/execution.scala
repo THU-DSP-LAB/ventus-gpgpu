@@ -16,7 +16,7 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 import IDecode._
-import TensorCore.TC_MMA888
+import TensorCore.{TC_MMA888, TC_MMA888_V2}
 
 class BranchCtrl extends Bundle{
   val wid=UInt(depth_warp.W)
@@ -119,6 +119,40 @@ class vTCexe extends Module{
 //  val tensor = Module(new TC_MMA888(8,8,8,16,new TCCtrlv2(xLen, depth_warp)))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
 
+
+//  val regArray_in = Reg(new vExeData())
+//  when(io.in.valid){
+//    regArray_in<>io.in.bits
+//  }
+//
+//  if(SPIKE_OUTPUT){
+//    val tcctrl_i = Wire(new TCCtrlv2(xLen, depth_warp))
+//    tcctrl_i.spike_info.get := regArray_in.ctrl.spike_info.get//io.in.bits.ctrl.spike_info.get
+//    tcctrl_i.reg_idxw := regArray_in.ctrl.reg_idxw//io.in.bits.ctrl.reg_idxw
+//    tcctrl_i.warpID := regArray_in.ctrl.wid//io.in.bits.ctrl.wid
+//    tensor.io.in.bits.ctrl := tcctrl_i
+//  }
+//  tensor.io.in.bits.ctrl.reg_idxw:=regArray_in.ctrl.reg_idxw//io.in.bits.ctrl.reg_idxw
+//  tensor.io.in.bits.ctrl.warpID:=regArray_in.ctrl.wid//io.in.bits.ctrl.wid
+//  tensor.io.in.valid:=io.in.valid
+//  io.in.ready:=tensor.io.in.ready
+//  (0 until num_thread).foreach(x=>{
+//    tensor.io.in.bits.data(x).ctrl.foreach{ _ :=0.U.asTypeOf(EmptyFPUCtrl())}
+//    tensor.io.in.bits.data(x).op:=0.U
+//    tensor.io.in.bits.data(x).rm:=io.rm
+//    tensor.io.in.bits.data(x).a:=regArray_in.in1(x)//regArray_datain(0)(x)//io.in.bits.in1(x)
+//    tensor.io.in.bits.data(x).b:=regArray_in.in1(x)//regArray_datain(1)(x)//
+//    tensor.io.in.bits.data(x).c:=regArray_in.in1(x)//regArray_datain(2)(x)//
+//    result_v.io.enq.bits.wb_wvd_rd(x):=tensor.io.out.bits.data(x).result
+//  })
+
+  val regArray_datain = Reg(Vec(3,Vec(num_thread, UInt(xLen.W))))
+  when(io.in.valid){
+    regArray_datain(0):=io.in.bits.in1
+    regArray_datain(1):=io.in.bits.in2
+    regArray_datain(2):=io.in.bits.in3
+  }
+
   if(SPIKE_OUTPUT){
     val tcctrl_i = Wire(new TCCtrlv2(xLen, depth_warp))
     tcctrl_i.spike_info.get := io.in.bits.ctrl.spike_info.get
@@ -134,9 +168,9 @@ class vTCexe extends Module{
     tensor.io.in.bits.data(x).ctrl.foreach{ _ :=0.U.asTypeOf(EmptyFPUCtrl())}
     tensor.io.in.bits.data(x).op:=0.U
     tensor.io.in.bits.data(x).rm:=io.rm
-    tensor.io.in.bits.data(x).a:=io.in.bits.in1(x)
-    tensor.io.in.bits.data(x).b:=io.in.bits.in2(x)
-    tensor.io.in.bits.data(x).c:=io.in.bits.in3(x)
+    tensor.io.in.bits.data(x).a:=regArray_datain(0)(x)//io.in.bits.in1(x)
+    tensor.io.in.bits.data(x).b:=regArray_datain(1)(x)//
+    tensor.io.in.bits.data(x).c:=regArray_datain(2)(x)//
     result_v.io.enq.bits.wb_wvd_rd(x):=tensor.io.out.bits.data(x).result
   })
 
@@ -160,51 +194,56 @@ class vTCexe extends Module{
 class vTCexeV2 extends Module{
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
-    val rm = Input(UInt(3.W))
+    val rm = Input(UInt(3.W))   // rounding mode
     //val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
   // thread = 8: Computation Array = 242; thread = 32: Computation Array = 484
   // val tensor = Module(new TensorCoreFP32(num_thread, tc_dim(0), tc_dim(1), tc_dim(2), new TCCtrlv2(xLen, depth_warp)))
   // thread = 32: 32bit register; FP16, 888 32 thread; 848 Computation Array
-  val tensor = Module(new TC_MMA888(DimM=8, DimN=8, DimK=8, xDatalen=16, new TCCtrlv2(xLen, depth_warp)))
+//  printf("Here is tensor core exec...\n")
+  val tensor = Module(new TC_MMA888_V2(DimM=8, DimN=8, DimK=8, xDatalen=16, new TCCtrlv2(xLen, depth_warp)))
   val result_v = Module(new Queue(new WriteVecCtrl,1,pipe=true))
 
   // Get ctrl and rm.
-  //  tensor.io.in.bits.ctrl := 0.U.asTypeOf(EmptyFPUCtrl())
-  tensor.io.in.bits.rm := io.rm
-  if(SPIKE_OUTPUT){
+  tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
+  tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
+  //  If SIPKE Info here, we will init spike_info too.
+  if(SPIKE_OUTPUT) {
     val tcctrl_i = Wire(new TCCtrlv2(xLen, depth_warp))
     tcctrl_i.spike_info.get := io.in.bits.ctrl.spike_info.get
     tcctrl_i.reg_idxw := io.in.bits.ctrl.reg_idxw
     tcctrl_i.warpID := io.in.bits.ctrl.wid
     tensor.io.in.bits.ctrl := tcctrl_i
   }
-  tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
-  tensor.io.in.valid:=io.in.valid
-  io.in.ready:=tensor.io.in.ready
+  tensor.io.in.bits.rm := io.rm // TODO: need further check its usage
 
   // Get Input data.
-  tensor.io.in.bits.data_in <> io.in.bits
-//  tensor.io.in.bits.data_in.in1 := io.in.bits.in1
-//  tensor.io.in.bits.data_in.in2 := io.in.bits.in2
-//  tensor.io.in.bits.data_in.in3 := io.in.bits.in3
-//  tensor.io.in.bits.data_in.mask := io.in.bits.mask
-//  tensor.io.in.bits.data_in.ctrl := io.in.bits.ctrl
+  tensor.io.in.bits.data_in.mask <> io.in.bits.mask
+  tensor.io.in.bits.data_in.in1 <> io.in.bits.in1
+  tensor.io.in.bits.data_in.in2 <> io.in.bits.in2
+  tensor.io.in.bits.data_in.in3 <> io.in.bits.in3
 
+  tensor.io.in.valid := io.in.valid
+  io.in.ready := tensor.io.in.ready
 
+//  val regArray_in = Reg(new vExeData())
+//  val regvalid = Reg(Bool())
+//  when(io.in.fire){
+//    regArray_in := io.in.bits
+////    tensor.io.in.bits.data_in <> io.in.bits
+//  }
 
   // Get computation results
   (0 until num_thread).foreach(x=>{
     result_v.io.enq.bits.wb_wvd_rd(x):=tensor.io.out.bits.data_out(x)
   })
 
-  result_v.io.enq.bits.warp_id:=tensor.io.out.bits.ctrl.warpID
-  result_v.io.enq.bits.reg_idxw:=tensor.io.out.bits.ctrl.reg_idxw
-  result_v.io.enq.bits.wvd:=tensor.io.out.valid
+  result_v.io.enq.bits.warp_id := tensor.io.out.bits.ctrl.warpID
+  result_v.io.enq.bits.reg_idxw := tensor.io.out.bits.ctrl.reg_idxw
+  result_v.io.enq.bits.wvd := tensor.io.out.valid
 //  TODO: now is all valid.
-  result_v.io.enq.bits.wvd_mask.foreach(_:=true.B)
+  result_v.io.enq.bits.wvd_mask.foreach(_:=true.B)// := tensor.io.out.bits.data_out//.foreach(_:=true.B)
   result_v.io.enq.valid:=tensor.io.out.valid
   tensor.io.out.ready:=result_v.io.enq.ready
 
