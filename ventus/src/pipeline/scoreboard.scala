@@ -67,6 +67,8 @@ class CtrlSigs extends Bundle {
   val funct = UInt(3.W)
   val copysize = UInt(2.W) //
   val dma = Bool()
+
+//  val mixedPrecisssion = Bool()
 }
 class scoreboardIO extends Bundle{
   val ibuffer_if_ctrl=Input(new CtrlSigs())

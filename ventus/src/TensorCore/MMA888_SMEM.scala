@@ -510,12 +510,14 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
   //  xDatalen: data bit len === xLen. FP16: xDatalen=16
   //  Compute: C[m8n8] = A[m8k8] * B[k8n8] + C[m8n8]
   //  A\B\C from Register.
+  //  Now, this module can process FP16 data type(A\B\C: FP16) and mixed precision data type(A\B: FP16 C:FP32).
 
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new TC_MMAInput_MixedPrecision(tcctrl)))
     val out = DecoupledIO(new TC_MMAOutput(tcctrl))
   })
   val set_num = 2 //2 := (888/848)
+
   // Init Register/FIFO(depth=1), Data output cache.
   val regArray1 = Reg(Vec(DimN*DimM/set_num, UInt(xDatalen.W)))
   val regArray2 = Reg(Vec(DimN*DimM/set_num, UInt(xDatalen.W)))
@@ -529,6 +531,9 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
   val reg_ctrl = Reg(tcctrl.cloneType)
 
   // Init data_out
+  //  for(m<-0 until 32){
+  //    io.out.bits.data_out(m) := 0.U
+  //  }
   for(m<-0 until 8){
     io.out.bits.data_out(m*4) := Cat(regArray1(m*4+1),regArray1(m*4))
     io.out.bits.data_out(m*4+1) := Cat(regArray1(m*4+3),regArray1(m*4+2))
@@ -554,30 +559,47 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
   val recvNS = WireInit(0.U(log2Ceil(maxIter+1).W))
   val recvCS = RegNext(recvNS)
 
+  // Init mode's lifelong mixedPrecision sigs.
+//  val isMixedPrec = false.B
+  val isMixedPrec = Wire(Bool())
+  isMixedPrec := io.in.bits.isMixedPrecisionMode//Mux(io.in.fire, io.in.bits.isMixedPrecisionMode, RegEnable(io.in.bits.isMixedPrecisionMode,io.in.fire))
+//
   TCComputation.io.in.bits.rm := io.in.bits.rm
   TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
-  TCComputation.io.out.ready := io.out.ready
-  TCComputation.io.in.valid := sendCS === 1.U || io.in.fire
+  TCComputation.io.in.bits.isMixedPrecisionMode := isMixedPrec
 
-  io.in.ready := TCComputation.io.in.ready && sendCS =/= 1.U
-  io.out.valid := recvCS === 2.U
+  TCComputation.io.out.ready := io.out.ready
+  TCComputation.io.in.valid := Mux(isMixedPrec, io.in.fire, sendCS === 1.U || io.in.fire)
+
+  io.in.ready := Mux(isMixedPrec, TCComputation.io.in.ready ,TCComputation.io.in.ready && sendCS =/= 1.U)
+  io.out.valid := Mux(isMixedPrec, TCComputation.io.out.valid, recvCS === 2.U)
 
   switch(sendCS){
     is(0.U){
+//      mixed-Prec is not relative to this state
       when(io.in.fire){
         sendNS := 1.U
       }.otherwise{
-        sendNS := 0.U//sendCS
+        sendNS := 0.U
       }
     }
     is(1.U){//1
-      when(TCComputation.io.in.fire && recvCS === 0.U){
-        sendNS := 2.U//sendCS +% 1.U
+      when(isMixedPrec){
+        when(io.in.fire){
+          sendNS := 2.U//sendCS +% 1.U
+        }.otherwise{
+          sendNS := 1.U//sendCS
+        }
       }.otherwise{
-        sendNS := 1.U//sendCS
+        when(TCComputation.io.in.fire && recvCS === 0.U){
+          sendNS := 2.U//sendCS +% 1.U
+        }.otherwise{
+          sendNS := 1.U//sendCS
+        }
       }
     }
     is(2.U){//2
+      //      mixed-Prec is not relative to this state
       when(io.in.fire){
         sendNS := 1.U
       }.otherwise{
@@ -595,39 +617,8 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
       reg_rm := 0.U.asTypeOf(reg_rm)
       reg_ctrl := 0.U.asTypeOf(reg_ctrl)
 
-      //      io.in.ready := TCComputation.io.in.ready
     }
     is(1.U) {
-      //      when(io.in.fire) {
-      //      io.in.ready := false.B
-      assert(io.in.valid === true.B)
-      //      TCComputation.io.in.valid := true.B//io.in.valid
-      // store set2 data
-      //A 8*8 row
-      for (m <- 0 until 8) {
-        for (n <- 0 until 4) {
-          regSet2_A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-          regSet2_A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
-        }
-      }
-      //B 8*4 col
-      for (m <- 0 until 4) {
-        for (n <- 0 until 4) {
-          regSet2_B(m * 8 + n * 2) := io.in.bits.data_in.in2(16 + m * 4 + n)(15, 0)
-          regSet2_B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(16 + m * 4 + n)(31, 16)
-        }
-      }
-      //C 8*4 row First
-      for (m <- 0 until 8) {
-        regSet2_C(m * 4) := io.in.bits.data_in.in3(2 + m * 4)(15, 0)
-        regSet2_C(m * 4 + 1) := io.in.bits.data_in.in3(2 + m * 4)(31, 16)
-        regSet2_C(m * 4 + 2) := io.in.bits.data_in.in3(2 + m * 4 + 1)(15, 0)
-        regSet2_C(m * 4 + 3) := io.in.bits.data_in.in3(2 + m * 4 + 1)(31, 16)
-      }
-      // save  ctrl and rm
-      reg_rm := io.in.bits.rm
-      reg_ctrl := io.in.bits.ctrl
-
       //get set1 data
       //A 8*8 row
       for (m <- 0 until 8) {
@@ -643,19 +634,52 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
           TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(m * 4 + n)(31, 16)
         }
       }
-      //C 8*4 row First
+      // store set2 data
+      //A 8*8 row
       for (m <- 0 until 8) {
-        TCComputation.io.in.bits.C(m * 4) := io.in.bits.data_in.in3(m * 4)(15, 0)
-        TCComputation.io.in.bits.C(m * 4 + 1) := io.in.bits.data_in.in3(m * 4)(31, 16)
-        TCComputation.io.in.bits.C(m * 4 + 2) := io.in.bits.data_in.in3(m * 4 + 1)(15, 0)
-        TCComputation.io.in.bits.C(m * 4 + 3) := io.in.bits.data_in.in3(m * 4 + 1)(31, 16)
+        for (n <- 0 until 4) {
+          regSet2_A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+          regSet2_A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+        }
       }
-      //      }
+      //B 8*4 col
+      for (m <- 0 until 4) {
+        for (n <- 0 until 4) {
+          regSet2_B(m * 8 + n * 2) := io.in.bits.data_in.in2(16 + m * 4 + n)(15, 0)
+          regSet2_B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(16 + m * 4 + n)(31, 16)
+        }
+      }
+
+      when(isMixedPrec){
+        // now, we don't need to store set2 data.
+        // A B will be provided in vExeData.
+        //C 8*4 row First
+        for (m <- 0 until 32){
+          TCComputation.io.in.bits.C(m) :=io.in.bits.data_in.in3(m)
+        }
+      }.otherwise {
+        assert(io.in.valid === true.B)
+        //C 8*4 row First
+        for (m <- 0 until 8) {
+          regSet2_C(m * 4) := io.in.bits.data_in.in3(2 + m * 4)(15, 0)
+          regSet2_C(m * 4 + 1) := io.in.bits.data_in.in3(2 + m * 4)(31, 16)
+          regSet2_C(m * 4 + 2) := io.in.bits.data_in.in3(2 + m * 4 + 1)(15, 0)
+          regSet2_C(m * 4 + 3) := io.in.bits.data_in.in3(2 + m * 4 + 1)(31, 16)
+        }
+        // save  ctrl and rm
+        reg_rm := io.in.bits.rm
+        reg_ctrl := io.in.bits.ctrl
+        //C 8*4 row First
+        for (m <- 0 until 8) {
+          TCComputation.io.in.bits.C(m * 4) := Cat(0.U(16.W),io.in.bits.data_in.in3(m * 4)(15, 0))
+          TCComputation.io.in.bits.C(m * 4 + 1) := Cat(0.U(16.W),io.in.bits.data_in.in3(m * 4)(31, 16))
+          TCComputation.io.in.bits.C(m * 4 + 2) := Cat(0.U(16.W),io.in.bits.data_in.in3(m * 4 + 1)(15, 0))
+          TCComputation.io.in.bits.C(m * 4 + 3) := Cat(0.U(16.W),io.in.bits.data_in.in3(m * 4 + 1)(31, 16))
+        }
+      }
     }
     is(2.U) {
-      //      io.in.ready := TCComputation.io.in.ready
-      //      TCComputation.io.in.valid := true.B
-      //      when(send.fire){
+//      get A B from store data.
       //A 8*8 row
       for (i <- 0 until 64) {
         TCComputation.io.in.bits.A(i) := regSet2_A(i)
@@ -664,45 +688,23 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
       for (i <- 0 until 32) {
         TCComputation.io.in.bits.B(i) := regSet2_B(i)
       }
-      //C 8*4 row First
-      for (i <- 0 until 32) {
-        TCComputation.io.in.bits.C(i) := regSet2_C(i)
+      when(isMixedPrec){
+        //C 8*4 row First
+        for (m <- 0 until 32){
+          TCComputation.io.in.bits.C(m) :=io.in.bits.data_in.in3(m)
+        }
+        // set ctrl and rm
+        TCComputation.io.in.bits.rm := io.in.bits.rm
+        TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
+      }.otherwise {
+        //C 8*4 row First
+        for (i <- 0 until 32) {
+          TCComputation.io.in.bits.C(i) := regSet2_C(i)
+        }
+        // save  ctrl and rm
+        TCComputation.io.in.bits.rm := reg_rm
+        TCComputation.io.in.bits.ctrl := reg_ctrl
       }
-      // save  ctrl and rm
-
-      //      reg_rm := io.in.bits.rm
-      //      reg_ctrl := io.in.bits.ctrl
-      TCComputation.io.in.bits.rm := reg_rm
-      TCComputation.io.in.bits.ctrl := reg_ctrl
-      //    }
-      //    when(io.in.fire){ // won't trigger if sendCS===maxIter-1 (since io.in.ready===false)
-      //      // store set2 data
-      //      //A 8*8 row
-      //      for (m <- 0 until 8) {
-      //        for (n <- 0 until 4) {
-      //          regSet2_A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
-      //          regSet2_A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
-      //        }
-      //      }
-      //      //B 8*4 col
-      //      for (m <- 0 until 4) {
-      //        for (n <- 0 until 4) {
-      //          regSet2_B(m * 8 + n * 2) := io.in.bits.data_in.in2(16 + m * 4 + n)(15, 0)
-      //          regSet2_B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(16 + m * 4 + n)(31, 16)
-      //        }
-      //      }
-      //      //C 8*4 row First
-      //      for (m <- 0 until 8) {
-      //        regSet2_C(m * 4) := io.in.bits.data_in.in3(2 + m * 4)(15, 0)
-      //        regSet2_C(m * 4 + 1) := io.in.bits.data_in.in3(2 + m * 4)(31, 16)
-      //        regSet2_C(m * 4 + 2) := io.in.bits.data_in.in3(2 + m * 4 + 1)(15, 0)
-      //        regSet2_C(m * 4 + 3) := io.in.bits.data_in.in3(2 + m * 4 + 1)(31, 16)
-      //      }
-      //      // save  ctrl and rm
-      //      reg_rm := io.in.bits.rm
-      //      reg_ctrl := io.in.bits.ctrl
-      ////      }
-      //    }
     }
   }
 
@@ -715,10 +717,18 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
       }
     }
     is(1.U){
-      when(TCComputation.io.out.fire){
-        recvNS := 2.U//recvCS +% 1.U
+      when(isMixedPrec){
+        when(io.out.fire){
+          recvNS := 2.U//recvCS +% 1.U
+        }.otherwise{
+          recvNS := recvCS //1.U
+        }
       }.otherwise{
-        recvNS := recvCS //1.U
+        when(TCComputation.io.out.fire){
+          recvNS := 2.U//recvCS +% 1.U
+        }.otherwise{
+          recvNS := recvCS //1.U
+        }
       }
     }
     is(2.U){
@@ -738,21 +748,32 @@ class TensorCore_MixedPrecision(DimM: Int, DimN: Int, DimK: Int, xDatalen:Int = 
       //      io.out.valid := false.B
     }
     is(1.U){
-      //        get set1 Result
-      for (m<- 0 until DimN*DimM/set_num){
-        regArray1(m) := TCComputation.io.out.bits.data(m).result
+      when(isMixedPrec){
+        for( m <- 0 until 32){
+          io.out.bits.data_out(m) := TCComputation.io.out.bits.data(m).result
+        }
+      }otherwise{
+        for (m<- 0 until DimN*DimM/set_num){
+          regArray1(m) := TCComputation.io.out.bits.data(m).result
+        }
+        //        here out is init.
       }
-      //      io.out.valid := false.B
     }
     is(2.U){
+      when(isMixedPrec){
+        for( m <- 0 until 32){
+          io.out.bits.data_out(m) := TCComputation.io.out.bits.data(m).result
+        }
+      }otherwise {
+        //  get set2 Result
+        for (m <- 0 until DimN * DimM / set_num) {
+          regArray2(m) := TCComputation.io.out.bits.data(m).result
+        }
+        //        here out is init.
 
-      //        get set2 Result
-      for (m<- 0 until DimN*DimM/set_num){
-        regArray2(m) := TCComputation.io.out.bits.data(m).result
       }
     }
   }
-
   io.out.bits.ctrl := TCComputation.io.out.bits.ctrl
 }
 

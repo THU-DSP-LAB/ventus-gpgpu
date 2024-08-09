@@ -183,7 +183,7 @@ class FP16toFP32Converter extends Module {
 
   // 提取FP16的各个部分
   val sign = io.in(15)
-  val exp = io.in(14, 10)
+  val exp = io.in(14, 10)//.asUInt()-15+127
   val frac = io.in(9, 0)
 
   // 检测零值
@@ -191,8 +191,8 @@ class FP16toFP32Converter extends Module {
 
   // FP32的各个部分
   val fp32Sign = sign
-  val fp32Exp = Mux(isZero, 0.U(8.W), (exp + 112.U).asUInt)
-  val fp32Frac = Mux(isZero, 0.U(23.W), Cat(0.U(13.W), frac))
+  val fp32Exp = Mux(isZero, 0.U(8.W), exp.asTypeOf(UInt(8.W)) + 112.U)  //.asTypeOf(UInt(10.W))(7,0))
+  val fp32Frac = Mux(isZero, 0.U(23.W), Cat(frac,0.U(13.W)))
 
   // 构建FP32
   io.out := Cat(fp32Sign, fp32Exp, fp32Frac)
@@ -207,7 +207,10 @@ class TCDotProduct_MixedPrecision(DimN: Int, expWidth: Int, precision: Int,
     val in = Flipped(DecoupledIO(new TCDotProductInput_MixedPrecision(DimN, len, tcCtrl)))
     val out = DecoupledIO(new TCDotProductOutput(2*len, tcCtrl))
   })
-
+  val isMix = Reg(Bool())
+  when(io.in.fire){
+    isMix:=io.in.bits.isMixedPrecisionMode
+  }
   def addTree = {
     var vl = DimN
     var adds: Seq[Seq[TCAddPipe]] = Nil
@@ -290,7 +293,7 @@ class TCDotProduct_MixedPrecision(DimN: Int, expWidth: Int, precision: Int,
   finalAdd.io.in.bits.op := DontCare
   finalAdd.io.in.bits.rm := outpack.rm
   finalAdd.io.in.bits.ctrl.foreach( _ := outpack )
-  finalAdd.io.in.valid := adds.last.head.io.out.valid && io.in.bits.isMixedPrecisionMode
+  finalAdd.io.in.valid := adds.last.head.io.out.valid && isMix
 
   finalAdd_FP16.io.in.bits.a := adds.last.head.io.out.bits.result
   finalAdd_FP16.io.in.bits.b := outpack.c(15,0)
@@ -298,18 +301,18 @@ class TCDotProduct_MixedPrecision(DimN: Int, expWidth: Int, precision: Int,
   finalAdd_FP16.io.in.bits.op := DontCare
   finalAdd_FP16.io.in.bits.rm := outpack.rm
   finalAdd_FP16.io.in.bits.ctrl.foreach( _ := outpack )
-  finalAdd_FP16.io.in.valid := adds.last.head.io.out.valid  && (! io.in.bits.isMixedPrecisionMode)
+  finalAdd_FP16.io.in.valid := adds.last.head.io.out.valid  && (! isMix)
 
-  adds.last.head.io.out.ready := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.in.ready,finalAdd_FP16.io.in.ready)
+  adds.last.head.io.out.ready := Mux(isMix,finalAdd.io.in.ready,finalAdd_FP16.io.in.ready)
 
-  val fifo = Module(new Queue(new TCDotProductOutput(len, tcCtrl), entries = 1, pipe = true))
-  fifo.io.enq.bits.result := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.bits.result,Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result))
-  fifo.io.enq.bits.fflags := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.bits.fflags,finalAdd_FP16.io.out.bits.fflags)
+  val fifo = Module(new Queue(new TCDotProductOutput(2*len, tcCtrl), entries = 1, pipe = true))
+  fifo.io.enq.bits.result := Mux(isMix,finalAdd.io.out.bits.result,Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result))
+  fifo.io.enq.bits.fflags := Mux(isMix,finalAdd.io.out.bits.fflags,finalAdd_FP16.io.out.bits.fflags)
 
   val outpack2 = Wire(new DotProdCtrl_mix(len, tcCtrl))
-  outpack2 := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.bits.ctrl.get,finalAdd_FP16.io.out.bits.ctrl.get)
+  outpack2 := Mux(isMix,finalAdd.io.out.bits.ctrl.get,finalAdd_FP16.io.out.bits.ctrl.get)
   fifo.io.enq.bits.ctrl.foreach( _ := outpack2.ctrl.get )
-  fifo.io.enq.valid := Mux(io.in.bits.isMixedPrecisionMode,finalAdd.io.out.valid,finalAdd_FP16.io.out.valid)
+  fifo.io.enq.valid := Mux(isMix,finalAdd.io.out.valid,finalAdd_FP16.io.out.valid)
   finalAdd.io.out.ready := fifo.io.enq.ready
   finalAdd_FP16.io.out.ready := fifo.io.enq.ready
   io.out <> fifo.io.deq
@@ -603,6 +606,7 @@ class TCComputationInput_MixedPrecision(DimM:Int,DimN:Int,DimK:Int, len: Int, tc
   //  val ctrl = FPUCtrlFac(new EmptyFPUCtrl())
   val rm = UInt(3.W)
   val ctrl = tcCtrl.cloneType
+  val isMixedPrecisionMode = Bool()
 }
 
 class TCComputationInput_Reuse(DimM:Int,DimN:Int,DimK:Int, len: Int, tcCtrl: TCCtrl) extends Bundle{
@@ -644,6 +648,7 @@ class TC_ComputationArray_MixedPrecision(xDatalen: Int=16, DimM: Int=8, DimN: In
     val out = DecoupledIO(new TensorCoreOutput(DimM * DimN, 2*xDatalen, tcCtrl))// out matrix dim=[8,4]
   })
   dontTouch(io.in.bits)
+
   val TCArray = Seq(Module(new TCDotProduct_MixedPrecision(DimK, 5, 11, tcCtrl))) ++
     Seq.fill(DimM*DimN-1)(Module(new TCDotProduct_MixedPrecision(DimK, 5, 11)))
   // control sig only claim 1 times
@@ -664,6 +669,7 @@ class TC_ComputationArray_MixedPrecision(xDatalen: Int=16, DimM: Int=8, DimN: In
 
       TCArray(m * DimN + n).io.in.bits.rm := io.in.bits.rm
       TCArray(m * DimN + n).io.in.bits.ctrl.foreach(_ := io.in.bits.ctrl)
+      TCArray(m * DimN + n).io.in.bits.isMixedPrecisionMode := io.in.bits.isMixedPrecisionMode
       TCArray(m * DimN + n).io.in.valid := io.in.valid
       TCArray(m * DimN + n).io.out.ready := io.out.ready
 
