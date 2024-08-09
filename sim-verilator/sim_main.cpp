@@ -2,12 +2,12 @@
 #include "cta_sche_wrapper.hpp"
 #include "kernel.hpp"
 #include "log.h"
-#include "testcase.hpp"
 #include <cinttypes>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory> // For std::unique_ptr
 #include <new>
@@ -18,7 +18,7 @@
 #ifndef SIM_WAVEFORM_FST
 #define SIM_WAVEFORM_FST 0
 #endif
-constexpr int CLK_MAX = 2000000;
+uint32_t CLK_MAX = 2000000;
 
 // Legacy function required only so linking works on Cygwin and MSVC++
 double sc_time_stamp() { return 0; }
@@ -30,6 +30,9 @@ void dut_reset(Vdut* dut, VerilatedContext* contextp
 #endif
 );
 
+int parse_arg(
+    std::vector<std::string> args, uint32_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel);
+
 int main(int argc, char** argv) {
     Verilated::mkdir("logs"); // Create logs/ directory in case we have traces to put under it
 
@@ -38,12 +41,24 @@ int main(int argc, char** argv) {
     contextp->debug(0);     // debug level, 0 is off, 9 is highest, may be overridden by commandArgs parsing
     contextp->randReset(2); // Randomization reset policy, may be overridden by commandArgs argument parsing
     contextp->traceEverOn(true);
-    contextp->commandArgs(argc, argv);
 
     // Hardware construct
     Vdut* dut   = new Vdut(contextp.get(), "DUT");
     MemBox* mem = new MemBox;
     Cta cta(mem);
+
+    // Parse ventus-sim cmd arguments
+    std::vector<std::string> args;
+    if (argc == 1) { // Default arguments
+        args.push_back("-f");
+        args.push_back("ventus_args.txt");
+    } else {
+        for (int i = 1; i < argc; i++) {
+            args.push_back(argv[i]);
+        }
+    }
+    parse_arg(args, CLK_MAX,
+        std::function<void(std::shared_ptr<Kernel>)>(std::bind(&Cta::kernel_add, &cta, std::placeholders::_1)));
 
 #if (SIM_WAVEFORM_FST)
     // waveform traces (FST)
@@ -51,16 +66,6 @@ int main(int argc, char** argv) {
     dut->trace(tfp, 5);
     tfp->open("obj_dir/Vdut.fst");
 #endif
-
-    // Load workload kernel
-    cta.kernel_add(std::make_shared<Kernel>(tc_matadd.get_kernel(0)));
-    //cta.kernel_add(std::make_shared<Kernel>(tc_vecadd.get_kernel(0)));
-    //for (int i = 0; i < tc_gaussian.get_num_kernel(); i++) {
-    //   cta.kernel_add(std::make_shared<Kernel>(tc_gaussian.get_kernel(i)));
-    //}
-    //for (int i = 0; i < tc_bfs.get_num_kernel(); i++) {
-    //    cta.kernel_add(std::make_shared<Kernel>(tc_bfs.get_kernel(i)));
-    //}
 
     // DUT initial reset
     dut_reset(dut, contextp.get()
@@ -108,8 +113,8 @@ int main(int argc, char** argv) {
                 uint32_t wg_idx, kernel_id;
                 std::string kernel_name;
                 assert(cta.wg_get_info(kernel_name, kernel_id, wg_idx));
-                log_debug(
-                    "block%2d dispatched to GPU (kernel%2d %s block%2d) ", wg_id, kernel_id, kernel_name.c_str(), wg_idx);
+                log_debug("block%2d dispatched to GPU (kernel%2d %s block%2d) ", wg_id, kernel_id, kernel_name.c_str(),
+                    wg_idx);
                 cta.wg_dispatched();
             }
             if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
