@@ -247,7 +247,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
   }.elsewhen(reg_save.ctrl.fence){
     opcode_wire :=3.U
     param_wire :=0.U
-  }.elsewhen(is_flush) { // is_flush: indicate kernel ends! will invalidate L1D instead of flush
+  }.elsewhen(is_flush) {
     opcode_wire := 3.U
     param_wire := 0.U
   }.otherwise{
