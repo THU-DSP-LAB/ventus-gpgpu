@@ -26,18 +26,14 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 #define MAX_CALLBACKS 32
 
-static unsigned *timeptr = NULL;
-
-void log_set_timeptr(unsigned *ptr) {
-    timeptr = ptr;
-}
+extern uint64_t log_get_time();
 
 static void log_get_timestamp(char *buf, int len) {
-    if(timeptr) {
-        snprintf(buf, len, "Time@%d: ", *timeptr);
-    }
+    snprintf(buf, len, "Time@%lu: ", log_get_time());
 }
 
 typedef struct {

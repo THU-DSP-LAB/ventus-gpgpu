@@ -19,7 +19,7 @@ public:
 
     void kernel_add(std::shared_ptr<Kernel> kernel);
 
-    std::shared_ptr<const Kernel> wg_finish(uint32_t wgid);
+    void wg_finish(uint32_t wgid);
 
     bool is_idle() const;
 

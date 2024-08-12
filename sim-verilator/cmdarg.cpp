@@ -15,7 +15,7 @@ int cmdarg_error(std::vector<std::string> args);
 int cmdarg_help(int exit_id);
 
 int parse_arg(
-    std::vector<std::string> args, uint32_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
+    std::vector<std::string> args, uint64_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
 
     for (int argid = 0; argid < args.size(); argid++) {
         if (args[argid] == "-f") {
