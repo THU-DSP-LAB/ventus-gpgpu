@@ -94,6 +94,7 @@ class ScoreboardUtil(n: Int,zero:Boolean=false)
     ens = ens || en
     when (ens) { _r := _next }
   }
+  dontTouch(r)
 }
 class Scoreboard extends Module{
   val io=IO(new scoreboardIO())
@@ -129,5 +130,12 @@ class Scoreboard extends Module{
   val read_op_colV=OpColRegV.read(0.U)
   val read_op_colX=OpColRegX.read(0.U)
   val readf=io.ibuffer_if_ctrl.mem & fenceReg.read(0.U)
+  dontTouch(read1)
+  dontTouch(read2)
+  dontTouch(read3)
+  dontTouch(readm)
+  dontTouch(readw)
+  dontTouch(readb)
+  dontTouch(readf)
   io.delay:=read1|read2|read3|readm|readw|readb|readf|read_op_colV|read_op_colX
 }
