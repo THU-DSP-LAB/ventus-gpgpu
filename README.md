@@ -139,3 +139,15 @@ We refer to some open-source design when developing Ventus GPGPU.
 | L2Cache       | [block-inclusivecache-sifive](https://github.com/sifive/block-inclusivecache-sifive) | Our L2Cache design is inspired by Sifive's block-inclusivecache                    |
 | Multiplier    | [XiangShan](https://github.com/OpenXiangShan/XiangShan)                              | We reused Array Multiplier in XiangShan. FPU design is also inspired by XiangShan. |
 | Config, ...   | [rocket-chip](https://github.com/chipsalliance/rocket-chip)                          | Some modules are sourced from RocketChip                                           |
+
+## License and Project Origin
+
+This repository is licensed under the Mulan Permissive Software License, Version 2 (Mulan PSL v2), except for certain files which are licensed under different terms.
+
+- `build.sc`, `common.sc` and `shell.nix` are licensed under the Apache License, Version 2.0. These files were originally derived from the [chipsalliance/playground](https://github.com/chipsalliance/playground) repository. While these files served as the foundation, the build system has since undergone significant evolution.
+
+- `ventus/src/config/config.scala` is licensed under the Apache License, Version 2.0.
+
+- `ventus/src/pipeline/ALU.scala` is licensed under both the Apache License, Version 2.0 and the BSD 3-Clause License, reflecting its origins from the [rocket-chip](https://github.com/chipsalliance/rocket-chip) repository.
+
+For more details, please see the `NOTICE` file and the headers of the respective files.
