@@ -18,6 +18,7 @@ compile:
 	./mill -i -j 0 __.compile
 
 test:
+	mkdir -p test_run_dir
 	./mill -i ventus[6.4.0].tests.testOnly play.AdvancedTest 2>&1 | tee test_run_dir/test.log
 
 verilog:

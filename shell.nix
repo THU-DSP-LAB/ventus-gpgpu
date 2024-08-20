@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2022 Jiuyang Liu <liu@jiuyang.me>
+
 with import <nixpkgs> {
   config = {
     packageOverrides = pkgs: with pkgs; {
