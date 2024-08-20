@@ -150,7 +150,7 @@ val mshr_wait_reg =RegInit(false.B)
         //          tobedone:=false.B
         //        }.else
         when(s1_valid_r && io.bs_radr.ready) { //for read hit or miss dirty
-          when((!s1_req.hit || (s1_req.opcode === Hint && !s1_req.last_flush)) && s1_req.dirty) { //miss dirty should read bankstore, then to source A
+          when(((!s1_req.hit && s1_req.opcode=/=Hint) || (s1_req.opcode === Hint && !s1_req.last_flush)) && s1_req.dirty) { //miss dirty should read bankstore, then to source A
             stateReg := stage_3
             busy := true.B
             tobedone := false.B
@@ -261,7 +261,7 @@ val mshr_wait_reg =RegInit(false.B)
   io.bs_wadr.bits.mask:=   pb_beat.mask
 
   ///将读取数据输出d
-  io.d.valid        :=(stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush) //&& s1_req.opcode===Get)//数据读出来之后准备输出
+  io.d.valid        :=((stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
   io.d.bits.source  :=s_final_req.source
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,Mux(s_final_req.last_flush,HintAck,AccessAck))
   io.d.bits.size    := s_final_req.size

@@ -77,7 +77,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
     val probeOut_st1 = Output(new MSHRprobeOut(NMshrEntry, NMshrSubEntry))
     val missReq = Flipped(Decoupled(new MSHRmissReq(bABits, tIWidth, WIdBits)))
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
-    val missRspOut = ValidIO(new MSHRmissRspOut(bABits, tIWidth, WIdBits))
+    val missRspOut = Decoupled(new MSHRmissRspOut(bABits, tIWidth, WIdBits))
     //For InOrFlu
     val empty = Output(Bool())
     val probestatus = Output(Bool())
@@ -272,7 +272,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   //如果后面发现missRspOut端口这一级不能取消，使用这段注释掉的代码
   //io.missRspIn.ready := !(subentryStatusForRsp.io.used >= 2.U ||
   //  (subentryStatusForRsp.io.used === 1.U && !io.missRspOut.ready))
-  io.missRspIn.ready := !((subentryStatusForRsp.io.used >= 2.U) ||
+  io.missRspIn.ready := !((subentryStatusForRsp.io.used >= 1.U) ||
     ((mshrStatus_st1_w === 4.U || mshrStatus_st1_w === 3.U) && subentryStatusForRsp.io.used === 1.U) ||
     io.missReq.valid)
 
@@ -284,11 +284,13 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
 
   val missRspTargetInfo_st0 = targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
   val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
+  val missRspOut_st1 = Module(new Queue(new MSHRmissRspOut(bABits, tIWidth, WIdBits),1,true,false))
+  missRspOut_st1.io.enq.valid := io.missRspIn.valid && !(subentryStatusForRsp.io.used===0.U)
+  missRspOut_st1.io.enq.bits.targetInfo := missRspTargetInfo_st0
+  missRspOut_st1.io.enq.bits.blockAddr := missRspBlockAddr_st0
+  missRspOut_st1.io.enq.bits.instrId := io.missRspIn.bits.instrId
 
-  io.missRspOut.bits.targetInfo := RegNext(missRspTargetInfo_st0)
-  io.missRspOut.bits.blockAddr := RegNext(missRspBlockAddr_st0)
-  io.missRspOut.bits.instrId := io.missRspIn.bits.instrId
-  io.missRspOut.valid := RegNext(io.missRspIn.valid ) && !(RegNext(subentryStatusForRsp.io.used)===0.U)
+  io.missRspOut <> missRspOut_st1.io.deq
   //io.missRspOut := RegNext(io.missRspIn.valid) &&
   //  subentryStatusForRsp.io.used >= 1.U//如果上述Access中改出SRAM，本信号需要延迟一个周期
 
@@ -300,7 +302,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
         iofSubEn.asUInt === 0.U && io.missReq.fire  && MSHR_st1.io.deq.fire && primaryMiss) {
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt === entryMatchMissRsp && iofSubEn.asUInt === subentry_next2cancel &&
-        io.missRspIn.valid) {
+        io.missRspIn.valid && missRspOut_st1.io.enq.ready) {
         subentry_valid(iofEn)(iofSubEn) := false.B
       }
     }.elsewhen(iofSubEn.asUInt === subEntryIdx_st1 &&

@@ -1,6 +1,7 @@
 #include "cta_sche_wrapper.hpp"
 #include "MemBox.hpp"
 #include "kernel.hpp"
+#include "log.h"
 #include <cassert>
 #include <memory>
 
@@ -22,17 +23,17 @@ void Cta::wg_dispatched() {
     kernel->wg_dispatched();
 }
 
-bool Cta::wg_get_info(std::string& kernel_name, uint32_t &kernel_id, uint32_t& wg_idx_in_kernel) {
+bool Cta::wg_get_info(std::string& kernel_name, uint32_t& kernel_id, uint32_t& wg_idx_in_kernel) {
     assert(m_kernel_idx_dispatching < 0 || m_kernel_idx_dispatching < m_kernels.size());
     std::shared_ptr<Kernel> kernel = (m_kernel_idx_dispatching == -1) ? nullptr : m_kernels[m_kernel_idx_dispatching];
     assert(m_kernel_idx_dispatching == -1 || kernel);
-    
+
     if (kernel == nullptr || !kernel->is_dispatching()) {
         return false;
     }
 
-    kernel_name = kernel->get_kname();
-    kernel_id = kernel->get_kid();
+    kernel_name      = kernel->get_kname();
+    kernel_id        = kernel->get_kid();
     wg_idx_in_kernel = kernel->get_next_wg_idx_in_kernel();
     return true;
 }
@@ -90,18 +91,22 @@ bool Cta::apply_to_dut(Vdut* dut) {
     assert(0);
 }
 
-std::shared_ptr<const Kernel> Cta::wg_finish(uint32_t wgid) {
+void Cta::wg_finish(uint32_t wgid) {
     for (auto it = m_kernels.begin(); it != m_kernels.end(); it++) {
         std::shared_ptr<Kernel> kernel = *it;
-        if (kernel->is_running() && kernel->is_wg_belonging(wgid)) { // 寻找wg所属kernel
+        uint32_t wg_idx                = -1;
+        if (kernel->is_running() && kernel->is_wg_belonging(wgid, &wg_idx)) { // 寻找wg所属kernel
             assert(it <= m_kernels.begin() + m_kernel_idx_dispatching);
             kernel->wg_finish(wgid);
+            log_debug("block%2d finished (kernel%2d %s block%2d)", wgid, kernel->get_kid(), kernel->get_kname().c_str(),
+                wg_idx);
             if (kernel->is_finished()) { // 整个kernel已经结束，删除之
+                log_info("kernel%2d %s finished", kernel->get_kid(), kernel->get_kname().c_str());
                 kernel->deactivate(m_mem);
                 m_kernels.erase(it);
                 m_kernel_idx_dispatching--; // 可能会减至-1
             }
-            return kernel;
+            return;
         }
     }
     assert(0); // 总应当可以找到WG所属的Kernel

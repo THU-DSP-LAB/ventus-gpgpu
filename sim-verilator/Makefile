@@ -54,7 +54,6 @@ VERILATOR_FLAGS += --threads $(NPROC_SIM)
 VERILATOR_FLAGS += --trace-threads $(NPROC_TRACE_FST)
 VERILATOR_FLAGS += -j $(NPROC_CPU)
 VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0 -DSIM_LOG_ENABLE"
-VERILATOR_FLAGS += -LDFLAGS "-fuse-ld=mold"
 
 CHISEL_VERILOG_ENABLE_PRINT = 0
 
@@ -64,7 +63,7 @@ DIR_OBJ = obj_dir
 
 SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
 SRC_V = dut.v
-SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp testcase.cpp cta_sche_wrapper.cpp
+SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp cta_sche_wrapper.cpp cmdarg.cpp
 SRC_C = log.c
 OBJ_C = $(SRC_C:%.c=$(DIR_OBJ)/%.o)
 VERILATOR_INPUT = $(SRC_V) $(SRC_CXX) $(notdir $(OBJ_C))
