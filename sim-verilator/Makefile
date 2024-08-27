@@ -14,7 +14,7 @@ endef
 ######################################################################
 # Set up variables
 NPROC_CPU = $(shell nproc)
-NPROC_DUT = 10
+NPROC_DUT = 11
 NPROC_SIM = $(call MIN_FUNC, $(NPROC_CPU), $(NPROC_DUT))
 NPROC_TRACE_FST = $(call MIN_FUNC, $(NPROC_SIM), 2)
 
@@ -35,7 +35,7 @@ VERILATOR_FLAGS += -cc --build --binary
 # Generate makefile dependencies (not shown as complicates the Makefile)
 VERILATOR_FLAGS += -MMD
 # Optimize
-VERILATOR_FLAGS += -x-assign fast
+VERILATOR_FLAGS += -x-assign unique -x-initial unique
 # Warn abount lint issues; may not want this on less solid designs
 #VERILATOR_FLAGS += -Wall
 VERILATOR_FLAGS += -Wno-WIDTHEXPAND
@@ -50,10 +50,12 @@ VERILATOR_FLAGS += --assert
 # Add this trace to get a backtrace in gdb
 #VERILATOR_FLAGS += --gdbbt
 
+VERILATOR_CFLAGS += -std=c++17 -g
+VERILATOR_CFLAGS += -O2
 VERILATOR_FLAGS += --threads $(NPROC_SIM)
 VERILATOR_FLAGS += --trace-threads $(NPROC_TRACE_FST)
 VERILATOR_FLAGS += -j $(NPROC_CPU)
-VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0 -DSIM_LOG_ENABLE"
+VERILATOR_FLAGS += -CFLAGS "$(VERILATOR_CFLAGS)"
 
 CHISEL_VERILOG_ENABLE_PRINT = 0
 
