@@ -19,10 +19,10 @@
 #define SIM_WAVEFORM_FST 0
 #endif
 
-uint64_t sim_time_max = 2000000;
+uint64_t sim_time_max = 50000000;
 #if (SIM_WAVEFORM_FST)
-constexpr uint64_t SIM_WAVEFORM_TIME_BEGIN = 640000;
-constexpr uint64_t SIM_WAVEFORM_TIME_END   = -1;
+constexpr uint64_t SIM_WAVEFORM_TIME_BEGIN = 2800000;
+constexpr uint64_t SIM_WAVEFORM_TIME_END   = 3000000;
 #endif
 VerilatedFstC* tfp         = nullptr;
 VerilatedContext* contextp = nullptr;
@@ -79,6 +79,9 @@ int main(int argc, char** argv) {
     }
     parse_arg(args, sim_time_max,
         std::function<void(std::shared_ptr<Kernel>)>(std::bind(&Cta::kernel_add, &cta, std::placeholders::_1)));
+    const char *tmp = "+verilator+seed+10086";
+    contextp->commandArgsAdd(1, &tmp);
+    contextp->commandArgs(argc, argv);
 
 #if (SIM_WAVEFORM_FST)
     // waveform traces (FST)
@@ -158,8 +161,8 @@ int main(int argc, char** argv) {
             }
         }
         // Clock output
-        if (contextp->time() % 10000 == 0)
-            log_debug("Simulation cycles: %lu", contextp->time());
+        if (contextp->time() % 100000 == 0)
+            log_debug("");
     }
 
     log_info("Simulation finished in %d cycles", contextp->time());

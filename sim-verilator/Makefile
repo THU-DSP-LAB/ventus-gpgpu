@@ -50,7 +50,7 @@ VERILATOR_FLAGS += --assert
 # Add this trace to get a backtrace in gdb
 #VERILATOR_FLAGS += --gdbbt
 
-VERILATOR_CFLAGS += -std=c++17 -g
+VERILATOR_CFLAGS += -std=c++20 -g
 VERILATOR_CFLAGS += -O2
 VERILATOR_FLAGS += --threads $(NPROC_SIM)
 VERILATOR_FLAGS += --trace-threads $(NPROC_TRACE_FST)

@@ -18,6 +18,9 @@ int parse_arg(
     std::vector<std::string> args, uint64_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
 
     for (int argid = 0; argid < args.size(); argid++) {
+        if(args[argid].starts_with("+verilator+")){
+            continue;
+        }
         if (args[argid] == "-f") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
