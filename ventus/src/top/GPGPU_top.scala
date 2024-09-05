@@ -42,6 +42,7 @@ class host2CTA_data extends Bundle{
   val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
+  val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
 }
 class CTA2host_data extends Bundle{
   val inflight_wg_buffer_host_wf_done_wg_id = (UInt(WG_ID_WIDTH.W))
@@ -72,8 +73,10 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_new.bits.num_sgpr_per_wf    := io.host2CTA.bits.host_sgpr_size_per_wf
   cta_sche.io.host_wg_new.bits.num_vgpr_per_wf    := io.host2CTA.bits.host_vgpr_size_per_wf
   cta_sche.io.host_wg_new.bits.gds_base           := io.host2CTA.bits.host_gds_baseaddr
-  cta_sche.io.host_wg_new.bits.asid_kernel        := 0.U
-  
+  if (MMU_ENABLED) {
+    cta_sche.io.host_wg_new.bits.asid_kernel.get  := io.host2CTA.bits.host_asid
+  }
+
   io.CTA2host.bits.inflight_wg_buffer_host_wf_done_wg_id := cta_sche.io.host_wg_done.bits.wg_id
   io.CTA2host.valid := cta_sche.io.host_wg_done.valid
   cta_sche.io.host_wg_done.ready := io.CTA2host.ready
