@@ -45,7 +45,7 @@ The tutorial of Chisel development environment configuration comes from [chipsal
 - Ubuntu  
 
 ```shell
-apt-get install make parallel wget cmake verilator git llvm clang lld protobuf-compiler antlr4 numactl
+apt-get install gcc g++ make parallel wget cmake verilator git llvm clang lld protobuf-compiler antlr4 numactl
 ```
 
 > We recomment using java 17 or higher versions. **We test the project under java 19.**
