@@ -196,6 +196,8 @@ trait Ventus
       v.chiselCrossVersions(chiselVersion)._3
     )
   }
+
+  def mainClass = Some("top.GPGPU_gen")   // def this to specify top App when generating verilog
 }
 
 // trait VentusGPGPUPublishModule extends PublishModule {
