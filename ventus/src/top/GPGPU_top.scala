@@ -97,6 +97,9 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_y
     io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_z
     io.CTA2warp(i).bits.dispatch2cu_wg_id := cta_sche.io.cu_wf_new(i).bits.wg_id
+    if(MMU_ENABLED) {
+        io.CTA2warp(i).bits.dispatch2cu_knl_asid.get := cta_sche.io.cu_wf_new(i).bits.asid_kernel.get
+    }
     cta_sche.io.cu_wf_new(i).ready := io.CTA2warp(i).ready
 
     cta_sche.io.cu_wf_done(i).bits.wf_tag := io.warp2CTA(i).bits.cu2dispatch_wf_tag_done
