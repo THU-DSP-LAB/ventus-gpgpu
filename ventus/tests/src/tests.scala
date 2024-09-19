@@ -17,6 +17,7 @@ import chisel3.util._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
+import chiseltest.internal.CachingAnnotation
 import org.scalatest.freespec
 import org.scalatest.freespec.AnyFreeSpec
 import chiseltest.simulator.WriteFstAnnotation
@@ -301,7 +302,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
 
     val mem = new MemBox(MemboxS.SV32)
     //mem.loadfile(0, metas.head, dataFileDir.head)
-    test(new GPGPU_SimWrapper(FakeCache = false, Some(mmu.SV32))).withAnnotations(Seq(VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>
+    test(new GPGPU_SimWrapper(FakeCache = false, Some(mmu.SV32))).withAnnotations(Seq(CachingAnnotation, VerilatorBackendAnnotation, WriteFstAnnotation)){ c =>
       c.io.host_req.initSource()
       c.io.host_req.setSourceClock(c.clock)
       c.io.out_d.initSource()
@@ -331,9 +332,6 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           clock_cnt - timestamp > gap
         }
         def senderEval(): Unit = {
-          if(checkForValid(reqPort) && checkForReady(reqPort)){
-            send_list = send_list.tail
-          }
           if(send_list.nonEmpty && finishWait()){
             reqPort.valid.poke(true.B)
             reqPort.bits.poke(send_list.head)
@@ -341,14 +339,17 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           else{
             reqPort.valid.poke(false.B)
           }
+          if(checkForValid(reqPort) && checkForReady(reqPort)){
+            send_list = send_list.tail
+          }
         }
         def receiverEval(): Unit = {
+          rspPort.ready.poke(true.B)
           if(checkForValid(rspPort) && checkForReady(rspPort)){
             val rsp = c.io.host_rsp.bits.peek().litValue
             val extract_rsp = (rsp >> parameters.CU_ID_WIDTH).toInt // See Also: MemBox.scala/MetaData.generateHostReq()
             wg_list(current_kernel)(extract_rsp) = true
           }
-          rspPort.ready.poke(true.B)
         }
         override def eval() = {
           senderEval()
@@ -408,14 +409,15 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
         c.io.inst_cnt.zipWithIndex.foreach{ case(x, i) =>
           print(s" [${i}: ${x.peek.litValue.toInt}]")
         }
+        print(" | ")
       }
-      else if(top.parameters.INST_CNT_2){
-        c.io.inst_cnt.zipWithIndex.foreach{ case(x, i) =>
-          print(s" [${i}: X: ${x.peek.litValue & ((BigInt(1) << 32) - 1)} V: ${x.peek.litValue >> 32}]")
-        }
+      if(top.parameters.INST_CNT_2){
+        c.io.inst_cnt2.foreach{ case xs => xs.zipWithIndex.foreach{ case(x, i) =>
+          print(s" [${i}: X: ${x(0).peek.litValue} V: ${x(1).peek.litValue}]")
+        }}
+        print("\n")
       }
-      print("\n")
-      Seq.fill(3000){
+      Seq.fill(300){
         mem_driver.eval()
         c.clock.step(1)
         clock_cnt +=1

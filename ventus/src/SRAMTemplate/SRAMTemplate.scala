@@ -161,6 +161,6 @@ class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int 
 
   // latch read results
   io.r.map{ case r => {
-    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire()))
+    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire))
   }}
 }

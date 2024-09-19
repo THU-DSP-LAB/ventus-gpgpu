@@ -2,19 +2,19 @@
 
 GPGPU processor supporting RISCV-V extension, developed with Chisel HDL.
 
-Copyright 2021-2023 by International Innovation Center of Tsinghua University, Shanghai
+Copyright 2021-2024 by International Innovation Center of Tsinghua University, Shanghai.
 
-We are calling for contributors. If you are interested in Ventus GPGPU, please contact <yang-zx21@mails.tsinghua.edu.cn>
+We are calling for contributors. If you are interested in Ventus GPGPU, please contact <yff22@mails.tsinghua.edu.cn>.
 
-“乘影”在RVV编译器工具链、验证环境开发和硬件设计方面还有很多不足，如果您有意愿参与到“乘影”的开发中，欢迎在github上pull request，也欢迎联系 <yang-zx21@mails.tsinghua.edu.cn>
+“乘影”在RVV编译器工具链、验证环境开发和硬件设计方面还有很多不足，如果您有意愿参与到“乘影”的开发中，欢迎在github上pull request，也欢迎联系 <yff22@mails.tsinghua.edu.cn>。
 
-乘影2.0架构文档在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/乘影GPGPU架构文档手册v2.0.pdf)，添加了对OpenCL支持所需的改动。如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
+乘影2.0架构文档在[这里](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/乘影GPGPU架构文档手册v2.01.pdf)，添加了对OpenCL支持所需的改动。如果您在软硬件方面有任何建议，欢迎提issue或邮件联系。
 
-乘影开源GPGPU项目网站：[opengpgpu.org.cn](https://opengpgpu.org.cn/)
+乘影开源GPGPU项目网站：[opengpgpu.org.cn](https://opengpgpu.org.cn/)。
 
-Home page of Ventus-GPGPU project: [opengpgpu.org.cn](https://opengpgpu.org.cn/)
+Home page of Ventus-GPGPU project: [opengpgpu.org.cn](https://opengpgpu.org.cn/).
 
-乘影软件工具链release版本在[这里](https://opengpgpu.org.cn/html/web/project/release/index.html)获取.
+乘影软件工具链release版本在[这里](https://opengpgpu.org.cn/html/web/project/release/index.html)获取。
 
 You can get the release version of software toolchain [here](https://opengpgpu.org.cn/html/web/project/release/index.html).
 
@@ -22,7 +22,7 @@ You can get the release version of software toolchain [here](https://opengpgpu.o
 
 The micro-architecture overview of Ventus(乘影) is shown below.
 
-ISA and micro-architecture docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/ventus%20GPGPU%20architecture%20whitepaper%20v2.0.pdf). Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/乘影GPGPU架构文档手册v2.0.pdf).
+ISA and micro-architecture docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/ventus%20GPGPU%20architecture%20whitepaper%20v2.01.pdf). Chinese docs is [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/乘影GPGPU架构文档手册v2.01.pdf).
 
 OpenCL C compiler based on LLVM is developed by Terapines([兆松科技](https://www.terapines.com/)).
 
@@ -32,7 +32,7 @@ Use the script in [ventus-llvm](https://github.com/THU-DSP-LAB/llvm-project) to 
 
 ## Quick Start
 
-[从零开始的配置教程](https://zhuanlan.zhihu.com/p/586445036)（中文，从WSL和IDEA安装讲起）
+如果你需要从头开始配置WSL和IDEA的开发环境，可以参考中文教程[从零开始的配置教程](https://zhuanlan.zhihu.com/p/586445036)。这个教程的部分命令已经过时，但依然是很好的参考。
 
 The tutorial of Chisel development environment configuration comes from [chipsalliance/playground: chipyard in mill :P](https://github.com/chipsalliance/playground)
 
@@ -45,26 +45,23 @@ The tutorial of Chisel development environment configuration comes from [chipsal
 - Ubuntu  
 
 ```shell
-apt-get install make parallel wget cmake verilator git llvm clang lld protobuf-compiler antlr4 numactl
-curl -L https://github.com/com-lihaoyi/mill/releases/download/0.10.8/0.10.8 > mill && chmod +x mill
+apt-get install gcc g++ make parallel wget cmake verilator git llvm clang lld protobuf-compiler antlr4 numactl
 ```
 
 > We recomment using java 17 or higher versions. **We test the project under java 19.**
 
-1. Init and update dependences
+1. Clone project, init and update dependencies
 
 ```shell
+git clone https://github.com/THU-DSP-LAB/ventus-gpgpu.git
 make init
-make patch
 ```
 
 2. IDE support `make idea` or `make bsp # generate IDE bsp`
 
-3. to generate verilog file, use `make verilog`. The output file is `GPGPU_top.v` . Notice that if you install 'mill' with 'curl', use `./mill` to replace `mill` in Makefile commands.
+3. to generate verilog file, use `make verilog`. The output file is `GPGPU_top.v` .
 
-4. to run tests, use `make test`. Output waveform file is at `test_run_dir`  
-
-> Notice that current codes are not stable and there are conflicts between existing codes and testcase `gaussian` `gemm`. We are preparing new testcase format to integrate with software toolchain and please wait for our new version.
+4. to run tests, use `make test`. Output waveform file is at `test_run_dir` . Due to the limitations of `chiseltest`, we have customized another simulation framework based on Verilator. Please refer to the `sim-verilator` folder's README for more details.
 
 ### Understanding Program Output in Our Project
 
@@ -142,3 +139,15 @@ We refer to some open-source design when developing Ventus GPGPU.
 | L2Cache       | [block-inclusivecache-sifive](https://github.com/sifive/block-inclusivecache-sifive) | Our L2Cache design is inspired by Sifive's block-inclusivecache                    |
 | Multiplier    | [XiangShan](https://github.com/OpenXiangShan/XiangShan)                              | We reused Array Multiplier in XiangShan. FPU design is also inspired by XiangShan. |
 | Config, ...   | [rocket-chip](https://github.com/chipsalliance/rocket-chip)                          | Some modules are sourced from RocketChip                                           |
+
+## License and Project Origin
+
+This repository is licensed under the Mulan Permissive Software License, Version 2 (Mulan PSL v2), except for certain files which are licensed under different terms.
+
+- `build.sc`, `common.sc` and `shell.nix` are licensed under the Apache License, Version 2.0. These files were originally derived from the [chipsalliance/playground](https://github.com/chipsalliance/playground) repository. While these files served as the foundation, the build system has since undergone significant evolution.
+
+- `ventus/src/config/config.scala` is licensed under the Apache License, Version 2.0.
+
+- `ventus/src/pipeline/ALU.scala` is licensed under both the Apache License, Version 2.0 and the BSD 3-Clause License, reflecting its origins from the [rocket-chip](https://github.com/chipsalliance/rocket-chip) repository.
+
+For more details, please see the `NOTICE` file and the headers of the respective files.

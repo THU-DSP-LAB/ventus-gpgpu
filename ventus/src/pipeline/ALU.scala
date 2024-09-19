@@ -1,21 +1,13 @@
-/*
- * Copyright (c) 2021-2022 International Innovation Center of Tsinghua University, Shanghai
- * Ventus is licensed under Mulan PSL v2.
- * You can use this software according to the terms and conditions of the Mulan PSL v2.
- * You may obtain a copy of Mulan PSL v2 at:
- *          http://license.coscl.org.cn/MulanPSL2
- * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
- * EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
- * MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
- * See the Mulan PSL v2 for more details. */
-
-//test
+// Copyright 2016-2017 SiFive, Inc.
+// Copyright (c) 2012-2014, The Regents of the University of California
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: BSD-3-Clause
 
 package pipeline
 
 import chisel3._
 import chisel3.util._
-import chisel3.stage.ChiselStage._
+//import chisel3.stage.ChiselStage._
 import scala.util.Random._
 /*
 ==== Supported Instructions ====
@@ -108,8 +100,8 @@ class ScalarALU() extends Module{
   //MIN, MAX
   val minu=Mux(io.in1>io.in2,io.in2,io.in1)
   val maxu=Mux(io.in1>io.in2,io.in1,io.in2)
-  val in1s=io.in1.asSInt()
-  val in2s=io.in2.asSInt()
+  val in1s=io.in1.asSInt
+  val in2s=io.in2.asSInt
   val mins=Mux(in1s>in2s,in2s,in1s).asUInt
   val maxs=Mux(in1s>in2s,in1s,in2s).asUInt
   val minmaxout = Mux(io.func===FN_MIN,mins,

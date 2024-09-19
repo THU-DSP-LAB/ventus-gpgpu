@@ -55,7 +55,7 @@ class CtrlSigs extends Bundle {
   val writemask = Bool()
   val wxd = Bool()
   val pc=UInt(32.W)
-  val imm_ext = UInt(6.W) // new! immext
+  val imm_ext = UInt((1+6).W) // new! immext
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
   val atomic= Bool()
   val aq = Bool()
@@ -95,6 +95,7 @@ class ScoreboardUtil(n: Int,zero:Boolean=false)
     ens = ens || en
     when (ens) { _r := _next }
   }
+  dontTouch(r)
 }
 class Scoreboard extends Module{
   val io=IO(new scoreboardIO())
@@ -117,9 +118,9 @@ class Scoreboard extends Module{
   OpColRegX.clear(io.op_colX_out_fire, 0.U)
   fenceReg.set(io.if_fire & io.if_ctrl.fence,0.U)
   fenceReg.clear(io.fence_end,0.U)
-  val read1=MuxLookup(io.ibuffer_if_ctrl.sel_alu1,false.B,Array(A1_RS1->scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),A1_VRS1->vectorReg.read(io.ibuffer_if_ctrl.reg_idx1)))
-  val read2=MuxLookup(io.ibuffer_if_ctrl.sel_alu2,false.B,Array(A2_RS2->scalarReg.read(io.ibuffer_if_ctrl.reg_idx2),A2_VRS2->vectorReg.read(io.ibuffer_if_ctrl.reg_idx2)))
-  val read3=MuxLookup(io.ibuffer_if_ctrl.sel_alu3,false.B,Array(A3_VRS3->vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),
+  val read1=MuxLookup(io.ibuffer_if_ctrl.sel_alu1,false.B)(Array(A1_RS1->scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),A1_VRS1->vectorReg.read(io.ibuffer_if_ctrl.reg_idx1)))
+  val read2=MuxLookup(io.ibuffer_if_ctrl.sel_alu2,false.B)(Array(A2_RS2->scalarReg.read(io.ibuffer_if_ctrl.reg_idx2),A2_VRS2->vectorReg.read(io.ibuffer_if_ctrl.reg_idx2)))
+  val read3=MuxLookup(io.ibuffer_if_ctrl.sel_alu3,false.B)(Array(A3_VRS3->vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),
     A3_SD->Mux(io.ibuffer_if_ctrl.isvec& (!io.ibuffer_if_ctrl.readmask),vectorReg.read(io.ibuffer_if_ctrl.reg_idx3),Mux(io.ibuffer_if_ctrl.isvec,vectorReg.read(io.ibuffer_if_ctrl.reg_idx2),scalarReg.read(io.ibuffer_if_ctrl.reg_idx2))),
     A3_FRS3->scalarReg.read(io.ibuffer_if_ctrl.reg_idx3),
     A3_PC-> Mux(io.ibuffer_if_ctrl.branch===B_R, scalarReg.read(io.ibuffer_if_ctrl.reg_idx1),false.B)
@@ -130,5 +131,12 @@ class Scoreboard extends Module{
   val read_op_colV=OpColRegV.read(0.U)
   val read_op_colX=OpColRegX.read(0.U)
   val readf=io.ibuffer_if_ctrl.mem & fenceReg.read(0.U)
+  dontTouch(read1)
+  dontTouch(read2)
+  dontTouch(read3)
+  dontTouch(readm)
+  dontTouch(readw)
+  dontTouch(readb)
+  dontTouch(readf)
   io.delay:=read1|read2|read3|readm|readw|readb|readf|read_op_colV|read_op_colX
 }

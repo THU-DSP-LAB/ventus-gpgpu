@@ -1,0 +1,19 @@
+NOTICE
+
+This repository is primarily licensed under the Mulan Permissive Software License, Version 2 (Mulan PSL v2), except for the following files:
+
+- `build.sc`
+- `common.sc`
+- `shell.nix`
+- `ventus/src/config/config.scala`
+- `ventus/src/pipeline/ALU.scala`
+
+These files are subject to different licensing terms. Specifically:
+
+- `build.sc`, `common.sc` and `shell.nix` were originally derived from the repository [chipsalliance/playground](https://github.com/chipsalliance/playground) and are licensed under the Apache License, Version 2.0. Although these files were part of the initial setup of this project, the build system has since evolved significantly.
+
+- `ventus/src/config/config.scala` is licensed under the Apache License, Version 2.0.
+
+- `ventus/src/pipeline/ALU.scala` is licensed under both the Apache License, Version 2.0 and the BSD 3-Clause License due to its derivation from the [rocket-chip](https://github.com/chipsalliance/rocket-chip) repository.
+
+Please refer to the individual file headers for the specific licensing information.

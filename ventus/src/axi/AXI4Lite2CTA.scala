@@ -188,7 +188,7 @@ trait HasPipelineReg{ this: CTA_IO =>
   //val cnt = RegInit(0.U((log2Up(latency)+1).W))
 
   //ready := (cnt < latency.U) || (cnt === latency.U && io.out.ready)
-  //cnt := cnt + io.in.fire() - io.out.fire()
+  //cnt := cnt + io.in.fire - io.out.fire
 
   val valids = io.in.valid +: Array.fill(latency)(RegInit(false.B))
   for(i <- 1 to latency){

@@ -65,8 +65,8 @@ class collectorUnit extends Module{
   // rsType == 2: Vec
   // rsType == 3: Imm
   val rsType = Reg(Vec(4, UInt(2.W)))
-  val ready = Reg(Vec(4, Bool()))
-  val valid = Reg(Vec(4, Bool()))
+  val ready = RegInit(VecInit.fill(4)(false.B))
+  val valid = RegInit(VecInit.fill(4)(false.B))
   val regIdx = Reg(Vec(4, UInt((regidx_width + regext_width).W)))
   val rsReg = RegInit(VecInit(Seq.fill(3)(VecInit(Seq.fill(num_thread)(0.U(xLen.W)))))) //op1, op2 and op3
   val mask = Reg(Vec(num_thread, Bool()))
@@ -128,7 +128,7 @@ class collectorUnit extends Module{
   })
   for (i <- 0 until 4) {
     io.outArbiterIO(i).valid :=
-      MuxLookup(state, false.B,
+      MuxLookup(state, false.B)(
         Array(s_idle->(io.control.fire && (readyWire(i)===0.U)),
           s_add->((valid(i) === true.B) && (ready(i)===false.B))
         ))
@@ -163,15 +163,15 @@ class collectorUnit extends Module{
 
   customCtrlWire := false.B
 
-  imm.io.inst := MuxLookup(state, 0.U,
+  imm.io.inst := MuxLookup(state, 0.U)(
     Array(s_idle->io.control.bits.inst,
       s_add->controlReg.inst
     ))
-  imm.io.imm_ext := MuxLookup(state, 0.U,
+  imm.io.imm_ext := MuxLookup(state, 0.U)(
     Array(s_idle -> io.control.bits.imm_ext,
       s_add -> controlReg.imm_ext
     ))
-  imm.io.sel := MuxLookup(state, 0.U,
+  imm.io.sel := MuxLookup(state, 0.U)(
     Array(s_idle -> io.control.bits.sel_imm,
       s_add -> controlReg.sel_imm
     ))
@@ -184,7 +184,7 @@ class collectorUnit extends Module{
         //using an iterable variable to indicate reg_idx signals
         regIdxWire(0) := io.control.bits.reg_idx1
         regIdxWire(1) := io.control.bits.reg_idx2
-        regIdxWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U,
+        regIdxWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U)(
           Array(
             A3_PC -> Mux(io.control.bits.branch===B_R, io.control.bits.reg_idx1, io.control.bits.reg_idx3),
             A3_VRS3 -> io.control.bits.reg_idx3,
@@ -202,7 +202,7 @@ class collectorUnit extends Module{
         //using an iterable variable to indicate sel_alu signals
         rsTypeWire(0) := io.control.bits.sel_alu1
         rsTypeWire(1) := io.control.bits.sel_alu2
-        rsTypeWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U,
+        rsTypeWire(2) := MuxLookup(io.control.bits.sel_alu3, 0.U)(
           Array(
             A3_PC -> Mux(io.control.bits.branch===B_R, 1.U, 3.U),
             A3_VRS3 -> 2.U,
@@ -263,10 +263,10 @@ class collectorUnit extends Module{
   for (i <- 0 until 4) {
     when(io.bankIn(i).fire) {
       when(io.bankIn(i).bits.regOrder === 0.U) { //operand1
-        rsRead := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsRead := MuxLookup(Mux(io.control.fire, rsTypeWire(0), rsType(0)), VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(
             A1_RS1 -> Mux(
-              MuxLookup(state, false.B, 
+              MuxLookup(state, false.B)(
                 Array(
                   s_idle -> regIdxWire(0).orR,
                   s_add -> regIdx(0).orR
@@ -283,10 +283,10 @@ class collectorUnit extends Module{
         }
         ready(0) := 1.U
       }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
-        rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(
             A2_RS2 -> Mux(
-              MuxLookup(state, false.B, 
+              MuxLookup(state, false.B)(
                 Array(
                   s_idle -> regIdxWire(1).orR,
                   s_add -> regIdx(1).orR
@@ -298,7 +298,7 @@ class collectorUnit extends Module{
         )
         ready(1) := 1.U
       }.elsewhen(io.bankIn(i).bits.regOrder === 2.U) { //operand3
-        rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)),
+        rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(A3_PC -> VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)),
             A3_VRS3 -> io.bankIn(i).bits.data,
             A3_SD -> Mux(controlReg.isvec, io.bankIn(i).bits.data, VecInit.fill(num_thread)(io.bankIn(i).bits.data(0))),
@@ -451,28 +451,61 @@ class instDemux extends Module{
   io.out.foreach(_.valid := 0.U)
 
   // For those out port ready, selecting one by bitwise priority.
+  val priorityXorV = RegInit(true.B)
+  priorityXorV := ~priorityXorV
   val outReady1 = VecInit(io.out.map(_.ready)).asUInt
-  val outV_sel_oh = Wire(UInt(num_collectorUnit.W))
-  outV_sel_oh :=  PriorityEncoderOH(outReady1)
-  val outV_sel = OHToUInt(outV_sel_oh)
-  val outReady2 = outReady1 & (~outV_sel_oh)
   val outX_sel = Wire(UInt(num_collectorUnit.W))
-  outX_sel := PriorityEncoder(outReady2)
-  io.in(0).ready := outReady1.orR
-  io.in(1).ready := outReady2.orR
+  val outV_sel = Wire(UInt(num_collectorUnit.W))
+  val outV_sel_oh = Wire(UInt(num_collectorUnit.W))
+  val outReady2 = Wire(UInt(num_collectorUnit.W))
 
-
-
-  for (i <- (0 until num_collectorUnit).reverse) {
-    when(outReady1.asUInt.orR) {
-      io.out(outV_sel).bits :=  io.in(0).bits
-      io.out(outV_sel).valid :=  io.in(0).valid
-
+  if (num_warp == 1) {
+    val outX_sel_oh = Wire(UInt(num_collectorUnit.W))
+    // Alternate priority between V and X to ensure instructions are not blocked when num_warp = 1
+    when(priorityXorV) {
+      // V has priority
+      outV_sel_oh := PriorityEncoderOH(outReady1)
+      outV_sel := PriorityEncoder(outReady1)
+      outReady2 := outReady1 & (~outV_sel_oh).asUInt
+      outX_sel := PriorityEncoder(outReady2)
+      io.in(0).ready := outReady1.orR
+      io.in(1).ready := outReady2.orR
+      outX_sel_oh := 0.U
+    }.otherwise {
+      // X has priority
+      outX_sel_oh := PriorityEncoderOH(outReady1)
+      outX_sel := PriorityEncoder(outReady1)
+      outReady2 := outReady1 & (~outX_sel_oh).asUInt
+      outV_sel := PriorityEncoder(outReady2)
+      io.in(1).ready := outReady1.orR
+      io.in(0).ready := outReady2.orR
+      outV_sel_oh := 0.U
     }
-    when(outReady2.asUInt.orR) {
-      io.out(outX_sel).bits :=  io.in(1).bits
-      io.out(outX_sel).valid :=  io.in(1).valid
+    
+    when((priorityXorV && outReady1.orR) || ((!priorityXorV).asBool && outReady2.orR)) {
+      io.out(outV_sel).bits := io.in(0).bits
+      io.out(outV_sel).valid := io.in(0).valid
+    }
+    when((priorityXorV && outReady2.orR) || ((!priorityXorV).asBool && outReady1.orR)) {
+      io.out(outX_sel).bits := io.in(1).bits
+      io.out(outX_sel).valid := io.in(1).valid
+    }
+  } else {
+    // num_warp > 1, do not need complex priority logic
+    outV_sel_oh := PriorityEncoderOH(outReady1)
+    outV_sel := OHToUInt(outV_sel_oh)
+    outReady2 := outReady1 & (~outV_sel_oh).asUInt
+    outX_sel := PriorityEncoder(outReady2)
+    io.in(0).ready := outReady1.orR
+    io.in(1).ready := outReady2.orR
 
+    when(outReady1.orR) {
+      io.out(outV_sel).bits := io.in(0).bits
+      io.out(outV_sel).valid := io.in(0).valid
+    }
+    when(outReady2.orR) {
+      io.out(outX_sel).bits := io.in(1).bits
+      io.out(outX_sel).valid := io.in(1).valid
     }
   }
 

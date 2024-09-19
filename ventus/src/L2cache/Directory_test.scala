@@ -29,7 +29,7 @@ package L2cache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.config._
+import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.ReplacementPolicy
@@ -89,6 +89,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     val flush  = Input(Bool())
     val invalidate =Input(Bool())
     val tag_match = Input(Bool())
+    val flush_invalidate_src=Input(UInt(params.source_bits.W))
  //   val finish_issue =Output(Bool())
   })
 
@@ -128,12 +129,18 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val is_invalidate_reg =RegInit(false.B)
   val is_invalidate =Mux(io.invalidate, io.invalidate,is_invalidate_reg)
 
-
+ val flush_source_reg=RegInit(0.U(params.source_bits.W))
 
   val flushCount =RegInit(0.U((params.setBits+params.wayBits+1).W))
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
-  when(io.flush || io.invalidate  || (flush_issue_reg&& io.result.fire)){
+  val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
+  val flush_set =flushCount/params.cache.ways.asUInt
+  val flush_way =(flushCount%params.cache.ways.asUInt)
+  val regout = cc_dir.io.r.resp.data //
+  val ways = regout.asTypeOf(Vec(params.cache.ways,new DirectoryEntry_lite(params)))
+  val flush_tag =ways(flush_way).tag
+  when(io.flush || io.invalidate  || (flush_issue_reg&& (io.result.fire || !RegNext(status_reg(flush_set).dirty(flush_way))))){
     flushCount := flushCount +1.U
   }.elsewhen(flushDone){
     flushCount :=0.U
@@ -142,10 +149,12 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
   when(io.flush || io.invalidate){
     flush_issue_reg:= true.B
+    flush_source_reg:=io.flush_invalidate_src
     is_invalidate_reg:=  io.invalidate
   }.elsewhen(flushDone){
     flush_issue_reg:= false.B
     is_invalidate_reg :=false.B
+    flush_source_reg:=0.U
   }
 
 
@@ -153,17 +162,16 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  val ren = io.read.fire() || flush_issue
+  val ren = io.read.fire || flush_issue
 
-  val wen_new = (!wipeDone && !wipeOff) || io.write.fire()
-  val wen =io.write.fire()
+  val wen_new = (!wipeDone && !wipeOff) || io.write.fire
+  val wen =io.write.fire
   require (codeBits <= 256)
 
   val not_replace= ((io.result.bits.opcode===PutFullData ||io.result.bits.opcode===PutPartialData) && !io.result.bits.hit) ||io.tag_match
   //not replace victim when write miss or when multi mergeable miss
 
 
-val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
   for(i <-0 until params.cache.sets) {
     for (j <-0 until params.cache.ways) {
       when(!wipeDone) {
@@ -198,7 +206,6 @@ val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
 
 
 
-  val regout = cc_dir.io.r.resp.data //
 
   val tag = RegEnable(io.read.bits.tag, ren)
   val set = RegEnable(io.read.bits.set, ren)
@@ -226,7 +233,6 @@ for(i<- 0 until params.cache.sets){
   val writeWay1 = RegInit(0.U(params.wayBits.W))
   writeWay1:=io.write.bits.way
 
-  val ways = regout.asTypeOf(Vec(params.cache.ways,new DirectoryEntry_lite(params)))
   val status = status_reg(set)
   // 这边作为LLC，没有块儿权限之说，这里hit，不用检查权限
   val hits = Cat(ways.zip(status.valid).map { case (w,s) =>
@@ -235,15 +241,12 @@ for(i<- 0 until params.cache.sets){
   }.reverse)
 
 
-  val flush_set =flushCount/params.cache.ways.asUInt
-  val flush_way =(flushCount%params.cache.ways.asUInt)
-  val flush_tag =ways(flush_way).tag
   cc_dir.io.r.req.valid := ren && (!(setQuash_1&&tagMatch_1)) //在非bypass情况下fire才会读
   cc_dir.io.r.req.bits.apply(setIdx=Mux(flush_issue,flush_set,io.read.bits.set))  //读了一个set的所有数据
 
 
 
-  val hit = hits.orR()
+  val hit = hits.orR
   val hitWay = Wire(UInt(params.cache.ways.W))
   hitWay:= OHToUInt(hits)
   val writeSet1 = RegNext(io.write.bits.set)
@@ -281,8 +284,8 @@ for(i<- 0 until params.cache.sets){
 
   val timely_hit = (RegNext(io.read.bits.tag) ===io.write.bits.data.tag) && io.write.fire && (RegNext(io.read.bits.set)===io.write.bits.set)
 
-  io.read.ready := ((wipeDone && !io.write.fire()) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
-  io.result.valid := Mux(RegNext(flush_issue), RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
+  io.read.ready := ((wipeDone && !io.write.fire) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
+  io.result.valid := Mux(RegNext(flush_issue), io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue), valid_signal)
   io.result.bits.hit := (hit || (setQuash && tagMatch )|| timely_hit) && (!about_replace)
   io.result.bits.way  := Mux(RegNext(flush_issue), RegNext(flush_way),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,RegNext(io.write.bits.way),Mux(timely_hit,io.write.bits.way,victimWay))))
   io.result.bits.put    :=Mux(RegNext(flush_issue),0.U,read_bits_reg.put)
@@ -290,7 +293,7 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.offset :=Mux(RegNext(flush_issue),0.U,read_bits_reg.offset)
   io.result.bits.size   :=Mux(RegNext(flush_issue),log2Up(params.cache.beatBytes).asUInt,read_bits_reg.size)
   io.result.bits.set    :=Mux(RegNext(flush_issue),RegNext(flush_set),read_bits_reg.set)
-  io.result.bits.source :=Mux(RegNext(flush_issue),0.U,read_bits_reg.source)
+  io.result.bits.source :=Mux(RegNext(flush_issue),RegNext(flush_source_reg),read_bits_reg.source)
   io.result.bits.tag    :=Mux(RegNext(flush_issue),RegNext(flush_tag),read_bits_reg.tag)
   //victim tag should be transfered when miss dirty
   io.result.bits.opcode :=Mux(RegNext(flush_issue),Hint,read_bits_reg.opcode)
