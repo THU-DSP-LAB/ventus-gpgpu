@@ -1,5 +1,6 @@
 package MmuTest
 
+import circt.stage.ChiselStage
 import chisel3._
 import chisel3.util._
 import chiseltest._
@@ -12,7 +13,6 @@ import MmuTestUtils._
 import org.scalatest.freespec.AnyFreeSpec
 import play.IniFile
 import play.TestUtils.{IOTestDriver, IOTransform, MemPortDriverDelay, RequestSender, checkForReady, checkForValid}
-
 import scala.io.Source
 
 class MMUSystem(NL1Cache: Int, NL1TlbWays: Int, SV: SVParam) extends Module{
@@ -95,7 +95,8 @@ class MMUSystem(NL1Cache: Int, NL1TlbWays: Int, SV: SVParam) extends Module{
 }
 
 object MMUGen extends App{
-  (new chisel3.stage.ChiselStage).emitVerilog(new MMUSystem(2, 4, mmu.SV32),Array("--emission-options=disableMemRandomization,disableRegisterRandomization"))
+  ChiselStage.emitSystemVerilogFile(new MMUSystem(2, 4, mmu.SV32),
+    firtoolOpts = Array("--emission-options=disableMemRandomization, disableRegisterRandomization"))
 }
 
 case class TLBRequest(
@@ -144,7 +145,7 @@ class MMU_test extends AnyFreeSpec
   with MMUHelpers {
   case class AdvTest(name: String, meta: Seq[String], data: Seq[String], var warp: Int, var cycles: Int)
 
-  def testcase = "adv_kmeans_8x4"
+  def testcase = "adv_vecadd"
   val iniFile = new IniFile("./ventus/txt/_cases.ini")
   val section = iniFile.sections(testcase)
   val testbench = AdvTest(

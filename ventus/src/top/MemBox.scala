@@ -34,7 +34,7 @@ class MetaData{
   // var lds_mem_size = new Array[BigInt](0)
     var lds_mem_index = new Array[Int](0)
 
-  def generateHostReq(i: BigInt, j: BigInt, k: BigInt) = {
+  def generateHostReq(i: BigInt, j: BigInt, k: BigInt, asid: BigInt) = {
     val blockID = (i * kernel_size(1) + j) * kernel_size(2) + k
     (new host2CTA_data).Lit(
       _.host_kernel_asid -> asid.U,
@@ -54,7 +54,7 @@ class MetaData{
       _.host_csr_knl -> metaDataBaseAddr.U,
       _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U),
       _.host_pds_size_per_wf -> 0.U,
-      _.host_asid -> 0.U
+      _.host_asid -> asid.U
     )
   }
 }
@@ -104,12 +104,15 @@ class DynamicMem(val stepSize: Int = 4096){
   class Page(val startAddr: BigInt) {
     val data = Array.fill(stepSize)(0.toByte)
   }
+  //存的是所有的页表
   var pages = new scala.collection.mutable.ArrayBuffer[Page](0)
+  //给start_addr分配一个page
   def insertPage(startAddr: BigInt): Unit = {
     if(pages.isEmpty) {
       pages = pages :+ new Page(startAddr)
       return
     }
+    //_.staeAddr表示pages中的每个startAddr
     else if(pages.exists(_.startAddr == startAddr)) return
 
     val i = pages.lastIndexWhere(_.startAddr < startAddr) + 1

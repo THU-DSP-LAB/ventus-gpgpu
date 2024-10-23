@@ -25,7 +25,6 @@ import L2cache._
 import cta.cta_scheduler_top
 import axi._
 import freechips.rocketchip.amba.axi4._
-import freechips.rocketchip.util.EnhancedChisel3Assign
 import mmu.{AsidLookup, L1TLB, L1TlbAutoReflect, L1ToL2TlbXBar, L2TLB, L2TlbReq, L2TlbRsp, L2TlbToL2CacheXBar}
 import scala.Option.option2Iterable
 
@@ -101,8 +100,10 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_y
     io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_z
     io.CTA2warp(i).bits.dispatch2cu_wg_id := cta_sche.io.cu_wf_new(i).bits.wg_id
-    if(MMU_ENABLED) {
-        io.CTA2warp(i).bits.dispatch2cu_knl_asid.get := cta_sche.io.cu_wf_new(i).bits.asid_kernel.get
+    (io.CTA2warp(i).bits.dispatch2cu_knl_asid, cta_sche.io.cu_wf_new(i).bits.asid_kernel) match {
+      case (Some(dispatch), Some(asid)) =>
+        dispatch := asid
+      case _ => // None
     }
     cta_sche.io.cu_wf_new(i).ready := io.CTA2warp(i).ready
 
@@ -194,16 +195,16 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   SV match {
     case None => {
       for(i <- 0 until NL2Cache){
-        l2cache(i).in_a :<> cluster2l2Arb(i).memReqOut
-        cluster2l2Arb(i).memRspIn :<> l2cache(i).in_d
+        l2cache(i).in_a <> cluster2l2Arb(i).memReqOut
+        cluster2l2Arb(i).memRspIn <> l2cache(i).in_d
 
         for(j <- 0 until NCluster){
-          cluster2l2Arb(i).memReqVecIn(j) :<> l2distribute(j).memReqVecOut(i)
-          l2distribute(j).memRspVecIn(i) :<> cluster2l2Arb(i).memRspVecOut(j)
+          cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
+          l2distribute(j).memRspVecIn(i) <> cluster2l2Arb(i).memRspVecOut(j)
         }
 
         io.out_a(i) <> l2cache(i).out_a
-        l2cache(i).out_d :<> io.out_d(i)
+        l2cache(i).out_d <> io.out_d(i)
       }
       sm_wrapper.foreach{ sm =>
         sm.l2tlbReq.foreach{ l2 =>
@@ -251,10 +252,10 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
         out
       }
       for(i <- 0 until NSms){
-        sm_tlb_xbar.io.req_l1(i * NCacheInSM) :<> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NCacheInSM).U)
-        sm_wrapper(i).l2tlbRsp(0) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM))
-        sm_tlb_xbar.io.req_l1(i * NCacheInSM + 1) :<> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NCacheInSM + 1).U)
-        sm_wrapper(i).l2tlbRsp(1) :<> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 1))
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM) <> genXbarReq(sm_wrapper(i).l2tlbReq(0), (i * NCacheInSM).U)
+        sm_wrapper(i).l2tlbRsp(0) <> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM))
+        sm_tlb_xbar.io.req_l1(i * NCacheInSM + 1) <> genXbarReq(sm_wrapper(i).l2tlbReq(1), (i * NCacheInSM + 1).U)
+        sm_wrapper(i).l2tlbRsp(1) <> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 1))
       }
 
       // l2tlb <-> l2c
@@ -270,10 +271,10 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
       l2tlb.io.mem_rsp <> tlb_l2c_xbar.io.rsp_tlb
 
       for(i <- 0 until NL2Cache) {
-        tlb_req_arb(i).io.in(0) :<> tlb_l2c_xbar.io.req_cache(i)
-        tlb_req_arb(i).io.in(1) :<> cluster2l2Arb(i).memReqOut
+        tlb_req_arb(i).io.in(0) <> tlb_l2c_xbar.io.req_cache(i)
+        tlb_req_arb(i).io.in(1) <> cluster2l2Arb(i).memReqOut
         tlb_req_arb(i).io.in(1).bits.source := Cat(cluster2l2Arb(i).memReqOut.bits.source, 0.U(1.W))
-        l2cache(i).in_a :<> tlb_req_arb(i).io.out
+        l2cache(i).in_a <> tlb_req_arb(i).io.out
 
         cluster2l2Arb(i).memRspIn.valid := l2cache(i).in_d.valid & !l2cache(i).in_d.bits.source(0)
         cluster2l2Arb(i).memRspIn.bits := l2cache(i).in_d.bits
@@ -286,12 +287,12 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
         l2cache(i).in_d.ready := Mux(l2cache(i).in_d.bits.source(0), tlb_l2c_xbar.io.rsp_cache(i).ready, cluster2l2Arb(i).memRspIn.ready)
 
         for(j <- 0 until NCluster){
-          cluster2l2Arb(i).memReqVecIn(j) :<> l2distribute(j).memReqVecOut(i)
-          l2distribute(j).memRspVecIn(i) :<> cluster2l2Arb(i).memRspVecOut(j)
+          cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
+          l2distribute(j).memRspVecIn(i) <> cluster2l2Arb(i).memRspVecOut(j)
         }
 
-        io.out_a(i) :<> l2cache(i).out_a
-        l2cache(i).out_d :<> io.out_d(i)
+        io.out_a(i) <> l2cache(i).out_a
+        l2cache(i).out_d <> io.out_d(i)
       }
     }
   }
@@ -333,7 +334,7 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
       val ppn = UInt(SV.getOrElse(mmu.SV32).ppnLen.W)
       val flags = UInt(8.W)
     })))
-    val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
+    //val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
     val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
   val cta2warp=Module(new CTA2warp)

@@ -25,6 +25,7 @@ class AsidLookup(SV: SVParam, nBanks: Int, nEntries: Int) extends Module{
   flush_tlb := 0.U.asTypeOf(io.flush_tlb)
 
   when(io.fill_in.valid){
+  //  printf(p"asid_lookup: recv valid input, asid = ${io.fill_in.bits.asid}\n")
     when(fill_hitvec.asUInt === 0.U && empty_vec.asUInt =/= 0.U){
       storage(PriorityEncoder(empty_vec)) := io.fill_in.bits
     }.elsewhen(fill_hitvec.asUInt =/= 0.U){ // if already exists, clear it.

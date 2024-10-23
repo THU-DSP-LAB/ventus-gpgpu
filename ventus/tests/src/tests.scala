@@ -367,6 +367,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
           if(ptbr_table(ptbr_pos) == -1){
             ptbr_table(ptbr_pos) = mem.createRootPageTable()
             c.io.asid_fill.valid.poke(true.B)
+          //  print(s"initializing kernel, asid = ${ptbr_pos}")
             c.io.asid_fill.bits.poke((new AsidLookupEntry(mmu.SV32)).Lit(
               _.ptbr -> ptbr_table(ptbr_pos).U,
               _.asid -> ptbr_pos.U,
@@ -385,7 +386,7 @@ class AdvancedTest extends AnyFreeSpec with ChiselScalatestTester{ // Working in
               i <- 0 until size3d(0)
               j <- 0 until size3d(1)
               k <- 0 until size3d(2)
-            } yield meta.generateHostReq(i, j, k)
+            } yield meta.generateHostReq(i, j, k, BigInt(ptbr_pos))
           )
           ptbr_pos += 1
         }

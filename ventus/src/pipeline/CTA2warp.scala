@@ -29,7 +29,7 @@ class CTAreqData extends Bundle{
   val dispatch2cu_wgid_y_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W)
   val dispatch2cu_wgid_z_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W)
   val dispatch2cu_wg_id              = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
-  val dispatch2cu_knl_asid           = if(CTA_SCHE_CONFIG.GPU.MMU_ENABLE) Some(UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)) else None
+  val dispatch2cu_knl_asid           = if(CTA_SCHE_CONFIG.GPU.MMU_ENABLE){Some(UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH))} else None
 }
 class CTArspData extends Bundle{
   val cu2dispatch_wf_tag_done = UInt(CTA_SCHE_CONFIG.WG.WF_TAG_WIDTH)

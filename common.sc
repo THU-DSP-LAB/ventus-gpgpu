@@ -19,10 +19,12 @@ trait VentusModule extends HasChisel {
   def fpuv2Module : ScalaModule
   def rocketchipModule : ScalaModule
   def inclusivecacheModule : ScalaModule
+  def memboxModule : ScalaModule
   override def moduleDeps = super.moduleDeps ++ Seq(
     hardfloatModule,
     fpuv2Module,
     rocketchipModule,
     inclusivecacheModule,
+    memboxModule,
   )
 }

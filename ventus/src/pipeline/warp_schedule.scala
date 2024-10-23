@@ -58,7 +58,7 @@ class warp_scheduler extends Module{
   val asidReg = Reg(Vec(num_warp,UInt(KNL_ASID_WIDTH.W)))
   val new_warpid = io.warpReq.bits.wid
   when(io.warpReq.fire){
-    asidReg(new_warpid) := io.warpReq.bits.CTAdata.dispatch2cu_knl_asid_dispatch
+    asidReg(new_warpid) := io.warpReq.bits.CTAdata.dispatch2cu_knl_asid.getOrElse(0.U).asUInt
   }
   io.asid := asidReg(io.pc_rsp.bits.warpid)
 

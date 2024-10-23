@@ -793,7 +793,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   // 0-idle 1-wait TLB resp 2-issue memreq
 
   when(wshrPass && memReq_Q.io.deq.fire) {
-    memReq_st3 := memReq_Q.io.deq.bits
+    memReq_st3 := memReq_Q.io.deq.bits}
   waitTLBnext := waitTLB
   waitTLB := waitTLBnext
   when(waitTLB === 0.U){
