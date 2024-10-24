@@ -16,8 +16,9 @@ import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 // ⬑ = continuing from above, 接续上文
 // =
 
-class io_cuinterface2rt extends Bundle with ctainfo_alloc_to_cuinterface {
+class io_cuinterface2rt extends Bundle with ctainfo_alloc_to_cuinterface_to_rt {
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
+  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)       // Number of wavefront in this cta
 }
 
 class io_ram[T <: Data](LEN: Int, gen: T) extends Bundle {

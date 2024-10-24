@@ -16,7 +16,7 @@ import top.parameters._
 
 class CTAreqData extends Bundle{
   val dispatch2cu_wg_wf_count        = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)      // num of WF in this WG
-  val dispatch2cu_wf_size_dispatch   = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX+1).W)  // num of thread in this WF
+  val dispatch2cu_wf_size_dispatch   = UInt(log2Ceil(CTA_SCHE_CONFIG.GPU.NUM_THREAD+1).W)     // num of thread in this WF
   val dispatch2cu_sgpr_base_dispatch = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)    // sGPR base addr of this WF
   val dispatch2cu_vgpr_base_dispatch = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)    // vGPR base addr of this WF
   val dispatch2cu_lds_base_dispatch  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_LDS_MAX+1).W)     // LDS  base addr of this WF
@@ -25,9 +25,9 @@ class CTAreqData extends Bundle{
   val dispatch2cu_pds_base_dispatch  = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val dispatch2cu_gds_base_dispatch  = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val dispatch2cu_csr_knl_dispatch   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
-  val dispatch2cu_wgid_x_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W)
-  val dispatch2cu_wgid_y_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W)
-  val dispatch2cu_wgid_z_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W)
+  val dispatch2cu_wgid_x_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val dispatch2cu_wgid_y_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val dispatch2cu_wgid_z_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
   val dispatch2cu_wg_id              = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
   val dispatch2cu_knl_asid           = if(CTA_SCHE_CONFIG.GPU.MMU_ENABLE) Some(UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)) else None
 }

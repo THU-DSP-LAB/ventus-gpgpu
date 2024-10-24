@@ -27,11 +27,14 @@ import axi._
 import freechips.rocketchip.amba.axi4._
 
 class host2CTA_data extends Bundle{
-  val host_wg_id            = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
-  val host_num_wf           = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)
-  val host_wf_size          = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX+1).W)
-  val host_start_pc         = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
-  val host_kernel_size_3d   = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W))
+  val host_wg_id                = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
+  val host_num_wf               = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)
+  val host_wf_size              = UInt(log2Ceil(CTA_SCHE_CONFIG.GPU.NUM_THREAD+1).W)
+  val host_start_pc             = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_kernel_size_3d       = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W))
+  val host_wg_idx_3d            = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W))
+  val host_num_thread_per_wg_3d = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W))
+  val host_thread_idx_global_offset_3d = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W))
   val host_csr_knl          = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_vgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
   val host_sgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
@@ -42,6 +45,7 @@ class host2CTA_data extends Bundle{
   val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
+  val host_num_dimension    = UInt(2.W) // how many dimension does this kernel have
   val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
 }
 class CTA2host_data extends Bundle{

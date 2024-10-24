@@ -12,7 +12,7 @@ class io_alloc2buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends B
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 
-class io_buffer2alloc(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends ctainfo_host_to_alloc {
+class io_buffer2alloc(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends ctainfo_host_to_alloc with ctainfo_host_to_alloc_to_cu {
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
   val wgram_addr = UInt(log2Ceil(NUM_ENTRIES).W)
 }
@@ -48,7 +48,7 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   // wgram_valid(addr) stores if wg_ram(addr) is valid information
   // wgram_alloc(addr) stores if wg in wg_ram(addr) is now being processed by allocator
   // =
-  class ram1datatype extends ctainfo_host_to_alloc{
+  class ram1datatype extends ctainfo_host_to_alloc with ctainfo_host_to_alloc_to_cu {
     val wg_id = if(DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
   }
 
@@ -111,8 +111,8 @@ class wg_buffer(NUM_ENTRIES: Int = CONFIG.WG_BUFFER.NUM_ENTRIES) extends Module 
   wgram1_rd_data := RegEnable(wgram1.read(wgram1_rd_next.bits), wgram1_rd_act)
   val wgram1_rd_data_addr = RegEnable(wgram1_rd_next.bits, wgram1_rd_act)
 
-  io.alloc_wg_new.bits.viewAsSupertype(new ctainfo_host_to_alloc {}) :=
-    wgram1_rd_data.viewAsSupertype(new ctainfo_host_to_alloc {})    // TODO: check if the connection is right
+  io.alloc_wg_new.bits.viewAsSupertype(new ctainfo_host_to_alloc {}) := wgram1_rd_data.viewAsSupertype(new ctainfo_host_to_alloc {})
+  io.alloc_wg_new.bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {}) := wgram1_rd_data.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {})
   io.alloc_wg_new.bits.wgram_addr := wgram1_rd_data_addr
   if(DEBUG) io.alloc_wg_new.bits.wg_id.get := wgram1_rd_data.wg_id.get
 

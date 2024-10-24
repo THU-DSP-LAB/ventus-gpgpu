@@ -145,13 +145,15 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def WF_COUNT_WIDTH = log2Ceil(WF_COUNT_MAX + 1)
   def WF_COUNT_WIDTH_PER_WG = log2Ceil(WF_COUNT_PER_WG_MAX + 1)
   def TAG_WIDTH = CTA_SCHE_CONFIG.WG.WF_TAG_WIDTH_UINT
-  def NUM_WG_DIM = 1024
-  def NUM_WG_X = NUM_WG_DIM // max wg num in kernel
-  def NUM_WG_Y = NUM_WG_DIM
-  def NUM_WG_Z = NUM_WG_DIM
-  def WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X + 1)
-  def WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y + 1)
-  def WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z + 1)
+  def NUM_WG = 2^16 - 1   // max threadBlock num in each kernel(grid) (each dim)
+  def NUM_WG_X = NUM_WG   // max threadBlock num in each kernel(grid) (x dim)
+  def NUM_WG_Y = NUM_WG   // max threadBlock num in each kernel(grid) (y dim)
+  def NUM_WG_Z = NUM_WG   // max threadBlock num in each kernel(grid) (z dim)
+  def NUM_THREAD_PER_WG     = 1024             // max thread num in each threadBlock
+  def NUM_THREAD_PER_KNL = NUM_WG * NUM_THREAD_PER_WG
+  def WG_SIZE_X_WIDTH = log2Ceil(NUM_THREAD_PER_WG + 1)
+  def WG_SIZE_Y_WIDTH = log2Ceil(NUM_THREAD_PER_WG + 1)
+  def WG_SIZE_Z_WIDTH = log2Ceil(NUM_THREAD_PER_WG + 1)
 
   object CTA_SCHE_CONFIG {
     import chisel3._
@@ -164,10 +166,13 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
       val MMU_ENABLE = MMU_ENABLED                 // if MMU will be used
       val ASID_WIDTH = MMU_ASID_WIDTH.W            // MMU ASID width
     }
+    object KERNEL {
+      val NUM_WG_MAX = NUM_WG                      // Max number of wg in each kernel
+      val NUM_THREAD_PER_KNL_MAX = NUM_THREAD_PER_KNL
+    }
     object WG {
       val WG_ID_WIDTH = parameters.WG_ID_WIDTH.W
-      val NUM_WG_DIM_MAX = NUM_WG_DIM              // Max number of wg in a single dimension in each kernel
-      val NUM_THREAD_MAX = GPU.NUM_THREAD          // Max number of thread in each wavefront(warp)
+      val NUM_THREAD_PER_WG_MAX   = NUM_THREAD_PER_WG   // Max number of thread in each **WG**
       val NUM_WF_MAX = num_warp_in_a_block         // Max number of wavefront in each workgroup(block)
       val NUM_LDS_MAX = sharemem_size              // Max number of LDS  occupied by a workgroup
       val NUM_SGPR_MAX = num_sgpr                  // Max number of sgpr occupied by a workgroup

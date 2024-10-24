@@ -218,3 +218,84 @@ object skid_valid {
     inst.io.out
   }
 }
+
+/** Variable-Radix counter, eg. 24h-60m-60s clock counter
+ *  Each place of the counter may have a different radix,
+ *  eg. threadID in a 8z-16y-32x thread block
+ * @param N: how many places does this counter have
+ * @param width: how width each place of the counter is
+ * @param io_radix: the new radix of each place. When radix.valid, the counter will be cleared and start from zero
+ * @param io_cnt: the counter's value. When cnt.fire, the counter will step up 1
+ *
+ * @note io.cnt will cleared to zero the next cycle after radix.valid
+ */
+class cnt_varRadix(val N: Int, width: Int) extends Module {
+  val io = IO(new Bundle {
+    val radix = Flipped(ValidIO(Vec(N, UInt(width.W))))
+    val cnt = DecoupledIO(Vec(N, UInt(width.W)))
+  })
+  val radix = Reg(Vec(N, UInt(width.W)))
+  val cnt = Reg(Vec(N, UInt(width.W)))
+
+  when (io.radix.valid) {
+    radix := io.radix.bits
+  }
+
+  io.cnt.valid := true.B
+  io.cnt.bits := cnt
+
+  val carry = Vec(N, Bool())            // 每一位是否已满，加一后需要进位
+  carry(0) := (cnt(0) + 1.U) === radix(0)
+  for(i <- 1 until N) {
+    carry(i) := ( (cnt(i) + 1.U) === radix(i) ) && carry(i-1)
+  }
+
+  for(i <- 0 until N) {
+    cnt(i) := MuxCase(cnt(i), Seq(
+      io.radix.fire -> 0.U,
+      (io.cnt.fire && carry(i-1)) -> Mux(carry(i), 0.U, (cnt(i) + 1.U)),
+    ))
+  }
+}
+
+class cnt_varRadix_multiStep(val N: Int, WIDTH: Int, STEP: Int = 2) extends Module {
+  val io = IO(new Bundle {
+    val radix = Flipped(ValidIO(Vec(N, UInt(WIDTH.W))))
+    val cnt = DecoupledIO(Vec(STEP, Vec(N, UInt(WIDTH.W))))
+  })
+  val radix = Reg(Vec(N, UInt(WIDTH.W)))
+  val cnt_reg = Reg(Vec(N, UInt(WIDTH.W)))
+  val cnt_res = Wire(Vec(STEP+1, Vec(N, UInt(WIDTH.W))))
+
+  when (io.radix.valid) {
+    radix := io.radix.bits
+  }
+
+  io.cnt.valid := true.B
+  for(step <- 0 until STEP) {
+    io.cnt.bits(step) := cnt_res(step)
+  }
+
+  val carry = Wire(Vec(STEP, Vec(N-1, Bool())))            // 每一位是否已满，加一后需要进位
+  for(step <- 0 until STEP) {
+    carry(step)(0) := (cnt_res(step)(0) + 1.U) === radix(0)
+    for(i <- 1 until N-1) {
+      carry(step)(i) := ( (cnt_res(step)(i) + 1.U) === radix(i) ) && carry(step)(i-1)
+    }
+  }
+
+  cnt_res(0) := cnt_reg
+  for(step <- 1 until STEP + 1; i <- 0 until N) {
+    if(i > 0) {
+      cnt_res(step)(i) := Mux(!carry(step-1)(i-1), cnt_res(step-1)(i),
+                          Mux((cnt_res(step-1)(i) + 1.U) === radix(i), 0.U, cnt_res(step-1)(i) + 1.U))
+    } else {
+      cnt_res(step)(0) := Mux((cnt_res(step-1)(i) + 1.U) === radix(0), 0.U, cnt_res(step-1)(0) + 1.U)
+    }
+  }
+
+  cnt_reg := MuxCase(cnt_reg, Seq(
+    io.radix.fire -> 0.U.asTypeOf(cnt_reg.cloneType),
+    io.cnt.fire -> cnt_res(STEP),
+  ))
+}

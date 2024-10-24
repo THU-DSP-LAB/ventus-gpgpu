@@ -18,7 +18,7 @@ class ResourceConflictException(msg: String) extends MyException(msg) {
 }
 
 object TESTCONFIG {
-  val TESTLEN = 5000
+  val TESTLEN = 50
 }
 import TESTCONFIG.TESTLEN
 
@@ -26,12 +26,21 @@ class Test(val len: Int) {
   class TestIn(testlen: Int) {
     val random = Random
     val csr = Seq.tabulate(testlen){i => random.nextInt().abs}
+    val num_thread_per_wg_x = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_thread_per_wg_y = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_thread_per_wg_z = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val wgIdx_x = Seq.tabulate(testlen){i => random.nextInt(64)}
+    val wgIdx_y = Seq.tabulate(testlen){i => random.nextInt(64)}
+    val wgIdx_z = Seq.tabulate(testlen){i => random.nextInt(64)}
+    val threadIdx_offset_x = Seq.tabulate(testlen){i => random.nextInt(64)}
+    val threadIdx_offset_y = Seq.tabulate(testlen){i => random.nextInt(64)}
+    val threadIdx_offset_z = Seq.tabulate(testlen){i => random.nextInt(64)}
     val wf_max = CONFIG.WG.NUM_WF_MAX                                           * 3 /  8
-    val wf = Seq.tabulate(testlen){i => random.nextInt(wf_max - 1) + 1}
+    val wf = Seq.tabulate(testlen){i => (num_thread_per_wg_x(i) * num_thread_per_wg_y(i) * num_thread_per_wg_z(i) + CONFIG.GPU.NUM_THREAD - 1) / CONFIG.GPU.NUM_THREAD}
     val lds = Seq.tabulate(testlen){i =>  random.nextInt(CONFIG.WG.NUM_LDS_MAX  * 3 / (8*wf(i))) * wf(i)}
     val sgpr = Seq.tabulate(testlen){i => random.nextInt(CONFIG.WG.NUM_SGPR_MAX * 3 / (8*wf(i)))}
     val vgpr = Seq.tabulate(testlen){i => random.nextInt(CONFIG.WG.NUM_VGPR_MAX * 3 / (8*wf(i)))}
-    val wf_time = Seq.tabulate(testlen){i => Seq.tabulate(wf(i)){j => 400 + random.nextInt(200)}}
+    val wf_time = Seq.tabulate(testlen){i => Seq.tabulate(wf(i)){j => 100 + random.nextInt(200)}}
   }
   class TestExec(testlen: Int) {
     val valid = Array.fill(testlen)(false)
@@ -48,6 +57,10 @@ class Test(val len: Int) {
 
 class Wf_slot {
   var valid: Boolean = false
+  val threadIdxL_3d = new Array[(Int,Int,Int)](CONFIG.GPU.NUM_THREAD)
+  val threadIdxL_1d = new Array[Int](CONFIG.GPU.NUM_THREAD)
+  val threadIdxG_3d = new Array[(Int,Int,Int)](CONFIG.GPU.NUM_THREAD)
+  val threadIdxG_1d = new Array[Int](CONFIG.GPU.NUM_THREAD)
   var wg_id: Int = _
   var wf_tag: Int = _
   var lds: (Int, Int) = _
@@ -67,6 +80,14 @@ class Wf_slot {
     vgpr = that.vgpr
     csr = that.csr
     time = that.time
+    for(i <- 0 until CONFIG.GPU.NUM_THREAD) {
+      threadIdxL_3d(i) = that.threadIdxL_3d(i)
+      threadIdxL_1d(i) = that.threadIdxL_1d(i)
+      threadIdxG_3d(i) = that.threadIdxG_3d(i)
+      threadIdxG_1d(i) = that.threadIdxG_1d(i)
+    }
+  }
+  def check(): Unit = {
   }
 }
 
@@ -82,15 +103,15 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
   var wf_new_last_sgpr: (Int,Int) = _
   var wf_new_last_vgpr: (Int,Int) = _
 
-  def update(): (Boolean, Int, Int) = {
+  def update(): (Boolean, Int, Int) = { // 仿真步进，判断哪些WF执行完毕，并返回其中一个
     var wf_finish = false
     var wf_tag = 0
     var wg_id = 0
     for(i <- 0 until NUM_WF_SLOT) {
       if(wf_slot(i).valid) {
         if(wf_slot(i).time > 0) {
-          wf_slot(i).time -= 1
-        } else {
+          wf_slot(i).time -= 1    // WF执行剩余时间--
+        } else { // 在执行完毕的WF中选择序号最靠前的一个返回给CTA_sche
           wf_tag = if(wf_finish) wf_tag else wf_slot(i).wf_tag
           wg_id = if(wf_finish) wg_id else wf_slot(i).wg_id
           wf_finish = true
@@ -100,8 +121,36 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
     (wf_finish, wg_id, wf_tag)
   }
   def wf_check(wf2: Wf_slot): Unit = {
+    val wg_id = wf2.wg_id
+    for(i <- 0 until CONFIG.GPU.NUM_THREAD - 1) {
+      if(wf2.threadIdxL_1d(i) + 1 != wf2.threadIdxL_1d(i+1)) { // threadIdxL_linear应当序号连续
+        new MyException(s"WF threadIdx-local-linear incorrect: ${wf2.threadIdxL_1d}")
+      }
+      if(wf2.wf_id != wf2.threadIdxL_1d(0) / CONFIG.GPU.NUM_THREAD) { // 首个threadIdxL应当与wf_id匹配
+        new MyException(s"WF ID ${wf2.wf_id} doesn't match local threadIdx-linear ${wf2.threadIdxL_1d(0)}~${wf2.threadIdxL_1d.last}")
+      }
+      // threadIdxL_{x,y,z}正确
+      if(wf2.threadIdxL_3d(i)._1 != (wf2.wf_id * CONFIG.GPU.NUM_THREAD + i) % (test.in.num_thread_per_wg_x(wf2.wg_id)) ||
+         wf2.threadIdxL_3d(i)._2 != (wf2.wf_id * CONFIG.GPU.NUM_THREAD + i) % (test.in.num_thread_per_wg_x(wf2.wg_id) * test.in.num_thread_per_wg_y(wf2.wg_id)) / test.in.num_thread_per_wg_x(wf2.wg_id) ||
+         wf2.threadIdxL_3d(i)._3 != (wf2.wf_id * CONFIG.GPU.NUM_THREAD + i) / (test.in.num_thread_per_wg_x(wf2.wg_id) * test.in.num_thread_per_wg_y(wf2.wg_id))
+      ) { new MyException(s"local threadIdx-3d incorrect or don't match WF_ID ${wf2.wf_id}: ${wf2.threadIdxL_3d}") }
+      // threadIdxG_{x,y,z}正确
+      if(wf2.threadIdxG_3d(i)._1 != (test.in.wgIdx_x(wg_id) * test.in.num_thread_per_wg_x(wg_id) + wf2.threadIdxL_3d(i)._1 + test.in.threadIdx_offset_x(wg_id)) ||
+         wf2.threadIdxG_3d(i)._2 != (test.in.wgIdx_y(wg_id) * test.in.num_thread_per_wg_y(wg_id) + wf2.threadIdxL_3d(i)._2 + test.in.threadIdx_offset_y(wg_id)) ||
+         wf2.threadIdxG_3d(i)._3 != (test.in.wgIdx_z(wg_id) * test.in.num_thread_per_wg_z(wg_id) + wf2.threadIdxL_3d(i)._3 + test.in.threadIdx_offset_z(wg_id))
+      ) { new MyException(s"global threadIdx-3d incorrect or don't match blockIdx ${(test.in.wgIdx_x(wg_id),test.in.wgIdx_y(wg_id),test.in.wgIdx_z(wg_id))} or offset: ${wf2.threadIdxG_3d}") }
+      if(wf2.threadIdxG_1d(i) != (wf2.threadIdxG_3d(i)._1 - test.in.threadIdx_offset_x(wg_id)) +
+         (wf2.threadIdxG_3d(i)._2 - test.in.threadIdx_offset_y(wg_id))  * test.in.num_thread_per_wg_x(wg_id) +
+         (wf2.threadIdxG_3d(i)._3 - test.in.threadIdx_offset_z(wg_id))  * test.in.num_thread_per_wg_x(wg_id) * test.in.num_thread_per_wg_y(wg_id)
+      ) {
+        new MyException(s"global threadIdx-1d ${wf2.threadIdxG_1d} not match threadIdxG_3d ${wf2.threadIdxG_3d} - offset ${(test.in.threadIdx_offset_x,test.in.threadIdx_offset_y,test.in.threadIdx_offset_z)}")
+      }
+    }
+
+    // 检验新来的WF的LDS/sGPR/vGPR资源占用是否与其它WF有重叠
     wf_slot.foreach { wf1 =>
       if(wf1.valid) {
+        // |--------------------检验资源占用是否重叠--------------------|    |--旧WF对此资源的耗用为0时跳过检查--|   |-同WG的LDS共享，跳过检查-|
         if((wf1.lds._1  >= wf2.lds._1  && wf1.lds._1  <= wf2.lds._2 ) && (wf1.lds._1  != wf1.lds._2  + 1) && wf1.wg_id != wf2.wg_id) { throw new ResourceConflictException("LDS", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
         if((wf1.sgpr._1 >= wf2.sgpr._1 && wf1.sgpr._1 <= wf2.sgpr._2) && (wf1.sgpr._1 != wf1.sgpr._2 + 1)) { throw new ResourceConflictException("sGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
         if((wf1.vgpr._1 >= wf2.vgpr._1 && wf1.vgpr._1 <= wf2.vgpr._2) && (wf1.vgpr._1 != wf1.vgpr._2 + 1)) { throw new ResourceConflictException("vGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
@@ -111,9 +160,9 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
       }
     }
   }
-  def wf_new(wf: Wf_slot): Unit = {
+  def wf_new(wf: Wf_slot): Unit = { // 向CU中新增WF，WF信息已被从硬件信号转化为软件class
     if(wf.wg_id < 0 || wf.wg_id >= test.len) {throw new MyException(s"WG ID ERROR: ${wf.wg_id}, expect WG ID Max = ${test.len - 1}")}
-    wf_check(wf)
+    wf_check(wf) // 检测新WF的LDS/sGPR/vGPR资源分配无误
     wf.valid = true
 
     val wf_cnt = test.wg_exec.wf_cnt(wf.wg_id) + 1
@@ -251,7 +300,16 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.num_wg_x -> 0.U,
         _.num_wg_y -> 0.U,
         _.num_wg_z -> 0.U,
-        _.asid_kernel.get -> 0.U,
+        //(_.asid_kernel.get) -> 0.U,
+        _.num_thread_per_wg_x -> (test.in.num_thread_per_wg_x(i)).U,
+        _.num_thread_per_wg_y -> (test.in.num_thread_per_wg_y(i)).U,
+        _.num_thread_per_wg_z -> (test.in.num_thread_per_wg_z(i)).U,
+        _.wgIdx_x -> (i % test.in.num_thread_per_wg_x(i)).U,
+        _.wgIdx_y -> (i / test.in.num_thread_per_wg_x(i) % test.in.num_thread_per_wg_y(i)).U,
+        _.wgIdx_z -> (i / test.in.num_thread_per_wg_x(i) / test.in.num_thread_per_wg_y(i)).U,
+        _.threadIdx_in_grid_offset_x -> (test.in.threadIdx_offset_x(i)).U,
+        _.threadIdx_in_grid_offset_y -> (test.in.threadIdx_offset_y(i)).U,
+        _.threadIdx_in_grid_offset_z -> (test.in.threadIdx_offset_z(i)).U,
       ) }
 
 
