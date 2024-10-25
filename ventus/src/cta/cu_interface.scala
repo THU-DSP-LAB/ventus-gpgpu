@@ -100,7 +100,7 @@ class cu_interface extends Module {
   import cta.utils.cnt_varRadix_multiStep
   import scala.math.{max,min}
   val THREADIDX_STEP = 2   // the counter will generate threadIndex-Local for $STEP threads each cycle
-  val THREADIDX_CTRL_EXTRA = min(CONFIG.GPU.NUM_THREAD, 3*THREADIDX_STEP)
+  val THREADIDX_CTRL_EXTRA = CONFIG.GPU.NUM_THREAD
   val THREADIDX_CTRL_MAX = NUM_THREAD_HW + THREADIDX_CTRL_EXTRA
 
   // instantiate
@@ -114,7 +114,8 @@ class cu_interface extends Module {
   // control logic
   val threadIdxL_ctrl_cnt = Reg(UInt(log2Ceil(THREADIDX_CTRL_MAX + THREADIDX_STEP).W))
   val threadIdxL_ctrl_ok = threadIdxL_ctrl_cnt >= CONFIG.GPU.NUM_THREAD.U
-  val threadIdxL_ctrl_full = threadIdxL_ctrl_cnt === THREADIDX_CTRL_MAX.U
+  val threadIdxL_ctrl_full = (threadIdxL_ctrl_cnt === THREADIDX_CTRL_MAX.U) && !wf_sent
+  val threadIdxL_ctrl_en = (splitter_cnt =/= 0.U) && !threadIdxL_ctrl_full // Still at least one WF remain to be dispatch && this WF unfinish
   threadIdxL_ctrl_cnt := Mux(splitter_cnt === 0.U, 0.U,
                              threadIdxL_ctrl_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U) + Mux(!threadIdxL_ctrl_full, THREADIDX_STEP.U, 0.U) )
   assert(!wf_sent || threadIdxL_ctrl_cnt >= NUM_THREAD_HW.U)
@@ -125,12 +126,11 @@ class cu_interface extends Module {
   threadIdxL_cnt3d.io.radix.bits(2) := fifo.io.deq.bits.num_thread_per_wg_z
   threadIdxL_cnt3d.io.radix.valid := splitter_load_new
   // cnt3d enable
-  val threadIdxL_cnt_enable = (splitter_cnt =/= 0.U) && !threadIdxL_ctrl_full // Still at least one WF remain to be dispatch && this WF unfinish
-  threadIdxL_cnt3d.io.cnt.ready := threadIdxL_cnt_enable
+  threadIdxL_cnt3d.io.cnt.ready := threadIdxL_ctrl_en
   // cnt1d clear & enable
   threadIdxL_cnt1d := MuxCase(threadIdxL_cnt1d, Seq(
     (splitter_load_new)     -> 0.U,
-    (threadIdxL_cnt_enable) -> (threadIdxL_cnt1d + THREADIDX_STEP.U),
+    (threadIdxL_ctrl_en) -> (threadIdxL_cnt1d + THREADIDX_STEP.U),
   ))
 
   for(i <- 0 until THREADIDX_CTRL_MAX) {
@@ -144,11 +144,11 @@ class cu_interface extends Module {
     }
     val select_base = threadIdxL_ctrl_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U)
     val select_this = (i.U >= select_base && i.U < select_base + THREADIDX_STEP.U)
-    when(threadIdxL_cnt_enable && select_this) {
-      threadIdxL_result_x(i) := threadIdxL_cnt3d.io.cnt.bits(i.U-threadIdxL_ctrl_cnt)(0)
-      threadIdxL_result_y(i) := threadIdxL_cnt3d.io.cnt.bits(i.U-threadIdxL_ctrl_cnt)(1)
-      threadIdxL_result_z(i) := threadIdxL_cnt3d.io.cnt.bits(i.U-threadIdxL_ctrl_cnt)(2)
-      threadIdxL_result_1d(i) := threadIdxL_cnt1d + (i.U - threadIdxL_ctrl_cnt)
+    when(threadIdxL_ctrl_en && select_this) {
+      threadIdxL_result_x(i) := threadIdxL_cnt3d.io.cnt.bits(i.U - select_base)(0)
+      threadIdxL_result_y(i) := threadIdxL_cnt3d.io.cnt.bits(i.U - select_base)(1)
+      threadIdxL_result_z(i) := threadIdxL_cnt3d.io.cnt.bits(i.U - select_base)(2)
+      threadIdxL_result_1d(i) := threadIdxL_cnt1d + (i.U - select_base)
     }
   }
 
@@ -160,8 +160,8 @@ class cu_interface extends Module {
   // control logic
   val threadIdxG_ctrl_input_cnt = Reg(UInt(log2Ceil(THREADIDX_CTRL_MAX + THREADIDX_STEP).W))
   val threadIdxG_ctrl_output_cnt = Reg(UInt(log2Ceil(THREADIDX_CTRL_MAX + THREADIDX_STEP).W))
-  val threadIdxG_ctrl_input_en = (threadIdxG_ctrl_input_cnt =/= THREADIDX_CTRL_MAX.U) && (threadIdxG_ctrl_input_cnt < threadIdxL_ctrl_cnt)
-  val threadIdxG_ctrl_output_en = RegNext(Mux(splitter_cnt =/= 0.U, RegNext(threadIdxG_ctrl_input_en), false.B))
+  val threadIdxG_ctrl_input_en = (threadIdxG_ctrl_input_cnt =/= THREADIDX_CTRL_MAX.U || wf_sent) && (threadIdxG_ctrl_input_cnt < threadIdxL_ctrl_cnt)
+  val threadIdxG_ctrl_output_en = RegNext(Mux(splitter_cnt =/= 0.U, RegNext(Mux(splitter_cnt =/= 0.U, threadIdxG_ctrl_input_en, false.B)), false.B))
   val threadIdxG_ctrl_ok = (threadIdxG_ctrl_input_cnt >= NUM_THREAD_HW.U) && (threadIdxG_ctrl_output_cnt >= NUM_THREAD_HW.U)
   threadIdxG_ctrl_input_cnt := Mux(splitter_cnt === 0.U, 0.U,
                                  threadIdxG_ctrl_input_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U) + Mux(threadIdxG_ctrl_input_en, THREADIDX_STEP.U, 0.U) )
@@ -174,7 +174,7 @@ class cu_interface extends Module {
   val threadIdxG_calc1_x = Wire(Vec(THREADIDX_STEP, UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)))
   val threadIdxG_calc1_y = Wire(Vec(THREADIDX_STEP, UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)))
   val threadIdxG_calc1_z = Wire(Vec(THREADIDX_STEP, UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)))
-  val threadIdxG_calc2_x = RegNext(threadIdxG_calc1_x)
+  val threadIdxG_calc2_x = RegNext(RegNext(threadIdxG_calc1_x))
   val threadIdxG_calc2_y = Wire(Vec(THREADIDX_STEP, UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)))
   val threadIdxG_calc2_z = Wire(Vec(THREADIDX_STEP, UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)))
   val threadIdxG_calc3_1d = Wire(Vec(THREADIDX_STEP, UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)))
@@ -214,8 +214,8 @@ class cu_interface extends Module {
     }
     val input_select_base  = threadIdxG_ctrl_input_cnt  - Mux(wf_sent, NUM_THREAD_HW.U, 0.U)
     val output_select_base = threadIdxG_ctrl_output_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U)
-    val input_select_this  = (i.U >= threadIdxG_ctrl_input_cnt  && i.U < threadIdxG_ctrl_input_cnt  + THREADIDX_CTRL_EXTRA.U)
-    val output_select_this = (i.U >= threadIdxG_ctrl_output_cnt && i.U < threadIdxG_ctrl_output_cnt + THREADIDX_CTRL_EXTRA.U)
+    val input_select_this  = (i.U >= input_select_base && i.U < input_select_base + THREADIDX_STEP.U)
+    val output_select_this = (i.U >= output_select_base && i.U < output_select_base + THREADIDX_STEP.U)
     when(threadIdxG_ctrl_input_en && input_select_this) { // threadIdxG_3d calc is combinational, reuse ctrl_input_en
       threadIdxG_result_x(i) := threadIdxG_calc1_x(i.U - input_select_base) + fifo.io.deq.bits.threadIdx_in_grid_offset_x
       threadIdxG_result_y(i) := threadIdxG_calc1_y(i.U - input_select_base) + fifo.io.deq.bits.threadIdx_in_grid_offset_y

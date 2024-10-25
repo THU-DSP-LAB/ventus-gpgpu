@@ -207,15 +207,15 @@ class allocator extends Module {
   val threadIdx_result_gsize_xy = Reg(io.cuinterface_wg_new.bits.num_thread_per_grid_xy.cloneType)
 
   val threadIdx_mul1 = Module(new ArrayMulDataModule(max(io.wgbuffer_wg_new.bits.wgIdx_x.getWidth, io.wgbuffer_wg_new.bits.num_thread_per_wg_x.getWidth) + 1))
-  val threadIdx_mul2 = Module(new ArrayMulDataModule(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX + 1))
+  val threadIdx_mul2 = Module(new ArrayMulDataModule(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX) + 1))
   threadIdx_mul1.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
   threadIdx_mul1.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
   threadIdx_mul2.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
   threadIdx_mul2.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
-  threadIdx_mul1.io.a := DontCare // default
-  threadIdx_mul1.io.b := DontCare // default
-  threadIdx_mul2.io.a := DontCare // default
-  threadIdx_mul2.io.b := DontCare // default
+  threadIdx_mul1.io.a := wg.wgIdx_x
+  threadIdx_mul1.io.b := wg.num_thread_per_wg_x // WG threadIdx-global base x
+  threadIdx_mul2.io.a := wg.num_wg_x
+  threadIdx_mul2.io.b := wg.num_thread_per_wg_x // num_thread_per_grid_x
   switch(threadIdx_fsm) {
     is(THREADIDX_FSM.IDLE_CALC0) {
       threadIdx_mul1.io.a := wg.wgIdx_x

@@ -178,7 +178,9 @@ class cta_scheduler_top(val NUM_CU: Int = CONFIG.GPU.NUM_CU) extends Module {
 
 object emitVerilog extends App {
   chisel3.emitVerilog(
-    new cta_scheduler_top(CONFIG.GPU.NUM_CU),
+    //new cta_scheduler_top(CONFIG.GPU.NUM_CU),
+    new allocator(),
+    //new cu_interface(),
     Array("--target-dir", "generated/")
   )
 }

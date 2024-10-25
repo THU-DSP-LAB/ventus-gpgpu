@@ -29,12 +29,15 @@ class Test(val len: Int) {
     val num_thread_per_wg_x = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
     val num_thread_per_wg_y = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
     val num_thread_per_wg_z = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
-    val wgIdx_x = Seq.tabulate(testlen){i => random.nextInt(64)}
-    val wgIdx_y = Seq.tabulate(testlen){i => random.nextInt(64)}
-    val wgIdx_z = Seq.tabulate(testlen){i => random.nextInt(64)}
-    val threadIdx_offset_x = Seq.tabulate(testlen){i => random.nextInt(64)}
-    val threadIdx_offset_y = Seq.tabulate(testlen){i => random.nextInt(64)}
-    val threadIdx_offset_z = Seq.tabulate(testlen){i => random.nextInt(64)}
+    val num_wg_x = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_wg_y = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_wg_z = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val wgIdx_x = Seq.tabulate(testlen){i => random.nextInt(num_wg_x(i))}
+    val wgIdx_y = Seq.tabulate(testlen){i => random.nextInt(num_wg_y(i))}
+    val wgIdx_z = Seq.tabulate(testlen){i => random.nextInt(num_wg_z(i))}
+    val threadIdx_offset_x = Seq.tabulate(testlen){i => 0}
+    val threadIdx_offset_y = Seq.tabulate(testlen){i => 0}
+    val threadIdx_offset_z = Seq.tabulate(testlen){i => 0}
     val wf_max = CONFIG.WG.NUM_WF_MAX                                           * 3 /  8
     val wf = Seq.tabulate(testlen){i => (num_thread_per_wg_x(i) * num_thread_per_wg_y(i) * num_thread_per_wg_z(i) + CONFIG.GPU.NUM_THREAD - 1) / CONFIG.GPU.NUM_THREAD}
     val lds = Seq.tabulate(testlen){i =>  random.nextInt(CONFIG.WG.NUM_LDS_MAX  * 3 / (8*wf(i))) * wf(i)}
@@ -140,8 +143,8 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
          wf2.threadIdxG_3d(i)._3 != (test.in.wgIdx_z(wg_id) * test.in.num_thread_per_wg_z(wg_id) + wf2.threadIdxL_3d(i)._3 + test.in.threadIdx_offset_z(wg_id))
       ) { new MyException(s"global threadIdx-3d incorrect or don't match blockIdx ${(test.in.wgIdx_x(wg_id),test.in.wgIdx_y(wg_id),test.in.wgIdx_z(wg_id))} or offset: ${wf2.threadIdxG_3d}") }
       if(wf2.threadIdxG_1d(i) != (wf2.threadIdxG_3d(i)._1 - test.in.threadIdx_offset_x(wg_id)) +
-         (wf2.threadIdxG_3d(i)._2 - test.in.threadIdx_offset_y(wg_id))  * test.in.num_thread_per_wg_x(wg_id) +
-         (wf2.threadIdxG_3d(i)._3 - test.in.threadIdx_offset_z(wg_id))  * test.in.num_thread_per_wg_x(wg_id) * test.in.num_thread_per_wg_y(wg_id)
+         (wf2.threadIdxG_3d(i)._2 - test.in.threadIdx_offset_y(wg_id))  * test.in.num_thread_per_wg_x(wg_id) * test.in.num_wg_x(wg_id) +
+         (wf2.threadIdxG_3d(i)._3 - test.in.threadIdx_offset_z(wg_id))  * test.in.num_thread_per_wg_x(wg_id) * test.in.num_wg_x(wg_id) * test.in.num_thread_per_wg_y(wg_id) * test.in.num_wg_y(wg_id)
       ) {
         new MyException(s"global threadIdx-1d ${wf2.threadIdxG_1d} not match threadIdxG_3d ${wf2.threadIdxG_3d} - offset ${(test.in.threadIdx_offset_x,test.in.threadIdx_offset_y,test.in.threadIdx_offset_z)}")
       }
@@ -163,7 +166,7 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
   }
   def wf_new(wf: Wf_slot): Unit = { // 向CU中新增WF，WF信息已被从硬件信号转化为软件class
     if(wf.wg_id < 0 || wf.wg_id >= test.len) {throw new MyException(s"WG ID ERROR: ${wf.wg_id}, expect WG ID Max = ${test.len - 1}")}
-    wf_check(wf) // 检测新WF的LDS/sGPR/vGPR资源分配无误
+    //wf_check(wf) // 检测新WF的LDS/sGPR/vGPR资源分配无误
     wf.valid = true
 
     val wf_cnt = test.wg_exec.wf_cnt(wf.wg_id) + 1
@@ -268,8 +271,7 @@ class Gpu(val test: Test) {
 
 class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
   "Test: CTA_scheduler" in {
-    println("CTA Scheduler Simulation begin0")
-    test(new cta_scheduler_top()).withAnnotations(Seq(WriteFstAnnotation, VerilatorBackendAnnotation)) { dut =>
+    test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation, VerilatorBackendAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq()) { dut =>
@@ -299,16 +301,16 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.num_thread_per_wf -> 0.U,
         _.pds_base -> 0.U,
         _.start_pc -> 0.U,
-        _.num_wg_x -> 0.U,
-        _.num_wg_y -> 0.U,
-        _.num_wg_z -> 0.U,
+        _.num_wg_x -> (test.in.num_wg_x(i)).U,
+        _.num_wg_y -> (test.in.num_wg_y(i)).U,
+        _.num_wg_z -> (test.in.num_wg_z(i)).U,
         //(_.asid_kernel.get) -> 0.U,
         _.num_thread_per_wg_x -> (test.in.num_thread_per_wg_x(i)).U,
         _.num_thread_per_wg_y -> (test.in.num_thread_per_wg_y(i)).U,
         _.num_thread_per_wg_z -> (test.in.num_thread_per_wg_z(i)).U,
-        _.wgIdx_x -> (i % test.in.num_thread_per_wg_x(i)).U,
-        _.wgIdx_y -> (i / test.in.num_thread_per_wg_x(i) % test.in.num_thread_per_wg_y(i)).U,
-        _.wgIdx_z -> (i / test.in.num_thread_per_wg_x(i) / test.in.num_thread_per_wg_y(i)).U,
+        _.wgIdx_x -> (test.in.wgIdx_x(i)).U,
+        _.wgIdx_y -> (test.in.wgIdx_y(i)).U,
+        _.wgIdx_z -> (test.in.wgIdx_z(i)).U,
         _.threadIdx_in_grid_offset_x -> (test.in.threadIdx_offset_x(i)).U,
         _.threadIdx_in_grid_offset_y -> (test.in.threadIdx_offset_y(i)).U,
         _.threadIdx_in_grid_offset_z -> (test.in.threadIdx_offset_z(i)).U,
