@@ -146,6 +146,7 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
         new MyException(s"global threadIdx-1d ${wf2.threadIdxG_1d} not match threadIdxG_3d ${wf2.threadIdxG_3d} - offset ${(test.in.threadIdx_offset_x,test.in.threadIdx_offset_y,test.in.threadIdx_offset_z)}")
       }
     }
+    new MyException(s"Try exception")
 
     // 检验新来的WF的LDS/sGPR/vGPR资源占用是否与其它WF有重叠
     wf_slot.foreach { wf1 =>
@@ -267,6 +268,7 @@ class Gpu(val test: Test) {
 
 class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
   "Test: CTA_scheduler" in {
+    println("CTA Scheduler Simulation begin0")
     test(new cta_scheduler_top()).withAnnotations(Seq(WriteFstAnnotation, VerilatorBackendAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
     //test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
@@ -312,7 +314,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.threadIdx_in_grid_offset_z -> (test.in.threadIdx_offset_z(i)).U,
       ) }
 
-
+      println("CTA Scheduler Simulation begin")
 
       dut.io.host_wg_done.ready.poke(false.B)
       dut.io.host_wg_new.valid.poke(false.B)
@@ -347,6 +349,12 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
               wf.vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + test.in.vgpr(wf.wg_id) - 1)
               wf.wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt
               wf.csr = wf_new.bits.csr_kernel.peek.litValue.toInt
+              for(t <- 0 until CONFIG.GPU.NUM_THREAD) {
+                wf.threadIdxG_3d(t) = (wf_new.bits.threadIdx_in_grid_x(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_grid_y(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_grid_z(t).peek.litValue.toInt)
+                wf.threadIdxL_3d(t) = (wf_new.bits.threadIdx_in_wg_x(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_wg_y(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_wg_z(t).peek.litValue.toInt)
+                wf.threadIdxG_1d(t) = wf_new.bits.threadIdx_in_grid(t).peek.litValue.toInt
+                wf.threadIdxL_1d(t) = wf_new.bits.threadIdx_in_wg(t).peek.litValue.toInt
+              }
               wf.time = test.in.wf_time(wf.wg_id)(wf.wf_id)
               gpu.wf_new(cu_id = i, wf)
             }
@@ -368,6 +376,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
       } .fork {
         while(cnt < testlen) {
           clk_cnt += 1
+          if(clk_cnt % 10000 == 0) { println(s"clock step ${clk_cnt} cycles") }
           dut.clock.step()
         }
       }.join

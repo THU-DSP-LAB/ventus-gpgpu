@@ -51,8 +51,9 @@ trait ctainfo_alloc_to_cuinterface extends ctainfo_alloc_to_cuinterface_to_rt {
   val threadIdx_in_grid_base_x = UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)
   val threadIdx_in_grid_base_y = UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)
   val threadIdx_in_grid_base_z = UInt(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W)
-  // num_thread_per_wg_x * num_thread_per_wg_y
-  val num_thread_per_wg_x_mul_y = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  // num_thread_per_grid_x,    num_thread_per_grid_x * num_thread_per_grid_y
+  val num_thread_per_grid_x = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val num_thread_per_grid_xy = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
 }
 
 /** IO Bundle: CTA information
@@ -79,6 +80,9 @@ trait ctainfo_host_to_alloc_to_cu extends Bundle {
   val wgIdx_x = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX).W)    // thread-block index in grid - x dimension
   val wgIdx_y = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX).W)    // thread-block index in grid - y dimension
   val wgIdx_z = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX).W)    // thread-block index in grid - z dimension
+  val num_wg_x = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX+1).W) // Number of wg in x-dimension in this kernel
+  val num_wg_y = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX+1).W) // Number of wg in y-dimension in this kernel
+  val num_wg_z = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX+1).W) // Number of wg in z-dimension in this kernel
   val num_thread_per_wg_x = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
   val num_thread_per_wg_y = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
   val num_thread_per_wg_z = UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
@@ -99,18 +103,14 @@ trait ctainfo_host_to_cu extends Bundle {
   val pds_base = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // PDS base addr of this WG, convert to WF base addr in CUinterface
   val start_pc = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // Program start pc address
   val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                    // Meta-data base address
-  val num_wg_x = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX+1).W)         // Number of wg in x-dimension in this kernel
-  val num_wg_y = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX+1).W)         // Number of wg in y-dimension in this kernel
-  val num_wg_z = UInt(log2Ceil(CONFIG.KERNEL.NUM_WG_MAX+1).W)         // Number of wg in z-dimension in this kernel
   val asid_kernel = if(CONFIG.GPU.MMU_ENABLE) Some(UInt(CONFIG.GPU.ASID_WIDTH)) else None // Virtual memory space ID
 }
 
 /** IO between CU-interface and CU
  */
-class io_cuinterface2cu extends Bundle with ctainfo_host_to_cu with ctainfo_alloc_to_cu {
+class io_cuinterface2cu extends Bundle with ctainfo_host_to_cu with ctainfo_alloc_to_cu with ctainfo_host_to_alloc_to_cu {
   val wg_id = UInt(CONFIG.WG.WG_ID_WIDTH)
   val wf_tag = UInt(CONFIG.WG.WF_TAG_WIDTH)
-  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)                 // Number of wavefront in this cta
   val threadIdx_in_wg_x = Vec(CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX).W))
   val threadIdx_in_wg_y = Vec(CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX).W))
   val threadIdx_in_wg_z = Vec(CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CONFIG.WG.NUM_THREAD_PER_WG_MAX).W))

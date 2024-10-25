@@ -98,9 +98,9 @@ class cu_interface extends Module {
   // Function 2.1: ThreadIdx-Local (in WG) generation, 3D and linear
   //
   import cta.utils.cnt_varRadix_multiStep
-  import scala.math.max
+  import scala.math.{max,min}
   val THREADIDX_STEP = 2   // the counter will generate threadIndex-Local for $STEP threads each cycle
-  val THREADIDX_CTRL_EXTRA = max(CONFIG.GPU.NUM_THREAD, 3*THREADIDX_STEP)
+  val THREADIDX_CTRL_EXTRA = min(CONFIG.GPU.NUM_THREAD, 3*THREADIDX_STEP)
   val THREADIDX_CTRL_MAX = NUM_THREAD_HW + THREADIDX_CTRL_EXTRA
 
   // instantiate
@@ -158,13 +158,15 @@ class cu_interface extends Module {
 
   // the threadIdxG_1d calculator has 2-cycles latency, with combinational output
   // control logic
-  val threadIdxG_ctrl_input_cnt = Reg(UInt(log2Ceil(THREADIDX_CTRL_MAX).W))
-  val threadIdxG_ctrl_output_cnt = RegNext(Mux(splitter_cnt =/= 0.U, RegNext(threadIdxG_ctrl_input_cnt), 0.U))
-  val threadIdxG_ctrl_input_en = (threadIdxG_ctrl_input_cnt === THREADIDX_CTRL_MAX.U) && (threadIdxG_ctrl_input_cnt < threadIdxL_ctrl_cnt)
+  val threadIdxG_ctrl_input_cnt = Reg(UInt(log2Ceil(THREADIDX_CTRL_MAX + THREADIDX_STEP).W))
+  val threadIdxG_ctrl_output_cnt = Reg(UInt(log2Ceil(THREADIDX_CTRL_MAX + THREADIDX_STEP).W))
+  val threadIdxG_ctrl_input_en = (threadIdxG_ctrl_input_cnt =/= THREADIDX_CTRL_MAX.U) && (threadIdxG_ctrl_input_cnt < threadIdxL_ctrl_cnt)
   val threadIdxG_ctrl_output_en = RegNext(Mux(splitter_cnt =/= 0.U, RegNext(threadIdxG_ctrl_input_en), false.B))
+  val threadIdxG_ctrl_ok = (threadIdxG_ctrl_input_cnt >= NUM_THREAD_HW.U) && (threadIdxG_ctrl_output_cnt >= NUM_THREAD_HW.U)
   threadIdxG_ctrl_input_cnt := Mux(splitter_cnt === 0.U, 0.U,
-                                 threadIdxG_ctrl_input_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U) +
-                                 Mux(!threadIdxG_ctrl_input_en && threadIdxG_ctrl_input_cnt < threadIdxL_ctrl_cnt, THREADIDX_STEP.U, 0.U) )
+                                 threadIdxG_ctrl_input_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U) + Mux(threadIdxG_ctrl_input_en, THREADIDX_STEP.U, 0.U) )
+  threadIdxG_ctrl_output_cnt := Mux(splitter_cnt === 0.U, 0.U,
+                                 threadIdxG_ctrl_output_cnt - Mux(wf_sent, NUM_THREAD_HW.U, 0.U) + Mux(threadIdxG_ctrl_output_en, THREADIDX_STEP.U, 0.U) )
 
   // calculate 1: threadIdxG_base_{x,y,z} + threadIdxL_{x,y,z} = calc1_{x,y,z},     calc1_{x,y,z} + offset_{x,y,z} = threadIdxG_{x,y,z}
   // calculate 2: calc1_y * num_thread_per_wg_x = calc2_y,    calc1_z * num_thread_per_wg_{x * y} = calc2_z
@@ -183,9 +185,9 @@ class cu_interface extends Module {
     threadIdxG_calc1_y(i) := fifo.io.deq.bits.threadIdx_in_grid_base_y + threadIdxL_result_y(threadIdxG_ctrl_input_cnt + i.U)
     threadIdxG_calc1_z(i) := fifo.io.deq.bits.threadIdx_in_grid_base_z + threadIdxL_result_z(threadIdxG_ctrl_input_cnt + i.U)
     threadIdxG_calc2_mul_y(i).a := RegNext(threadIdxG_calc1_y(i))
-    threadIdxG_calc2_mul_y(i).b := fifo.io.deq.bits.num_thread_per_wg_x
+    threadIdxG_calc2_mul_y(i).b := fifo.io.deq.bits.num_thread_per_grid_x
     threadIdxG_calc2_mul_z(i).a := RegNext(threadIdxG_calc1_z(i))
-    threadIdxG_calc2_mul_z(i).b := fifo.io.deq.bits.num_thread_per_wg_x_mul_y
+    threadIdxG_calc2_mul_z(i).b := fifo.io.deq.bits.num_thread_per_grid_xy
     threadIdxG_calc2_y(i) := threadIdxG_calc2_mul_y(i).result
     threadIdxG_calc2_z(i) := threadIdxG_calc2_mul_z(i).result
     threadIdxG_calc3_1d(i) := threadIdxG_calc2_x(i) + threadIdxG_calc2_y(i) + threadIdxG_calc2_z(i)
@@ -247,8 +249,9 @@ class cu_interface extends Module {
   assert(splitter_cnt <= 1.U || NUM_VGPR.U - splitter_vgpr_addr > fifo.io.deq.bits.num_vgpr_per_wf)
 
   for(i <- 0 until NUM_CU) {
-    io.cu_wf_new(i).valid := (splitter_cnt =/= 0.U) && threadIdxL_ctrl_ok && (fifo.io.deq.bits.cu_id === i.U)
+    io.cu_wf_new(i).valid := (splitter_cnt =/= 0.U) && threadIdxL_ctrl_ok && threadIdxG_ctrl_ok && (fifo.io.deq.bits.cu_id === i.U)
     io.cu_wf_new(i).bits.viewAsSupertype(new ctainfo_host_to_cu {}) := fifo.io.deq.bits
+    io.cu_wf_new(i).bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {}) := fifo.io.deq.bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {})
     io.cu_wf_new(i).bits.pds_base := splitter_pds_addr
     io.cu_wf_new(i).bits.lds_base := splitter_lds_addr
     io.cu_wf_new(i).bits.sgpr_base := splitter_sgpr_addr

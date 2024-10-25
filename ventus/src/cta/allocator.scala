@@ -142,6 +142,7 @@ class allocator extends Module {
   // Some signal/reg declaration
   //
   val wg = Reg(io.wgbuffer_wg_new.bits.cloneType) // WG info got from wg_buffer
+  //val wg = Reg(io.wgbuffer_wg_new.bits) // WG info got from wg_buffer
   val alloc_task_ok = Wire(Bool())                // FSM 'alloc' state tasks finished
 
   // =
@@ -188,56 +189,71 @@ class allocator extends Module {
   // =
   // Auxiliary function 3: thread-index calculating pipeline
   // - threadIdx_in_grid_base_{x,y,z} = wgIdx_{x,y,z} * num_thread_per_wg_{x,y,z} (FSM.CALC0~2)
-  // - num_thread_per_wg_x_mul_y = num_thread_per_wg_x * num_thread_per_wg_y      (FSM.CALC3  ) (used in threadIdx_grid_linear calc)
+  // - num_thread_in_grid_{x,y} = num_wg_{x,y} * num_thread_per_wg_{x,y} (FSM.CALC0~1)
+  // - num_thread_in_grid_{x*y} (FSM.CALC2)
   // It's assumed that the hardware multiplier has 1 cycle latency
   // =
   import pipeline.ArrayMulDataModule
   import scala.math.max
 
   object THREADIDX_FSM extends ChiselEnum {
-    val IDLE_CALC0, CALC1_STORE0, CALC2_STORE1, CALC3_STORE2, STORE3, OK = Value
+    val IDLE_CALC0, CALC1_STORE0, CALC2_STORE1, STORE2, OK = Value
   }
   val threadIdx_fsm = RegInit(THREADIDX_FSM.IDLE_CALC0)
-
-  val threadIdx_mul = Module(new ArrayMulDataModule(max(io.wgbuffer_wg_new.bits.wgIdx_x.getWidth, io.wgbuffer_wg_new.bits.num_thread_per_wg_x.getWidth) + 1))
-  threadIdx_mul.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
-  threadIdx_mul.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
-  threadIdx_mul.io.a := wg.wgIdx_z                // default
-  threadIdx_mul.io.b := wg.num_thread_per_wg_z    // default
-  switch(threadIdx_fsm) {
-    is(THREADIDX_FSM.IDLE_CALC0) {
-      threadIdx_mul.io.a := wg.wgIdx_z
-      threadIdx_mul.io.b := wg.num_thread_per_wg_z
-    }
-    is(THREADIDX_FSM.CALC1_STORE0) {
-      threadIdx_mul.io.a := wg.wgIdx_y
-      threadIdx_mul.io.b := wg.num_thread_per_wg_y
-    }
-    is(THREADIDX_FSM.CALC2_STORE1) {
-      threadIdx_mul.io.a := wg.wgIdx_x
-      threadIdx_mul.io.b := wg.num_thread_per_wg_x
-    }
-    is(THREADIDX_FSM.CALC3_STORE2) {
-      threadIdx_mul.io.a := wg.num_thread_per_wg_y
-      threadIdx_mul.io.b := wg.num_thread_per_wg_x
-    }
-  }
-
   val threadIdx_result_base_x = Reg(io.cuinterface_wg_new.bits.threadIdx_in_grid_base_x.cloneType)
   val threadIdx_result_base_y = Reg(io.cuinterface_wg_new.bits.threadIdx_in_grid_base_y.cloneType)
   val threadIdx_result_base_z = Reg(io.cuinterface_wg_new.bits.threadIdx_in_grid_base_z.cloneType)
-  val threadIdx_result_size_xy = Reg(io.cuinterface_wg_new.bits.num_thread_per_wg_x_mul_y.cloneType)
-  when(threadIdx_fsm === THREADIDX_FSM.CALC1_STORE0) { threadIdx_result_base_x := threadIdx_mul.io.result }
-  when(threadIdx_fsm === THREADIDX_FSM.CALC2_STORE1) { threadIdx_result_base_y := threadIdx_mul.io.result }
-  when(threadIdx_fsm === THREADIDX_FSM.CALC3_STORE2) { threadIdx_result_base_z := threadIdx_mul.io.result }
-  when(threadIdx_fsm === THREADIDX_FSM.STORE3) { threadIdx_result_size_xy := threadIdx_mul.io.result }
+  val threadIdx_result_gsize_x  = Reg(io.cuinterface_wg_new.bits.num_thread_per_grid_x.cloneType)
+  val threadIdx_result_gsize_xy = Reg(io.cuinterface_wg_new.bits.num_thread_per_grid_xy.cloneType)
 
+  val threadIdx_mul1 = Module(new ArrayMulDataModule(max(io.wgbuffer_wg_new.bits.wgIdx_x.getWidth, io.wgbuffer_wg_new.bits.num_thread_per_wg_x.getWidth) + 1))
+  val threadIdx_mul2 = Module(new ArrayMulDataModule(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX + 1))
+  threadIdx_mul1.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
+  threadIdx_mul1.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
+  threadIdx_mul2.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
+  threadIdx_mul2.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
+  threadIdx_mul1.io.a := DontCare // default
+  threadIdx_mul1.io.b := DontCare // default
+  threadIdx_mul2.io.a := DontCare // default
+  threadIdx_mul2.io.b := DontCare // default
+  switch(threadIdx_fsm) {
+    is(THREADIDX_FSM.IDLE_CALC0) {
+      threadIdx_mul1.io.a := wg.wgIdx_x
+      threadIdx_mul1.io.b := wg.num_thread_per_wg_x // WG threadIdx-global base x
+      threadIdx_mul2.io.a := wg.num_wg_x
+      threadIdx_mul2.io.b := wg.num_thread_per_wg_x // num_thread_per_grid_x
+    }
+    is(THREADIDX_FSM.CALC1_STORE0) {
+      threadIdx_mul1.io.a := wg.wgIdx_y
+      threadIdx_mul1.io.b := wg.num_thread_per_wg_y // WG threadIdx-global base y
+      threadIdx_mul2.io.a := wg.num_wg_y
+      threadIdx_mul2.io.b := wg.num_thread_per_wg_y // num_thread_per_grid_y
+    }
+    is(THREADIDX_FSM.CALC2_STORE1) {
+      threadIdx_mul1.io.a := wg.wgIdx_z
+      threadIdx_mul1.io.b := wg.num_thread_per_wg_z // WG threadIdx-global base z
+      threadIdx_mul2.io.a := threadIdx_result_gsize_x
+      threadIdx_mul2.io.b := threadIdx_mul2.io.result // num_thread_per_grid_{x * y}
+    }
+  }
+
+  // multiply results store
+  when(threadIdx_fsm === THREADIDX_FSM.CALC1_STORE0) {
+    threadIdx_result_base_x := threadIdx_mul1.io.result
+    threadIdx_result_gsize_x := threadIdx_mul2.io.result
+  }
+  when(threadIdx_fsm === THREADIDX_FSM.CALC2_STORE1) { threadIdx_result_base_y := threadIdx_mul1.io.result }
+  when(threadIdx_fsm === THREADIDX_FSM.STORE2) {
+    threadIdx_result_base_z := threadIdx_mul1.io.result
+    threadIdx_result_gsize_xy := threadIdx_mul2.io.result
+  }
+
+  // control logic
   threadIdx_fsm := MuxLookup(threadIdx_fsm, THREADIDX_FSM.IDLE_CALC0)(Seq(
-    THREADIDX_FSM.IDLE_CALC0   -> Mux(fsm === FSM.IDLE  , THREADIDX_FSM.CALC1_STORE0, THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.IDLE_CALC0   -> Mux(fsm =/= FSM.IDLE  , THREADIDX_FSM.CALC1_STORE0, THREADIDX_FSM.IDLE_CALC0),
     THREADIDX_FSM.CALC1_STORE0 -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.CALC2_STORE1, THREADIDX_FSM.IDLE_CALC0),
-    THREADIDX_FSM.CALC2_STORE1 -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.CALC3_STORE2, THREADIDX_FSM.IDLE_CALC0),
-    THREADIDX_FSM.CALC3_STORE2 -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.STORE3      , THREADIDX_FSM.IDLE_CALC0),
-    THREADIDX_FSM.STORE3       -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.OK          , THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.CALC2_STORE1 -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.STORE2      , THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.STORE2       -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.OK          , THREADIDX_FSM.IDLE_CALC0),
     THREADIDX_FSM.OK           -> Mux(fsm === FSM.REJECT || alloc_task_ok, THREADIDX_FSM.IDLE_CALC0, threadIdx_fsm),
   ))
 
@@ -401,7 +417,8 @@ class allocator extends Module {
   cuinterface_buf.io.enq.bits.threadIdx_in_grid_base_x := threadIdx_result_base_x
   cuinterface_buf.io.enq.bits.threadIdx_in_grid_base_y := threadIdx_result_base_y
   cuinterface_buf.io.enq.bits.threadIdx_in_grid_base_z := threadIdx_result_base_z
-  cuinterface_buf.io.enq.bits.num_thread_per_wg_x_mul_y := threadIdx_result_size_xy
+  cuinterface_buf.io.enq.bits.num_thread_per_grid_x  := threadIdx_result_gsize_x
+  cuinterface_buf.io.enq.bits.num_thread_per_grid_xy := threadIdx_result_gsize_xy
   cuinterface_buf.io.enq.bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {}) := wg.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {})
   if(CONFIG.DEBUG) {cuinterface_buf.io.enq.bits.wg_id.get := wg.wg_id.get}
   alloc_task_cuinterface_reg := Mux(fsm === FSM.ALLOC, alloc_task_cuinterface_reg || (cuinterface_buf.io.enq.fire && !alloc_task_ok), false.B )
