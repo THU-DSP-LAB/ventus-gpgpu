@@ -485,6 +485,8 @@ object IDecodeLUT_VC{
     VADD12_VI->   List(Y,N,N,B_N,N,N,CSR.N,Y,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
     VSUB12_VI->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_I,MEM_X,FN_SUB,N,M_X,N,N,N,Y,N,N,N,N,Y,N,N),
     VFTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
+// tc update
+    TC_MMA            ->  List(Y,N,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTF,N,M_X,N,N,N,Y,N,N,N,Y,Y,N,N),
     VFEXP_V ->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_EXP,N,M_X,N,N,Y,Y,N,N,N,N,N,N,N)
     //VHTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTH,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
     //VBTTA_VV->List(Y,Y,N,B_N,N,N,CSR.N,N,A3_VRS3,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_TTB,N,M_X,N,N,N,Y,N,N,N,Y,N,N,N),
@@ -565,7 +567,9 @@ class InstrDecodeV2 extends Module {
         BitPat("b0?00111") -> lut(2),
         BitPat("b0101011") -> lut(2),
         BitPat("b1011011") -> lut(3),
-        BitPat("b0001011") -> lut(3)
+        BitPat("b0001011") -> lut(3),
+        // tc update
+        BitPat("b1100001") -> lut(3)
       ))
   })
   (ctrlSignals zip io.control).zipWithIndex.foreach{ case((s, c), i) =>
@@ -600,7 +604,11 @@ class InstrDecodeV2 extends Module {
     c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
     c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
-    c.tc := s(23)
+    // tc update
+    c.tc := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt , true.B, false.B)//s(23)
+    c.tc_isMix := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt & io.inst(i)(12) === "b1".U.asUInt, true.B, false.B)
+    c.tc_shape := io.inst(i)(26, 25)
+    c.tc_ReLU := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt & io.inst(i)(27) === "b1".U.asUInt, true.B, false.B)
     c.disable_mask := s(24)
     c.custom_signal_0 := s(25)
     c.reg_idx1 := Cat(regextInfo(i).regPrefix(1), io.inst(i)(19, 15))
