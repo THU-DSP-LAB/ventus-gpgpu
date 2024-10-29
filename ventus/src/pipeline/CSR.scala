@@ -41,6 +41,12 @@ object CSR{
   val csr_print = 0x80b.U(12.W)
   val rpc = 0x80c.U(12.W)
 
+  val global_id = 0x80d.U(12.W)
+  val global_linear_id = 0x80e.U(12.W)
+  val local_id = 0x80f.U(12.W)
+  val local_linear_id = 0x810.U(12.W)
+
+
   // Vector csr address
   val vstart = 0x008.U(12.W)
   val vxsat = 0x009.U(12.W)
@@ -171,6 +177,14 @@ class CSRFile extends Module {
   val csr_print = RegInit(0.U(32.W))
   val rpc=RegInit(0.U(32.W))
 
+  val global_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_linear_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_linear_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+
+
+
+
   val sgpr_base_dispatch = Reg(UInt((SGPR_ID_WIDTH + 1).W))
   val vgpr_base_dispatch = Reg(UInt((VGPR_ID_WIDTH + 1).W))
   io.sgpr_base:=sgpr_base_dispatch
@@ -248,7 +262,12 @@ class CSRFile extends Module {
     BitPat(CSR.wg_id_y)-> wg_id_y,
     BitPat(CSR.wg_id_z)-> wg_id_z,
     BitPat(CSR.csr_print)-> csr_print,
-    BitPat(CSR.rpc)->rpc
+    BitPat(CSR.rpc)->rpc,
+    BitPat(CSR.global_id)-> global_id,
+    BitPat(CSR.global_linear_id)-> global_linear_id,
+    BitPat(CSR.local_id)-> local_id,
+    BitPat(CSR.local_linear_id)-> local_linear_id
+
   )
 
   csr_rdata := Lookup(csr_addr, 0.U(xLen.W), csrFile).asUInt
@@ -308,6 +327,10 @@ class CSRFile extends Module {
     wg_id_y:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_y_dispatch
     wg_id_z:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_z_dispatch
     wg_id:=io.CTA2csr.bits.CTAdata.dispatch2cu_wg_id
+    global_id     := io.CTA2csr.bits.CTAdata.dispatch2cu_global_id
+    global_linear_id     := io.CTA2csr.bits.CTAdata.dispatch2cu_global_linear_id
+    local_id     := io.CTA2csr.bits.CTAdata.dispatch2cu_local_id
+    local_linear_id := io.CTA2csr.bits.CTAdata.dispatch2cu_local_linear_id
 
     threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)<<depth_thread//threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
   }
