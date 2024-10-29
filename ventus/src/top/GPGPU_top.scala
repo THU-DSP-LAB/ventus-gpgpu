@@ -43,6 +43,19 @@ class host2CTA_data extends Bundle{
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
   val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
+  val host_num_thread_per_wg_x=UInt(32.W)
+  val host_num_thread_per_wg_y=UInt(32.W)
+  val host_num_thread_per_wg_z=UInt(32.W)
+  val host_num_wg_x=UInt(32.W)
+  val host_num_wg_y=UInt(32.W)
+  val host_num_wg_z=UInt(32.W)
+  val host_threadID_globaloffset_x=UInt(32.W)
+  val host_threadID_globaloffset_y=UInt(32.W)
+  val host_threadID_globaloffset_z=UInt(32.W)
+  val host_kernel_dim=UInt(2.W)
+
+
+
 }
 class CTA2host_data extends Bundle{
   val inflight_wg_buffer_host_wf_done_wg_id = (UInt(WG_ID_WIDTH.W))

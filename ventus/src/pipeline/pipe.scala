@@ -66,7 +66,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   val mul=Module(new vMULv2(num_thread,num_lane))
   val tensorcore=Module(new vTCexe)
   val lsu2wb=Module(new LSU2WB)
-  val wb=Module(new Writeback(6,6))
+  val wb=Module(new Writeback(6,7))
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
@@ -388,6 +388,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   wb.io.in_v(3)<>sfu.io.out_v
   wb.io.in_v(4)<>mul.io.out_v
   wb.io.in_v(5)<>tensorcore.io.out_v
+  wb.io.in_v(6)<>csrfile.io.out_v
 
   issue_stall:=(~issueX.io.in.ready).asBool | (~issueV.io.in.ready).asBool//scoreb.io.delay | issue.io.in.ready
 }

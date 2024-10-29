@@ -41,10 +41,15 @@ object CSR{
   val csr_print = 0x80b.U(12.W)
   val rpc = 0x80c.U(12.W)
 
-  val global_id = 0x80d.U(12.W)
-  val global_linear_id = 0x80e.U(12.W)
-  val local_id = 0x80f.U(12.W)
-  val local_linear_id = 0x810.U(12.W)
+  val global_id_x = 0x80d.U(12.W)
+  val global_id_y = 0x80e.U(12.W)
+  val global_id_z = 0x80f.U(12.W)
+  val global_linear_id = 0x810.U(12.W)
+  val local_id_x = 0x811.U(12.W)
+  val local_id_y = 0x812.U(12.W)
+  val local_id_z = 0x813.U(12.W)
+
+
 
 
   // Vector csr address
@@ -96,6 +101,8 @@ class CSRFile extends Module {
     val in1 = Input(UInt(xLen.W))
     val write = Input(Bool())
     val wb_wxd_rd  = Output(UInt(xLen.W))
+    val wb_wvd_rd  = Output(Vec(num_thread,UInt(xLen.W)))
+    val wb_isvec   = Output(Bool())
     val frm = Output(UInt(3.W))
     val CTA2csr = Flipped(ValidIO(new warpReqData))
     val sgpr_base = Output(UInt((SGPR_ID_WIDTH + 1).W))
@@ -177,10 +184,15 @@ class CSRFile extends Module {
   val csr_print = RegInit(0.U(32.W))
   val rpc=RegInit(0.U(32.W))
 
-  val global_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_id_x = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_id_y = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_id_z = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+
+
   val global_linear_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
-  val local_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
-  val local_linear_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id_x       = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id_y       = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id_z       = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
 
 
 
@@ -220,13 +232,14 @@ class CSRFile extends Module {
   val csr_addr = io.ctrl.inst(31,20)
   val csr_input = io.in1
   val csr_rdata = Wire(UInt(xLen.W))
-
+  val csr_rdata_v =Wire(Vec(num_thread,UInt(xLen.W)))
   val wdata=Wire(UInt(xLen.W))
   wdata:=csr_rdata
   io.wb_wxd_rd:=wdata
-
+  io.wb_wvd_rd:=csr_rdata_v
   io.simt_rpc:=rpc
-
+  io.wb_isvec:= (csr_addr===CSR.global_id_x) || (csr_addr===CSR.global_id_y) || (csr_addr===CSR.global_id_z) ||
+    (csr_addr===CSR.local_id_x) ||(csr_addr===CSR.local_id_y) ||(csr_addr===CSR.local_id_z) ||(csr_addr===CSR.global_linear_id)
   val wen=io.ctrl.csr.orR&io.write
   val csr_wdata = MuxLookup(io.ctrl.csr, 0.U)(
     Seq(
@@ -262,15 +275,22 @@ class CSRFile extends Module {
     BitPat(CSR.wg_id_y)-> wg_id_y,
     BitPat(CSR.wg_id_z)-> wg_id_z,
     BitPat(CSR.csr_print)-> csr_print,
-    BitPat(CSR.rpc)->rpc,
-    BitPat(CSR.global_id)-> global_id,
-    BitPat(CSR.global_linear_id)-> global_linear_id,
-    BitPat(CSR.local_id)-> local_id,
-    BitPat(CSR.local_linear_id)-> local_linear_id
+    BitPat(CSR.rpc)->rpc
 
   )
 
+  val csrFile_v= Seq(
+    BitPat(CSR.global_id_x) -> global_id_x,
+    BitPat(CSR.global_id_y) -> global_id_y,
+    BitPat(CSR.global_id_z) -> global_id_z,
+    BitPat(CSR.global_linear_id) -> global_linear_id,
+    BitPat(CSR.local_id_x) -> local_id_x,
+    BitPat(CSR.local_id_y) -> local_id_y,
+    BitPat(CSR.local_id_z) -> local_id_z
+  )
+
   csr_rdata := Lookup(csr_addr, 0.U(xLen.W), csrFile).asUInt
+  csr_rdata_v:=Lookup(csr_addr, 0.U(xLen.W), csrFile_v).asUInt
   val AVL=csr_input
 
     when(wen){
@@ -327,10 +347,15 @@ class CSRFile extends Module {
     wg_id_y:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_y_dispatch
     wg_id_z:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_z_dispatch
     wg_id:=io.CTA2csr.bits.CTAdata.dispatch2cu_wg_id
-    global_id     := io.CTA2csr.bits.CTAdata.dispatch2cu_global_id
-    global_linear_id     := io.CTA2csr.bits.CTAdata.dispatch2cu_global_linear_id
-    local_id     := io.CTA2csr.bits.CTAdata.dispatch2cu_local_id
-    local_linear_id := io.CTA2csr.bits.CTAdata.dispatch2cu_local_linear_id
+
+    global_id_x           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_x
+    global_id_y           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_y
+    global_id_z           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_z
+    local_id_x            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_x
+    local_id_y            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_y
+    local_id_z            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_z
+    global_linear_id      :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_linear
+
 
     threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)<<depth_thread//threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
   }
@@ -344,6 +369,7 @@ class CSRexe extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new csrExeData))
     val out = Decoupled(new WriteScalarCtrl())
+    val out_v =Decoupled(new WriteVecCtrl())
     val rm_wid = Input(Vec(3,UInt(depth_warp.W)))
     val rm = Output(Vec(3,UInt(3.W)))
     val CTA2csr = Flipped(ValidIO(new warpReqData))
@@ -377,17 +403,29 @@ class CSRexe extends Module {
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire
   vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
+  val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   result.io.deq<>io.out
 
-  io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid
-  result.io.enq.valid:=io.in.fire
+  io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid & result_v.io.enq.ready
+
+  result.io.enq.valid:=io.in.fire & !vCSR(io.in.bits.ctrl.wid).wb_isvec
   result.io.enq.bits:=0.U.asTypeOf(new WriteScalarCtrl)
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  result.io.enq.bits.wxd:=io.in.bits.ctrl.wxd
+  result.io.enq.bits.wxd:= !vCSR(io.in.bits.ctrl.wid).wb_isvec
   result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
 
+  result_v.io.deq <> io.out_v
+
+  result_v.io.enq.valid := io.in.fire & vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result_v.io.enq.bits := 0.U.asTypeOf(new WriteScalarCtrl)
+  result_v.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
+  result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
+  result_v.io.enq.bits.warp_id := io.in.bits.ctrl.wid
+
   if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+  if(SPIKE_OUTPUT) result_v.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   (0 until 3).foreach(x=>{
     io.rm(x):=vCSR(io.rm_wid(x)).frm
   })
