@@ -15,6 +15,17 @@ object helper{
 }
 
 class MetaData{
+  var num_thread_per_wg_x: BigInt=0
+  var num_thread_per_wg_y: BigInt=0
+  var num_thread_per_wg_z: BigInt=0
+  var num_wg_x: BigInt=0
+  var num_wg_y: BigInt=0
+  var num_wg_z: BigInt=0
+  var threadID_globaloffset_x: BigInt=0
+  var threadID_globaloffset_y: BigInt=0
+  var threadID_globaloffset_z: BigInt=0
+  var kernel_dim: BigInt=0
+
   var kernel_id: BigInt = 0
   var kernel_size: Array[BigInt] = Array(0, 0, 0)
   var wf_size: BigInt = 0
@@ -51,7 +62,18 @@ class MetaData{
       _.host_csr_knl -> metaDataBaseAddr.U,
       _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U),
       _.host_pds_size_per_wf -> 0.U,
-      _.host_asid -> 0.U
+      _.host_asid -> 0.U,
+      _.host_num_thread_per_wg_x      -> num_thread_per_wg_x.U    ,
+      _.host_num_thread_per_wg_y      -> num_thread_per_wg_y.U    ,
+      _.host_num_thread_per_wg_z      -> num_thread_per_wg_z.U    ,
+      _.host_num_wg_x                 -> num_wg_x.U               ,
+      _.host_num_wg_y                 -> num_wg_y.U               ,
+      _.host_num_wg_z                 -> num_wg_z.U               ,
+      _.host_threadID_globaloffset_x  -> threadID_globaloffset_x.U,
+      _.host_threadID_globaloffset_y  -> threadID_globaloffset_y.U,
+      _.host_threadID_globaloffset_z  -> threadID_globaloffset_z.U,
+      _.host_kernel_dim               -> kernel_dim.U
+
     )
   }
 }
@@ -68,6 +90,19 @@ object MetaData{
       file.getLines()
     }
     new MetaData{
+      num_thread_per_wg_x = parseHex(buf, 64)
+      num_thread_per_wg_y = parseHex(buf, 64)
+      num_thread_per_wg_z = parseHex(buf, 64)
+
+
+      num_wg_x = parseHex(buf, 64)
+      num_wg_y = parseHex(buf, 64)
+      num_wg_z = parseHex(buf, 64)
+
+      threadID_globaloffset_x = parseHex(buf, 64)
+      threadID_globaloffset_y = parseHex(buf, 64)
+      threadID_globaloffset_z = parseHex(buf, 64)
+      kernel_dim = parseHex(buf, 64)
       parseHex(buf, 64) // skip start_pc = 0x80000000
       kernel_id = parseHex(buf, 64)
       kernel_size = kernel_size.map{ _ => parseHex(buf, 64) }
@@ -93,6 +128,8 @@ object MetaData{
         // else
         buffer_size = buffer_size :+ parsed
       }
+
+
     }
   }
 }
