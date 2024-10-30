@@ -142,7 +142,6 @@ class allocator extends Module {
   // Some signal/reg declaration
   //
   val wg = Reg(io.wgbuffer_wg_new.bits.cloneType) // WG info got from wg_buffer
-  //val wg = Reg(io.wgbuffer_wg_new.bits) // WG info got from wg_buffer
   val alloc_task_ok = Wire(Bool())                // FSM 'alloc' state tasks finished
 
   // =
@@ -212,10 +211,10 @@ class allocator extends Module {
   threadIdx_mul1.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
   threadIdx_mul2.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
   threadIdx_mul2.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
-  threadIdx_mul1.io.a := wg.wgIdx_x
-  threadIdx_mul1.io.b := wg.num_thread_per_wg_x // WG threadIdx-global base x
-  threadIdx_mul2.io.a := wg.num_wg_x
-  threadIdx_mul2.io.b := wg.num_thread_per_wg_x // num_thread_per_grid_x
+  threadIdx_mul1.io.a := DontCare
+  threadIdx_mul1.io.b := DontCare
+  threadIdx_mul2.io.a := DontCare
+  threadIdx_mul2.io.b := DontCare
   switch(threadIdx_fsm) {
     is(THREADIDX_FSM.IDLE_CALC0) {
       threadIdx_mul1.io.a := wg.wgIdx_x

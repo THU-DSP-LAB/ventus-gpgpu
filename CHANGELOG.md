@@ -15,6 +15,11 @@ This project did not initially maintain a changelog. Starting from version [2.0.
 
 - Initiated changelog documentation.
 - Support for Chisel 6.4.0.
+- Support hardware thread index calculation in CTA_scheduler
+  + threadIdx_local_{x,y,z,linear}: index in thread-block
+  + threadIdx_global_{x,y,z,global}: index in thread-grid
+  + SM will save them into CSR
+  + preivously, these are calculated by software
 
 ### Removed
 

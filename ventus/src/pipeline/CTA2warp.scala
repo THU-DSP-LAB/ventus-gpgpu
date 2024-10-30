@@ -21,7 +21,7 @@ class CTAreqData extends Bundle{
   val dispatch2cu_vgpr_base_dispatch = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)    // vGPR base addr of this WF
   val dispatch2cu_lds_base_dispatch  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_LDS_MAX+1).W)     // LDS  base addr of this WF
   val dispatch2cu_wf_tag_dispatch    = UInt(CTA_SCHE_CONFIG.WG.WF_TAG_WIDTH)    // WF tag = cat(wg_slot_id_in_cu, wf_id_in_wg)
-  val dispatch2cu_start_pc_dispatch  = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val dispatch2cu_start_pc_dispatch  = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH) // Where program starts, 0x80000000
   val dispatch2cu_pds_base_dispatch  = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val dispatch2cu_gds_base_dispatch  = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val dispatch2cu_csr_knl_dispatch   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
@@ -30,15 +30,13 @@ class CTAreqData extends Bundle{
   val dispatch2cu_wgid_z_dispatch    = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
   val dispatch2cu_wg_id              = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
   val dispatch2cu_knl_asid           = if(CTA_SCHE_CONFIG.GPU.MMU_ENABLE) Some(UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)) else None
-  val dispatch2cu_threadIdx_global_x          = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-  val dispatch2cu_threadIdx_global_y          = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-  val dispatch2cu_threadIdx_global_z          = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-  val dispatch2cu_threadIdx_local_x           = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-  val dispatch2cu_threadIdx_local_y           = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-  val dispatch2cu_threadIdx_local_z           = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-  val dispatch2cu_threadIdx_global_linear   = Vec(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX,UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH))
-
-
+  val dispatch2cu_threadIdx_local_x  = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX).W))
+  val dispatch2cu_threadIdx_local_y  = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX).W))
+  val dispatch2cu_threadIdx_local_z  = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX).W))
+  val dispatch2cu_threadIdx_global_x = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W))
+  val dispatch2cu_threadIdx_global_y = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W))
+  val dispatch2cu_threadIdx_global_z = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W))
+  val dispatch2cu_threadIdx_global_linear = Vec(CTA_SCHE_CONFIG.GPU.NUM_THREAD, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX).W))
 }
 class CTArspData extends Bundle{
   val cu2dispatch_wf_tag_done = UInt(CTA_SCHE_CONFIG.WG.WF_TAG_WIDTH)

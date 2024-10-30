@@ -60,20 +60,21 @@ class MetaData{
       _.host_gds_baseaddr -> 0.U,
       _.host_pds_baseaddr -> (pdsBaseAddr + blockID * pdsSize * wf_size * wg_size).U,
       _.host_csr_knl -> metaDataBaseAddr.U,
-      _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U),
+      _.host_wgIdx_x -> i.U,
+      _.host_wgIdx_y -> j.U,
+      _.host_wgIdx_z -> k.U,
       _.host_pds_size_per_wf -> 0.U,
       _.host_asid -> 0.U,
       _.host_num_thread_per_wg_x      -> num_thread_per_wg_x.U    ,
       _.host_num_thread_per_wg_y      -> num_thread_per_wg_y.U    ,
       _.host_num_thread_per_wg_z      -> num_thread_per_wg_z.U    ,
-      _.host_num_wg_x                 -> num_wg_x.U               ,
-      _.host_num_wg_y                 -> num_wg_y.U               ,
-      _.host_num_wg_z                 -> num_wg_z.U               ,
-      _.host_threadID_globaloffset_x  -> threadID_globaloffset_x.U,
-      _.host_threadID_globaloffset_y  -> threadID_globaloffset_y.U,
-      _.host_threadID_globaloffset_z  -> threadID_globaloffset_z.U,
-      _.host_kernel_dim               -> kernel_dim.U
-
+      _.host_kernel_size_x            -> num_wg_x.U               ,
+      _.host_kernel_size_y            -> num_wg_y.U               ,
+      _.host_kernel_size_z            -> num_wg_z.U               ,
+      _.host_threadIdx_global_offset_x-> threadID_globaloffset_x.U,
+      _.host_threadIdx_global_offset_y-> threadID_globaloffset_y.U,
+      _.host_threadIdx_global_offset_z-> threadID_globaloffset_z.U,
+      _.host_kernel_dim               -> kernel_dim.U,
     )
   }
 }

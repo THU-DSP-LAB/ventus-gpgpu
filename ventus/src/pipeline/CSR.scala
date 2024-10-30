@@ -280,17 +280,17 @@ class CSRFile extends Module {
   )
 
   val csrFile_v= Seq(
-    BitPat(CSR.global_id_x) -> global_id_x,
-    BitPat(CSR.global_id_y) -> global_id_y,
-    BitPat(CSR.global_id_z) -> global_id_z,
-    BitPat(CSR.global_linear_id) -> global_linear_id,
-    BitPat(CSR.local_id_x) -> local_id_x,
-    BitPat(CSR.local_id_y) -> local_id_y,
-    BitPat(CSR.local_id_z) -> local_id_z
+    BitPat(CSR.global_id_x) -> global_id_x.asUInt,
+    BitPat(CSR.global_id_y) -> global_id_y.asUInt,
+    BitPat(CSR.global_id_z) -> global_id_z.asUInt,
+    BitPat(CSR.global_linear_id) -> global_linear_id.asUInt,
+    BitPat(CSR.local_id_x) -> local_id_x.asUInt,
+    BitPat(CSR.local_id_y) -> local_id_y.asUInt,
+    BitPat(CSR.local_id_z) -> local_id_z.asUInt,
   )
 
   csr_rdata := Lookup(csr_addr, 0.U(xLen.W), csrFile).asUInt
-  csr_rdata_v:=Lookup(csr_addr, 0.U(xLen.W), csrFile_v).asUInt
+  csr_rdata_v:=Lookup(csr_addr, VecInit.fill(num_thread)(0.U(xLen.W)).asUInt, csrFile_v).asTypeOf(Vec(num_thread, UInt(xLen.W)))
   val AVL=csr_input
 
     when(wen){
@@ -418,7 +418,7 @@ class CSRexe extends Module {
   result_v.io.deq <> io.out_v
 
   result_v.io.enq.valid := io.in.fire & vCSR(io.in.bits.ctrl.wid).wb_isvec
-  result_v.io.enq.bits := 0.U.asTypeOf(new WriteScalarCtrl)
+  result_v.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
   result_v.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
   result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
   result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd

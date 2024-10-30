@@ -31,10 +31,18 @@ class host2CTA_data extends Bundle{
   val host_num_wf               = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)
   val host_wf_size              = UInt(log2Ceil(CTA_SCHE_CONFIG.GPU.NUM_THREAD+1).W)
   val host_start_pc             = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
-  val host_kernel_size_3d       = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W))
-  val host_wg_idx_3d            = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W))
-  val host_num_thread_per_wg_3d = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W))
-  val host_thread_idx_global_offset_3d = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W))
+  val host_kernel_size_x        = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val host_kernel_size_y        = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val host_kernel_size_z        = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val host_wgIdx_x              = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_wgIdx_y              = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_wgIdx_z              = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_num_thread_per_wg_x  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val host_num_thread_per_wg_y  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val host_num_thread_per_wg_z  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val host_threadIdx_global_offset_x = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_threadIdx_global_offset_y = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_threadIdx_global_offset_z = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
   val host_csr_knl          = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_vgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
   val host_sgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
@@ -45,21 +53,8 @@ class host2CTA_data extends Bundle{
   val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
-  val host_num_dimension    = UInt(2.W) // how many dimension does this kernel have
+  val host_kernel_dim       = UInt(2.W) // how many dimension does this kernel have
   val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
-  val host_num_thread_per_wg_x=UInt(32.W)
-  val host_num_thread_per_wg_y=UInt(32.W)
-  val host_num_thread_per_wg_z=UInt(32.W)
-  val host_num_wg_x=UInt(32.W)
-  val host_num_wg_y=UInt(32.W)
-  val host_num_wg_z=UInt(32.W)
-  val host_threadID_globaloffset_x=UInt(32.W)
-  val host_threadID_globaloffset_y=UInt(32.W)
-  val host_threadID_globaloffset_z=UInt(32.W)
-  val host_kernel_dim=UInt(2.W)
-
-
-
 }
 class CTA2host_data extends Bundle{
   val inflight_wg_buffer_host_wf_done_wg_id = (UInt(WG_ID_WIDTH.W))
@@ -78,9 +73,18 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_new.bits.num_wf             := io.host2CTA.bits.host_num_wf
   cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wf_size
   cta_sche.io.host_wg_new.bits.start_pc           := io.host2CTA.bits.host_start_pc
-  cta_sche.io.host_wg_new.bits.num_wg_x           := io.host2CTA.bits.host_kernel_size_3d(0)
-  cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_3d(1)
-  cta_sche.io.host_wg_new.bits.num_wg_z           := io.host2CTA.bits.host_kernel_size_3d(2)
+  cta_sche.io.host_wg_new.bits.num_wg_x           := io.host2CTA.bits.host_kernel_size_x
+  cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_y
+  cta_sche.io.host_wg_new.bits.num_wg_z           := io.host2CTA.bits.host_kernel_size_z
+  cta_sche.io.host_wg_new.bits.wgIdx_x            := io.host2CTA.bits.host_wgIdx_x
+  cta_sche.io.host_wg_new.bits.wgIdx_y            := io.host2CTA.bits.host_wgIdx_y
+  cta_sche.io.host_wg_new.bits.wgIdx_z            := io.host2CTA.bits.host_wgIdx_z
+  cta_sche.io.host_wg_new.bits.num_thread_per_wg_x:= io.host2CTA.bits.host_num_thread_per_wg_x
+  cta_sche.io.host_wg_new.bits.num_thread_per_wg_y:= io.host2CTA.bits.host_num_thread_per_wg_y
+  cta_sche.io.host_wg_new.bits.num_thread_per_wg_z:= io.host2CTA.bits.host_num_thread_per_wg_z
+  cta_sche.io.host_wg_new.bits.threadIdx_in_grid_offset_x := io.host2CTA.bits.host_threadIdx_global_offset_x
+  cta_sche.io.host_wg_new.bits.threadIdx_in_grid_offset_y := io.host2CTA.bits.host_threadIdx_global_offset_y
+  cta_sche.io.host_wg_new.bits.threadIdx_in_grid_offset_z := io.host2CTA.bits.host_threadIdx_global_offset_z
   cta_sche.io.host_wg_new.bits.pds_base           := io.host2CTA.bits.host_pds_baseaddr
   cta_sche.io.host_wg_new.bits.num_pds_per_wf     := io.host2CTA.bits.host_pds_size_per_wf
   cta_sche.io.host_wg_new.bits.csr_kernel         := io.host2CTA.bits.host_csr_knl
@@ -107,12 +111,19 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_vgpr_base_dispatch := cta_sche.io.cu_wf_new(i).bits.vgpr_base
     io.CTA2warp(i).bits.dispatch2cu_wf_tag_dispatch    := cta_sche.io.cu_wf_new(i).bits.wf_tag
     io.CTA2warp(i).bits.dispatch2cu_start_pc_dispatch  := cta_sche.io.cu_wf_new(i).bits.start_pc
-    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch := cta_sche.io.cu_wf_new(i).bits.gds_base
-    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch := cta_sche.io.cu_wf_new(i).bits.pds_base
-    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch := cta_sche.io.cu_wf_new(i).bits.csr_kernel
-    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_x
-    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_y
-    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_z
+    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch  := cta_sche.io.cu_wf_new(i).bits.gds_base
+    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch  := cta_sche.io.cu_wf_new(i).bits.pds_base
+    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch   := cta_sche.io.cu_wf_new(i).bits.csr_kernel
+    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch    := cta_sche.io.cu_wf_new(i).bits.wgIdx_x
+    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch    := cta_sche.io.cu_wf_new(i).bits.wgIdx_y
+    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch    := cta_sche.io.cu_wf_new(i).bits.wgIdx_z
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_local_x  := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_wg_x
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_local_y  := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_wg_y
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_local_z  := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_wg_z
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_x := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid_x
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_y := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid_y
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_z := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid_z
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_linear := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid
     io.CTA2warp(i).bits.dispatch2cu_wg_id := cta_sche.io.cu_wf_new(i).bits.wg_id
     if(MMU_ENABLED) {
         io.CTA2warp(i).bits.dispatch2cu_knl_asid.get := cta_sche.io.cu_wf_new(i).bits.asid_kernel.get
@@ -536,13 +547,17 @@ class CPUtest(C: TestCase#Props) extends Module{
   io.host2cta.bits.host_gds_baseaddr := sharemem_size.U
   io.host2cta.bits.host_pds_baseaddr := sharemem_size.U
   io.host2cta.bits.host_csr_knl:=10.U
-  io.host2cta.bits.host_kernel_size_3d:=0.U.asTypeOf(io.host2cta.bits.host_kernel_size_3d)
+  io.host2cta.bits.host_kernel_size_x := 0.U
+  io.host2cta.bits.host_kernel_size_y := 0.U
+  io.host2cta.bits.host_kernel_size_z := 0.U
 
   val cnt=Counter(16)
   io.host2cta.bits.host_wg_id:=Cat(cnt.value + 3.U,0.U(CU_ID_WIDTH.W))
   //io.host2cta.bits.host_pds_baseaddr:=cnt.value << 10
   io.host2cta.bits.host_csr_knl:=cnt.value
-  io.host2cta.bits.host_kernel_size_3d:=VecInit(Seq(cnt.value,cnt.value+1.U,cnt.value+2.U))
+  io.host2cta.bits.host_wgIdx_x := cnt.value
+  io.host2cta.bits.host_wgIdx_x := cnt.value + 1.U
+  io.host2cta.bits.host_wgIdx_x := cnt.value + 2.U
   when(cnt.value < num_of_block){
     io.host2cta.valid:=true.B
     when(io.host2cta.ready){cnt.inc()}
