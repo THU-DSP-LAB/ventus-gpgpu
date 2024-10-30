@@ -11,3 +11,6 @@
 	path = dependencies/fpuv2
 	url = git@github.com:liuxd17thu/fpuv2.git
 	branch = chisel6
+[submodule "difftest"]
+	path = difftest
+	url = https://github.com/OpenXiangShan/difftest.git
