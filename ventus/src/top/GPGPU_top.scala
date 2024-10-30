@@ -556,8 +556,8 @@ class CPUtest(C: TestCase#Props) extends Module{
   //io.host2cta.bits.host_pds_baseaddr:=cnt.value << 10
   io.host2cta.bits.host_csr_knl:=cnt.value
   io.host2cta.bits.host_wgIdx_x := cnt.value
-  io.host2cta.bits.host_wgIdx_x := cnt.value + 1.U
-  io.host2cta.bits.host_wgIdx_x := cnt.value + 2.U
+  io.host2cta.bits.host_wgIdx_y := cnt.value + 1.U
+  io.host2cta.bits.host_wgIdx_z := cnt.value + 2.U
   when(cnt.value < num_of_block){
     io.host2cta.valid:=true.B
     when(io.host2cta.ready){cnt.inc()}
