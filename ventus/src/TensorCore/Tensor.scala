@@ -292,8 +292,7 @@ class TCDotProduct_MixedPrecision(DimN: Int, expWidth: Int, precision: Int,
     i = i + 1
   }
 
-  // TODO: transfer FP16->FP32.
-  //  Done.
+  // TODO: transfer FP16->FP32. Done.
   val fp16to32 = Module(new FP16toFP32Converter)
 
   val finalAdd = Module(new TCAddPipe(8, 24, new DotProdCtrl_mix(len, tcCtrl)))
@@ -323,8 +322,20 @@ class TCDotProduct_MixedPrecision(DimN: Int, expWidth: Int, precision: Int,
   adds.last.head.io.out.ready := Mux( outpack.ctrl.isMixedPrecisionMode,finalAdd.io.in.ready,finalAdd_FP16.io.in.ready)
 
   val fifo = Module(new Queue(new TCDotProductOutput(2*len, tcCtrl), entries = 1, pipe = true))
-  fifo.io.enq.bits.result := Mux( outpack.ctrl.isMixedPrecisionMode,finalAdd.io.out.bits.result,Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result))
-  fifo.io.enq.bits.fflags := Mux( outpack.ctrl.isMixedPrecisionMode,finalAdd.io.out.bits.fflags,finalAdd_FP16.io.out.bits.fflags)
+  // 使用 Mux 处理 tc_ReLU 标志位和符号位
+  val out_fp32 = Wire(UInt(32.W))
+  out_fp32 := Mux(io.in.bits.ctrl.tc_ReLU,
+    Mux(finalAdd.io.out.bits.result(31), 0.U(32.W), finalAdd.io.out.bits.result), // 如果 tc_ReLU 为 1 且结果为负数，输出 0；否则输出结果
+    finalAdd.io.out.bits.result) // 如果 tc_ReLU 不为 1，直接输出结果
+
+  val out_fp16 = Wire(UInt(32.W))
+  out_fp16 := Mux(io.in.bits.ctrl.tc_ReLU,
+    Mux(finalAdd_FP16.io.out.bits.result(15), 0.U(32.W), Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result)), // 如果 tc_ReLU 为 1 且结果为负数，输出 0；否则输出结果
+    Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result)) // 如果 tc_ReLU 不为 1，直接输出结果
+
+//  fifo.io.enq.bits.result := Mux(outpack.ctrl.isMixedPrecisionMode,finalAdd.io.out.bits.result,Cat(0.U(16.W),finalAdd_FP16.io.out.bits.result))
+  fifo.io.enq.bits.result := Mux(outpack.ctrl.isMixedPrecisionMode,out_fp32,out_fp16)
+  fifo.io.enq.bits.fflags := Mux(outpack.ctrl.isMixedPrecisionMode,finalAdd.io.out.bits.fflags,finalAdd_FP16.io.out.bits.fflags)
 
   val outpack2 = Wire(new DotProdCtrl_mix(len, tcCtrl))
   outpack2 := Mux( outpack.ctrl.isMixedPrecisionMode,finalAdd.io.out.bits.ctrl.get,finalAdd_FP16.io.out.bits.ctrl.get)
@@ -461,6 +472,8 @@ class TCCtrl_mix_mul_slot(len: Int,datawidth:Int, depth_warp: Int) extends Bundl
   val reg_idxw = UInt(5.W)
   val warpID = UInt(depth_warp.W)
   val isMixedPrecisionMode = Bool()
+  val tc_ReLU = Bool()
+  val tc_shape = UInt(2.W)
   val sel_slot_num = UInt(datawidth.W)
 }
 //################################## TCComputation ##################################

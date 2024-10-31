@@ -39,7 +39,7 @@ class TC_MMAOutput(tcCtrl:TCCtrl) extends Bundle{
 class TC_MMAInput_MixedPrecision2(tcCtrl:pipeline.TCCtrl_mulslot_v2) extends Bundle{
   val data_in = new vTCData
   val rm = UInt(3.W)
-  val isMixedPrecisionMode = Bool()
+//  val isMixedPrecisionMode = Bool()
   val ctrl = tcCtrl.cloneType
 }
 

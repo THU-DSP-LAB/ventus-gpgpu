@@ -66,7 +66,10 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
   reg_sel_slot := sel_slot
 
   val tcctrl_mslot = Wire(new TCCtrl_mulslot_v2(xLen, depth_warp))
-  tcctrl_mslot.isMixedPrecisionMode := io.in.bits.isMixedPrecisionMode
+  tcctrl_mslot.isMixedPrecisionMode := io.in.bits.ctrl.isMixedPrecisionMode
+  tcctrl_mslot.tc_ReLU := io.in.bits.ctrl.tc_ReLU
+  tcctrl_mslot.tc_shape := io.in.bits.ctrl.tc_shape
+
   tcctrl_mslot.warpID := io.in.bits.ctrl.warpID
   tcctrl_mslot.reg_idxw := io.in.bits.ctrl.reg_idxw
   tcctrl_mslot.sel_slot_num := selSlotIdx
@@ -80,6 +83,17 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
 
   val reg_rm = Reg(Vec(slot_num,UInt(3.W)))
   val reg_ctrl = Reg(Vec(slot_num, tcctrl_mslot.cloneType))
+
+  val reg_isMixSendMode = Reg(Vec(slot_num,Bool()))
+  (0 until slot_num).foreach { iofL =>
+    reg_isMixSendMode(iofL) := false.B
+  }
+  when(io.in.fire){
+    reg_isMixSendMode(reg_sel_slot) := io.in.bits.ctrl.isMixedPrecisionMode//Mux(io.in.fire, io.in.bits.ctrl.isMixedPrecisionMode, RegEnable(io.in.bits.ctrl.isMixedPrecisionMode,io.in.fire))
+  }
+
+  val isMixSendMode = Mux(io.in.fire, io.in.bits.ctrl.isMixedPrecisionMode, RegEnable(io.in.bits.ctrl.isMixedPrecisionMode,io.in.fire))//RegInit(false.B)//Wire(false.B)//
+//  val reg_ismix = RegNext(io.in.bits.ctrl.isMixedPrecisionMode)
 
   // Init TC Computation Array Input IO
   //A 8*8 row
@@ -97,15 +111,28 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
 
   TCComputation.io.out.ready := io.out.ready
   io.out.valid := Mux(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode, TCComputation.io.out.valid, recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num) === 2.U)
-  TCComputation.io.in.valid := Mux(io.in.bits.isMixedPrecisionMode, slot.map(_.valid).reduce(_ || _), sendCS(reg_sel_slot) === 1.U || slot.map(_.valid).reduce(_ || _))
+  TCComputation.io.in.valid := Mux(isMixSendMode, slot.map(_.valid).reduce(_ || _), (sendCS(reg_sel_slot) === 1.U && reg_isMixSendMode(reg_sel_slot) === false.B) || slot.map(_.valid).reduce(_ || _))
 
-  val is1stage = VecInit(Seq.fill(slot_num)(WireInit(false.B)))
-  for (i <- 0 until slot_num) {
-    is1stage(i) := sendCS(i) === 1.U
+//  val is1stage = VecInit(Seq.fill(slot_num)(WireInit(false.B)))
+//  for (i <- 0 until slot_num) {
+//    is1stage(i) := sendCS(i) === 1.U
+//  }
+//  // 如果有匹配的 slot，则选择该 slot
+//  val is1stage_all = is1stage.reduce(_ || _)
+
+  // 定义一个寄存器，标记是否要在下一个周期将 ready 置为 false
+  val readyDelayed = RegInit(false.B)
+  io.in.ready := !readyDelayed
+  // 当输入握手完成，且 isMixedPrecisionMode 为 false 时，设置 readyDelayed 为 true
+  when(io.in.fire && !io.in.bits.ctrl.isMixedPrecisionMode) {
+    readyDelayed := true.B
+  }.elsewhen(readyDelayed) {
+    // 在下一个周期将 readyDelayed 置回 false
+    readyDelayed := false.B
   }
-  // 如果有匹配的 slot，则选择该 slot
-  val is1stage_all = is1stage.reduce(_ || _)
-  io.in.ready := Mux(io.in.bits.isMixedPrecisionMode, TCComputation.io.in.ready ,TCComputation.io.in.ready && (!is1stage_all))//slot.map(_.io.enq.ready).reduce(_ || _)
+
+//  io.in.ready := Mux(is1stage_all && (reg_ismix === false.B),false.B,true.B)
+//  io.in.ready := Mux(io.in.bits.ctrl.isMixedPrecisionMode, TCComputation.io.in.ready ,TCComputation.io.in.ready && (!is1stage_all) || )//slot.map(_.io.enq.ready).reduce(_ || _)
 
   // select output
   for(m<-0 until 8){
@@ -120,16 +147,28 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
       //      mixed-Prec is not relative to this state
       when(io.in.fire) {
         sendNS(sel_slot) := 1.U
+//        when(io.in.bits.ctrl.isMixedPrecisionMode){
+//          isMixSendMode := true.B
+//        }.otherwise {
+//          isMixSendMode := false.B
+//        }
       }.otherwise {
         sendNS(sel_slot) := 0.U
+//        when(io.in.bits.ctrl.isMixedPrecisionMode){
+//          isMixSendMode := true.B
+//        }.otherwise {
+//          isMixSendMode := false.B
+//        }
       }
     }
     is(1.U) { //1
-      when(io.in.bits.isMixedPrecisionMode) {
+      when(io.in.bits.ctrl.isMixedPrecisionMode) {
         when(io.in.fire) {
           sendNS(sel_slot) := 2.U //sendCS +% 1.U
+//          isMixSendMode := true.B
         }.otherwise {
           sendNS(sel_slot) := 1.U //sendCS
+//          isMixSendMode := true.B
         }
       }.otherwise {
         when(TCComputation.io.in.fire && recvCS(sel_slot) === 0.U) {
@@ -191,15 +230,17 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
         }
       }
 
-      when(io.in.bits.isMixedPrecisionMode) {
+      when(io.in.bits.ctrl.isMixedPrecisionMode) {
         // now, we don't need to store set2 data.
         // A B will be provided in vExeData.
         //C 8*4 row First
         for (m <- 0 until 32) {
           TCComputation.io.in.bits.C(m) := io.in.bits.data_in.in3(m)
         }
+//        TCComputation.io.in.bits.ctrl := io.in.bits.ctrl
+//        TCComputation.io.in.bits.rm := io.in.bits.rm
       }.otherwise {
-        assert(io.in.valid === true.B)
+//        assert(io.in.valid === true.B)
         //C 8*4 row First
         for (m <- 0 until 8) {
           regSet2_C(sel_slot)(m * 4) := io.in.bits.data_in.in3(2 + m * 4)(15, 0)
@@ -229,14 +270,14 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
       for (k <- 0 until 32) {
         TCComputation.io.in.bits.B(k) := regSet2_B(sel_slot)(k)
       }
-      when(io.in.bits.isMixedPrecisionMode) {
+      when(io.in.bits.ctrl.isMixedPrecisionMode) {
         //C 8*4 row First
         for (m <- 0 until 32) {
           TCComputation.io.in.bits.C(m) := io.in.bits.data_in.in3(m)
         }
         // set ctrl and rm
-        TCComputation.io.in.bits.rm := io.in.bits.rm
-        TCComputation.io.in.bits.ctrl := tcctrl_mslot//io.in.bits.ctrl
+//        TCComputation.io.in.bits.rm := io.in.bits.rm
+//        TCComputation.io.in.bits.ctrl := tcctrl_mslot//io.in.bits.ctrl
       }.otherwise {
         //C 8*4 row First
         for (k <- 0 until 32) {

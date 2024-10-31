@@ -124,7 +124,9 @@ class vTCexe_mult_slot extends Module{
   tensor.io.in.bits.ctrl.reg_idxw:=io.in.bits.ctrl.reg_idxw
   tensor.io.in.bits.ctrl.warpID:=io.in.bits.ctrl.wid
   //  tensor.io.in.bits.ctrl.isMixedPrecisionMode := false.B
-  tensor.io.in.bits.isMixedPrecisionMode := false.B
+  tensor.io.in.bits.ctrl.isMixedPrecisionMode := io.in.bits.ctrl.tc_isMix
+  tensor.io.in.bits.ctrl.tc_ReLU := io.in.bits.ctrl.tc_ReLU
+  tensor.io.in.bits.ctrl.tc_shape := io.in.bits.ctrl.tc_shape
 
   //  If SIPKE Info here, we will init spike_info too.
   if(SPIKE_OUTPUT) {
@@ -132,11 +134,13 @@ class vTCexe_mult_slot extends Module{
     tcctrl_i.spike_info.get := io.in.bits.ctrl.spike_info.get
     tcctrl_i.reg_idxw := io.in.bits.ctrl.reg_idxw
     tcctrl_i.warpID := io.in.bits.ctrl.wid
-    tcctrl_i.isMixedPrecisionMode := false.B
+    tcctrl_i.isMixedPrecisionMode := io.in.bits.ctrl.tc_isMix
+    tcctrl_i.tc_ReLU := io.in.bits.ctrl.tc_ReLU
+    tcctrl_i.tc_shape := io.in.bits.ctrl.tc_shape
     tcctrl_i.sel_slot_num := num_warp.U
     tensor.io.in.bits.ctrl := tcctrl_i
   }
-  tensor.io.in.bits.rm := io.rm // TODO: need further check its usage
+  tensor.io.in.bits.rm := io.rm //
 
   // Get Input data.
   tensor.io.in.bits.data_in.mask <> io.in.bits.mask
