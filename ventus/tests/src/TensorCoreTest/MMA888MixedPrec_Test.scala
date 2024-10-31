@@ -2,13 +2,13 @@ package TensorCoreTest
 
 import FPUv2.TCCtrl
 import FPUv2.utils.RoundingModes
-import TensorCore.{TCComputationInput_MixedPrecision, TC_MMA888_V2, TC_MMAInput, TC_MMAInput_MixedPrecision, TC_MMAOutput,  vTCData}//TensorCore_MixedPrecision,
+import TensorCore.{TCComputationInput_MixedPrecision, TCCtrl_mix_mul_slot, TC_MMA888_V2, TC_MMAInput, TC_MMAInput_MixedPrecision, TC_MMAInput_MixedPrecision2, TC_MMAOutput, TC_MMAOutput2, TensorCore_MixedPrecision_multslot_simple, vTCData}
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
-import pipeline.{CtrlSigs, InstWriteBack}
+import pipeline.{CtrlSigs, InstWriteBack, TCCtrl_mulslot_v2}
 import play.TestUtils.RequestSender
 //import chisel3.util.Hexadecimal
 import top.parameters._
@@ -53,79 +53,85 @@ class MMA888MixedPrec_Test extends AnyFlatSpec with ChiselScalatestTester {
         )
       }
 
-      new TC_MMAInput_MixedPrecision(new TCCtrl(32, 1)).Lit(
+      new TC_MMAInput_MixedPrecision2(new TCCtrl_mulslot_v2(32, 1)).Lit(
         _.data_in -> data_in,
         _.rm -> RoundingModes.RNE,
 //        _.rm -> RoundingModes.RTZ,
 //        _.rm -> RoundingModes.RDN,
 //        _.rm -> RoundingModes.RUP,
 //        _.rm -> RoundingModes.RMM,
-        _.isMixedPrecisionMode -> true.B,
-        _.ctrl -> new TCCtrl(32, 1).Lit(
+//        _.ctrl -> true.B,
+        _.ctrl -> new TCCtrl_mulslot_v2(32, 1).Lit(
           _.reg_idxw -> count.U,
-          _.warpID -> 0.U
+          _.warpID -> 0.U,
+          _.isMixedPrecisionMode -> true.B,
+          _.tc_ReLU -> true.B,
+          _.tc_shape -> 0.U,
+          _.sel_slot_num -> 0.U,
+//          _.spike_info -> 0.U.asTypeOf(InstWriteBack)//DontCare
+          //_.spike_info -> if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
         )
       )
     }
   }
 //
-//  behavior of "Tensor Core MMA888 V2 mix prec"
-//  it should "TCComputationArray 888 FP16" in {
-//    test(new TensorCore_MixedPrecision(8,8,8,16,new TCCtrl(32, 1))).withAnnotations(Seq(WriteVcdAnnotation)) { d =>
-//      TCMMA888Input.reset
-//      d.io.in.initSource()
-//      d.io.in.setSourceClock(d.clock)
-//      d.io.out.initSink()
-//      d.io.out.setSinkClock(d.clock)
-//      d.clock.setTimeout(80)
-//
-//      val input_list = Seq(TCMMA888Input(1))//,TCMMA888Input(0))//,TCMMA888Input(1),TCMMA888Input(0))
-//      val TC_input_sender = new RequestSender[TC_MMAInput_MixedPrecision, TC_MMAOutput](d.io.in, d.io.out)
-//      TC_input_sender.add(input_list)
-//
-//      d.clock.setTimeout(0)
-//      d.clock.step(4)
-//      var clock_cnt = 0
-//
-////      d.clock.step()
-////      TC_input_sender.eval()
-////      d.io.out.ready.poke(true.B)
-////      d.io.in.valid.poke(false.B)
-////      d.clock.step(2)
-////      d.io.in.valid.poke(true.B)
-////      clock_cnt += 1
-//
-//      while(clock_cnt <= 100){
-//        d.clock.step(1)
-//        TC_input_sender.eval()
-//        d.io.out.ready.poke(true.B)
-//        clock_cnt += 1
-//        d.clock.step(1)
-//      }
-////      d.io.in.bits.isMixedPrecisionMode.poke(false.B)
-//
-////      d.clock.step(600)
-//      println("\n")
-//      val Rd = TCMMA888Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData_888/RD.txt")
-////      val Rd_torch = TCMMA888Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData_888/RD_torch.txt")
-//      for (i <- 0 until 32) {
-//        val elementValue = d.io.out.bits.data_out(i).peek()
-//        val intValue: Int = elementValue(15,0).litValue().toInt
-//        val intValue2: Int = elementValue(31,16).litValue().toInt
-////        val intValue3: Int = elementValue(47,32).litValue().toInt
-////        val intValue4: Int = elementValue(63,48).litValue().toInt
-//        val hexString: String = f"$intValue%04x" // %016x 表示至少16位的16进制数，不足的前面补零
-//        val hexString2: String = f"$intValue2%04x" // %016x 表示至少16位的16进制数，不足的前面补零
-////        val hexString3: String = f"$intValue3%04x" // %016x 表示至少16位的16进制数，不足的前面补零
-////        val hexString4: String = f"$intValue4%04x" // %016x 表示至少16位的16进制数，不足的前面补零
-////        println(s"data_out($i) = hex:$hexString")
-//        val std: String = Rd(i)
-////        val std_torch: String = Rd_torch(i)
-////        println(s"$i $hexString4$hexString3$hexString2$hexString, $std, $std_torch")
-//        println(s"$i $hexString2$hexString, $std")
-//      }
-////      d.clock.step(30)
-//    }
-//  }
+  behavior of "Tensor Core MMA888 V2 mix prec"
+  it should "TCComputationArray 888 FP16" in {
+    test(new TensorCore_MixedPrecision_multslot_simple(8,8,8,num_warp,16,new TCCtrl_mulslot_v2(32, 1))).withAnnotations(Seq(WriteVcdAnnotation)) { d =>
+      TCMMA888Input.reset
+      d.io.in.initSource()
+      d.io.in.setSourceClock(d.clock)
+      d.io.out.initSink()
+      d.io.out.setSinkClock(d.clock)
+      d.clock.setTimeout(80)
+
+      val input_list = Seq(TCMMA888Input(1))//,TCMMA888Input(0))//,TCMMA888Input(1),TCMMA888Input(0))
+      val TC_input_sender = new RequestSender[TC_MMAInput_MixedPrecision2, TC_MMAOutput2](d.io.in, d.io.out)
+      TC_input_sender.add(input_list)
+
+      d.clock.setTimeout(0)
+      d.clock.step(4)
+      var clock_cnt = 0
+
+//      d.clock.step()
+//      TC_input_sender.eval()
+//      d.io.out.ready.poke(true.B)
+//      d.io.in.valid.poke(false.B)
+//      d.clock.step(2)
+//      d.io.in.valid.poke(true.B)
+//      clock_cnt += 1
+
+      while(clock_cnt <= 100){
+        d.clock.step(1)
+        TC_input_sender.eval()
+        d.io.out.ready.poke(true.B)
+        clock_cnt += 1
+        d.clock.step(1)
+      }
+//      d.io.in.bits.isMixedPrecisionMode.poke(false.B)
+
+//      d.clock.step(600)
+      println("\n")
+      val Rd = TCMMA888Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData_888/RD.txt")
+//      val Rd_torch = TCMMA888Input.readTxtFileToOneDimensionalArray("ventus/tests/src/TensorCoreTest/testData_888/RD_torch.txt")
+      for (i <- 0 until 32) {
+        val elementValue = d.io.out.bits.data_out(i).peek()
+        val intValue: Int = elementValue(15,0).litValue.toInt
+        val intValue2: Int = elementValue(31,16).litValue.toInt
+//        val intValue3: Int = elementValue(47,32).litValue().toInt
+//        val intValue4: Int = elementValue(63,48).litValue().toInt
+        val hexString: String = f"$intValue%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+        val hexString2: String = f"$intValue2%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+//        val hexString3: String = f"$intValue3%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+//        val hexString4: String = f"$intValue4%04x" // %016x 表示至少16位的16进制数，不足的前面补零
+//        println(s"data_out($i) = hex:$hexString")
+        val std: String = Rd(i)
+//        val std_torch: String = Rd_torch(i)
+//        println(s"$i $hexString4$hexString3$hexString2$hexString, $std, $std_torch")
+        println(s"$i $hexString2$hexString, $std")
+      }
+//      d.clock.step(30)
+    }
+  }
 }
 

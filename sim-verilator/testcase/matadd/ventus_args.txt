@@ -4,4 +4,4 @@
 
 # characters following '#' on each line are ignored
 
---kernel name=matadd,metafile=matadd.metadata,datafile=matadd.data
+--kernel name=mma_4_ReLU,metafile=/home/lan/temp_file_lw/p/ventus-gpgpu/sim-verilator/testcase/mma_4_ReLU/mma_new_0.metadata,datafile=/home/lan/temp_file_lw/p/ventus-gpgpu/sim-verilator/testcase/mma_4_ReLU/mma_new_0.data
