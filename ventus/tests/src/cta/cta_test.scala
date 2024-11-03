@@ -142,7 +142,8 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
                                     wg_id = ${wf2.wg_id}
                                     num_thread_per_wg_{x,y,z} = (${test.in.num_thread_per_wg_x(wf2.wg_id)},${test.in.num_thread_per_wg_y(wf2.wg_id)},${test.in.num_thread_per_wg_z(wf2.wg_id)})
                                     expect thread${i} threadIdxL_{x,y,z} = ($threadIdxL_x, $threadIdxL_y, $threadIdxL_z)
-                               """) }
+                               """)
+      }
       // threadIdxG_{x,y,z}正确
       if(wf2.threadIdxG_3d(i)._1 != (test.in.wgIdx_x(wg_id) * test.in.num_thread_per_wg_x(wg_id) + wf2.threadIdxL_3d(i)._1 + test.in.threadIdx_offset_x(wg_id)) ||
          wf2.threadIdxG_3d(i)._2 != (test.in.wgIdx_y(wg_id) * test.in.num_thread_per_wg_y(wg_id) + wf2.threadIdxL_3d(i)._2 + test.in.threadIdx_offset_y(wg_id)) ||
@@ -439,68 +440,7 @@ class RunCtaTests extends AnyFlatSpec {
         clk_cnt += 1
         if(clk_cnt % 10000 == 0) { println(s"clock step ${clk_cnt} cycles") }
         dut.clock.step()
-        
       }
-
-
-      //fork{       // Host_wg_new
-      //  dut.io.host_wg_new.enqueueSeq(testSeqIn)
-      //} .fork {   // CU interface
-      //  while(cnt < testlen) {
-      //    val wf_done_seq = gpu.update()
-      //    for(i <- 0 until NUM_CU) {
-      //      dut.io.cu_wf_done(i).valid.poke(wf_done_seq(i)._1.asBool)
-      //      dut.io.cu_wf_done(i).bits.wf_tag.poke(wf_done_seq(i)._3.asUInt)
-      //    }
-      //    for(i <- 0 until NUM_CU) {
-      //      // 这个循环不能与上一个融合，CU interface会从所有的wf_done(i).valid中Arbiter出一个作为处理对象
-      //      // 必须等所有wf_done(i).valid更新完毕后才能读取wf_done(i).ready
-      //      if(dut.io.cu_wf_done(i).valid.peek.litToBoolean && dut.io.cu_wf_done(i).ready.peek.litToBoolean) {
-      //        gpu.wf_done(cu_id = i, wf_tag = wf_done_seq(i)._3)
-      //      }
-      //    }
-      //    for(i <- 0 until NUM_CU) {
-      //      val wf_new = dut.io.cu_wf_new(i)
-      //      wf_new.ready.poke(Random.nextBoolean().B)
-      //      if(wf_new.valid.peek.litToBoolean && wf_new.ready.peek.litToBoolean) {
-      //        val wf = new Wf_slot
-      //        wf.wg_id = wf_new.bits.wg_id.peek.litValue.toInt
-      //        wf.lds =  (wf_new.bits.lds_base.peek.litValue.toInt , wf_new.bits.lds_base.peek.litValue.toInt  + test.in.lds(wf.wg_id)  - 1)
-      //        wf.sgpr = (wf_new.bits.sgpr_base.peek.litValue.toInt, wf_new.bits.sgpr_base.peek.litValue.toInt + test.in.sgpr(wf.wg_id) - 1)
-      //        wf.vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + test.in.vgpr(wf.wg_id) - 1)
-      //        wf.wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt
-      //        wf.csr = wf_new.bits.csr_kernel.peek.litValue.toInt
-      //        for(t <- 0 until CONFIG.GPU.NUM_THREAD) {
-      //          wf.threadIdxG_3d(t) = (wf_new.bits.threadIdx_in_grid_x(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_grid_y(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_grid_z(t).peek.litValue.toInt)
-      //          wf.threadIdxL_3d(t) = (wf_new.bits.threadIdx_in_wg_x(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_wg_y(t).peek.litValue.toInt, wf_new.bits.threadIdx_in_wg_z(t).peek.litValue.toInt)
-      //          wf.threadIdxG_1d(t) = wf_new.bits.threadIdx_in_grid(t).peek.litValue.toInt
-      //          wf.threadIdxL_1d(t) = wf_new.bits.threadIdx_in_wg(t).peek.litValue.toInt
-      //        }
-      //        wf.time = test.in.wf_time(wf.wg_id)(wf.wf_id)
-      //        gpu.wf_new(cu_id = i, wf)
-      //      }
-      //    }
-      //    dut.clock.step()
-      //  }
-      //} .fork {   // Host_wg_done
-      //  dut.clock.step(70)
-      //  while(cnt < testlen){
-      //    dut.io.host_wg_done.ready.poke((scala.util.Random.nextBoolean() && scala.util.Random.nextBoolean()).B)
-      //    if(dut.io.host_wg_done.valid.peek.litToBoolean && dut.io.host_wg_done.ready.peek.litToBoolean) {
-      //      val wg_id = dut.io.host_wg_done.bits.wg_id.peek.litValue.toInt
-      //      testOut_wg(wg_id) = true
-      //      println(s"WG ${dut.io.host_wg_done.bits.wg_id.peek.litValue} finished")
-      //      cnt = cnt + 1
-      //    }
-      //    dut.clock.step()
-      //  }
-      //} .fork {
-      //  while(cnt < testlen) {
-      //    clk_cnt += 1
-      //    if(clk_cnt % 10000 == 0) { println(s"clock step ${clk_cnt} cycles") }
-      //    dut.clock.step()
-      //  }
-      //}.join
 
       gpu.final_check()
       dut.clock.step(100)
