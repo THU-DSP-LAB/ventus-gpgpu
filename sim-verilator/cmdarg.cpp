@@ -1,3 +1,4 @@
+#include "common.h"
 #include "kernel.hpp"
 #include "log.h"
 #include <cassert>
@@ -14,11 +15,12 @@ int cmdarg_kernel(std::string arg, std::function<void(std::shared_ptr<Kernel>)> 
 int cmdarg_error(std::vector<std::string> args);
 int cmdarg_help(int exit_id);
 
-int parse_arg(
-    std::vector<std::string> args, uint64_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
+int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
+    // NOTE: make g_config writable
+    global_config_t* g_config_rw = (global_config_t*)(&g_config);
 
     for (int argid = 0; argid < args.size(); argid++) {
-        if(args[argid].starts_with("+verilator+")){
+        if (args[argid].starts_with("+verilator+")) {
             continue;
         }
         if (args[argid] == "-f") {
@@ -55,11 +57,14 @@ int parse_arg(
                         arguments.push_back(arg);
                     }
                 }
-                parse_arg(arguments, simtime, new_kernel);
+                parse_arg(arguments, new_kernel);
                 std::filesystem::current_path(path_origin);
             }
         } else if (args[argid] == "--task") {
-            // TODO
+            if (++argid >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
+            } else { // TODO
+            }
         } else if (args[argid] == "--kernel") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
@@ -68,13 +73,13 @@ int parse_arg(
             }
         } else if (args[argid] == "--help") {
             cmdarg_help(0);
-        } else if (args[argid] == "--simtime") {
+        } else if (args[argid] == "--sim-time-max") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
             } else {
-                simtime = std::atoi(args[argid].c_str());
-                if(simtime == 0) {
-                    std::cout << "Error: --simtime needs number > 0\n";
+                uint64_t simtime = std::stoull(args[argid]);
+                if (simtime == 0) {
+                    std::cout << "Error: --sim-time-max needs number > 0\n";
                     cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
                 }
             }
@@ -164,7 +169,7 @@ int cmdarg_help(int exit_id) {
     std::cout << "ventus-sim [--arg subarg1=val1,subarg2=val2,...]\n"
               << "\n"
               << "Supported cmdline arguments: \n"
-              << "-f         <file>   string  // load cmd args from file\n"
+              << "-f         FILE     string  // load cmd args from file\n"
               << "                            // if no cmd args is given, -f ventus_cmdargs.txt is applied\n"
               << "\n"
               << "--task                      // create a new GPGPU task\n"
@@ -177,6 +182,6 @@ int cmdarg_help(int exit_id) {
               << "           datafile string  // kernel的.data文件路径\n"
               << "           taskid   uint    // 可选，若无则为不归属任何task的独立kernel。必须指向之前已经申明的task\n"
               << "\n"
-              << "--simtime  <num>    uint    // number of simulation cycles" << std::endl;
+              << "--sim-time-max NUM  uint    // number of simulation cycles" << std::endl;
     exit(exit_id);
 }

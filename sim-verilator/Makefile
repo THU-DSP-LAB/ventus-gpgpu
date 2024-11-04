@@ -35,7 +35,7 @@ VERILATOR_FLAGS += -cc --build --binary
 # Generate makefile dependencies (not shown as complicates the Makefile)
 VERILATOR_FLAGS += -MMD
 # Optimize
-VERILATOR_FLAGS += -x-assign unique -x-initial unique
+VERILATOR_FLAGS += -x-assign 0 -x-initial 0
 # Warn abount lint issues; may not want this on less solid designs
 #VERILATOR_FLAGS += -Wall
 VERILATOR_FLAGS += -Wno-WIDTHEXPAND
