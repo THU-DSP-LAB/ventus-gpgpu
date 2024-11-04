@@ -91,6 +91,7 @@ object MetaData{
       file.getLines()
     }
     new MetaData{
+      kernel_dim = parseHex(buf, 64)
       num_thread_per_wg_x = parseHex(buf, 64)
       num_thread_per_wg_y = parseHex(buf, 64)
       num_thread_per_wg_z = parseHex(buf, 64)
@@ -103,7 +104,7 @@ object MetaData{
       threadID_globaloffset_x = parseHex(buf, 64)
       threadID_globaloffset_y = parseHex(buf, 64)
       threadID_globaloffset_z = parseHex(buf, 64)
-      kernel_dim = parseHex(buf, 64)
+
       parseHex(buf, 64) // skip start_pc = 0x80000000
       kernel_id = parseHex(buf, 64)
       kernel_size = kernel_size.map{ _ => parseHex(buf, 64) }
