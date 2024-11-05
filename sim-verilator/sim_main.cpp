@@ -3,6 +3,7 @@
 #include "cta_sche_wrapper.hpp"
 #include "kernel.hpp"
 #include "log.h"
+#include <bits/types/siginfo_t.h>
 #include <bits/types/sigset_t.h>
 #include <cinttypes>
 #include <csignal>
@@ -27,12 +28,15 @@
 // bug it will be forced into writable while parsing cmd-args
 const global_config_t g_config = {
     .sim_time_max = 800000,
-    .waveform = { .enable = true , .time_begin = 20000, .time_end = 30000, },
-    .snapshot = { .enable = true , .time_interval = 50000, .num_max = 1, },
+    .waveform     = { .enable = true, .time_begin = 20000, .time_end = 30000, .filename = "obj_dir/Vdut.fst" },
+    .snapshot     = { .enable = true, .time_interval = 50000, .num_max = 1, .filename = "obj_dir/Vdut.snapshot.fst" },
 };
+
+#define SNAPSHOT_WAKEUP_SIGNAL SIGRTMIN
 
 typedef struct {
     bool is_child;
+    uint64_t main_exit_time;        // when does the main simulation process exit
     std::deque<pid_t> children_pid; // front is newest, back is oldest
 } snapshot_t;
 
@@ -66,42 +70,52 @@ void snapshot_fork(snapshot_t* snap) {
         snap->children_pid.pop_back();
     }
     // fork a new snapshot process
-    dut->prepareClone(); // see https://verilator.org/guide/latest/connecting.html#process-level-clone-apis
+    // see https://verilator.org/guide/latest/connecting.html#process-level-clone-apis
+    // see verilator/test_regress/t/t_wrapper_clone.cpp:48
+    dut->prepareClone(); // prepareClone can be omitted if a little memory leak is ok
     pid_t child_pid = fork();
-    dut->atClone();
+    dut->atClone(); // If prepareClone is omitted, call atClone() only in child process
     if (child_pid < 0) {
         log_error("SNAPSHOT: failed to fork new child process");
         return;
     }
     if (child_pid != 0) { // for the original process
         snap->children_pid.push_front(child_pid);
-        log_debug("SNAPSHOT created, pid=%d", child_pid);
+        log_info("SNAPSHOT created, pid=%d", child_pid);
     } else { // for the fork-child snapshot process
         snap->is_child = true;
-        sigset_t set;
-        int sig;
+        sigset_t set, oldset;
+        siginfo_t info;
         sigemptyset(&set);
-        sigaddset(&set, SIGUSR2);
-        sigprocmask(SIG_BLOCK, &set, NULL); // Block SIGUSR1 for using sigwait
-        sigwait(&set, &sig);                // Wait for snapshot-rollback
-        sigprocmask(SIG_UNBLOCK, &set, NULL);
-        assert(sig == SIGUSR2); // This snapshot is activated
-        log_info("SNAPSHOT is activated, sim_time = %llu", contextp->time());
-        // delete tfp;                  // Cannot do this, or it will block the process
-        // (maybe because Vdut.fst is closed in the parent process?)
+        sigaddset(&set, SNAPSHOT_WAKEUP_SIGNAL);
+        sigprocmask(SIG_BLOCK, &set, &oldset);   // Block SIG for using sigwait
+        sigwaitinfo(&set, &info);                // Wait for snapshot-rollback
+        sigprocmask(SIG_SETMASK, &oldset, NULL); // Change signal blocking mask back
+        assert(info.si_signo == SNAPSHOT_WAKEUP_SIGNAL);
+        snap->main_exit_time = (uint64_t)(info.si_value.sival_ptr);
+        log_info("SNAPSHOT is activated, sim_time = %llu, origin process exited at time %d", contextp->time(),
+            snap->main_exit_time);
+        // delete tfp;             // Cannot do this, or it will block the process
+        // (maybe because Vdut.fst was already closed in the parent process?)
         tfp = new VerilatedFstC(); // This will cause memory leak for once, but not serious. How to fix it?
         dut->trace(tfp, 99);
-        tfp->open("obj_dir/Vdut_snapshot.fst");
+        tfp->open(g_config.snapshot.filename.c_str());
     }
 }
-void snapshot_rollback(snapshot_t* snap) {
-    if (!g_config.snapshot.enable || snap->is_child)
+void snapshot_rollback(uint64_t time) {
+    if (!g_config.snapshot.enable || snapshots.is_child)
         return;
+    log_info("SNAPSHOT rollback to %d time-unit ago, pid=%d",
+        time % g_config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * g_config.snapshot.time_interval,
+        snapshots.children_pid.front());
+    assert(sizeof(sigval_t) >= sizeof(contextp->time()));
+    sigval_t sigval;
+    sigval.sival_ptr = (void*)(contextp->time());
 
-    pid_t child = snap->children_pid.back(); // Choose the oldest snapshot
-    kill(child, SIGUSR2);                    // Activate the snapshot
-    waitpid(child, NULL, 0);                 // Wait for snapshot finished
-    snap->children_pid.pop_back();
+    pid_t child = snapshots.children_pid.back();     // Choose the oldest snapshot
+    sigqueue(child, SNAPSHOT_WAKEUP_SIGNAL, sigval); // Activate the snapshot
+    waitpid(child, NULL, 0);                         // Wait for snapshot finished
+    snapshots.children_pid.pop_back();
 }
 void snapshot_kill_all(snapshot_t* snap) {
     while (!snap->children_pid.empty()) {
@@ -110,6 +124,7 @@ void snapshot_kill_all(snapshot_t* snap) {
         waitpid(child, NULL, 0);
         snap->children_pid.pop_back();
     }
+    log_debug("All snapshot process are killed");
 }
 
 void dut_reset(Vdut* dut);
@@ -130,7 +145,7 @@ int main(int argc, char** argv) {
     // Parse ventus-sim cmd arguments
     std::vector<std::string> args;
     if (argc == 1) { // Default arguments
-        std::cout << "[Info] using default cmdline arguments: -f ventus_args.txt" << std::endl;
+        puts("[Info] using default cmdline arguments: -f ventus_args.txt");
         args.push_back("-f");
         args.push_back("ventus_args.txt");
     } else {
@@ -148,14 +163,12 @@ int main(int argc, char** argv) {
     // waveform traces (FST)
     tfp = new VerilatedFstC;
     dut->trace(tfp, 99);
-    tfp->open("obj_dir/Vdut.fst");
+    tfp->open(g_config.waveform.filename.c_str());
 
     // =
     // Simulation begin
     // =
-
-    snapshot_fork(&snapshots);
-    log_debug("SNAPSHOT: Init fork ok");
+    snapshot_fork(&snapshots); // initial snapshot at sim_time = 0
 
     // DUT initial reset
     dut_reset(dut);
@@ -165,7 +178,7 @@ int main(int argc, char** argv) {
     //     |----硬件终止仿真----|    |仿真结果有误|    |-------------仿真超时终止-------------|    |-仿真成功完成-|
     while (!contextp->gotFinish() && !sim_got_error && contextp->time() < g_config.sim_time_max && !cta.is_idle()) {
         static bool is_child = false;
-        contextp->timeInc(1); // 1 timeprecision period passes...
+        contextp->timeInc(1);
         dut->clock = !dut->clock;
 
         //
@@ -237,6 +250,8 @@ int main(int argc, char** argv) {
         //
         if (contextp->time() % 10000 == 0)
             log_debug("");
+        if (contextp->time() >= 123456)
+            sim_got_error = true;
 
         //
         // snapshot fork
@@ -251,16 +266,19 @@ int main(int argc, char** argv) {
 
     if (g_config.snapshot.enable && snapshots.is_child) {
         if (sim_got_error) {
-            log_info("SNAPSHOT exited at %d unit time", sim_end_time);
+            if (sim_end_time == snapshots.main_exit_time) {
+                log_info("SNAPSHOT exited at time %d, OK", sim_end_time);
+            } else {
+                log_error("SNAPSHOT exited at time %d, which differs from the original process (time %d)", sim_end_time,
+                    snapshots.main_exit_time);
+            }
         } else {
-            log_error("SNAPSHOT finished NORMALLY in %d unit time, which means it different from the original "
-                      "simulation process",
-                sim_end_time);
+            log_error("SNAPSHOT finished NORMALLY at time %d, which differs from the original process", sim_end_time);
         }
 
     } else {
         if (sim_got_error) {
-            log_fatal("Simulation exited ABNORMALLY at %d unit time", sim_end_time);
+            log_fatal("Simulation exited ABNORMALLY at time %d", sim_end_time);
         } else {
             log_info("Simulation finished in %d unit time", sim_end_time);
         }
@@ -269,22 +287,19 @@ int main(int argc, char** argv) {
     tfp->close();
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
-    delete dut;
-    delete contextp;
-    delete tfp;
 
     if (g_config.snapshot.enable && !snapshots.is_child && snapshots.children_pid.size() != 0 && sim_got_error) {
-        log_info("SNAPSHOT rollback to %d time-unit ago, pid=%d",
-            sim_end_time % g_config.snapshot.time_interval
-                + (snapshots.children_pid.size() - 1) * g_config.snapshot.time_interval,
-            snapshots.children_pid.front());
-        snapshot_rollback(&snapshots); // Exec snapshot
+        snapshot_rollback(sim_end_time); // Exec snapshot
     }
     if (g_config.snapshot.enable && snapshots.is_child) {
-        log_info("SNAPSHOT process exit... wavefrom dumped as obj_dir/Vdut_snapshot.fst");
+        log_info("SNAPSHOT process exit... wavefrom dumped as %s", g_config.snapshot.filename.c_str());
     } else {
-        snapshot_kill_all(&snapshots);
+        snapshot_kill_all(&snapshots); // kill unused snapshots in the parent process
     }
+
+    delete dut;
+    delete tfp;
+    delete contextp; // log system use this to get time
     return 0;
 }
 

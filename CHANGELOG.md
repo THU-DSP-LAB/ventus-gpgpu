@@ -15,6 +15,8 @@ This project did not initially maintain a changelog. Starting from version [2.0.
 
 - Initiated changelog documentation.
 - Support for Chisel 6.4.0.
+- sim-verilator
+  + support snapshots (inspired by xiangshan/difftest/[lightSSS](https://github.com/OpenXiangShan/difftest?tab=readme-ov-file#lightsss-a-lightweight-simulation-snapshot-mechanism))
 
 ### Removed
 
