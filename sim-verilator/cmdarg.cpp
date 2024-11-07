@@ -17,7 +17,8 @@ int cmdarg_help(int exit_id);
 
 int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
     // NOTE: make g_config writable
-    global_config_t* g_config_rw = (global_config_t*)(&g_config);
+    extern global_config_t g_config_writable;
+    global_config_t* g_config_rw = (global_config_t*)(&g_config_writable);
 
     for (int argid = 0; argid < args.size(); argid++) {
         if (args[argid].starts_with("+verilator+")) {

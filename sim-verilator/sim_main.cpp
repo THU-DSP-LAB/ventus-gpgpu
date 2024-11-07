@@ -16,7 +16,6 @@
 #include <functional>
 #include <iostream>
 #include <memory> // For std::unique_ptr
-#include <new>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -24,15 +23,14 @@
 #include <verilated.h>
 #include <verilated_fst_c.h>
 
-// g_config is read-only commonly,
-// bug it will be forced into writable while parsing cmd-args
-const global_config_t g_config = {
+// real global config (only write in cmdarg.cpp)
+global_config_t g_config_writable = {
     .sim_time_max = 800000,
     .waveform     = { .enable = true, .time_begin = 20000, .time_end = 30000, .filename = "obj_dir/Vdut.fst" },
     .snapshot     = { .enable = true, .time_interval = 50000, .num_max = 1, .filename = "obj_dir/Vdut.snapshot.fst" },
 };
-
-#define SNAPSHOT_WAKEUP_SIGNAL SIGRTMIN
+// read-only global config
+const global_config_t& g_config = g_config_writable;
 
 typedef struct {
     bool is_child;
@@ -40,95 +38,19 @@ typedef struct {
     std::deque<pid_t> children_pid; // front is newest, back is oldest
 } snapshot_t;
 
+// global variables used in this file
+#define SNAPSHOT_WAKEUP_SIGNAL SIGRTMIN
 static VerilatedFstC* tfp         = nullptr;
 static VerilatedContext* contextp = nullptr;
 static Vdut* dut                  = nullptr;
 static snapshot_t snapshots       = { .is_child = false };
 
-void waveform_dump() {
-    // snapshot child process always enables waveform dump
-    bool is_snapshot = g_config.snapshot.enable && snapshots.is_child;
-    if (!g_config.waveform.enable && !is_snapshot)
-        return;
-
-    assert(contextp && tfp);
-    uint64_t time = contextp->time();
-    if (is_snapshot || time >= g_config.waveform.time_begin && time < g_config.waveform.time_end) {
-        tfp->dump(time);
-    }
-}
-
-void snapshot_fork(snapshot_t* snap) {
-    if (!g_config.snapshot.enable || snap->is_child)
-        return;
-
-    // delete oldest snapshot if needed
-    if (snap->children_pid.size() >= g_config.snapshot.num_max) {
-        pid_t oldest = snap->children_pid.back();
-        kill(oldest, SIGKILL);
-        waitpid(oldest, NULL, 0);
-        snap->children_pid.pop_back();
-    }
-    // fork a new snapshot process
-    // see https://verilator.org/guide/latest/connecting.html#process-level-clone-apis
-    // see verilator/test_regress/t/t_wrapper_clone.cpp:48
-    dut->prepareClone(); // prepareClone can be omitted if a little memory leak is ok
-    pid_t child_pid = fork();
-    dut->atClone(); // If prepareClone is omitted, call atClone() only in child process
-    if (child_pid < 0) {
-        log_error("SNAPSHOT: failed to fork new child process");
-        return;
-    }
-    if (child_pid != 0) { // for the original process
-        snap->children_pid.push_front(child_pid);
-        log_info("SNAPSHOT created, pid=%d", child_pid);
-    } else { // for the fork-child snapshot process
-        snap->is_child = true;
-        sigset_t set, oldset;
-        siginfo_t info;
-        sigemptyset(&set);
-        sigaddset(&set, SNAPSHOT_WAKEUP_SIGNAL);
-        sigprocmask(SIG_BLOCK, &set, &oldset);   // Block SIG for using sigwait
-        sigwaitinfo(&set, &info);                // Wait for snapshot-rollback
-        sigprocmask(SIG_SETMASK, &oldset, NULL); // Change signal blocking mask back
-        assert(info.si_signo == SNAPSHOT_WAKEUP_SIGNAL);
-        snap->main_exit_time = (uint64_t)(info.si_value.sival_ptr);
-        log_info("SNAPSHOT is activated, sim_time = %llu, origin process exited at time %d", contextp->time(),
-            snap->main_exit_time);
-        // delete tfp;             // Cannot do this, or it will block the process
-        // (maybe because Vdut.fst was already closed in the parent process?)
-        tfp = new VerilatedFstC(); // This will cause memory leak for once, but not serious. How to fix it?
-        dut->trace(tfp, 99);
-        tfp->open(g_config.snapshot.filename.c_str());
-    }
-}
-void snapshot_rollback(uint64_t time) {
-    if (!g_config.snapshot.enable || snapshots.is_child)
-        return;
-    log_info("SNAPSHOT rollback to %d time-unit ago, pid=%d",
-        time % g_config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * g_config.snapshot.time_interval,
-        snapshots.children_pid.front());
-    assert(sizeof(sigval_t) >= sizeof(contextp->time()));
-    sigval_t sigval;
-    sigval.sival_ptr = (void*)(contextp->time());
-
-    pid_t child = snapshots.children_pid.back();     // Choose the oldest snapshot
-    sigqueue(child, SNAPSHOT_WAKEUP_SIGNAL, sigval); // Activate the snapshot
-    waitpid(child, NULL, 0);                         // Wait for snapshot finished
-    snapshots.children_pid.pop_back();
-}
-void snapshot_kill_all(snapshot_t* snap) {
-    while (!snap->children_pid.empty()) {
-        pid_t child = snap->children_pid.back();
-        kill(child, SIGKILL);
-        waitpid(child, NULL, 0);
-        snap->children_pid.pop_back();
-    }
-    log_debug("All snapshot process are killed");
-}
-
+void waveform_dump();
+void snapshot_fork(snapshot_t* snap);
+void snapshot_rollback(uint64_t time);
+void snapshot_kill_all(snapshot_t* snap);
 void dut_reset(Vdut* dut);
-int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel);
+extern int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel);
 
 int main(int argc, char** argv) {
     // Verilator simulation context init
@@ -250,8 +172,6 @@ int main(int argc, char** argv) {
         //
         if (contextp->time() % 10000 == 0)
             log_debug("");
-        if (contextp->time() >= 123456)
-            sim_got_error = true;
 
         //
         // snapshot fork
@@ -261,9 +181,14 @@ int main(int argc, char** argv) {
         }
     }
 
+    // =
+    // Siumulation end
+    // =
+
     uint64_t sim_end_time = contextp->time();
     sim_got_error         = sim_got_error || contextp->gotError() || contextp->gotFinish();
 
+    // prints simulation result
     if (g_config.snapshot.enable && snapshots.is_child) {
         if (sim_got_error) {
             if (sim_end_time == snapshots.main_exit_time) {
@@ -288,9 +213,11 @@ int main(int argc, char** argv) {
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
 
+    // invoke snapshot if needed
     if (g_config.snapshot.enable && !snapshots.is_child && snapshots.children_pid.size() != 0 && sim_got_error) {
         snapshot_rollback(sim_end_time); // Exec snapshot
     }
+    // clear snapshots
     if (g_config.snapshot.enable && snapshots.is_child) {
         log_info("SNAPSHOT process exit... wavefrom dumped as %s", g_config.snapshot.filename.c_str());
     } else {
@@ -301,6 +228,92 @@ int main(int argc, char** argv) {
     delete tfp;
     delete contextp; // log system use this to get time
     return 0;
+}
+
+void snapshot_fork(snapshot_t* snap) {
+    if (!g_config.snapshot.enable || snap->is_child)
+        return;
+
+    // delete oldest snapshot if needed
+    if (snap->children_pid.size() >= g_config.snapshot.num_max) {
+        pid_t oldest = snap->children_pid.back();
+        kill(oldest, SIGKILL);
+        waitpid(oldest, NULL, 0);
+        snap->children_pid.pop_back();
+    }
+    // fork a new snapshot process
+    // see https://verilator.org/guide/latest/connecting.html#process-level-clone-apis
+    // see verilator/test_regress/t/t_wrapper_clone.cpp:48
+    dut->prepareClone(); // prepareClone can be omitted if a little memory leak is ok
+    pid_t child_pid = fork();
+    dut->atClone(); // If prepareClone is omitted, call atClone() only in child process
+    if (child_pid < 0) {
+        log_error("SNAPSHOT: failed to fork new child process");
+        return;
+    }
+    if (child_pid != 0) { // for the original process
+        snap->children_pid.push_front(child_pid);
+        log_info("SNAPSHOT created, pid=%d", child_pid);
+    } else { // for the fork-child snapshot process
+        snap->is_child = true;
+        sigset_t set, oldset;
+        siginfo_t info;
+        sigemptyset(&set);
+        sigaddset(&set, SNAPSHOT_WAKEUP_SIGNAL);
+        sigprocmask(SIG_BLOCK, &set, &oldset);   // Block SIG for using sigwait
+        sigwaitinfo(&set, &info);                // Wait for snapshot-rollback
+        sigprocmask(SIG_SETMASK, &oldset, NULL); // Change signal blocking mask back
+        assert(info.si_signo == SNAPSHOT_WAKEUP_SIGNAL);
+        snap->main_exit_time = (uint64_t)(info.si_value.sival_ptr);
+        log_info("SNAPSHOT is activated, sim_time = %llu, origin process exited at time %d", contextp->time(),
+            snap->main_exit_time);
+        // delete tfp;             // Cannot do this, or it will block the process
+        // (maybe because Vdut.fst was already closed in the parent process?)
+        tfp = new VerilatedFstC(); // This will cause memory leak for once, but not serious. How to fix it?
+        dut->trace(tfp, 99);
+        tfp->open(g_config.snapshot.filename.c_str());
+    }
+}
+
+// only used in the parent process, activating the olded snapshot
+void snapshot_rollback(uint64_t time) {
+    if (!g_config.snapshot.enable || snapshots.is_child)
+        return;
+    log_info("SNAPSHOT rollback to %d time-unit ago, pid=%d",
+        time % g_config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * g_config.snapshot.time_interval,
+        snapshots.children_pid.front());
+    assert(sizeof(sigval_t) >= sizeof(contextp->time()));
+    sigval_t sigval;
+    sigval.sival_ptr = (void*)(contextp->time());
+
+    pid_t child = snapshots.children_pid.back();     // Choose the oldest snapshot
+    sigqueue(child, SNAPSHOT_WAKEUP_SIGNAL, sigval); // Activate the snapshot
+    waitpid(child, NULL, 0);                         // Wait for snapshot finished
+    snapshots.children_pid.pop_back();
+}
+
+// only used in the parent process, killing all remaining snapshot process
+void snapshot_kill_all(snapshot_t* snap) {
+    while (!snap->children_pid.empty()) {
+        pid_t child = snap->children_pid.back();
+        kill(child, SIGKILL);
+        waitpid(child, NULL, 0);
+        snap->children_pid.pop_back();
+    }
+    log_debug("All snapshot process are killed");
+}
+
+void waveform_dump() {
+    // snapshot child process always enables waveform dump
+    bool is_snapshot = g_config.snapshot.enable && snapshots.is_child;
+    if (!g_config.waveform.enable && !is_snapshot)
+        return;
+
+    assert(contextp && tfp);
+    uint64_t time = contextp->time();
+    if (is_snapshot || time >= g_config.waveform.time_begin && time < g_config.waveform.time_end) {
+        tfp->dump(time);
+    }
 }
 
 void dut_reset(Vdut* dut) {

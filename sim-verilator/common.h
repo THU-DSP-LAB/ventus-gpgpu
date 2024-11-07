@@ -18,4 +18,4 @@ typedef struct {
     } snapshot;
 } global_config_t;
 
-extern const global_config_t g_config;
+extern const global_config_t& g_config;
