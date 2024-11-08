@@ -110,7 +110,8 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
   //  TCComputation.io.in.bits.ctrl.sel_slot_num := sel_slot
 
   TCComputation.io.out.ready := io.out.ready
-  io.out.valid := Mux(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode, TCComputation.io.out.valid, recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num) === 2.U)
+  io.out.valid := Mux(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode || TCComputation.io.out.bits.ctrl.tc_shape===2.U,
+    TCComputation.io.out.valid, recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num) === 2.U)
   TCComputation.io.in.valid := Mux(isMixSendMode, slot.map(_.valid).reduce(_ || _), (sendCS(reg_sel_slot) === 1.U && reg_isMixSendMode(reg_sel_slot) === false.B) || slot.map(_.valid).reduce(_ || _))
 
 //  val is1stage = VecInit(Seq.fill(slot_num)(WireInit(false.B)))
@@ -124,15 +125,12 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
   val readyDelayed = RegInit(false.B)
   io.in.ready := !readyDelayed
   // 当输入握手完成，且 isMixedPrecisionMode 为 false 时，设置 readyDelayed 为 true
-  when(io.in.fire && !io.in.bits.ctrl.isMixedPrecisionMode) {
+  when(io.in.fire && !io.in.bits.ctrl.isMixedPrecisionMode && io.in.bits.ctrl.tc_shape =/= 2.U) {
     readyDelayed := true.B
   }.elsewhen(readyDelayed) {
     // 在下一个周期将 readyDelayed 置回 false
     readyDelayed := false.B
   }
-
-//  io.in.ready := Mux(is1stage_all && (reg_ismix === false.B),false.B,true.B)
-//  io.in.ready := Mux(io.in.bits.ctrl.isMixedPrecisionMode, TCComputation.io.in.ready ,TCComputation.io.in.ready && (!is1stage_all) || )//slot.map(_.io.enq.ready).reduce(_ || _)
 
   // select output
   for(m<-0 until 8){
@@ -145,25 +143,15 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
   switch(sendCS(sel_slot)) {
     is(0.U) {
       //      mixed-Prec is not relative to this state
-      when(io.in.fire) {
+      when(io.in.fire && io.in.bits.ctrl.tc_shape =/= 2.U) {
         sendNS(sel_slot) := 1.U
-//        when(io.in.bits.ctrl.isMixedPrecisionMode){
-//          isMixSendMode := true.B
-//        }.otherwise {
-//          isMixSendMode := false.B
-//        }
       }.otherwise {
         sendNS(sel_slot) := 0.U
-//        when(io.in.bits.ctrl.isMixedPrecisionMode){
-//          isMixSendMode := true.B
-//        }.otherwise {
-//          isMixSendMode := false.B
-//        }
       }
     }
     is(1.U) { //1
-      when(io.in.bits.ctrl.isMixedPrecisionMode) {
-        when(io.in.fire) {
+      when(io.in.bits.ctrl.isMixedPrecisionMode ) {
+        when(io.in.fire && io.in.bits.ctrl.tc_shape =/= 2.U) {
           sendNS(sel_slot) := 2.U //sendCS +% 1.U
 //          isMixSendMode := true.B
         }.otherwise {
@@ -171,7 +159,7 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
 //          isMixSendMode := true.B
         }
       }.otherwise {
-        when(TCComputation.io.in.fire && recvCS(sel_slot) === 0.U) {
+        when(TCComputation.io.in.fire && recvCS(sel_slot) === 0.U && io.in.bits.ctrl.tc_shape =/= 2.U) {
           sendNS(sel_slot) := 2.U //sendCS +% 1.U
         }.otherwise {
           sendNS(sel_slot) := 1.U //sendCS
@@ -290,23 +278,62 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
     }
   }
 
+  // 848 shape
+  when(io.in.fire && io.in.bits.ctrl.tc_shape === 2.U) {
+    //get set1 data
+    //A 8*8 row
+    for (m <- 0 until 8) {
+      for (n <- 0 until 4) {
+        TCComputation.io.in.bits.A(m * 8 + n * 2) := io.in.bits.data_in.in1(m * 4 + n)(15, 0)
+        TCComputation.io.in.bits.A(m * 8 + n * 2 + 1) := io.in.bits.data_in.in1(m * 4 + n)(31, 16)
+      }
+    }
+    //B 8*4 col
+    for (m <- 0 until 4) {
+      for (n <- 0 until 4) {
+        TCComputation.io.in.bits.B(m * 8 + n * 2) := io.in.bits.data_in.in2(m * 4 + n)(15, 0)
+        TCComputation.io.in.bits.B(m * 8 + n * 2 + 1) := io.in.bits.data_in.in2(m * 4 + n)(31, 16)
+      }
+    }
+    when(io.in.bits.ctrl.isMixedPrecisionMode) {
+      // now, we don't need to store set2 data.
+      // A B will be provided in vExeData.
+      //C 8*4 row First
+      for (m <- 0 until 32) {
+        TCComputation.io.in.bits.C(m) := io.in.bits.data_in.in3(m)
+      }
+    }.otherwise {
+      //C 8*4 row First
+      for (m <- 0 until 8) {
+        TCComputation.io.in.bits.C(m * 4) := Cat(0.U(16.W), io.in.bits.data_in.in3(m * 4)(15, 0))
+        TCComputation.io.in.bits.C(m * 4 + 1) := Cat(0.U(16.W), io.in.bits.data_in.in3(m * 4)(31, 16))
+        TCComputation.io.in.bits.C(m * 4 + 2) := Cat(0.U(16.W), io.in.bits.data_in.in3(m * 4 + 1)(15, 0))
+        TCComputation.io.in.bits.C(m * 4 + 3) := Cat(0.U(16.W), io.in.bits.data_in.in3(m * 4 + 1)(31, 16))
+      }
+    }
+  }
+
   switch(recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num)) {
     is(0.U) {
-      when(TCComputation.io.out.fire) {
+      when(TCComputation.io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape =/= 2.U) {
         recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 1.U
+//      }.elsewhen(TCComputation.io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape === 2.U){
+//        recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 2.U
+//      }.elsewhen(io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape === 2.U){
+//        recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 0.U
       }.otherwise {
         recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num) //0.U
       }
     }
     is(1.U) {
-      when(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode) {
+      when(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode && TCComputation.io.out.bits.ctrl.tc_shape =/= 2.U) {
         when(io.out.fire) {
           recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 2.U //recvCS +% 1.U
         }.otherwise {
           recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num) //1.U
         }
       }.otherwise {
-        when(TCComputation.io.out.fire) {
+        when(TCComputation.io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape =/= 2.U) {
           recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 2.U //recvCS +% 1.U
         }.otherwise {
           recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num) //1.U
@@ -314,8 +341,10 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
       }
     }
     is(2.U) {
-      when(io.out.fire) {
+      when(io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape =/= 2.U) {
         recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 0.U
+//      }.elsewhen(TCComputation.io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape === 2.U){
+//        recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := 0.U
       }.otherwise {
         recvNS(TCComputation.io.out.bits.ctrl.sel_slot_num) := recvCS(TCComputation.io.out.bits.ctrl.sel_slot_num)
       }
@@ -330,7 +359,7 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
       //      io.out.valid := false.B
     }
     is(1.U) {
-      when((TCComputation.io.out.bits.ctrl.isMixedPrecisionMode)) {
+      when(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode) {
         for (m <- 0 until 32) {
           io.out.bits.data_out(m) := TCComputation.io.out.bits.data(m).result
         }
@@ -342,13 +371,13 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
       }
     }
     is(2.U) {
+//      restore the slot status.
       slot(TCComputation.io.out.bits.ctrl.sel_slot_num).bits := num_warp.U
-
-      when((TCComputation.io.out.bits.ctrl.isMixedPrecisionMode)) {
+      when(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode) {
         for (m <- 0 until 32) {
           io.out.bits.data_out(m) := TCComputation.io.out.bits.data(m).result
         }
-      } otherwise {
+      }. otherwise {
         //  get set2 Result
         for (m <- 0 until DimN * DimM / set_num) {
           regArray2(TCComputation.io.out.bits.ctrl.sel_slot_num)(m) := TCComputation.io.out.bits.data(m).result
@@ -356,6 +385,23 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
         // here out is init.
       }
     }
+  }
+
+  when((TCComputation.io.out.fire) && TCComputation.io.out.bits.ctrl.tc_shape === 2.U){
+   slot(TCComputation.io.out.bits.ctrl.sel_slot_num).bits := num_warp.U
+//    io.out.valid := true.B
+   when(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode){
+     for (m <- 0 until 32) {
+       io.out.bits.data_out(m) := TCComputation.io.out.bits.data(m).result
+     }
+   }.otherwise{
+    for(m<-0 until 8){
+      io.out.bits.data_out(m*4) := Cat(TCComputation.io.out.bits.data(m*4+1).result,TCComputation.io.out.bits.data(m*4).result)
+      io.out.bits.data_out(m*4+1) := Cat(TCComputation.io.out.bits.data(m*4+3).result,TCComputation.io.out.bits.data(m*4+2).result)
+      io.out.bits.data_out(m*4+2) := 0.U//Cat(regArray2(sel_slot)(m*4+1),regArray2(sel_slot)(m*4))
+      io.out.bits.data_out(m*4+3) := 0.U//Cat(regArray2(sel_slot)(m*4+3),regArray2(sel_slot)(m*4+2))
+    }
+   }
   }
 
   io.out.bits.ctrl := TCComputation.io.out.bits.ctrl
