@@ -79,10 +79,19 @@ int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
             } else {
                 uint64_t simtime = std::stoull(args[argid]);
-                if (simtime == 0) {
+                if (simtime <= 0) {
                     std::cout << "Error: --sim-time-max needs number > 0\n";
                     cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
                 }
+                g_config_rw->sim_time_max = simtime;
+            }
+        } else if (args[argid] == "--snapshot") {
+            if (++argid >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
+            } else {
+                uint64_t snapshot_time = std::stoull(args[argid]);
+                g_config_rw->snapshot.enable = (snapshot_time > 0);
+                g_config_rw->snapshot.time_interval = snapshot_time;
             }
         } else {
             cmdarg_error(std::vector<std::string>(args.begin() + argid, args.begin() + argid + 1));
@@ -183,6 +192,7 @@ int cmdarg_help(int exit_id) {
               << "           datafile string  // kernel的.data文件路径\n"
               << "           taskid   uint    // 可选，若无则为不归属任何task的独立kernel。必须指向之前已经申明的task\n"
               << "\n"
+              << "--snapshot INTERVAL uint    // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能"
               << "--sim-time-max NUM  uint    // number of simulation cycles" << std::endl;
     exit(exit_id);
 }

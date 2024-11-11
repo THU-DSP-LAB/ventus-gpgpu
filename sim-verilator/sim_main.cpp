@@ -300,7 +300,7 @@ void snapshot_kill_all(snapshot_t* snap) {
         waitpid(child, NULL, 0);
         snap->children_pid.pop_back();
     }
-    log_debug("All snapshot process are killed");
+    log_debug("All snapshot process are killed, OK");
 }
 
 void waveform_dump() {
