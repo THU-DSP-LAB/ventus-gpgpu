@@ -347,14 +347,15 @@ class CSRFile extends Module {
     wg_id_y:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_y_dispatch
     wg_id_z:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_z_dispatch
     wg_id:=io.CTA2csr.bits.CTAdata.dispatch2cu_wg_id
-
-    global_id_x           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_x
-    global_id_y           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_y
-    global_id_z           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_z
-    local_id_x            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_x
-    local_id_y            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_y
-    local_id_z            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_z
-    global_linear_id      :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_linear
+    for (i <-0 until num_thread){
+    global_id_x(i)           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_x(i)
+    global_id_y(i)           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_y(i)
+    global_id_z(i)           :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_z(i)
+    local_id_x(i)            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_x(i)
+    local_id_y(i)            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_y(i)
+    local_id_z(i)            :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_z(i)
+    global_linear_id(i)      :=io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_linear(i)
+    }
 
 
     threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)<<depth_thread//threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
@@ -423,6 +424,7 @@ class CSRexe extends Module {
   result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
   result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
   result_v.io.enq.bits.warp_id := io.in.bits.ctrl.wid
+  result_v.io.enq.bits.wvd_mask:= VecInit.fill(num_thread)(true.B)
 
   if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   if(SPIKE_OUTPUT) result_v.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get

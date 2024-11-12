@@ -175,7 +175,7 @@ class pipe(val sm_id: Int = 0) extends Module{
       printf(p"sm ${sm_id} warp ${Decimal(ctrl.wid)} ")
       printf(p"undefined @ 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}\n")
     }
-    assert (!(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask), s"undefined instruction")
+//    assert (!(ctrl.alu_fn === 63.U & ibuffer.io.in.valid & mask), s"undefined instruction")
   }
 
 

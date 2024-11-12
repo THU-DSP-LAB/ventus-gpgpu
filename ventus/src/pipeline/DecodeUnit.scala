@@ -187,6 +187,8 @@ object IDecodeLUT_IMF{
     CSRRSI-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     CSRRCI-> List(N,N,N,B_N,N,N,CSR.C,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
 
+    CSRRSV->  List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
+
     FENCE->  List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_X,IMM_I,MEM_X,FN_ADD,N,M_X,N,Y,N,N,N,N,Y,N,N,N,N),
     LW->     List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,N,N,N,Y,N,N,N,N),
     LH->     List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_I,MEM_H,FN_ADD,N,M_XRD,N,N,N,N,N,N,Y,N,N,N,N),
@@ -560,6 +562,7 @@ class InstrDecodeV2 extends Module {
     }
     ListLookup(io.inst(i)(6, 0), lut(0),
       Array(
+        BitPat("b1110010") -> lut(0),  //CSRRSV
         BitPat("b1010111") -> lut(1),
         BitPat("b1111011") -> lut(2),
         BitPat("b0?00111") -> lut(2),

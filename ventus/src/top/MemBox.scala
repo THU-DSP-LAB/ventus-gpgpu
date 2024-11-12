@@ -91,6 +91,20 @@ object MetaData{
       file.getLines()
     }
     new MetaData{
+      parseHex(buf, 64) // skip start_pc = 0x80000000
+
+      
+      kernel_id = parseHex(buf, 64)
+      kernel_size = kernel_size.map{ _ => parseHex(buf, 64) }
+      wf_size = parseHex(buf, 64)
+      wg_size = parseHex(buf, 64)
+      metaDataBaseAddr = parseHex(buf, 64)
+      ldsSize = parseHex(buf, 64)
+      pdsSize = parseHex(buf, 64)
+      sgprUsage = parseHex(buf, 64)
+      vgprUsage = parseHex(buf, 64)
+      pdsBaseAddr = parseHex(buf, 64)
+      
       kernel_dim = parseHex(buf, 64)
       num_thread_per_wg_x = parseHex(buf, 64)
       num_thread_per_wg_y = parseHex(buf, 64)
@@ -104,19 +118,9 @@ object MetaData{
       threadID_globaloffset_x = parseHex(buf, 64)
       threadID_globaloffset_y = parseHex(buf, 64)
       threadID_globaloffset_z = parseHex(buf, 64)
-
-      parseHex(buf, 64) // skip start_pc = 0x80000000
-      kernel_id = parseHex(buf, 64)
-      kernel_size = kernel_size.map{ _ => parseHex(buf, 64) }
-      wf_size = parseHex(buf, 64)
-      wg_size = parseHex(buf, 64)
-      metaDataBaseAddr = parseHex(buf, 64)
-      ldsSize = parseHex(buf, 64)
-      pdsSize = parseHex(buf, 64)
-      sgprUsage = parseHex(buf, 64)
-      vgprUsage = parseHex(buf, 64)
-      pdsBaseAddr = parseHex(buf, 64)
       num_buffer = parseHex(buf, 64)
+
+
       for( i <- 0 until num_buffer.toInt){
         val parsed = parseHex(buf, 64)
         if(parsed < BigInt("80000000", 16) && parsed >= BigInt("70000000", 16))
