@@ -51,7 +51,7 @@ VERILATOR_FLAGS += --assert
 #VERILATOR_FLAGS += --gdbbt
 
 VERILATOR_CFLAGS += -std=c++20 -g
-VERILATOR_CFLAGS += -O2
+#VERILATOR_CFLAGS += -O2
 VERILATOR_FLAGS += --threads $(NPROC_SIM)
 VERILATOR_FLAGS += --trace-threads $(NPROC_TRACE_FST)
 VERILATOR_FLAGS += -j $(NPROC_CPU)
@@ -65,7 +65,7 @@ DIR_OBJ = obj_dir
 
 SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
 SRC_V = dut.v
-SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp cta_sche_wrapper.cpp cmdarg.cpp
+SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp cta_sche_wrapper.cpp cmdarg.cpp sim_main2.cpp ventus_rtlsim.cpp
 SRC_C = log.c
 OBJ_C = $(SRC_C:%.c=$(DIR_OBJ)/%.o)
 VERILATOR_INPUT = $(SRC_V) $(SRC_CXX) $(notdir $(OBJ_C))
@@ -88,7 +88,7 @@ verilog: $(SRC_V)
 
 $(DIR_OBJ)/%.o: %.c
 	@mkdir -p $(DIR_OBJ)
-	gcc -c -o $@ $<
+	gcc -c -g -o $@ $<
 
 verilator: verilog $(OBJ_C)
 	@mkdir -p $(DIR_OBJ)

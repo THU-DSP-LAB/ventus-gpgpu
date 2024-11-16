@@ -1,6 +1,6 @@
 #include "common.h"
 #include "kernel.hpp"
-#include "log.h"
+#include <iostream>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>

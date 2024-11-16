@@ -30,9 +30,10 @@ extern "C" {
 
 #define MAX_CALLBACKS 32
 
-extern uint64_t log_get_time();
+extern uint64_t (*log_get_time)();
 
 static void log_get_timestamp(char *buf, int len) {
+  if(log_get_time != NULL)
     snprintf(buf, len, "Time@%lu: ", log_get_time());
 }
 

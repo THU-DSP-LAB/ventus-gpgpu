@@ -5,7 +5,6 @@
 #include "log.h"
 #include <bits/types/siginfo_t.h>
 #include <bits/types/sigset_t.h>
-#include <cinttypes>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -14,7 +13,6 @@
 #include <deque>
 #include <filesystem>
 #include <functional>
-#include <iostream>
 #include <memory> // For std::unique_ptr
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -22,6 +20,13 @@
 #include <vector>
 #include <verilated.h>
 #include <verilated_fst_c.h>
+
+int main_new(int argc, char* argv[]);
+int main_old(int argc, char* argv[]);
+
+int main(int argc, char* argv[]) {
+    return main_new(argc, argv);
+}
 
 // real global config (only write in cmdarg.cpp)
 global_config_t g_config_writable = {
@@ -52,7 +57,7 @@ void snapshot_kill_all(snapshot_t* snap);
 void dut_reset(Vdut* dut);
 extern int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel);
 
-int main(int argc, char** argv) {
+int main_old(int argc, char** argv) {
     // Verilator simulation context init
     contextp = new VerilatedContext;
     contextp->debug(0);     // debug level, 0 is off, 9 is highest, may be overridden by commandArgs parsing
@@ -99,7 +104,6 @@ int main(int argc, char** argv) {
     bool sim_got_error = false;
     //     |----硬件终止仿真----|    |仿真结果有误|    |-------------仿真超时终止-------------|    |-仿真成功完成-|
     while (!contextp->gotFinish() && !sim_got_error && contextp->time() < g_config.sim_time_max && !cta.is_idle()) {
-        static bool is_child = false;
         contextp->timeInc(1);
         dut->clock = !dut->clock;
 
@@ -140,23 +144,27 @@ int main(int argc, char** argv) {
                 cta.wg_finish(wg_id);
             }
         } else {
+            // Check if io_mem is VlWide
+            static_assert(VlIsVlWide<std::decay<decltype(dut->io_mem_rd_data)>::type>::value, "Check io_mem type");
+            static_assert(VlIsVlWide<std::decay<decltype(dut->io_mem_wr_data)>::type>::value, "Check io_mem type");
+            static_assert(VlIsVlWide<std::decay<decltype(dut->io_mem_wr_mask)>::type>::value, "Check io_mem type");
             // Memory access: read
             if (dut->io_mem_rd_en) {
-                volatile uint32_t rd_addr = dut->io_mem_rd_addr;
-                uint8_t* rd_data          = new uint8_t[MEMACCESS_DATA_BYTE_SIZE];
+                uint32_t rd_addr = dut->io_mem_rd_addr;
+                uint8_t* rd_data = new uint8_t[dut->io_mem_rd_data.Words * 4];
                 if (!mem->read(dut->io_mem_rd_addr, rd_data)) {
                     // std::cerr << "Read uninitialized memory: 0x" << std::hex << dut->io_mem_rd_addr << std::dec
                     //           << " @ time " << clk_cnt << std::endl;
                     // getchar();
                     // break;
                 }
-                memcpy(dut->io_mem_rd_data.data(), rd_data, MEMACCESS_DATA_BYTE_SIZE);
+                memcpy(dut->io_mem_rd_data.data(), rd_data, dut->io_mem_rd_data.Words * 4);
                 delete[] rd_data;
             }
             // Memory access: write
             if (dut->io_mem_wr_en) {
-                bool mask[MEMACCESS_DATA_BYTE_SIZE];
-                for (int idx = 0; idx < 4; idx++) {
+                bool* mask = new bool[dut->io_mem_wr_mask.Words * 32];
+                for (int idx = 0; idx < dut->io_mem_wr_mask.Words; idx++) {
                     uint32_t mask_raw = dut->io_mem_wr_mask[idx];
                     for (int bit = 0; bit < 32; bit++) {
                         mask[bit + idx * 32] = mask_raw & 0x1;
@@ -164,6 +172,7 @@ int main(int argc, char** argv) {
                     }
                 }
                 mem->write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
+                delete[] mask;
             }
         }
 
@@ -182,7 +191,7 @@ int main(int argc, char** argv) {
     }
 
     // =
-    // Siumulation end
+    // Simulation end
     // =
 
     uint64_t sim_end_time = contextp->time();
@@ -275,7 +284,7 @@ void snapshot_fork(snapshot_t* snap) {
     }
 }
 
-// only used in the parent process, activating the olded snapshot
+// only used in the parent process, activating the oldest snapshot
 void snapshot_rollback(uint64_t time) {
     if (!g_config.snapshot.enable || snapshots.is_child)
         return;
@@ -300,7 +309,7 @@ void snapshot_kill_all(snapshot_t* snap) {
         waitpid(child, NULL, 0);
         snap->children_pid.pop_back();
     }
-    log_debug("All snapshot process are killed, OK");
+    log_debug("All snapshot process are cleared, OK");
 }
 
 void waveform_dump() {
@@ -349,12 +358,12 @@ void dut_reset(Vdut* dut) {
 }
 
 // let the log system know the simulation time
-extern "C" {
-uint64_t log_get_time() {
-    assert(contextp);
-    return contextp->time();
-}
-}
+//extern "C" {
+//uint64_t log_get_time() {
+//    assert(contextp);
+//    return contextp->time();
+//}
+//}
 
 // Legacy function required only so linking works on Cygwin and MSVC++
 double sc_time_stamp() { return 0; }
