@@ -1,0 +1,76 @@
+Subject: [PATCH] cvt change on fpuv2.
+---
+Index: src/main/scala/FPToFP_cvt.scala
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/scala/FPToFP_cvt.scala b/src/main/scala/FPToFP_cvt.scala
+new file mode 100644
+--- /dev/null	(date 1731598336905)
++++ b/src/main/scala/FPToFP_cvt.scala	(date 1731598336905)
+@@ -0,0 +1,37 @@
++package FPUv2
++
++import FPUv2.utils.FPUOps._
++import FPUv2.utils._
++import chisel3._
++import fudian.{FPToFP, _}
++
++class FPToFP_cvt(ctrlGen: Data = EmptyFPUCtrl())
++  extends FPUPipelineModule(32, ctrlGen) {
++  override def latency = 1
++
++  val isFP16ToFP32 = io.in.bits.op === "b000".U
++  val isFP32ToFP16 = io.in.bits.op === "b001".U
++
++  val FP2FCore = (
++    Module(new FPToFP(5, 11, 8, 24)),  // FP16 to FP32
++    Module(new FPToFP(8, 24, 5, 11))   // FP32 to FP16
++  )
++
++  // Handle FP16 to FP32 conversion
++  FP2FCore._1.io.in := io.in.bits.b
++  FP2FCore._1.io.rm := io.in.bits.rm
++//  FP2FCore._1.io <> DontCare
++
++  // Handle FP32 to FP16 conversion
++  FP2FCore._2.io.in := io.in.bits.b
++  FP2FCore._2.io.rm := io.in.bits.rm
++//  FP2FCore._2.io <> DontCare
++
++  // Determine which conversion to output
++  io.out.bits.result := Mux(isFP16ToFP32, S1Reg(FP2FCore._1.io.result),
++    Mux(isFP32ToFP16, S1Reg(FP2FCore._2.io.result), 0.U(32.W)))
++  io.out.bits.fflags := Mux(isFP16ToFP32, S1Reg(FP2FCore._1.io.fflags),
++    Mux(isFP32ToFP16, S1Reg(FP2FCore._2.io.fflags), 0.U(5.W)))
++  io.out.bits.ctrl.foreach(_ := S1Reg(io.in.bits.ctrl.get))
++}
++
+Index: src/main/scala/FPU.scala
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/src/main/scala/FPU.scala b/src/main/scala/FPU.scala
+--- a/src/main/scala/FPU.scala	(revision 7ea30df00f9353f2e8645b32665b13f9b3f69e6d)
++++ b/src/main/scala/FPU.scala	(date 1731580597555)
+@@ -17,7 +17,8 @@
+     Module(new FCMP(expWidth, precision, ctrlGen)),
+     Module(new FPMV(expWidth, precision, ctrlGen)),
+     Module(new FPToInt(ctrlGen)),
+-    Module(new IntToFP(ctrlGen))
++    Module(new IntToFP(ctrlGen)),
++    Module(new FPToFP_cvt(ctrlGen))
+   )
+ 
+   val fu = io.in.bits.op.head(3)
+@@ -36,7 +37,7 @@
+     }
+   )
+ 
+-  val outArbiter = Module(new Arbiter(new FPUOutput(64, ctrlGen), 5))
++  val outArbiter = Module(new Arbiter(new FPUOutput(64, ctrlGen), 6))
+   subModules.zipWithIndex.foreach{ case (module, idx) =>
+     outArbiter.io.in(idx) <> module.io.out
+   }
