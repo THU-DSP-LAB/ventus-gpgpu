@@ -57,7 +57,8 @@ public:
     bool is_activated() const { return m_is_activated; }
 
     // Load kernel init data (testcase.data file) and get ready to run
-    void activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem = nullptr);
+    //void activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem = nullptr);
+    void activate(uint32_t kernel_id, uint32_t wgid_base);
     void deactivate();
     const std::function<void(const metadata_t*)> m_finish_callback; // call this after kernel finished
 

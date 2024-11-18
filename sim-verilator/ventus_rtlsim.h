@@ -4,6 +4,14 @@
 extern "C" {
 #endif
 
+#if __GNUC__ >= 4
+#define DLL_PUBLIC __attribute__((visibility("default")))
+#define DLL_LOCAL __attribute__((visibility("hidden")))
+#else
+#define DLL_PUBLIC
+#define DLL_LOCAL
+#endif
+
 #include <stdint.h>
 
 typedef struct ventus_rtlsim_t ventus_rtlsim_t;
@@ -63,25 +71,33 @@ typedef struct {
     bool idle;        // All given kernels has finished
 } ventus_rtlsim_step_result_t;
 
-ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config);
-void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
-const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim);
-uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim);
-bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim);
+DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config);
+DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+DLL_PUBLIC const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim);
+DLL_PUBLIC uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim);
+DLL_PUBLIC bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim);
 
-// It's allowed to delay loading data until the kernel is actually activated on GPU by using data_load_callback
+// It's allowed to delay loading data until the kernel is actually activated on GPU by using
+// data_load_callback
 // **Temporary api**, May be removed in the future
-void ventus_rtlsim_add_kernel__delay_data_loading(ventus_rtlsim_t* sim, const ventus_kernel_metadata_t* metadata,
+DLL_PUBLIC void ventus_rtlsim_add_kernel__delay_data_loading(
+    ventus_rtlsim_t* sim, const ventus_kernel_metadata_t* metadata,
     void (*load_data_callback)(const ventus_kernel_metadata_t*),
-    void (*finish_callback)(const ventus_kernel_metadata_t*));
+    void (*finish_callback)(const ventus_kernel_metadata_t*)
+);
 // It's recommended to use this ↓. Load data to GPU before calling this.
-void ventus_rtlsim_add_kernel(ventus_rtlsim_t* sim, const ventus_kernel_metadata_t* metadata,
-    void (*finish_callback)(const ventus_kernel_metadata_t*));
+DLL_PUBLIC void ventus_rtlsim_add_kernel(
+    ventus_rtlsim_t* sim, const ventus_kernel_metadata_t* metadata,
+    void (*finish_callback)(const ventus_kernel_metadata_t*)
+);
 
-bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
-bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
-bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size);
-bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size);
+DLL_PUBLIC bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
+DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
+DLL_PUBLIC bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size);
+DLL_PUBLIC bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size);
+
+#undef DLL_PUBLIC
+#undef DLL_LOCAL
 
 #ifdef __cplusplus
 } // extern "C"

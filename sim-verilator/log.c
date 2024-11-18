@@ -151,7 +151,7 @@ static void init_event(log_Event *ev, void *udata) {
   ev->udata = udata;
 }
 
-
+__attribute__((visibility("default")))
 void log_log(int level, const char *file, int line, const char *fmt, ...) {
   log_Event ev = {
     .fmt   = fmt,

@@ -1,12 +1,13 @@
 #include "common.h"
 #include "kernel.hpp"
-#include <iostream>
+#include "ventus_rtlsim.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,10 +16,8 @@ int cmdarg_kernel(std::string arg, std::function<void(std::shared_ptr<Kernel>)> 
 int cmdarg_error(std::vector<std::string> args);
 int cmdarg_help(int exit_id);
 
-int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
-    // NOTE: make g_config writable
-    extern global_config_t g_config_writable;
-    global_config_t* g_config_rw = (global_config_t*)(&g_config_writable);
+int parse_arg(std::vector<std::string> args, ventus_rtlsim_config_t* config,
+    std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
 
     for (int argid = 0; argid < args.size(); argid++) {
         if (args[argid].starts_with("+verilator+")) {
@@ -36,7 +35,7 @@ int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<
                     exit(1);
                 }
                 path_to_file = filename.parent_path();
-                path_origin  = std::filesystem::current_path();
+                path_origin = std::filesystem::current_path();
                 std::filesystem::current_path(path_to_file);
                 std::ifstream file(filename);
                 if (!file.is_open()) {
@@ -58,7 +57,7 @@ int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<
                         arguments.push_back(arg);
                     }
                 }
-                parse_arg(arguments, new_kernel);
+                parse_arg(arguments, config, new_kernel);
                 std::filesystem::current_path(path_origin);
             }
         } else if (args[argid] == "--task") {
@@ -69,8 +68,10 @@ int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<
         } else if (args[argid] == "--kernel") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
-            } else if (cmdarg_kernel(args[argid], new_kernel)) {
-                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.begin() + argid + 1));
+            } else if (new_kernel) {
+                if (cmdarg_kernel(args[argid], new_kernel)) {
+                    cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.begin() + argid + 1));
+                }
             }
         } else if (args[argid] == "--help") {
             cmdarg_help(0);
@@ -83,15 +84,15 @@ int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<
                     std::cout << "Error: --sim-time-max needs number > 0\n";
                     cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
                 }
-                g_config_rw->sim_time_max = simtime;
+                config->sim_time_max = simtime;
             }
         } else if (args[argid] == "--snapshot") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
             } else {
                 uint64_t snapshot_time = std::stoull(args[argid]);
-                g_config_rw->snapshot.enable = (snapshot_time > 0);
-                g_config_rw->snapshot.time_interval = snapshot_time;
+                config->snapshot.enable = (snapshot_time > 0);
+                config->snapshot.time_interval = snapshot_time;
             }
         } else {
             cmdarg_error(std::vector<std::string>(args.begin() + argid, args.begin() + argid + 1));
@@ -102,22 +103,22 @@ int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<
 
 int cmdarg_kernel(std::string arg_raw, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
 
-    int len   = arg_raw.size();
+    int len = arg_raw.size();
     char* arg = new char[len + 1];
     strcpy(arg, arg_raw.c_str());
 
     // int taskid     = -1;
-    char* name     = nullptr;
+    char* name = nullptr;
     char* metafile = nullptr;
     char* datafile = nullptr;
 
-    char* ptr1   = NULL;
+    char* ptr1 = NULL;
     char* subarg = strtok_r(arg, ",", &ptr1);
     while (subarg) {
         if (strlen(subarg) > 0) {
             char* ptr2 = NULL;
-            char* var  = strtok_r(subarg, "=", &ptr2);
-            char* val  = strtok_r(NULL, "=", &ptr2);
+            char* var = strtok_r(subarg, "=", &ptr2);
+            char* val = strtok_r(NULL, "=", &ptr2);
             assert(var && val);
 
             // if (strcmp(var, "taskid") == 0) {
@@ -157,7 +158,8 @@ int cmdarg_kernel(std::string arg_raw, std::function<void(std::shared_ptr<Kernel
                       << e.what() << std::endl;
             exit(1);
         }
-        new_kernel(kernel);
+        if (new_kernel)
+            new_kernel(kernel);
     }
 
     return 0;

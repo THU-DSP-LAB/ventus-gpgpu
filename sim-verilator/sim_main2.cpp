@@ -6,7 +6,8 @@
 #include <fstream>
 #include <memory>
 
-extern int parse_arg(std::vector<std::string> args, std::function<void(std::shared_ptr<Kernel>)> new_kernel);
+extern int parse_arg(std::vector<std::string> args, ventus_rtlsim_config_t* config,
+    std::function<void(std::shared_ptr<Kernel>)> new_kernel);
 
 typedef struct {
     std::filesystem::path datafile;
@@ -15,9 +16,7 @@ typedef struct {
 
 uint64_t (*log_get_time)() = nullptr;
 static ventus_rtlsim_t* g_sim = nullptr;
-uint64_t log_get_time_callback() {
-    return ventus_rtlsim_get_time(g_sim);
-}
+uint64_t log_get_time_callback() { return ventus_rtlsim_get_time(g_sim); }
 
 void kernel_load_data_callback(const metadata_t* metadata) {
     kernel_load_data_callback_t* cb_data = (kernel_load_data_callback_t*)metadata->data;
@@ -65,14 +64,12 @@ int main_new(int argc, char* argv[]) {
         .sim_time_max = 800000,
         .pmem = { .pagesize = 4096, .auto_alloc = true },
         .waveform
-        = { .enable = true, .time_begin = 20000, .time_end = 30000, .levels = 99, .filename = "obj_dir/Vdut.fst" },
-        .snapshot = { .enable = true, .time_interval = 50000, .num_max = 2, .filename = "obj_dir/Vdut.snapshot.fst" },
+        = { .enable = true, .time_begin = 20000, .time_end = 30000, .levels = 99, .filename = "logs/Vdut.fst" },
+        .snapshot = { .enable = true, .time_interval = 50000, .num_max = 2, .filename = "logs/Vdut.snapshot.fst" },
         .verilator_argc = sizeof(verilator_argv) / sizeof(verilator_argv[0]),
         .verilator_argv = verilator_argv,
     };
-    ventus_rtlsim_t* sim = ventus_rtlsim_init(&sim_config);
-    g_sim = sim;
-    log_get_time = log_get_time_callback;
+    ventus_rtlsim_config_t sim_config_1 = sim_config;
 
     std::vector<std::string> args;
     if (argc == 1) { // Default arguments
@@ -84,12 +81,18 @@ int main_new(int argc, char* argv[]) {
             args.push_back(argv[i]);
         }
     }
+    parse_arg(args, &sim_config, nullptr);
+
+    ventus_rtlsim_t* sim = ventus_rtlsim_init(&sim_config);
+    g_sim = sim;
+    log_get_time = log_get_time_callback;
+
     std::function<void(std::shared_ptr<Kernel>)> f_new_kernel = [sim](std::shared_ptr<Kernel> kernel) {
         metadata_t metadata = *kernel->get_metadata();
         metadata.data = new kernel_load_data_callback_t { .datafile = kernel->m_datafile, .sim = sim };
         ventus_rtlsim_add_kernel__delay_data_loading(sim, &metadata, kernel_load_data_callback, nullptr);
     };
-    parse_arg(args, f_new_kernel);
+    parse_arg(args, &sim_config_1, f_new_kernel);
 
     const ventus_rtlsim_step_result_t* result;
     while (1) {

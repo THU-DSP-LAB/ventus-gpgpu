@@ -62,7 +62,8 @@ bool Cta::apply_to_dut(Vdut* dut) {
             kernel = m_kernels[++m_kernel_idx_dispatching];
             assert(kernel && !kernel->is_activated() && !kernel->is_finished());
             assert(m_kernel_wgid_base_next <= 0xEFFFFFFF); // 当前实现中线程块ID不会回收，需防止其溢出
-            kernel->activate(m_kernel_id_next++, m_kernel_wgid_base_next, m_mem);
+            //kernel->activate(m_kernel_id_next++, m_kernel_wgid_base_next, m_mem);
+            kernel->activate(m_kernel_id_next++, m_kernel_wgid_base_next);
             m_kernel_wgid_base_next += kernel->get_num_wg();
         }
     }

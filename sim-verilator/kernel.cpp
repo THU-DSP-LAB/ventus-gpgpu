@@ -43,7 +43,7 @@ uint32_t Kernel::get_next_wgid() const { return m_wgid_base + get_next_wg_idx_in
 void Kernel::wg_dispatched() {
     assert(is_dispatching());
     uint32_t idx = get_next_wg_idx_in_kernel();
-    if(m_wg_status[idx] != WG_STATUS_WAITING) {
+    if (m_wg_status[idx] != WG_STATUS_WAITING) {
         log_fatal("Kernel %s: WG %d is dispatched twice", m_kernel_name.c_str(), idx);
     }
     assert(m_wg_status[idx] == WG_STATUS_WAITING);
@@ -52,7 +52,8 @@ void Kernel::wg_dispatched() {
 }
 
 Kernel::Kernel(
-    const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file)
+    const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file
+)
     : m_datafile(data_file)
     , m_kernel_id(-1) // kernel_id will be assigned when kernel get activated
     , m_kernel_name(kernel_name)
@@ -67,8 +68,10 @@ Kernel::Kernel(
     m_is_activated = false;
 }
 
-Kernel::Kernel(const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
-    std::function<void(const metadata_t*)> finish_callback)
+Kernel::Kernel(
+    const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
+    std::function<void(const metadata_t*)> finish_callback
+)
     : m_kernel_name(metadata_full && metadata_full->kernel_name ? metadata_full->kernel_name : "unknown_kernel")
     , m_load_data_from_file(false)
     , m_load_data_callback(data_load_callback)
@@ -184,50 +187,51 @@ void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& m
     }
 }
 
-void Kernel::load_data_from_file(MemBox* mem) {
-    assert(mem);
-    std::ifstream file(m_datafile);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file: " << m_datafile << std::endl;
-        assert(0);
-    }
+// void Kernel::load_data_from_file(MemBox* mem) {
+//     assert(mem);
+//     std::ifstream file(m_datafile);
+//     if (!file.is_open()) {
+//         std::cerr << "Failed to open file: " << m_datafile << std::endl;
+//         assert(0);
+//     }
+//
+//     std::string line;
+//     int bufferIndex = 0;
+//     std::vector<uint8_t> buffer;
+//     for (int bufferIndex = 0; bufferIndex < m_metadata.num_buffer; bufferIndex++) {
+//         buffer.reserve(m_metadata.buffer_size[bufferIndex]); // 提前分配空间
+//         int readbytes = 0;
+//         while (readbytes < m_metadata.buffer_size[bufferIndex]) {
+//             std::getline(file, line);
+//             for (int i = line.length(); i > 0; i -= 2) {
+//                 std::string hexChars = line.substr(i - 2, 2);
+//                 uint8_t byte = std::stoi(hexChars, nullptr, 16);
+//                 buffer.push_back(byte);
+//             }
+//             readbytes += 4;
+//         }
+//         mem->write(m_metadata.buffer_base[bufferIndex], buffer.data(), readbytes);
+//         buffer.clear();
+//     }
+//     std::getline(file, line);
+//     for (const char* ptr = line.c_str(); *ptr != '\0'; ptr++) {
+//         assert(*ptr == '0');
+//     }
+//     assert(file.eof());
+//
+//     file.close();
+//     log_trace("kernel%2d %s data loaded from file", get_kid(), get_kname().c_str(), m_datafile.c_str());
+// }
 
-    std::string line;
-    int bufferIndex = 0;
-    std::vector<uint8_t> buffer;
-    for (int bufferIndex = 0; bufferIndex < m_metadata.num_buffer; bufferIndex++) {
-        buffer.reserve(m_metadata.buffer_size[bufferIndex]); // 提前分配空间
-        int readbytes = 0;
-        while (readbytes < m_metadata.buffer_size[bufferIndex]) {
-            std::getline(file, line);
-            for (int i = line.length(); i > 0; i -= 2) {
-                std::string hexChars = line.substr(i - 2, 2);
-                uint8_t byte = std::stoi(hexChars, nullptr, 16);
-                buffer.push_back(byte);
-            }
-            readbytes += 4;
-        }
-        mem->write(m_metadata.buffer_base[bufferIndex], buffer.data(), readbytes);
-        buffer.clear();
-    }
-    std::getline(file, line);
-    for (const char* ptr = line.c_str(); *ptr != '\0'; ptr++) {
-        assert(*ptr == '0');
-    }
-    assert(file.eof());
-
-    file.close();
-    log_trace("kernel%2d %s data loaded from file", get_kid(), get_kname().c_str(), m_datafile.c_str());
-}
-
-void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem) {
+void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base) {
     m_kernel_id = kernel_id;
     m_wgid_base = wgid_base;
     m_metadata.kernel_id = kernel_id;
 
     // If it's needed to load data before running kernel, do it
     if (m_load_data_from_file) {
-        load_data_from_file(mem);
+        // load_data_from_file(mem);
+        assert(0);
     } else {
         if (m_load_data_callback)
             m_load_data_callback(&m_metadata);
@@ -244,7 +248,7 @@ void Kernel::deactivate() {
     assert(is_activated());
     assert(!is_running());
     m_is_activated = false;
-    if(m_finish_callback)
+    if (m_finish_callback)
         m_finish_callback(&m_metadata);
     // TODO: when MMU is enabled, release memory usage
 }

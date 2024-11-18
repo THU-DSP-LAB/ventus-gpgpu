@@ -40,3 +40,5 @@ extern "C" struct ventus_rtlsim_t {
     void snapshot_rollback(uint64_t time);
     void snapshot_kill_all();
 };
+
+inline static paddr_t pmem_get_page_base(paddr_t paddr, uint64_t pagesize) { return paddr - paddr % pagesize; }
