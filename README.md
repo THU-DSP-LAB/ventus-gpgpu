@@ -129,6 +129,31 @@ warp 3 0x8000024c 0x0401905b vbranch     current mask and npc:   0001    0x80000
 warp 3 0x8000028c 0x0000205b join    mask and npc:    1110 0x8000028c pop stack ? 1
 ```
 
+## Citation and Presentation Materials
+
+Our work has been accepted to **The 42nd IEEE International Conference on Computer Design (ICCD 2024)**. If you find this repository helpful for your research, please consider citing our paper:
+
+### Paper Information
+
+**Title:** Ventus: A High-performance Open-source GPGPU Based on RISC-V and Its Vector Extension  
+**Authors:** Jingzhou Li, Kexiang Yang, Chufeng Jin, Xudong Liu, Zexia Yang, Fangfei Yu, Yujie Shi, Mingyuan Ma, Li Kong, Jing Zhou, Hualin Wu, and Hu He  
+**DOI:** coming soon...
+
+**Citation Format (BibTeX):**
+
+```bibtex
+@inproceedings{ventus_iccd2024,
+  title     = {Ventus: A High-performance Open-source GPGPU Based on RISC-V and Its Vector Extension},
+  author    = {Jingzhou Li and Kexiang Yang and Chufeng Jin and Xudong Liu and Zexia Yang and Fangfei Yu and Yujie Shi and Mingyuan Ma and Li Kong and Jing Zhou and Hualin Wu and Hu He},
+  booktitle = {The 42nd IEEE International Conference on Computer Design (ICCD)},
+  year      = {2024}
+}
+```
+
+### Presentation Slides
+
+The presentation slides from ICCD 2024 are available in the [`docs`](https://github.com/THU-DSP-LAB/ventus-gpgpu/tree/master/docs) folder of this repository. You can view or download them directly [here](https://github.com/THU-DSP-LAB/ventus-gpgpu/blob/master/docs/ICCD2024_Ventus_Presentation.pdf).
+
 ## Acknowledgement
 
 We refer to some open-source design when developing Ventus GPGPU.
