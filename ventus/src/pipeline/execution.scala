@@ -527,6 +527,15 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
         alu(x).in1 := io.in.bits.in2(x)
         alu(x).in2 := io.in.bits.in1(x)
       }
+      if(shuffle.IS_SHUFFLE) {
+        when(io.in.bits.ctrl.alu_fn === FN_SHUFFLE_DOWN) {
+          // Perform the shuffle operation
+          val shiftAmount = io.in.bits.in1(x) // in2 represents the shift amount
+          val targetIndex = (x.U + shiftAmount) % num_thread.U
+          result.io.enq.bits.wb_wvd_rd(x) := io.in.bits.in2(targetIndex)
+          result.io.enq.valid := true.B
+        }
+      }
       when((io.in.bits.ctrl.alu_fn === FN_VMANDNOT) | (io.in.bits.ctrl.alu_fn === FN_VMORNOT) | (io.in.bits.ctrl.alu_fn === FN_VMNAND) | (io.in.bits.ctrl.alu_fn === FN_VMNOR) | (io.in.bits.ctrl.alu_fn === FN_VMXNOR)) {
         when((io.in.bits.ctrl.alu_fn === FN_VMANDNOT) | (io.in.bits.ctrl.alu_fn === FN_VMORNOT)) {
           alu(x).in1 := (~io.in.bits.in1(x))

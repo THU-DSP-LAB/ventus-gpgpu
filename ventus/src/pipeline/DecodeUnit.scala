@@ -101,7 +101,6 @@ object IDecode //extends DecodeConstants
 
   def FN_SHUFFLE_DOWN = 60.U(6.W)
 
-
   def FN_FADD     = 0.U(6.W)  // 000 000
   def FN_FSUB     = 1.U(6.W)  // 000 001
   def FN_FMUL     = 2.U(6.W)  // 000 010
@@ -301,6 +300,9 @@ object IDecodeLUT_V{
     VOR_VV->    List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_OR,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VOR_VX->    List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_OR,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VOR_VI->    List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_OR,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+
+//    VFCVT_F_H_V-> List(Y,Y,N,B_N,N,N,CSR.N,Y,A3_X,A2_VRS2,A1_X,IMM_X,MEM_X,FN_FP16ToFP32,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
+    VSHUFFLE_DOWN -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_VRS2, A1_VRS1, IMM_X, MEM_X, FN_SHUFFLE_DOWN, N, M_X, N, N, N, Y, N, N, N, N, N, N, N),
     VXOR_VV->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_VRS1,IMM_X,MEM_X,FN_XOR,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VXOR_VX->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_RS1,IMM_X,MEM_X,FN_XOR,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
     VXOR_VI->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_VRS2,A1_IMM,IMM_V,MEM_X,FN_XOR,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
