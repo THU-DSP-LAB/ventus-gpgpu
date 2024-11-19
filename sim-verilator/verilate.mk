@@ -15,7 +15,7 @@ $(strip $(shell if [ $(1) -lt $(2) ]; then echo $(1); else echo $(2); fi))
 endef
 
 #=====================================================================
-# Find verilator executable
+# Toolchain check
 #=====================================================================
 
 # If $VERILATOR_ROOT isn't in the environment, we assume it is part of a
@@ -29,6 +29,8 @@ export VERILATOR_ROOT
 VLIB_VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 VLIB_VERILATOR_COVERAGE = $(VERILATOR_ROOT)/bin/verilator_coverage
 endif
+
+MOLD = $(shell which mold)
 
 #=====================================================================
 # Source file list and build directories
@@ -79,7 +81,7 @@ VLIB_VERILATOR_FLAGS += -x-assign fast -x-initial fast
 else
 VLIB_VERILATOR_FLAGS += -x-assign unique -x-initial unique
 endif
-# Warn abount lint issues; may not want this on less solid designs
+# Warn about lint issues; may not want this on less solid designs
 #VLIB_VERILATOR_FLAGS += -Wall
 VLIB_VERILATOR_FLAGS += -Wno-WIDTHEXPAND
 # Make waveforms
@@ -102,7 +104,9 @@ VLIB_CFLAGS += -fPIC -fvisibility=hidden
 VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
 VLIB_LDFLAGS += -lc
+ifeq ($(MOLD),1)
 VLIB_LDFLAGS += -fuse-ld=mold
+endif
 
 VLIB_VERILATOR_FLAGS += --threads $(VLIB_NPROC_SIM)
 VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)

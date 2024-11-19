@@ -18,6 +18,8 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 
+MOLD = $(shell which mold)
+
 #=====================================================================
 # Source file list and build directories
 #=====================================================================
@@ -57,7 +59,9 @@ CXXFLAGS += -g -O0
 endif
 CXXFLAGS += -std=c++20 -MMD -MP
 
+ifeq ($(RELEASE),1)
 LDFLAGS += -fuse-ld=mold
+endif
 # shared library & link path
 LDFLAGS += -lspdlog -lfmt
 LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH))
