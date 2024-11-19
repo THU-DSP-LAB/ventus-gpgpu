@@ -216,9 +216,6 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
             logger->debug(fmt::format(
                 "block{0:<2} dispatched to GPU (kernel{1:<2} {2} block{3:<2})", wg_id, kernel_id, kernel_name, wg_idx
             ));
-            // log_debug(
-            //     "block%2d dispatched to GPU (kernel%2d %s block%2d) ", wg_id, kernel_id, kernel_name.c_str(), wg_idx
-            //);
         }
         // Thread-block return from GPU (handshake OK)
         if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
@@ -238,7 +235,6 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     //
     if (contextp->time() % 10000 == 0) {
         logger->debug("");
-        // log_debug("");
     }
 
     //
@@ -264,31 +260,22 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
         if (need_rollback) {
             if (sim_end_time == snapshots.main_exit_time) {
                 logger->info("SNAPSHOT exited at time {}, OK", sim_end_time);
-                // log_info("SNAPSHOT exited at time %d, OK", sim_end_time);
             } else {
                 logger->error(
                     "SNAPSHOT exited at time {}, which differs from the original process (time {})", sim_end_time,
                     snapshots.main_exit_time
                 );
-                // log_error(
-                //     "SNAPSHOT exited at time %d, which differs from the original process (time %d)", sim_end_time,
-                //     snapshots.main_exit_time
-                //);
             }
         } else {
             logger->error(
                 "SNAPSHOT finished NORMALLY at time {}, which differs from the original process", sim_end_time
             );
-            // log_error("SNAPSHOT finished NORMALLY at time %d, which differs from the original process",
-            // sim_end_time);
         }
     } else { // This is the main simulation process
         if (need_rollback) {
             logger->critical("Simulation exited ABNORMALLY at time {}", sim_end_time);
-            // log_fatal("Simulation exited ABNORMALLY at time %d", sim_end_time);
         } else {
             logger->info("Simulation finished in {} unit time", sim_end_time);
-            // log_info("Simulation finished in %d unit time", sim_end_time);
         }
     }
 
@@ -303,7 +290,6 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     // clear snapshots
     if (config.snapshot.enable && snapshots.is_child) {
         logger->info("SNAPSHOT process exit... wavefrom dumped as {}", config.snapshot.filename);
-        // log_info("SNAPSHOT process exit... wavefrom dumped as %s", config.snapshot.filename);
     } else {
         snapshot_kill_all(); // kill unused snapshots in the parent process
     }
@@ -322,12 +308,10 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
 bool ventus_rtlsim_t::pmem_page_alloc(paddr_t paddr) {
     if (paddr % config.pmem.pagesize != 0) {
         logger->warn("PMEM address 0x{:x} is not aligned to page! Align it...", paddr);
-        // log_warn("PMEM address 0x%lx is not aligned to page! Align it...", paddr);
         paddr = pmem_get_page_base(paddr, config.pmem.pagesize);
     }
     if (!config.pmem.auto_alloc && pmem_map.find(paddr) != pmem_map.end()) {
         logger->error("PMEM page at 0x{:x} duplicate allocation", paddr);
-        // log_error("PMEM page at 0x%lx duplicate allocation", paddr);
         return false;
     }
     pmem_map[paddr] = new (std::align_val_t(4096)) uint8_t[config.pmem.pagesize];
@@ -337,12 +321,10 @@ bool ventus_rtlsim_t::pmem_page_alloc(paddr_t paddr) {
 bool ventus_rtlsim_t::pmem_page_free(paddr_t paddr) {
     if (paddr % config.pmem.pagesize != 0) {
         logger->warn("PMEM address 0x{:x} is not aligned to page! Align it...", paddr);
-        // log_warn("PMEM address 0x%lx is not aligned to page! Align it...", paddr);
         paddr = pmem_get_page_base(paddr, config.pmem.pagesize);
     }
     if (pmem_map.find(paddr) == pmem_map.end()) {
         logger->error("PMEM page at 0x{:x} not allocated", paddr);
-        // log_error("PMEM page at 0x%lx not allocated", paddr);
         return false;
     }
     delete[] pmem_map[paddr];
@@ -365,7 +347,6 @@ bool ventus_rtlsim_t::pmem_write(paddr_t paddr, const void* data_, const bool ma
             pmem_page_alloc(first_page_base);
         } else {
             logger->critical("PMEM page at 0x{:x} not allocated, cannot write", paddr);
-            // log_fatal("PMEM page at 0x%lx not allocated, cannot write", paddr);
             return false;
         }
     }
@@ -393,7 +374,6 @@ bool ventus_rtlsim_t::pmem_write(paddr_t paddr, const void* data_, uint64_t size
             pmem_page_alloc(first_page_base);
         } else {
             logger->critical("PMEM page at 0x{:x} not allocated, cannot write", paddr);
-            // log_fatal("PMEM page at 0x%lx not allocated, cannot write", paddr);
             return false;
         }
     }
@@ -414,7 +394,6 @@ bool ventus_rtlsim_t::pmem_read(paddr_t paddr, void* data_, uint64_t size) {
     }
     if (pmem_map.find(first_page_base) == pmem_map.end()) {
         logger->warn("PMEM page at 0x{:x} not allocated, read as all zero", paddr);
-        // log_warn("PMEM page at 0x%lx not allocated, read as all zero", paddr);
         std::memset(data, 0, size);
         return false;
     }
@@ -443,13 +422,11 @@ void ventus_rtlsim_t::snapshot_fork() {
     dut->atClone(); // If prepareClone is omitted, call atClone() only in child process
     if (child_pid < 0) {
         logger->error("SNAPSHOT: failed to fork new child process");
-        // log_error("SNAPSHOT: failed to fork new child process");
         return;
     }
     if (child_pid != 0) { // for the original process
         snapshots.children_pid.push_front(child_pid);
         logger->info("SNAPSHOT created, pid={}", child_pid);
-        // log_info("SNAPSHOT created, pid=%d", child_pid);
     } else { // for the fork-child snapshot process
         snapshots.is_child = true;
         sigset_t set, oldset;
@@ -465,10 +442,6 @@ void ventus_rtlsim_t::snapshot_fork() {
             "SNAPSHOT is activated, sim_time = {}, origin process exited at time {}", contextp->time(),
             snapshots.main_exit_time
         );
-        // log_info(
-        //     "SNAPSHOT is activated, sim_time = %llu, origin process exited at time %d", contextp->time(),
-        //     snapshots.main_exit_time
-        //);
         //  delete tfp;             // Cannot do this, or it will block the process
         //  (maybe because Vdut.fst was already closed in the parent process?)
         tfp = new VerilatedFstC(); // This will cause memory leak for once, but not serious. How to fix it?
@@ -477,8 +450,6 @@ void ventus_rtlsim_t::snapshot_fork() {
             logger->error(
                 "snapshot enabled but snapshot.fst filename is NULL, set to default: logs/ventus_rtlsim.snapshot.fst"
             );
-            // log_error("snapshot enabled but snapshot.fst filename is NULL, set to default:
-            // logs/ventus_rtlsim.snapshot.fst");
             config.snapshot.filename = "logs/ventus_rtlsim.snapshot.fst";
         }
         tfp->open(config.snapshot.filename);
@@ -490,7 +461,6 @@ void ventus_rtlsim_t::snapshot_rollback(uint64_t time) {
         return;
     if (snapshots.children_pid.empty()) {
         logger->error("No snapshot for rolling back. Where is the initial snapshot?");
-        // log_error("No snapshot for rolling back. Where is the initial snapshot?");
         return;
     }
     assert(dut && contextp);
@@ -500,11 +470,6 @@ void ventus_rtlsim_t::snapshot_rollback(uint64_t time) {
         time % config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * config.snapshot.time_interval,
         snapshots.children_pid.front()
     );
-    // log_info(
-    //     "SNAPSHOT rollback to %d time-unit ago, pid=%d",
-    //     time % config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * config.snapshot.time_interval,
-    //     snapshots.children_pid.front()
-    //);
     assert(sizeof(sigval_t) >= sizeof(contextp->time()));
     sigval_t sigval;
     sigval.sival_ptr = (void*)(contextp->time());
@@ -523,7 +488,6 @@ void ventus_rtlsim_t::snapshot_kill_all() {
         snapshots.children_pid.pop_back();
     }
     logger->debug("All snapshot process are cleared, OK");
-    // log_debug("All snapshot process are cleared, OK");
 }
 
 void ventus_rtlsim_t::waveform_dump() const {
@@ -570,5 +534,4 @@ void ventus_rtlsim_t::dut_reset() const {
     dut->eval();
     waveform_dump();
     logger->trace("Hardware reset ok");
-    // log_trace("Hardware reset ok");
 }

@@ -21,6 +21,7 @@ endif
 #=====================================================================
 # Source file list and build directories
 #=====================================================================
+
 DIR_BUILD = build/driver_example
 DIR_BUILDOBJ_DEBUG = $(DIR_BUILD)/debug
 DIR_BUILDOBJ_RELEASE = $(DIR_BUILD)/release
@@ -30,7 +31,7 @@ else
 DIR_BUILDOBJ = $(DIR_BUILDOBJ_DEBUG)
 endif
 
-SRC_CXX = sim_main.cpp sim_main2.cpp cmdarg.cpp kernel.cpp
+SRC_CXX = sim_main.cpp cmdarg.cpp kernel.cpp
 OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
 DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
 
@@ -91,6 +92,7 @@ gdb: $(APP)
 #=====================================================================
 # Other targets
 #=====================================================================
+
 clean:
 	-rm -rf $(DIR_BUILD)
 

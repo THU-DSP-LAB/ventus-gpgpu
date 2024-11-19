@@ -1,16 +1,9 @@
 #include "cta_sche_wrapper.hpp"
-//#include "MemBox.hpp"
 #include "kernel.hpp"
-// #include "log.h"
 #include <cassert>
 #include <memory>
 #include <spdlog/logger.h>
 
-//Cta::Cta(MemBox* mem)
-//    : m_kernel_idx_dispatching(-1)
-//    , m_kernel_id_next(0)
-//    , m_kernel_wgid_base_next(0)
-//    , m_mem(mem) {};
 Cta::Cta(std::shared_ptr<spdlog::logger> logger_)
     : m_kernel_idx_dispatching(-1)
     , m_kernel_id_next(0)
@@ -66,7 +59,6 @@ bool Cta::apply_to_dut(Vdut* dut) {
             kernel = m_kernels[++m_kernel_idx_dispatching];
             assert(kernel && !kernel->is_activated() && !kernel->is_finished());
             assert(m_kernel_wgid_base_next <= 0xEFFFFFFF); // 当前实现中线程块ID不会回收，需防止其溢出
-            // kernel->activate(m_kernel_id_next++, m_kernel_wgid_base_next, m_mem);
             kernel->activate(m_kernel_id_next++, m_kernel_wgid_base_next);
             m_kernel_wgid_base_next += kernel->get_num_wg();
         }
@@ -111,13 +103,8 @@ void Cta::wg_finish(uint32_t wgid) {
                 "block{0:<2} finished (kernel{1:<2} {2} block{3:<2})", wgid, kernel->get_kid(), kernel->get_kname(),
                 wg_idx
             );
-            //log_debug(
-            //    "block%2d finished (kernel%2d %s block%2d)", wgid, kernel->get_kid(), kernel->get_kname().c_str(),
-            //    wg_idx
-            //);
             if (kernel->is_finished()) { // 整个kernel已经结束，删除之
                 logger->info("kernel{0:<2} {1} finished", kernel->get_kid(), kernel->get_kname());
-                //log_info("kernel%2d %s finished", kernel->get_kid(), kernel->get_kname().c_str());
                 kernel->deactivate();
                 m_kernels.erase(it);
                 m_kernel_idx_dispatching--; // 可能会减至-1

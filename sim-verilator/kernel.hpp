@@ -1,5 +1,4 @@
 #pragma once
-//#include "MemBox.hpp"
 #include "ventus_rtlsim.h"
 #include <cstdint>
 #include <filesystem>
@@ -17,10 +16,13 @@ typedef ventus_kernel_metadata_t metadata_t;
 
 class Kernel {
 public:
-    Kernel(const std::string& kernel_name, const std::filesystem::path metadata_file,
-        const std::filesystem::path data_file);
-    Kernel(const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
-        std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger);
+    Kernel(
+        const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file
+    );
+    Kernel(
+        const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
+        std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger
+    );
 
     // Basic kernel info
     uint32_t get_kid() const { return m_kernel_id; }
@@ -59,12 +61,12 @@ public:
     bool is_activated() const { return m_is_activated; }
 
     // Load kernel init data (testcase.data file) and get ready to run
-    //void activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem = nullptr);
     void activate(uint32_t kernel_id, uint32_t wgid_base);
     void deactivate();
     const std::function<void(const metadata_t*)> m_finish_callback; // call this after kernel finished
 
     const std::filesystem::path m_datafile;
+
 private:
     uint32_t m_kernel_id;
     const std::string m_kernel_name;
@@ -76,11 +78,9 @@ private:
     int charToHex(char c) const;
 
     // Load kernel metadata (testcase.metadata file)
-    //void load_data_from_file(MemBox* mem);
     void readHexFile(const std::string& filename, std::vector<uint64_t>& items, int itemSize = 64) const;
     void initMetaData(const std::string& filename);
     void assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& mtd);
-    bool m_load_data_from_file; // load data from .data file (true) OR by callback function (false)
     std::function<void(const metadata_t*)> m_load_data_callback;
 
     // Get new thread-block

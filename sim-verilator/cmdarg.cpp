@@ -15,8 +15,10 @@ int cmdarg_kernel(std::string arg, std::function<void(std::shared_ptr<Kernel>)> 
 int cmdarg_error(std::vector<std::string> args);
 int cmdarg_help(int exit_id);
 
-int parse_arg(std::vector<std::string> args, ventus_rtlsim_config_t* config,
-    std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
+int parse_arg(
+    std::vector<std::string> args, ventus_rtlsim_config_t* config,
+    std::function<void(std::shared_ptr<Kernel>)> new_kernel
+) {
 
     for (int argid = 0; argid < args.size(); argid++) {
         if (args[argid].starts_with("+verilator+")) {
@@ -150,7 +152,8 @@ int cmdarg_kernel(std::string arg_raw, std::function<void(std::shared_ptr<Kernel
         std::shared_ptr<Kernel> kernel = nullptr;
         try {
             kernel = std::make_shared<Kernel>(
-                name, std::filesystem::canonical(metafile), std::filesystem::canonical(datafile));
+                name, std::filesystem::canonical(metafile), std::filesystem::canonical(datafile)
+            );
         } catch (const std::filesystem::filesystem_error& e) {
             std::cout << "Error: file not found: \n"
                       << "metafile = " << metafile << "\ndatafile = " << datafile << "\n"

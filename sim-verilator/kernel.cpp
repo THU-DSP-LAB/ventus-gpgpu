@@ -1,5 +1,4 @@
 #include "kernel.hpp"
-// #include "log.h"
 #include <cassert>
 #include <cstdint>
 #include <fstream>
@@ -47,7 +46,6 @@ void Kernel::wg_dispatched() {
     uint32_t idx = get_next_wg_idx_in_kernel();
     if (m_wg_status[idx] != WG_STATUS_WAITING) {
         logger->critical("Kernel {} WG {} is dispatched twice", m_kernel_name, idx);
-        // log_fatal("Kernel %s: WG %d is dispatched twice", m_kernel_name.c_str(), idx);
     }
     assert(m_wg_status[idx] == WG_STATUS_WAITING);
     m_wg_status[idx] = WG_STATUS_RUNNING;
@@ -60,7 +58,6 @@ Kernel::Kernel(
     : m_datafile(data_file)
     , m_kernel_id(-1) // kernel_id will be assigned when kernel get activated
     , m_kernel_name(kernel_name)
-    , m_load_data_from_file(true)
     , m_load_data_callback(nullptr)
     , m_finish_callback(nullptr) {
     // Get metadata of this kernel
@@ -76,7 +73,6 @@ Kernel::Kernel(
     std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger_
 )
     : m_kernel_name(metadata_full && metadata_full->kernel_name ? metadata_full->kernel_name : "unknown_kernel")
-    , m_load_data_from_file(false)
     , m_load_data_callback(data_load_callback)
     , m_finish_callback(finish_callback)
     , logger(logger_) {
@@ -192,55 +188,14 @@ void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& m
     }
 }
 
-// void Kernel::load_data_from_file(MemBox* mem) {
-//     assert(mem);
-//     std::ifstream file(m_datafile);
-//     if (!file.is_open()) {
-//         std::cerr << "Failed to open file: " << m_datafile << std::endl;
-//         assert(0);
-//     }
-//
-//     std::string line;
-//     int bufferIndex = 0;
-//     std::vector<uint8_t> buffer;
-//     for (int bufferIndex = 0; bufferIndex < m_metadata.num_buffer; bufferIndex++) {
-//         buffer.reserve(m_metadata.buffer_size[bufferIndex]); // 提前分配空间
-//         int readbytes = 0;
-//         while (readbytes < m_metadata.buffer_size[bufferIndex]) {
-//             std::getline(file, line);
-//             for (int i = line.length(); i > 0; i -= 2) {
-//                 std::string hexChars = line.substr(i - 2, 2);
-//                 uint8_t byte = std::stoi(hexChars, nullptr, 16);
-//                 buffer.push_back(byte);
-//             }
-//             readbytes += 4;
-//         }
-//         mem->write(m_metadata.buffer_base[bufferIndex], buffer.data(), readbytes);
-//         buffer.clear();
-//     }
-//     std::getline(file, line);
-//     for (const char* ptr = line.c_str(); *ptr != '\0'; ptr++) {
-//         assert(*ptr == '0');
-//     }
-//     assert(file.eof());
-//
-//     file.close();
-//     log_trace("kernel%2d %s data loaded from file", get_kid(), get_kname().c_str(), m_datafile.c_str());
-// }
-
 void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base) {
     m_kernel_id = kernel_id;
     m_wgid_base = wgid_base;
     m_metadata.kernel_id = kernel_id;
 
     // If it's needed to load data before running kernel, do it
-    if (m_load_data_from_file) {
-        // load_data_from_file(mem);
-        assert(0);
-    } else {
-        if (m_load_data_callback)
-            m_load_data_callback(&m_metadata);
-    }
+    if (m_load_data_callback)
+        m_load_data_callback(&m_metadata);
 
     for (const auto wg_status : m_wg_status) {
         assert(wg_status == WG_STATUS_WAITING);
@@ -248,7 +203,6 @@ void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base) {
 
     m_is_activated = true;
     logger->trace("kernel{0:>2} {1} activate", get_kid(), get_kname());
-    // log_trace("kernel%2d %s activate", get_kid(), get_kname().c_str());
 }
 void Kernel::deactivate() {
     assert(is_activated());
