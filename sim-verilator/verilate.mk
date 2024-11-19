@@ -47,7 +47,7 @@ endif
 VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
 VLIB_SRC_V = dut.v
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp # API in these files will be exported to shared library
-VLIB_SRC_CXX = kernel.cpp MemBox.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp $(VLIB_SRC_CXX_EXPORT)
+VLIB_SRC_CXX = kernel.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp $(VLIB_SRC_CXX_EXPORT)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
 VLIB_VERILATOR_INPUT = $(VLIB_SRC_V) $(VLIB_SRC_CXX_ABSPATH)
 VLIB_VERILATOR_OUTPUT = $(VLIB_DIR_BUILDOBJ)/libVdut.a
@@ -117,9 +117,9 @@ VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 default: lib
 
-$(VLIB_DIR_BUILDOBJ)/log.o: log.c
-	@mkdir -p $(VLIB_DIR_BUILDOBJ)
-	gcc -c $(VLIB_CFLAGS) -o $@ $<
+#$(VLIB_DIR_BUILDOBJ)/log.o: log.c
+#	@mkdir -p $(VLIB_DIR_BUILDOBJ)
+#	gcc -c $(VLIB_CFLAGS) -o $@ $<
 
 $(VLIB_SRC_V): $(VLIB_SRC_SCALA)
 	cd .. && ./mill ventus[6.4.0].runMain top.emitVerilog
@@ -128,19 +128,21 @@ $(VLIB_SRC_V): $(VLIB_SRC_SCALA)
 
 verilog: $(VLIB_SRC_V)
 
-verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_DIR_BUILDOBJ)/log.o
+verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) #$(VLIB_DIR_BUILDOBJ)/log.o
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
-	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT) log.o
+	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
+#	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT) log.o
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_DIR_BUILDOBJ)/log.o
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) #$(VLIB_DIR_BUILDOBJ)/log.o
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
-	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT) log.o
+	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
+#	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT) log.o
 
 $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	g++ $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
-	  $(VLIB_OBJ_EXPORT) $(VLIB_DIR_BUILDOBJ)/log.o \
+	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -pthread -lpthread -lz -latomic  
+	  -lspdlog -lfmt -pthread -lpthread -lz -latomic  
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/libVentusRTL.so
 
 lib: $(VLIB_TARGET)

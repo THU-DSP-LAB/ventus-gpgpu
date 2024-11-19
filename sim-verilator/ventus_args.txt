@@ -1,1 +1,1 @@
-/home/wangyh/testcase/nw/ventus_args.txt
+testcase/ventus_args.txt

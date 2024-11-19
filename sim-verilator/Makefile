@@ -6,6 +6,19 @@ endif
 RELEASE ?= 0
 
 #=====================================================================
+# Check toolchain
+#=====================================================================
+
+CCACHE = $(shell which ccache)
+ifeq ($(CCACHE),)
+CC  = gcc
+CXX = g++
+else
+CC  = ccache gcc
+CXX = ccache g++
+endif
+
+#=====================================================================
 # Source file list and build directories
 #=====================================================================
 DIR_BUILD = build/driver_example
@@ -45,6 +58,7 @@ CXXFLAGS += -std=c++20 -MMD -MP
 
 LDFLAGS += -fuse-ld=mold
 # shared library & link path
+LDFLAGS += -lspdlog -lfmt
 LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH))
 
 #=====================================================================
@@ -54,19 +68,23 @@ LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath=$(abspath $(VL
 -include $(DEP_CXX)
 $(DIR_BUILDOBJ)/%.o: %.cpp
 	@mkdir -p $(DIR_BUILDOBJ)
-	g++ -c $(CXXFLAGS) -o $@ $<
+	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
 $(APP): $(VLIB_TARGET) $(OBJ_CXX)
 	@mkdir -p $(DIR_BUILDOBJ)
-	g++ -o $@ $(OBJ_CXX) $(LDFLAGS)
+	$(CXX) -o $@ $(OBJ_CXX) $(LDFLAGS)
 
 run: $(APP)
 	@echo
+	-rm -f logs/ventus_rtlsim.log
 	$(APP)
+	@echo
 
 gdb: $(APP)
 	@echo
+	-rm -f logs/ventus_rtlsim.log
 	gdb --tui $(APP)
+	@echo
 
 .PHONY: lib run gdb
 

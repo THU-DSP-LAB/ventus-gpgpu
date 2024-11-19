@@ -4,6 +4,7 @@
 #include "cta_sche_wrapper.hpp"
 #include "ventus_rtlsim.h"
 #include <map>
+#include <memory>
 #include <verilated.h>
 #include <verilated_fst_c.h>
 
@@ -15,6 +16,7 @@ typedef struct {
 } snapshot_t;
 
 extern "C" struct ventus_rtlsim_t {
+    std::shared_ptr<spdlog::logger> logger;
     VerilatedContext* contextp;
     Vdut* dut;
     VerilatedFstC* tfp;

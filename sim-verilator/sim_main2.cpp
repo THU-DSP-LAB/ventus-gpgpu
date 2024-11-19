@@ -1,13 +1,17 @@
 #include "kernel.hpp"
-#include "log.h"
+// #include "log.h"
 #include "ventus_rtlsim.h"
 #include <cassert>
 #include <cstring>
+#include <fmt/core.h>
 #include <fstream>
 #include <memory>
+#include <spdlog/spdlog.h>
 
-extern int parse_arg(std::vector<std::string> args, ventus_rtlsim_config_t* config,
-    std::function<void(std::shared_ptr<Kernel>)> new_kernel);
+extern int parse_arg(
+    std::vector<std::string> args, ventus_rtlsim_config_t* config,
+    std::function<void(std::shared_ptr<Kernel>)> new_kernel
+);
 
 typedef struct {
     std::filesystem::path datafile;
@@ -22,7 +26,8 @@ void kernel_load_data_callback(const metadata_t* metadata) {
     kernel_load_data_callback_t* cb_data = (kernel_load_data_callback_t*)metadata->data;
     std::ifstream file(cb_data->datafile);
     if (!file.is_open()) {
-        log_fatal("Failed to open .data file: %s", cb_data->datafile.c_str());
+        spdlog::critical("Failed to open .data file: {}", cb_data->datafile.c_str());
+        // log_fatal("Failed to open .data file: %s", cb_data->datafile.c_str());
         assert(0);
     }
 
@@ -51,24 +56,27 @@ void kernel_load_data_callback(const metadata_t* metadata) {
     assert(file.eof());
 
     file.close();
-    log_trace(
-        "kernel%2d %s data loaded from file", metadata->kernel_id, metadata->kernel_name, cb_data->datafile.c_str());
+    spdlog::trace(fmt::format("kernel{} {} data loaded from file", metadata->kernel_id, metadata->kernel_name));
+    // log_trace(
+    //     "kernel%2d %s data loaded from file", metadata->kernel_id, metadata->kernel_name, cb_data->datafile.c_str()
+    //);
 }
 
 int main_new(int argc, char* argv[]) {
+    spdlog::set_level(spdlog::level::trace);
     const char* verilator_argv[] = {
         "+verilator+seed+10086",
     };
 
-    ventus_rtlsim_config_t sim_config = {
-        .sim_time_max = 800000,
-        .pmem = { .pagesize = 4096, .auto_alloc = true },
-        .waveform
-        = { .enable = true, .time_begin = 20000, .time_end = 30000, .levels = 99, .filename = "logs/Vdut.fst" },
-        .snapshot = { .enable = true, .time_interval = 50000, .num_max = 2, .filename = "logs/Vdut.snapshot.fst" },
-        .verilator_argc = sizeof(verilator_argv) / sizeof(verilator_argv[0]),
-        .verilator_argv = verilator_argv,
-    };
+    ventus_rtlsim_config_t sim_config;
+    ventus_rtlsim_get_default_config(&sim_config);
+    sim_config.log.console.level = "trace";
+    sim_config.sim_time_max = 800000;
+    sim_config.pmem.auto_alloc = true;
+    sim_config.waveform.time_begin = 20000;
+    sim_config.waveform.time_end = 30000;
+    sim_config.verilator.argc = sizeof(verilator_argv) / sizeof(verilator_argv[0]);
+    sim_config.verilator.argv = verilator_argv;
     ventus_rtlsim_config_t sim_config_1 = sim_config;
 
     std::vector<std::string> args;

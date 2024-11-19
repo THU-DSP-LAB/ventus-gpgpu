@@ -1,9 +1,11 @@
 #pragma once
-#include "MemBox.hpp"
+//#include "MemBox.hpp"
 #include "ventus_rtlsim.h"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <spdlog/logger.h>
 #include <string>
 #include <vector>
 
@@ -18,7 +20,7 @@ public:
     Kernel(const std::string& kernel_name, const std::filesystem::path metadata_file,
         const std::filesystem::path data_file);
     Kernel(const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
-        std::function<void(const metadata_t*)> finish_callback);
+        std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger);
 
     // Basic kernel info
     uint32_t get_kid() const { return m_kernel_id; }
@@ -74,7 +76,7 @@ private:
     int charToHex(char c) const;
 
     // Load kernel metadata (testcase.metadata file)
-    void load_data_from_file(MemBox* mem);
+    //void load_data_from_file(MemBox* mem);
     void readHexFile(const std::string& filename, std::vector<uint64_t>& items, int itemSize = 64) const;
     void initMetaData(const std::string& filename);
     void assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& mtd);
@@ -91,4 +93,6 @@ private:
 
     // Kernel status
     bool m_is_activated; // activated: data loaded to memory and ready to run
+
+    std::shared_ptr<spdlog::logger> logger;
 };

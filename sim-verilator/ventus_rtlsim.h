@@ -42,6 +42,18 @@ typedef struct ventus_kernel_metadata_t { // 这个metadata是供驱动使用的
 
 typedef struct {
     uint64_t sim_time_max; // 最大仿真时间限制
+    struct {               // These log sinks can be enabled simultaneously
+        struct {           // basic file log
+            bool enable;
+            const char* level;
+            const char* filename;
+        } file;
+        struct { // colorful console log
+            bool enable;
+            const char* level;
+        } console;
+        const char* level;
+    } log;
     struct {
         uint64_t pagesize; // 物理内存页大小
         uint64_t auto_alloc; // 若访存到未分配的物理页，自动分配（如此则与实际硬件内存行为相同）
@@ -60,9 +72,10 @@ typedef struct {
         int num_max;            // 最大快照数量，超限时新快照将顶替最旧快照
         const char* filename;   // 快照输出的FST波形文件名
     } snapshot;
-    // verilator运行时命令行参数，以argc,argv形式传入
-    int verilator_argc;          // 注意argc可以为0
-    const char** verilator_argv; // 共有argc个char*字符串，[0]成员不是程序名，而是首个verilator参数
+    struct {               // verilator运行时命令行参数，以argc,argv形式传入
+        int argc;          // 注意argc可以为0
+        const char** argv; // 共有argc个char*字符串，[0]成员不是程序名，而是首个verilator参数
+    } verilator;
 } ventus_rtlsim_config_t;
 
 typedef struct {
@@ -70,6 +83,9 @@ typedef struct {
     bool time_exceed; // Simulation time exceeds limit
     bool idle;        // All given kernels has finished
 } ventus_rtlsim_step_result_t;
+
+// Helper functions, giving you a recommended default config
+DLL_PUBLIC void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config);
 
 DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config);
 DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);

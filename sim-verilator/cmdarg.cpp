@@ -1,4 +1,3 @@
-#include "common.h"
 #include "kernel.hpp"
 #include "ventus_rtlsim.h"
 #include <cassert>

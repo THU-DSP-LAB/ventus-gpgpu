@@ -1,15 +1,16 @@
 #pragma once
-#include "MemBox.hpp"
+//#include "MemBox.hpp"
 #include "Vdut.h"
 #include "kernel.hpp"
 #include <memory>
+#include <spdlog/logger.h>
 #include <vector>
 
 class Cta {
 public:
-    Cta();
-    Cta(MemBox* mem);
-    MemBox* m_mem;
+    Cta(std::shared_ptr<spdlog::logger> logger);
+//    Cta(MemBox* mem);
+//    MemBox* m_mem;
 
     bool apply_to_dut(Vdut* dut); // DUT WG new IO port stimuli
     void wg_dispatched();
@@ -30,4 +31,6 @@ private:
     int m_kernel_idx_dispatching;
     uint32_t m_kernel_id_next;
     uint32_t m_kernel_wgid_base_next;
+
+    std::shared_ptr<spdlog::logger> logger;
 };

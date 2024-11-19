@@ -1,9 +1,11 @@
 #include "kernel.hpp"
-#include "log.h"
+// #include "log.h"
 #include <cassert>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <memory>
+#include <spdlog/logger.h>
 #include <string>
 #include <vector>
 
@@ -44,7 +46,8 @@ void Kernel::wg_dispatched() {
     assert(is_dispatching());
     uint32_t idx = get_next_wg_idx_in_kernel();
     if (m_wg_status[idx] != WG_STATUS_WAITING) {
-        log_fatal("Kernel %s: WG %d is dispatched twice", m_kernel_name.c_str(), idx);
+        logger->critical("Kernel {} WG {} is dispatched twice", m_kernel_name, idx);
+        // log_fatal("Kernel %s: WG %d is dispatched twice", m_kernel_name.c_str(), idx);
     }
     assert(m_wg_status[idx] == WG_STATUS_WAITING);
     m_wg_status[idx] = WG_STATUS_RUNNING;
@@ -70,13 +73,15 @@ Kernel::Kernel(
 
 Kernel::Kernel(
     const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
-    std::function<void(const metadata_t*)> finish_callback
+    std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger_
 )
     : m_kernel_name(metadata_full && metadata_full->kernel_name ? metadata_full->kernel_name : "unknown_kernel")
     , m_load_data_from_file(false)
     , m_load_data_callback(data_load_callback)
-    , m_finish_callback(finish_callback) {
+    , m_finish_callback(finish_callback)
+    , logger(logger_) {
     assert(metadata_full);
+    assert(logger_);
     // copy metadata
     m_metadata = *metadata_full;
     // Init other members from metadata
@@ -242,7 +247,8 @@ void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base) {
     }
 
     m_is_activated = true;
-    log_trace("kernel%2d %s activate", get_kid(), get_kname().c_str());
+    logger->trace("kernel{0:>2} {1} activate", get_kid(), get_kname());
+    // log_trace("kernel%2d %s activate", get_kid(), get_kname().c_str());
 }
 void Kernel::deactivate() {
     assert(is_activated());
@@ -250,7 +256,6 @@ void Kernel::deactivate() {
     m_is_activated = false;
     if (m_finish_callback)
         m_finish_callback(&m_metadata);
-    // TODO: when MMU is enabled, release memory usage
 }
 
 bool Kernel::is_finished() const {
