@@ -196,7 +196,7 @@ int cmdarg_help(int exit_id) {
               << "           datafile string  // kernel的.data文件路径\n"
               << "           taskid   uint    // 可选，若无则为不归属任何task的独立kernel。必须指向之前已经申明的task\n"
               << "\n"
-              << "--snapshot INTERVAL uint    // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能"
+              << "--snapshot INTERVAL uint    // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能\n"
               << "--sim-time-max NUM  uint    // number of simulation cycles" << std::endl;
     exit(exit_id);
 }
