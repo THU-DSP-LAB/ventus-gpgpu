@@ -44,7 +44,8 @@ extern "C" void ventus_rtlsim_add_kernel__delay_data_loading(
     void (*load_data_callback)(const ventus_kernel_metadata_t*),
     void (*finish_callback)(const ventus_kernel_metadata_t*)
 ) {
-    std::shared_ptr<Kernel> kernel = std::make_shared<Kernel>(metadata, load_data_callback, finish_callback, sim->logger);
+    std::shared_ptr<Kernel> kernel
+        = std::make_shared<Kernel>(metadata, load_data_callback, finish_callback, sim->logger);
     sim->cta->kernel_add(kernel);
 }
 extern "C" void ventus_rtlsim_add_kernel(

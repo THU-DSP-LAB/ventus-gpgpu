@@ -30,6 +30,14 @@ VLIB_VERILATOR = $(VERILATOR_ROOT)/bin/verilator
 VLIB_VERILATOR_COVERAGE = $(VERILATOR_ROOT)/bin/verilator_coverage
 endif
 
+CCACHE = $(shell which ccache)
+ifeq ($(CCACHE),)
+CC  = gcc
+CXX = g++
+else
+CC  = ccache gcc
+CXX = ccache g++
+endif
 MOLD = $(shell which mold)
 
 #=====================================================================
@@ -103,6 +111,7 @@ endif
 VLIB_CFLAGS += -fPIC -fvisibility=hidden
 VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
+VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_LDFLAGS += -lc
 ifeq ($(MOLD),1)
 VLIB_LDFLAGS += -fuse-ld=mold
@@ -121,10 +130,6 @@ VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 default: lib
 
-#$(VLIB_DIR_BUILDOBJ)/log.o: log.c
-#	@mkdir -p $(VLIB_DIR_BUILDOBJ)
-#	gcc -c $(VLIB_CFLAGS) -o $@ $<
-
 $(VLIB_SRC_V): $(VLIB_SRC_SCALA)
 	cd .. && ./mill ventus[6.4.0].runMain top.emitVerilog
 	mv GPGPU_SimTop.v $(VLIB_SRC_V)
@@ -132,18 +137,16 @@ $(VLIB_SRC_V): $(VLIB_SRC_SCALA)
 
 verilog: $(VLIB_SRC_V)
 
-verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) #$(VLIB_DIR_BUILDOBJ)/log.o
+verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
-#	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT) log.o
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) #$(VLIB_DIR_BUILDOBJ)/log.o
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
-#	$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT) log.o
 
 $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
-	g++ $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
+	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
 	  -lspdlog -lfmt -pthread -lpthread -lz -latomic  
@@ -161,9 +164,13 @@ info-verilator:
 	$(VLIB_VERILATOR) -V
 
 clean-lib:
-	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.a $(VLIB_DIR_BUILDOBJ_DEBUG)/*.d $(VLIB_DIR_BUILDOBJ_DEBUG)/*.o $(VLIB_DIR_BUILDOBJ_DEBUG)/*.so
-	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.a $(VLIB_DIR_BUILDOBJ_RELEASE)/*.d $(VLIB_DIR_BUILDOBJ_RELEASE)/*.o $(VLIB_DIR_BUILDOBJ_RELEASE)/*.so
+	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.a $(VLIB_DIR_BUILDOBJ_DEBUG)/*.o $(VLIB_DIR_BUILDOBJ_DEBUG)/*.so
+	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.a $(VLIB_DIR_BUILDOBJ_RELEASE)/*.o $(VLIB_DIR_BUILDOBJ_RELEASE)/*.so
 	-rm -f $(VLIB_DIR_BUILD)/*.so
+
+clean-lib-dep: clean-lib
+	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.d
+	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.d
 
 clean-verilated: 
 	-rm -rf $(VLIB_DIR_BUILD)
@@ -171,4 +178,4 @@ clean-verilated:
 clean-verilog: clean-verilated
 	-rm -f $(VLIB_SRC_V)
 
-.PHONY: clean-lib clean-verilated clean-verilog info-verilator
+.PHONY: clean-lib clean-lib-dep clean-verilated clean-verilog info-verilator

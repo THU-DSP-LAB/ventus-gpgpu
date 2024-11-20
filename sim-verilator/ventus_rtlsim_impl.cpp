@@ -1,5 +1,4 @@
 #include "ventus_rtlsim_impl.hpp"
-// #include "log.h"
 #include "ventus_rtlsim.h"
 #include <csignal>
 #include <cstdint>
@@ -16,6 +15,7 @@
 #include <sys/wait.h>
 #include <utility>
 
+// helper
 static spdlog::level::level_enum get_log_level(const char* level) {
     if (level == nullptr) {
         // set to default level later
@@ -36,6 +36,7 @@ static spdlog::level::level_enum get_log_level(const char* level) {
     return spdlog::level::trace;
 }
 
+// log formatter
 class Formatter_ventus_rtlsim : public spdlog::formatter {
 public:
     Formatter_ventus_rtlsim(std::function<std::string()> callback)
@@ -54,7 +55,6 @@ public:
     std::unique_ptr<spdlog::formatter> clone() const override {
         return std::make_unique<Formatter_ventus_rtlsim>(m_callback);
     }
-
 private:
     std::function<std::string()> m_callback;
 };

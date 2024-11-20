@@ -20,7 +20,7 @@ public:
         const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file
     );
     Kernel(
-        const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
+        const metadata_t* metadata, std::function<void(const metadata_t*)> data_load_callback,
         std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger
     );
 

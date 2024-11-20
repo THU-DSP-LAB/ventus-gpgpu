@@ -19,8 +19,8 @@ typedef uint64_t paddr_t;
 
 typedef struct ventus_kernel_metadata_t { // 这个metadata是供驱动使用的，而不是给硬件的
     // Additional data
-    const char* kernel_name;
-    volatile void* data;
+    const char* name; // kernel name
+    void* data;       // use this as you like, such as callback function argument
 
     // Raw metadata
     uint64_t startaddr;
@@ -43,12 +43,12 @@ typedef struct ventus_kernel_metadata_t { // 这个metadata是供驱动使用的
 typedef struct {
     uint64_t sim_time_max; // 最大仿真时间限制
     struct {               // These log sinks can be enabled simultaneously
-        struct {           // basic file log
+        struct {           // Write log to a file (append to its tail)
             bool enable;
-            const char* level;
+            const char* level; // "trace", "debug", "info", "warn", "error", "critical"
             const char* filename;
         } file;
-        struct { // colorful console log
+        struct { // console log
             bool enable;
             const char* level;
         } console;
@@ -84,32 +84,75 @@ typedef struct {
     bool idle;        // All given kernels has finished
 } ventus_rtlsim_step_result_t;
 
-// Helper functions, giving you a recommended default config
-DLL_PUBLIC void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config);
+// =
+// API functions:
+// =
 
-DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config);
-DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
-DLL_PUBLIC const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim);
+//
+// Helper functions
+//
+
+// Give you a recommended default config.
+DLL_PUBLIC void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config);
+// Get current simulation time.
 DLL_PUBLIC uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim);
+// Check if the simulated GPU is idle (no kernel is running).
 DLL_PUBLIC bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim);
 
-// It's allowed to delay loading data until the kernel is actually activated on GPU by using
-// data_load_callback
+//
+// Init, calculate, and finish
+//
+
+// Init the simulation.
+DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config);
+
+// Finish the simulation.
+// If error occurred in the simulation, and snapshot feature enabled,
+//   it will rollback to the oldest snapshot to find out what happened.
+// You can force the rollback by passing `snapshot_rollback_forcing = true`
+DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+
+// Calculate 1 unit-time of simulation.
+// Return the result of this step: ok, error, time_exceed, or idle.
+// If error occurred, calling this function has no effect, you should consider finish the simulation.
+DLL_PUBLIC const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim);
+
+//
+// Push new kernels to gpu for execution.
+//
+
+// After a kernel finishing its execution, the finish_callback will be called, with metadata passed,
+//   aka. `finish_callback(metadata)` will be called.
+
+// It's allowed to delay data-loading until the kernel is actually activated on GPU,
+// by using data_load_callback
 // **Temporary api**, May be removed in the future
 DLL_PUBLIC void ventus_rtlsim_add_kernel__delay_data_loading(
     ventus_rtlsim_t* sim, const ventus_kernel_metadata_t* metadata,
     void (*load_data_callback)(const ventus_kernel_metadata_t*),
     void (*finish_callback)(const ventus_kernel_metadata_t*)
 );
-// It's recommended to use this ↓. Load data to GPU before calling this.
+
+// It's recommended to use this ↓. Remember to load data to GPU before calling this.
 DLL_PUBLIC void ventus_rtlsim_add_kernel(
     ventus_rtlsim_t* sim, const ventus_kernel_metadata_t* metadata,
     void (*finish_callback)(const ventus_kernel_metadata_t*)
 );
 
+//
+// Physical memory interface
+//
+
+// Physical page alloc & free
+// These functions are not needed by actual hardware memory, only for reducing simulation memory usage.
+// If config.pmem.auto_alloc is set, you don't need to call these functions.
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
+
+// Physical memory read & write
+// copy data from host to device
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size);
+// copy data from device to host
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size);
 
 #undef DLL_PUBLIC

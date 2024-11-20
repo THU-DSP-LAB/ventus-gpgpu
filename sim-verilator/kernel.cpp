@@ -69,17 +69,17 @@ Kernel::Kernel(
 }
 
 Kernel::Kernel(
-    const metadata_t* metadata_full, std::function<void(const metadata_t*)> data_load_callback,
+    const metadata_t* metadata, std::function<void(const metadata_t*)> data_load_callback,
     std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger_
 )
-    : m_kernel_name(metadata_full && metadata_full->kernel_name ? metadata_full->kernel_name : "unknown_kernel")
+    : m_kernel_name(metadata && metadata->name ? metadata->name : "unknown_kernel")
     , m_load_data_callback(data_load_callback)
     , m_finish_callback(finish_callback)
     , logger(logger_) {
-    assert(metadata_full);
+    assert(metadata);
     assert(logger_);
     // copy metadata
-    m_metadata = *metadata_full;
+    m_metadata = *metadata;
     // Init other members from metadata
     m_kernel_id = m_metadata.kernel_id;
     m_grid_dim.x = m_metadata.kernel_size[0];
@@ -144,7 +144,7 @@ void Kernel::initMetaData(const std::string& filename) {
     std::vector<uint64_t> metadata;
     readHexFile(filename, metadata, 64);
     assignMetadata(metadata, m_metadata);
-    m_metadata.kernel_name = m_kernel_name.c_str();
+    m_metadata.name = m_kernel_name.c_str();
 }
 
 void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& mtd) {
