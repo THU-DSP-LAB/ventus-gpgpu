@@ -20,6 +20,7 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
     val in = Flipped(DecoupledIO(new TC_MMAInput_MixedPrecision2(tcctrl)))
     val out = DecoupledIO(new TC_MMAOutput2(tcctrl))
   })
+  // TODO: like GPGPU-sim tensor core, assert inst.active_count() != MAX_WARP_SIZE(32)
   val set_num = 2 //2 := (888/848)
   val dataWidth = log2Ceil(num_warp+1) // slot_num数据宽度
   //  val slot_num = num_warp
