@@ -106,7 +106,7 @@ object ByteExtract{
   }
 }
 
-class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Module{
+class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
     val csr_wid = Output(UInt(depth_warp.W))
@@ -155,7 +155,7 @@ class AddrCalculate(val sharedmemory_addr_max: UInt = 4096.U(32.W)) extends Modu
                     reg_save.in1(0) + reg_save.in2(0)
                   )
                 )
-    is_shared(x) := !reg_save.mask(x) || addr(x)<sharedmemory_addr_max
+    is_shared(x) := !reg_save.mask(x) || ( addr(x) >= LDS_BASE.U(32.W) && addr(x) < (LDS_BASE.U(32.W) + sharedmemory_maxsize) )
   })
   all_shared := Mux(reg_save.ctrl.isvec,
     is_shared.asUInt.andR, // "AND" Reduce
