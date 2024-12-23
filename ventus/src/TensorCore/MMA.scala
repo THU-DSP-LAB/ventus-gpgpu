@@ -388,7 +388,7 @@ class TensorCore_MixedPrecision_multslot_simple(DimM: Int, DimN: Int, DimK: Int,
     }
   }
 
-  when((TCComputation.io.out.fire) && TCComputation.io.out.bits.ctrl.tc_shape === 2.U){
+  when(TCComputation.io.out.fire && TCComputation.io.out.bits.ctrl.tc_shape === 2.U){
    slot(TCComputation.io.out.bits.ctrl.sel_slot_num).bits := num_warp.U
 //    io.out.valid := true.B
    when(TCComputation.io.out.bits.ctrl.isMixedPrecisionMode){
