@@ -22,6 +22,10 @@ This project did not initially maintain a changelog. Starting from version [2.0.
 
 - Support for Chisel 3.5.0 is no longer supported since dependency rocket-chip removed support for it.
 
+### Fixed
+
+- fix error that memory access to local memory space did not fall in shared momory module (commit `3358f128f1e11db4ca4f99b250d449da649c9b8e`).
+
 ## [Previous Versions]
 
 For details about changes prior to version [2.0.3], please refer to commit history or previous release notes if available.
