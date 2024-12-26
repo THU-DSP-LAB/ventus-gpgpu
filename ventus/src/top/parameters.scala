@@ -129,6 +129,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def num_l2cache = 1
 
+  val LDS_BASE : BigInt = 0x70000000  // LDS base address: a hyperparameter used within each SM
+
   def NUMBER_CU = num_sm
   def NUMBER_VGPR_SLOTS = num_vgpr
   def NUMBER_SGPR_SLOTS = num_sgpr
