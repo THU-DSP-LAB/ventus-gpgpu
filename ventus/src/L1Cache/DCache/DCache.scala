@@ -458,7 +458,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   InvOrFluMemReq.a_param := Mux(invalidatenodirty,L2flush.a_param,0.U) //regular write
   InvOrFluMemReq.a_source := DontCare //wait for WSHR
   InvOrFluMemReq.a_addr := RegNext(Cat(TagAccess.io.dirtyTag_st1.get,
-    TagAccess.io.dirtySetIdx_st0.get, 0.U((WordLength - TagBits - SetIdxBits).W)))
+    RegNext(TagAccess.io.dirtySetIdx_st0.get), 0.U((WordLength - TagBits - SetIdxBits).W)))
   InvOrFluMemReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
   //InvOrFluMemReq.a_data :=
   InvOrFluMemReq.hasCoreRsp := waitforL2flush_st2
