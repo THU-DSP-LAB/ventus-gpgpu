@@ -1,75 +1,49 @@
-#include "Vdut.h"
-#include "cta_sche_wrapper.hpp"
 #include "kernel.hpp"
-#include "log.h"
-#include <cinttypes>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
+#include "ventus_rtlsim.h"
+#include <cassert>
 #include <cstring>
-#include <functional>
-#include <iostream>
-#include <memory> // For std::unique_ptr
-#include <new>
-#include <vector>
-#include <verilated.h>
-#include <verilated_fst_c.h>
+#include <fmt/core.h>
+#include <fstream>
+#include <memory>
+#include <spdlog/spdlog.h>
 
-#ifndef SIM_WAVEFORM_FST
-#define SIM_WAVEFORM_FST 0
-#endif
+extern int parse_arg(
+    std::vector<std::string> args, ventus_rtlsim_config_t* config,
+    std::function<void(std::shared_ptr<Kernel>)> new_kernel
+);
 
-uint64_t sim_time_max = 2000000;
-#if (SIM_WAVEFORM_FST)
-constexpr uint64_t SIM_WAVEFORM_TIME_BEGIN = 640000;
-constexpr uint64_t SIM_WAVEFORM_TIME_END   = -1;
-#endif
-VerilatedFstC* tfp         = nullptr;
-VerilatedContext* contextp = nullptr;
-Vdut* dut                  = nullptr;
+typedef struct {
+    std::filesystem::path datafile;
+    ventus_rtlsim_t* sim;
+} kernel_load_data_callback_t;
 
-extern "C" {
-uint64_t log_get_time() {
-    assert(contextp);
-    return contextp->time();
-}
-}
+void kernel_load_data_callback(const metadata_t* metadata);
 
-void waveform_dump(VerilatedFstC* tfp, VerilatedContext* contextp) {
-#if (SIM_WAVEFORM_FST)
-    assert(contextp && tfp);
-    uint64_t time = contextp->time();
-    if (time >= SIM_WAVEFORM_TIME_BEGIN && time <= SIM_WAVEFORM_TIME_END) {
-        tfp->dump(time);
-    }
-#endif
-}
+int main(int argc, char* argv[]) {
+    spdlog::set_level(spdlog::level::trace);
+    const char* verilator_argv[] = {
+        "+verilator+seed+10086",
+    };
 
-// Legacy function required only so linking works on Cygwin and MSVC++
-double sc_time_stamp() { return 0; }
+    //
+    // simulation config
+    //
+    ventus_rtlsim_config_t sim_config;
+    ventus_rtlsim_get_default_config(&sim_config);
 
-void dut_reset(Vdut* dut, VerilatedContext* contextp, VerilatedFstC* tfp);
-int parse_arg(
-    std::vector<std::string> args, uint64_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel);
+    sim_config.log.console.level = "trace";
+    sim_config.sim_time_max = 800000;
+    sim_config.pmem.auto_alloc = true;
+    sim_config.waveform.time_begin = 20000;
+    sim_config.waveform.time_end = 30000;
+    sim_config.verilator.argc = sizeof(verilator_argv) / sizeof(verilator_argv[0]);
+    sim_config.verilator.argv = verilator_argv;
+    ventus_rtlsim_config_t sim_config_1 = sim_config; // not needed
 
-int main(int argc, char** argv) {
-    Verilated::mkdir("logs"); // Create logs/ directory in case we have traces to put under it
-
-    // Verilator simulation context init
-    contextp = new VerilatedContext;
-    contextp->debug(0);     // debug level, 0 is off, 9 is highest, may be overridden by commandArgs parsing
-    contextp->randReset(2); // Randomization reset policy, may be overridden by commandArgs argument parsing
-    contextp->traceEverOn(true);
-
-    // Hardware construct
-    dut         = new Vdut(contextp, "DUT");
-    MemBox* mem = new MemBox;
-    Cta cta(mem);
-
-    // Parse ventus-sim cmd arguments
+    // parse cmdline args, set sim-config
     std::vector<std::string> args;
     if (argc == 1) { // Default arguments
-        std::cout << "[Info] using default cmdline arguments: -f ventus_args.txt" << std::endl;
+        puts("[Info] using default cmdline arguments: -f ventus_args.txt");
         args.push_back("-f");
         args.push_back("ventus_args.txt");
     } else {
@@ -77,133 +51,74 @@ int main(int argc, char** argv) {
             args.push_back(argv[i]);
         }
     }
-    parse_arg(args, sim_time_max,
-        std::function<void(std::shared_ptr<Kernel>)>(std::bind(&Cta::kernel_add, &cta, std::placeholders::_1)));
+    parse_arg(args, &sim_config, nullptr);
 
-#if (SIM_WAVEFORM_FST)
-    // waveform traces (FST)
-    tfp = new VerilatedFstC;
-    dut->trace(tfp, 5);
-    tfp->open("obj_dir/Vdut.fst");
-#endif
+    //
+    // init Ventus RTLSIM
+    //
+    ventus_rtlsim_t* sim = ventus_rtlsim_init(&sim_config);
 
-    // DUT initial reset
-    dut_reset(dut, contextp, tfp);
+    // parse cmdline arguments, generate kernels, and add them to Ventus RTLSIM
+    std::function<void(std::shared_ptr<Kernel>)> f_new_kernel = [sim](std::shared_ptr<Kernel> kernel) {
+        metadata_t metadata = *kernel->get_metadata();
+        metadata.data = new kernel_load_data_callback_t { .datafile = kernel->m_datafile, .sim = sim };
+        ventus_rtlsim_add_kernel__delay_data_loading(
+            sim, &metadata, kernel_load_data_callback, nullptr
+        );
+    };
+    parse_arg(args, &sim_config_1, f_new_kernel);
 
-    while (!contextp->gotFinish() && contextp->time() < sim_time_max && !cta.is_idle()) {
-        contextp->timeInc(1); // 1 timeprecision period passes...
-        dut->clock = !dut->clock;
-
-        //
-        // Delta time before clock edge
-        //
-
-        dut->io_host_rsp_ready = 1;
-        if (dut->clock == 0) {
-            // Input stimulus apply to hardware at negedge clk
-            // Host WG new
-            cta.apply_to_dut(dut);
+    //
+    // Run simulation, each step stands for 1 simulation time-unit
+    //
+    const ventus_rtlsim_step_result_t* result;
+    while (1) {
+        result = ventus_rtlsim_step(sim);
+        if (result->error || result->idle || result->time_exceed) {
+            break;
         }
-
-        //
-        // Eval
-        //
-        dut->eval();
-        waveform_dump(tfp, contextp);
-
-        //
-        // time after clock edge
-        // DUT outputs will not change until next clock edge
-        // React to new output & prepare for new input stimulus
-        //
-        if (dut->clock == 0) {
-            if (dut->io_host_req_valid && dut->io_host_req_ready) {
-                uint32_t wg_id = dut->io_host_req_bits_host_wg_id;
-                uint32_t wg_idx, kernel_id;
-                std::string kernel_name;
-                assert(cta.wg_get_info(kernel_name, kernel_id, wg_idx));
-                log_debug("block%2d dispatched to GPU (kernel%2d %s block%2d) ", wg_id, kernel_id, kernel_name.c_str(),
-                    wg_idx);
-                cta.wg_dispatched();
-            }
-            if (dut->io_host_rsp_valid && dut->io_host_rsp_ready) {
-                uint32_t wg_id = dut->io_host_rsp_bits_inflight_wg_buffer_host_wf_done_wg_id;
-                cta.wg_finish(wg_id);
-            }
-        } else {
-            // Memory access: read
-            if (dut->io_mem_rd_en) {
-                volatile uint32_t rd_addr = dut->io_mem_rd_addr;
-                uint8_t* rd_data          = new uint8_t[MEMACCESS_DATA_BYTE_SIZE];
-                if (!mem->read(dut->io_mem_rd_addr, rd_data)) {
-                    // std::cerr << "Read uninitialized memory: 0x" << std::hex << dut->io_mem_rd_addr << std::dec
-                    //           << " @ time " << clk_cnt << std::endl;
-                    // getchar();
-                    // break;
-                }
-                memcpy(dut->io_mem_rd_data.data(), rd_data, MEMACCESS_DATA_BYTE_SIZE);
-                delete[] rd_data;
-            }
-            // Memory access: write
-            if (dut->io_mem_wr_en) {
-                bool mask[MEMACCESS_DATA_BYTE_SIZE];
-                for (int idx = 0; idx < 4; idx++) {
-                    uint32_t mask_raw = dut->io_mem_wr_mask[idx];
-                    for (int bit = 0; bit < 32; bit++) {
-                        mask[bit + idx * 32] = mask_raw & 0x1;
-                        mask_raw >>= 1;
-                    }
-                }
-                mem->write(dut->io_mem_wr_addr, mask, reinterpret_cast<uint8_t*>(dut->io_mem_wr_data.data()));
-            }
-        }
-        // Clock output
-        if (contextp->time() % 10000 == 0)
-            log_debug("Simulation cycles: %lu", contextp->time());
     }
 
-    log_info("Simulation finished in %d cycles", contextp->time());
-#if (SIM_WAVEFORM_FST)
-    tfp->close();
-#endif
-    dut->final();                  // Final model cleanup
-    contextp->statsPrintSummary(); // Final simulation summary
-    delete dut;
-    delete contextp;
-#if (SIM_WAVEFORM_FST)
-    delete tfp;
-#endif
+    //
+    // Finish simulation, release resources
+    //
+    ventus_rtlsim_finish(sim, false);
+
     return 0;
 }
 
-void dut_reset(Vdut* dut, VerilatedContext* contextp, VerilatedFstC* tfp) {
-    assert(dut && contextp);
-    contextp->time(0);
-    dut->io_host_req_valid = 0;
-    dut->io_host_rsp_ready = 0;
-    dut->reset             = 1;
-    dut->clock             = 0;
-    dut->eval();
-    waveform_dump(tfp, contextp);
+void kernel_load_data_callback(const metadata_t* metadata) {
+    kernel_load_data_callback_t* cb_data = (kernel_load_data_callback_t*)metadata->data;
+    std::ifstream file(cb_data->datafile);
+    if (!file.is_open()) {
+        spdlog::critical("Failed to open .data file: {}", cb_data->datafile.c_str());
+        assert(0);
+    }
 
-    contextp->timeInc(1);
-    dut->clock = 1;
-    dut->eval();
-    waveform_dump(tfp, contextp);
+    std::string line;
+    int bufferIndex = 0;
+    std::vector<uint8_t> buffer;
+    for (int bufferIndex = 0; bufferIndex < metadata->num_buffer; bufferIndex++) {
+        buffer.reserve(metadata->buffer_size[bufferIndex]); // 提前分配空间
+        int readbytes = 0;
+        while (readbytes < metadata->buffer_size[bufferIndex]) {
+            std::getline(file, line);
+            for (int i = line.length(); i > 0; i -= 2) {
+                std::string hexChars = line.substr(i - 2, 2);
+                uint8_t byte = std::stoi(hexChars, nullptr, 16);
+                buffer.push_back(byte);
+            }
+            readbytes += 4;
+        }
+        ventus_rtlsim_pmemcpy_h2d(cb_data->sim, metadata->buffer_base[bufferIndex], buffer.data(), readbytes);
+        buffer.clear();
+    }
+    std::getline(file, line);
+    for (const char* ptr = line.c_str(); *ptr != '\0'; ptr++) {
+        assert(*ptr == '0');
+    }
+    assert(file.eof());
 
-    contextp->timeInc(1);
-    dut->clock = 0;
-    dut->eval();
-    waveform_dump(tfp, contextp);
-
-    contextp->timeInc(1);
-    dut->clock = 1;
-    dut->eval();
-    waveform_dump(tfp, contextp);
-
-    contextp->timeInc(1);
-    dut->clock = 0;
-    dut->reset = 0;
-    dut->eval();
-    waveform_dump(tfp, contextp);
+    file.close();
+    spdlog::trace(fmt::format("kernel{} {} data loaded from file", metadata->kernel_id, metadata->name));
 }

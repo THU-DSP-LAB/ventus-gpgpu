@@ -1,11 +1,12 @@
 #include "kernel.hpp"
-#include "log.h"
+#include "ventus_rtlsim.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -15,9 +16,14 @@ int cmdarg_error(std::vector<std::string> args);
 int cmdarg_help(int exit_id);
 
 int parse_arg(
-    std::vector<std::string> args, uint64_t& simtime, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
+    std::vector<std::string> args, ventus_rtlsim_config_t* config,
+    std::function<void(std::shared_ptr<Kernel>)> new_kernel
+) {
 
     for (int argid = 0; argid < args.size(); argid++) {
+        if (args[argid].starts_with("+verilator+")) {
+            continue;
+        }
         if (args[argid] == "-f") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
@@ -30,7 +36,7 @@ int parse_arg(
                     exit(1);
                 }
                 path_to_file = filename.parent_path();
-                path_origin  = std::filesystem::current_path();
+                path_origin = std::filesystem::current_path();
                 std::filesystem::current_path(path_to_file);
                 std::ifstream file(filename);
                 if (!file.is_open()) {
@@ -52,28 +58,42 @@ int parse_arg(
                         arguments.push_back(arg);
                     }
                 }
-                parse_arg(arguments, simtime, new_kernel);
+                parse_arg(arguments, config, new_kernel);
                 std::filesystem::current_path(path_origin);
             }
         } else if (args[argid] == "--task") {
-            // TODO
+            if (++argid >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
+            } else { // TODO
+            }
         } else if (args[argid] == "--kernel") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
-            } else if (cmdarg_kernel(args[argid], new_kernel)) {
-                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.begin() + argid + 1));
+            } else if (new_kernel) {
+                if (cmdarg_kernel(args[argid], new_kernel)) {
+                    cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.begin() + argid + 1));
+                }
             }
         } else if (args[argid] == "--help") {
             cmdarg_help(0);
-        } else if (args[argid] == "--simtime") {
+        } else if (args[argid] == "--sim-time-max") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
             } else {
-                simtime = std::atoi(args[argid].c_str());
-                if(simtime == 0) {
-                    std::cout << "Error: --simtime needs number > 0\n";
+                uint64_t simtime = std::stoull(args[argid]);
+                if (simtime <= 0) {
+                    std::cout << "Error: --sim-time-max needs number > 0\n";
                     cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
                 }
+                config->sim_time_max = simtime;
+            }
+        } else if (args[argid] == "--snapshot") {
+            if (++argid >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
+            } else {
+                uint64_t snapshot_time = std::stoull(args[argid]);
+                config->snapshot.enable = (snapshot_time > 0);
+                config->snapshot.time_interval = snapshot_time;
             }
         } else {
             cmdarg_error(std::vector<std::string>(args.begin() + argid, args.begin() + argid + 1));
@@ -84,22 +104,22 @@ int parse_arg(
 
 int cmdarg_kernel(std::string arg_raw, std::function<void(std::shared_ptr<Kernel>)> new_kernel) {
 
-    int len   = arg_raw.size();
+    int len = arg_raw.size();
     char* arg = new char[len + 1];
     strcpy(arg, arg_raw.c_str());
 
     // int taskid     = -1;
-    char* name     = nullptr;
+    char* name = nullptr;
     char* metafile = nullptr;
     char* datafile = nullptr;
 
-    char* ptr1   = NULL;
+    char* ptr1 = NULL;
     char* subarg = strtok_r(arg, ",", &ptr1);
     while (subarg) {
         if (strlen(subarg) > 0) {
             char* ptr2 = NULL;
-            char* var  = strtok_r(subarg, "=", &ptr2);
-            char* val  = strtok_r(NULL, "=", &ptr2);
+            char* var = strtok_r(subarg, "=", &ptr2);
+            char* val = strtok_r(NULL, "=", &ptr2);
             assert(var && val);
 
             // if (strcmp(var, "taskid") == 0) {
@@ -132,14 +152,16 @@ int cmdarg_kernel(std::string arg_raw, std::function<void(std::shared_ptr<Kernel
         std::shared_ptr<Kernel> kernel = nullptr;
         try {
             kernel = std::make_shared<Kernel>(
-                name, std::filesystem::canonical(metafile), std::filesystem::canonical(datafile));
+                name, std::filesystem::canonical(metafile), std::filesystem::canonical(datafile)
+            );
         } catch (const std::filesystem::filesystem_error& e) {
             std::cout << "Error: file not found: \n"
                       << "metafile = " << metafile << "\ndatafile = " << datafile << "\n"
                       << e.what() << std::endl;
             exit(1);
         }
-        new_kernel(kernel);
+        if (new_kernel)
+            new_kernel(kernel);
     }
 
     return 0;
@@ -161,7 +183,7 @@ int cmdarg_help(int exit_id) {
     std::cout << "ventus-sim [--arg subarg1=val1,subarg2=val2,...]\n"
               << "\n"
               << "Supported cmdline arguments: \n"
-              << "-f         <file>   string  // load cmd args from file\n"
+              << "-f         FILE     string  // load cmd args from file\n"
               << "                            // if no cmd args is given, -f ventus_cmdargs.txt is applied\n"
               << "\n"
               << "--task                      // create a new GPGPU task\n"
@@ -174,6 +196,7 @@ int cmdarg_help(int exit_id) {
               << "           datafile string  // kernel的.data文件路径\n"
               << "           taskid   uint    // 可选，若无则为不归属任何task的独立kernel。必须指向之前已经申明的task\n"
               << "\n"
-              << "--simtime  <num>    uint    // number of simulation cycles" << std::endl;
+              << "--snapshot INTERVAL uint    // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能\n"
+              << "--sim-time-max NUM  uint    // number of simulation cycles" << std::endl;
     exit(exit_id);
 }

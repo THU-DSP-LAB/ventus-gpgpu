@@ -3,123 +3,103 @@ ifneq ($(words $(CURDIR)),1)
  $(error Unsupported: GNU Make cannot build in directories containing spaces, build elsewhere: '$(CURDIR)')
 endif
 
-######################################################################
-# Helpers
+RELEASE ?= 0
 
-# Choose the smaller one between two numbers
-define MIN_FUNC
-$(strip $(shell if [ $(1) -lt $(2) ]; then echo $(1); else echo $(2); fi))
-endef
+#=====================================================================
+# Check toolchain
+#=====================================================================
 
-######################################################################
-# Set up variables
-NPROC_CPU = $(shell nproc)
-NPROC_DUT = 10
-NPROC_SIM = $(call MIN_FUNC, $(NPROC_CPU), $(NPROC_DUT))
-NPROC_TRACE_FST = $(call MIN_FUNC, $(NPROC_SIM), 2)
-
-# If $VERILATOR_ROOT isn't in the environment, we assume it is part of a
-# package install, and verilator is in your path. Otherwise find the
-# binary relative to $VERILATOR_ROOT (such as when inside the git sources).
-ifeq ($(VERILATOR_ROOT),)
-VERILATOR = verilator
-VERILATOR_COVERAGE = verilator_coverage
+CCACHE = $(shell which ccache)
+ifeq ($(CCACHE),)
+CC  = gcc
+CXX = g++
 else
-export VERILATOR_ROOT
-VERILATOR = $(VERILATOR_ROOT)/bin/verilator
-VERILATOR_COVERAGE = $(VERILATOR_ROOT)/bin/verilator_coverage
+CC  = ccache gcc
+CXX = ccache g++
 endif
 
-# Generate C++ in executable form
-VERILATOR_FLAGS += -cc --build --binary
-# Generate makefile dependencies (not shown as complicates the Makefile)
-VERILATOR_FLAGS += -MMD
-# Optimize
-VERILATOR_FLAGS += -x-assign fast
-# Warn abount lint issues; may not want this on less solid designs
-#VERILATOR_FLAGS += -Wall
-VERILATOR_FLAGS += -Wno-WIDTHEXPAND
-# Make waveforms
-VERILATOR_FLAGS += --trace-fst
-# Check SystemVerilog assertions
-VERILATOR_FLAGS += --assert
-# Generate coverage analysis
-#VERILATOR_FLAGS += --coverage
-# Run Verilator in debug mode
-#VERILATOR_FLAGS += --debug
-# Add this trace to get a backtrace in gdb
-#VERILATOR_FLAGS += --gdbbt
+MOLD = $(shell which mold)
 
-VERILATOR_FLAGS += --threads $(NPROC_SIM)
-VERILATOR_FLAGS += --trace-threads $(NPROC_TRACE_FST)
-VERILATOR_FLAGS += -j $(NPROC_CPU)
-VERILATOR_FLAGS += -CFLAGS "-std=c++17 -g -O0 -DSIM_LOG_ENABLE"
+#=====================================================================
+# Source file list and build directories
+#=====================================================================
 
-CHISEL_VERILOG_ENABLE_PRINT = 0
+DIR_BUILD = build/driver_example
+DIR_BUILDOBJ_DEBUG = $(DIR_BUILD)/debug
+DIR_BUILDOBJ_RELEASE = $(DIR_BUILD)/release
+ifeq ($(RELEASE),1)
+DIR_BUILDOBJ = $(DIR_BUILDOBJ_RELEASE)
+else
+DIR_BUILDOBJ = $(DIR_BUILDOBJ_DEBUG)
+endif
 
-######################################################################
-DIR_SCALA = ../ventus/src
-DIR_OBJ = obj_dir
+SRC_CXX = sim_main.cpp cmdarg.cpp kernel.cpp
+OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
+DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
 
-SRC_SCALA = $(shell find $(DIR_SCALA) -name "*.scala")
-SRC_V = dut.v
-SRC_CXX = sim_main.cpp kernel.cpp MemBox.cpp cta_sche_wrapper.cpp cmdarg.cpp
-SRC_C = log.c
-OBJ_C = $(SRC_C:%.c=$(DIR_OBJ)/%.o)
-VERILATOR_INPUT = $(SRC_V) $(SRC_CXX) $(notdir $(OBJ_C))
+APP = $(DIR_BUILDOBJ)/sim-VentusRTL
 
-VERILATED_DIR = $(DIR_OBJ)
-VERILATED_CXXFILES = $(shell find $(VERILATED_DIR) -name "*.cpp")
-VERILATED_HFILES = $(shell find $(VERILATED_DIR) -name "*.h")
-VERILATED_MKFILE = $(VERILATED_DIR)/Vdut.mk
-VERILATED_FILES = $(VERILATED_MKFILE) $(VERILATED_CXXFILES) $(VERILATED_HFILES)
+#=====================================================================
+# Include Ventus RTL library build rules
+#=====================================================================
 
-######################################################################
-default: verilator
+# default build target should be set by this Makefile
+default: $(APP)
 
-$(SRC_V): $(SRC_SCALA)
-	cd .. && ./mill ventus[6.4.0].runMain top.emitVerilog
-	mv GPGPU_SimTop.v $(SRC_V)
-	sed -i "1i\`define PRINTF_COND 0" $(SRC_V)
+include verilate.mk
 
-verilog: $(SRC_V)
+#=====================================================================
+# Toolchain flags
+#=====================================================================
 
-$(DIR_OBJ)/%.o: %.c
-	@mkdir -p $(DIR_OBJ)
-	gcc -c -o $@ $<
+ifeq ($(RELEASE),1)
+CXXFLAGS += -O2
+else
+CXXFLAGS += -g -O0
+endif
+CXXFLAGS += -std=c++20 -MMD -MP
 
-verilator: verilog $(OBJ_C)
-	@mkdir -p $(DIR_OBJ)
-	$(VERILATOR) $(VERILATOR_FLAGS) $(VERILATOR_INPUT)
+ifeq ($(RELEASE),1)
+LDFLAGS += -fuse-ld=mold
+endif
+# shared library & link path
+LDFLAGS += -lspdlog -lfmt
+LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH))
 
-run: verilator
-	@-rm -f $(VERILATED_DIR)/Vdut.fst
-	@-rm -rf logs
-	@mkdir -p logs
-	$(VERILATED_DIR)/Vdut
+#=====================================================================
+# Build rules and targets
+#=====================================================================
 
-gdb: ${VERILATED_DIR}/Vdut
-	gdb --tui $(VERILATED_DIR)/Vdut
+-include $(DEP_CXX)
+$(DIR_BUILDOBJ)/%.o: %.cpp
+	@mkdir -p $(DIR_BUILDOBJ)
+	$(CXX) -c $(CXXFLAGS) -o $@ $<
 
-.PHONY: run gdb verilog verilator
+$(APP): $(VLIB_TARGET) $(OBJ_CXX)
+	@mkdir -p $(DIR_BUILDOBJ)
+	$(CXX) -o $@ $(OBJ_CXX) $(LDFLAGS)
 
-######################################################################
+run: $(APP)
+	@echo
+	-rm -f logs/ventus_rtlsim.log
+	$(APP)
+	@echo
+
+gdb: $(APP)
+	@echo
+	-rm -f logs/ventus_rtlsim.log
+	gdb --tui $(APP)
+	@echo
+
+.PHONY: lib run gdb
+
+#=====================================================================
 # Other targets
-
-show-config:
-	$(VERILATOR) -V
+#=====================================================================
 
 clean:
-	-rm -f $(VERILATED_DIR)/*.a $(VERILATED_DIR)/*.d $(VERILATED_DIR)/*.o $(VERILATED_DIR)/Vdut
-	-rm -f *.log *.dmp *.vpd coverage.dat core
-	-rm -rf logs
+	-rm -rf $(DIR_BUILD)
 
-clean_cpp: clean
-	-rm -rf $(VERILATED_DIR)
+clean-all: clean clean-verilog
 
-clean_verilog: clean_cpp
-	-rm -f dut.v
-
-clean_all: clean_verilog
-
-.PHONY: clean clean_cpp clean_verilog clean_all
+.PHONY: clean clean-all

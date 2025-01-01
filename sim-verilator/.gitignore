@@ -1,5 +1,5 @@
 logs/
-obj_dir/
+build/
 .cache/
 *.json
 *.fir

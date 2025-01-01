@@ -78,7 +78,7 @@ trait ctainfo_host_to_cu extends Bundle {
   val num_wg_x = UInt(log2Ceil(CONFIG.WG.NUM_WG_DIM_MAX+1).W)         // Number of wg in x-dimension in this kernel
   val num_wg_y = UInt(log2Ceil(CONFIG.WG.NUM_WG_DIM_MAX+1).W)         // Number of wg in y-dimension in this kernel
   val num_wg_z = UInt(log2Ceil(CONFIG.WG.NUM_WG_DIM_MAX+1).W)         // Number of wg in z-dimension in this kernel
-  val asid_kernel = UInt(CONFIG.GPU.ASID_WIDTH)                       // Virtual memory space ID
+  val asid_kernel = if(CONFIG.GPU.MMU_ENABLE) Some(UInt(CONFIG.GPU.ASID_WIDTH)) else None // Virtual memory space ID
 }
 
 /** IO between CU-interface and CU

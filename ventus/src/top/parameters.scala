@@ -10,6 +10,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   val SPIKE_OUTPUT: Boolean = true
   val INST_CNT: Boolean = false
   val INST_CNT_2: Boolean = true
+  val MMU_ENABLED: Boolean = false
+  def MMU_ASID_WIDTH = 16
   val wid_to_check = 2
   def num_bank = 4
   def num_collectorUnit = num_warp
@@ -161,7 +163,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
       val NUM_WG_SLOT = num_block                  // Number of WG slot in each CU
       val NUM_WF_SLOT = num_warp                   // Number of WF slot in each CU
       val NUM_THREAD = num_thread                  // Number of thread in each WF
-      val ASID_WIDTH = 32.W
+      val MMU_ENABLE = MMU_ENABLED                 // if MMU will be used
+      val ASID_WIDTH = MMU_ASID_WIDTH.W            // MMU ASID width
     }
     object WG {
       val WG_ID_WIDTH = parameters.WG_ID_WIDTH.W

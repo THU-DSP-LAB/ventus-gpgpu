@@ -1,10 +1,10 @@
 #include "kernel.hpp"
-#include "log.h"
 #include <cassert>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <spdlog/logger.h>
 #include <string>
 #include <vector>
 
@@ -44,17 +44,47 @@ uint32_t Kernel::get_next_wgid() const { return m_wgid_base + get_next_wg_idx_in
 void Kernel::wg_dispatched() {
     assert(is_dispatching());
     uint32_t idx = get_next_wg_idx_in_kernel();
+    if (m_wg_status[idx] != WG_STATUS_WAITING) {
+        logger->critical("Kernel {} WG {} is dispatched twice", m_kernel_name, idx);
+    }
     assert(m_wg_status[idx] == WG_STATUS_WAITING);
     m_wg_status[idx] = WG_STATUS_RUNNING;
     increment_x_then_y_then_z(m_next_wg, m_grid_dim);
 }
 
-Kernel::Kernel(const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file)
+Kernel::Kernel(
+    const std::string& kernel_name, const std::filesystem::path metadata_file, const std::filesystem::path data_file
+)
     : m_datafile(data_file)
-    , m_kernel_id(-1)
-    , m_kernel_name(kernel_name) {
+    , m_kernel_id(-1) // kernel_id will be assigned when kernel get activated
+    , m_kernel_name(kernel_name)
+    , m_load_data_callback(nullptr)
+    , m_finish_callback(nullptr) {
     // Get metadata of this kernel
     initMetaData(metadata_file);
+    // Init thread-block status record vector
+    m_wg_status.resize(m_metadata.kernel_size[0] * m_metadata.kernel_size[1] * m_metadata.kernel_size[2]);
+    std::fill(m_wg_status.begin(), m_wg_status.end(), WG_STATUS_WAITING);
+    m_is_activated = false;
+}
+
+Kernel::Kernel(
+    const metadata_t* metadata, std::function<void(const metadata_t*)> data_load_callback,
+    std::function<void(const metadata_t*)> finish_callback, std::shared_ptr<spdlog::logger> logger_
+)
+    : m_kernel_name(metadata && metadata->name ? metadata->name : "unknown_kernel")
+    , m_load_data_callback(data_load_callback)
+    , m_finish_callback(finish_callback)
+    , logger(logger_) {
+    assert(metadata);
+    assert(logger_);
+    // copy metadata
+    m_metadata = *metadata;
+    // Init other members from metadata
+    m_kernel_id = m_metadata.kernel_id;
+    m_grid_dim.x = m_metadata.kernel_size[0];
+    m_grid_dim.y = m_metadata.kernel_size[1];
+    m_grid_dim.z = m_metadata.kernel_size[2];
     // Init thread-block status record vector
     m_wg_status.resize(m_metadata.kernel_size[0] * m_metadata.kernel_size[1] * m_metadata.kernel_size[2]);
     std::fill(m_wg_status.begin(), m_wg_status.end(), WG_STATUS_WAITING);
@@ -72,9 +102,9 @@ void Kernel::readHexFile(const std::string& filename, std::vector<uint64_t>& ite
     }
 
     char c;
-    int bits       = 0;
+    int bits = 0;
     uint64_t value = 0;
-    bool leftside  = false;
+    bool leftside = false;
 
     while (file.get(c)) {
         if (c == '\n') {
@@ -97,8 +127,8 @@ void Kernel::readHexFile(const std::string& filename, std::vector<uint64_t>& ite
 
         if (bits >= itemSize) {
             items.push_back(value);
-            value    = 0;
-            bits     = 0;
+            value = 0;
+            bits = 0;
             leftside = false;
         }
     }
@@ -114,6 +144,7 @@ void Kernel::initMetaData(const std::string& filename) {
     std::vector<uint64_t> metadata;
     readHexFile(filename, metadata, 64);
     assignMetadata(metadata, m_metadata);
+    m_metadata.name = m_kernel_name.c_str();
 }
 
 void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& mtd) {
@@ -130,15 +161,15 @@ void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& m
     m_grid_dim.y = mtd.kernel_size[1];
     m_grid_dim.z = mtd.kernel_size[2];
 
-    mtd.wf_size          = metadata[index++];
-    mtd.wg_size          = metadata[index++];
+    mtd.wf_size = metadata[index++];
+    mtd.wg_size = metadata[index++];
     mtd.metaDataBaseAddr = metadata[index++];
-    mtd.ldsSize          = metadata[index++];
-    mtd.pdsSize          = metadata[index++];
-    mtd.sgprUsage        = metadata[index++];
-    mtd.vgprUsage        = metadata[index++];
-    mtd.pdsBaseAddr      = metadata[index++];
-    mtd.num_buffer       = metadata[index++];
+    mtd.ldsSize = metadata[index++];
+    mtd.pdsSize = metadata[index++];
+    mtd.sgprUsage = metadata[index++];
+    mtd.vgprUsage = metadata[index++];
+    mtd.pdsBaseAddr = metadata[index++];
+    mtd.num_buffer = metadata[index++];
 
     mtd.buffer_base = new uint64_t[mtd.num_buffer];
 
@@ -157,55 +188,28 @@ void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& m
     }
 }
 
-void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base, MemBox* mem) {
-    m_kernel_id                 = kernel_id;
-    m_wgid_base                 = wgid_base;
-    metadata_t& mtd             = m_metadata;
-    const std::string& filename = m_datafile;
+void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base) {
+    m_kernel_id = kernel_id;
+    m_wgid_base = wgid_base;
+    m_metadata.kernel_id = kernel_id;
+
+    // If it's needed to load data before running kernel, do it
+    if (m_load_data_callback)
+        m_load_data_callback(&m_metadata);
 
     for (const auto wg_status : m_wg_status) {
         assert(wg_status == WG_STATUS_WAITING);
     }
 
-    std::ifstream file(filename);
-    if (!file.is_open()) {
-        std::cerr << "Failed to open file: " << filename << std::endl;
-        assert(0);
-    }
-
-    std::string line;
-    int bufferIndex = 0;
-    std::vector<uint8_t> buffer;
-    for (int bufferIndex = 0; bufferIndex < mtd.num_buffer; bufferIndex++) {
-        buffer.reserve(mtd.buffer_size[bufferIndex]); // 提前分配空间
-        int readbytes = 0;
-        while (readbytes < mtd.buffer_size[bufferIndex]) {
-            std::getline(file, line);
-            for (int i = line.length(); i > 0; i -= 2) {
-                std::string hexChars = line.substr(i - 2, 2);
-                uint8_t byte         = std::stoi(hexChars, nullptr, 16);
-                buffer.push_back(byte);
-            }
-            readbytes += 4;
-        }
-        mem->write(mtd.buffer_base[bufferIndex], buffer.data(), readbytes);
-        buffer.clear();
-    }
-    std::getline(file, line);
-    for (const char* ptr = line.c_str(); *ptr != '\0'; ptr++) {
-        assert(*ptr == '0');
-    }
-    assert(file.eof());
-
-    file.close();
     m_is_activated = true;
-    log_info("kernel%2d %s activate", get_kid(), get_kname().c_str());
+    logger->trace("kernel{0:>2} {1} activate", get_kid(), get_kname());
 }
-void Kernel::deactivate(MemBox* mem) {
+void Kernel::deactivate() {
     assert(is_activated());
     assert(!is_running());
     m_is_activated = false;
-    // TODO: when MMU is enabled, release memory usage
+    if (m_finish_callback)
+        m_finish_callback(&m_metadata);
 }
 
 bool Kernel::is_finished() const {

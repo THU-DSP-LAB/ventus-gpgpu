@@ -251,7 +251,7 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.num_wg_x -> 0.U,
         _.num_wg_y -> 0.U,
         _.num_wg_z -> 0.U,
-        _.asid_kernel -> 0.U,
+        _.asid_kernel.get -> 0.U,
       ) }
 
 
