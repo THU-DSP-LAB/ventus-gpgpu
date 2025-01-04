@@ -24,7 +24,7 @@ Our work has been accepted to **The 42nd IEEE International Conference on Comput
 
 ### Paper Information
 
-**Citation Format (BibTeX):**
+J. Li et al., "Ventus: A High-performance Open-source GPGPU Based on RISC-V and Its Vector Extension," 2024 IEEE 42nd International Conference on Computer Design (ICCD), Milan, Italy, 2024, pp. 276-279, doi: 10.1109/ICCD63220.2024.00049.
 
 ```bibtex
 @INPROCEEDINGS{10818098,
@@ -32,8 +32,6 @@ Our work has been accepted to **The 42nd IEEE International Conference on Comput
   booktitle={2024 IEEE 42nd International Conference on Computer Design (ICCD)}, 
   title={Ventus: A High-performance Open-source GPGPU Based on RISC-V and Its Vector Extension}, 
   year={2024},
-  volume={},
-  number={},
   pages={276-279},
   keywords={Generative AI;Large language models;Graphics processing units;Full stack;Computer architecture;Vectors;Software;Open source hardware;Field programmable gate arrays;Software development management;GPGPU;Open-source Design;RISC-V;Vector},
   doi={10.1109/ICCD63220.2024.00049}}
