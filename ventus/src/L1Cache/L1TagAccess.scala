@@ -75,7 +75,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, readOnly: Boolean)extends Mo
     shouldReset = false,
     holdRead = true,
     singlePort = false,
-    bypassWrite = false
+    bypassWrite = true
   ))
   if(readOnly){
     tagBodyAccess.io.r.req <> io.probeRead
