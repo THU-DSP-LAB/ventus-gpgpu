@@ -571,7 +571,7 @@ class DataCache(implicit p: Parameters) extends DCacheModule{
   TagAccess.io.allocateWrite.valid := Mux(tagReqValidCtrl,memRsp_Q.io.deq.valid && memRspIsRead,false.B)
   TagAccess.io.allocateWrite.bits.setIdx := memRsp_Q.io.deq.bits.d_source(SetIdxBits-1,0)
   //TagAccess.io.allocateWriteData_st1 to be connected in memRsp_pipe2_cycle
-  probereadAllocateWriteConflict := io.coreReq.valid && RegNext(TagAccess.io.allocateWrite.valid)
+  probereadAllocateWriteConflict := io.coreReq.valid && TagAccess.io.allocateWrite.valid
   // ******     l1_data_cache::memRsp_pipe2_cycle      ******
   //missRspFromMshr_st1 := MshrAccess.io.missRspOut.valid//suffix _st2 is on another path comparing to cacheHit
   missRspTI_st1 := MshrAccess.io.missRspOut.bits.targetInfo.asTypeOf(new VecMshrTargetInfo)
