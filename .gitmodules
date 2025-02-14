@@ -13,4 +13,4 @@
 	branch = chisel6
 [submodule "difftest"]
 	path = difftest
-	url = https://github.com/OpenXiangShan/difftest.git
+	url = git@github.com:reoLantern/difftest.git

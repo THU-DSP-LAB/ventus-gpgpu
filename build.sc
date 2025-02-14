@@ -6,6 +6,7 @@ import mill._
 import mill.scalalib._
 import mill.scalalib.publish._
 import coursier.maven.MavenRepository
+import $file.difftest.build
 
 // Import from each repository
 import $file.dependencies.`rocket-chip`.common
@@ -159,6 +160,13 @@ trait InclusiveCache
   
   def rocketchipModule = rocketchip(crossValue)
   override def moduleDeps = super.moduleDeps ++ Seq(rocketchipModule)
+}
+
+// We recommend using a fixed Chisel version.
+object difftest extends millbuild.difftest.build.CommonDiffTest {
+  def crossValue: String = "6.4.0"
+
+  override def millSourcePath = os.pwd / "difftest"
 }
 
 // Define main ventus module
