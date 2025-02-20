@@ -37,7 +37,7 @@ compile:
 
 test:
 	mkdir -p test_run_dir
-	./mill -i ventus[6.4.0].tests.testOnly play.AdvancedTest 2>&1 | tee test_run_dir/AItest-Attention.log
+	./mill -i ventus[6.4.0].tests.testOnly play.AdvancedTest 2>&1 | tee test_run_dir/AItest-MNIST_conv.log
 
 verilog:
 	./mill ventus[6.4.0].run
@@ -47,3 +47,4 @@ clean:
 
 clean-git:
 	git clean -fd
+

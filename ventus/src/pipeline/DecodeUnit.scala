@@ -577,7 +577,7 @@ class InstrDecodeV2 extends Module {
         BitPat("b1011011") -> lut(3),
         BitPat("b0001011") -> lut(3),
         // tc update
-        BitPat("b1100001") -> lut(3)
+        BitPat("b0001010") -> lut(3)
       ))
   })
   (ctrlSignals zip io.control).zipWithIndex.foreach{ case((s, c), i) =>
@@ -613,10 +613,10 @@ class InstrDecodeV2 extends Module {
     c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
     // tc update
-    c.tc := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt , true.B, false.B)//s(23)
-    c.tc_isMix := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt & io.inst(i)(12) === "b1".U.asUInt, true.B, false.B)
+    c.tc := Mux(io.inst(i)(6, 0) === "b0001010".U.asUInt , true.B, false.B)//s(23)
+    c.tc_isMix := Mux(io.inst(i)(6, 0) === "b0001010".U.asUInt & io.inst(i)(12) === "b1".U.asUInt, true.B, false.B)
     c.tc_shape := io.inst(i)(26, 25)
-    c.tc_ReLU := Mux(io.inst(i)(6, 0) === "b1100001".U.asUInt & io.inst(i)(27) === "b1".U.asUInt, true.B, false.B)
+    c.tc_ReLU := Mux(io.inst(i)(6, 0) === "b0001010".U.asUInt & io.inst(i)(27) === "b1".U.asUInt, true.B, false.B)
     c.disable_mask := s(24)
     c.custom_signal_0 := s(25)
     c.reg_idx1 := Cat(regextInfo(i).regPrefix(1), io.inst(i)(19, 15))

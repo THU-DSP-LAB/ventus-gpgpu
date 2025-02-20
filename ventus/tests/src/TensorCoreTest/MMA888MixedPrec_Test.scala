@@ -2,7 +2,7 @@ package TensorCoreTest
 
 import FPUv2.TCCtrl
 import FPUv2.utils.RoundingModes
-import TensorCore.{TCComputationInput_MixedPrecision, TCCtrl_mix_mul_slot, TC_MMA888_V2, TC_MMAInput, TC_MMAInput_MixedPrecision, TC_MMAInput_MixedPrecision2, TC_MMAOutput, TC_MMAOutput2, TensorCore_MixedPrecision_multslot_simple, vTCData}
+import TensorCore._
 import chisel3._
 import chisel3.experimental.BundleLiterals._
 import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
@@ -10,7 +10,6 @@ import chiseltest._
 import org.scalatest.flatspec.AnyFlatSpec
 import pipeline.{CtrlSigs, InstWriteBack, TCCtrl_mulslot_v2}
 import play.TestUtils.RequestSender
-//import chisel3.util.Hexadecimal
 import top.parameters._
 
 import scala.io.Source

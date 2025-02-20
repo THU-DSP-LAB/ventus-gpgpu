@@ -16,7 +16,7 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 import IDecode._
-import TensorCore.{TC_MMA888, TC_MMA888_V2, TensorCore_MixedPrecision_multslot_simple}
+import TensorCore.{TensorCore_MixedPrecision_multslot_simple}
 
 class BranchCtrl extends Bundle{
   val wid=UInt(depth_warp.W)
