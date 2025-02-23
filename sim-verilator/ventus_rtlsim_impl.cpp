@@ -1,12 +1,13 @@
 #include "ventus_rtlsim_impl.hpp"
+#include "Vdut.h"
 #include "ventus_rtlsim.h"
+#include "verilated.h"
 #include <csignal>
 #include <cstdint>
 #include <fmt/core.h>
 #include <functional>
 #include <iostream>
 #include <memory>
-#include <new>
 #include <spdlog/common.h>
 #include <spdlog/formatter.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -55,6 +56,7 @@ public:
     std::unique_ptr<spdlog::formatter> clone() const override {
         return std::make_unique<Formatter_ventus_rtlsim>(m_callback);
     }
+
 private:
     std::function<std::string()> m_callback;
 };
@@ -63,15 +65,16 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     // copy and check sim config
     config = *config_;
     if (config.log.file.enable && config.log.file.filename == nullptr) {
-        std::cerr << "Log file name out given, set to default: logs/ventus_rtlsim.log" << std::endl;
+        std::cerr << "Log file name not given, set to default: logs/ventus_rtlsim.log" << std::endl;
         config.log.file.filename = "logs/ventus_rtlsim.log";
     }
     if (config.waveform.enable && config.waveform.filename == NULL) {
-        std::cerr << "waveform enabled but fst filename is NULL, set to default: obj_dir/Vdut.fst" << std::endl;
+        std::cerr << "waveform enabled but fst filename is NULL, set to default: logs/ventus_rtlsim.fst" << std::endl;
         config.waveform.filename = "logs/ventus_rtlsim.fst";
     }
     if (config.snapshot.enable && config.snapshot.filename == NULL) {
-        std::cerr << "waveform enabled but fst filename is NULL, set to default: obj_dir/Vdut.fst" << std::endl;
+        std::cerr << "waveform enabled but fst filename is NULL, set to default: logs/ventus_rtlsim.snapshot.fst"
+                  << std::endl;
         config.snapshot.filename = "logs/ventus_rtlsim.snapshot.fst";
     }
     config.verilator.argc = 0;
@@ -112,6 +115,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     }
 
     // init Verilator simulation context
+    // contextp = new VerilatedContext;
     contextp = new VerilatedContext;
     contextp->debug(0);
     contextp->randReset(0);
@@ -129,9 +133,10 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
         contextp->commandArgs(config_->verilator.argc, config_->verilator.argv);
 
     // instantiate hardware
-    dut = new Vdut;
+    dut = new Vdut();
     cta = new Cta(logger);
-    pmem_map.clear();
+    pmem = std::make_unique<PhysicalMemory>(config.pmem.auto_alloc, config.pmem.pagesize, logger);
+    // pmem_map.clear();
 
     // waveform traces (FST)
     if (config.waveform.enable) {
@@ -181,7 +186,7 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
         // Physical memory access - read
         if (dut->io_mem_rd_en) {
             uint64_t rd_addr = dut->io_mem_rd_addr;
-            pmem_read(rd_addr, dut->io_mem_rd_data.data(), dut->io_mem_rd_data.Words * 4);
+            pmem->read(rd_addr, dut->io_mem_rd_data.data(), dut->io_mem_rd_data.Words * 4);
         }
         // Physical memory access - write
         if (dut->io_mem_wr_en) {
@@ -194,7 +199,7 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
                     mask_raw >>= 1;
                 }
             }
-            if (!pmem_write(wr_addr, dut->io_mem_wr_data.data(), mask, dut->io_mem_wr_data.Words * 4)) {
+            if (!pmem->write(wr_addr, dut->io_mem_wr_data.data(), mask, dut->io_mem_wr_data.Words * 4)) {
                 sim_got_error = true;
             }
             delete[] mask;
@@ -294,112 +299,10 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
         snapshot_kill_all(); // kill unused snapshots in the parent process
     }
 
-    // release pmem
-    for (auto& it : pmem_map) {
-        delete[] it.second;
-    }
-
     delete dut;
     delete cta;
     delete tfp;
     delete contextp; // log system use this to get time
-}
-
-bool ventus_rtlsim_t::pmem_page_alloc(paddr_t paddr) {
-    if (paddr % config.pmem.pagesize != 0) {
-        logger->warn("PMEM address 0x{:x} is not aligned to page! Align it...", paddr);
-        paddr = pmem_get_page_base(paddr, config.pmem.pagesize);
-    }
-    if (!config.pmem.auto_alloc && pmem_map.find(paddr) != pmem_map.end()) {
-        logger->error("PMEM page at 0x{:x} duplicate allocation", paddr);
-        return false;
-    }
-    pmem_map[paddr] = new (std::align_val_t(4096)) uint8_t[config.pmem.pagesize];
-    return true;
-}
-
-bool ventus_rtlsim_t::pmem_page_free(paddr_t paddr) {
-    if (paddr % config.pmem.pagesize != 0) {
-        logger->warn("PMEM address 0x{:x} is not aligned to page! Align it...", paddr);
-        paddr = pmem_get_page_base(paddr, config.pmem.pagesize);
-    }
-    if (pmem_map.find(paddr) == pmem_map.end()) {
-        logger->error("PMEM page at 0x{:x} not allocated", paddr);
-        return false;
-    }
-    delete[] pmem_map[paddr];
-    pmem_map.erase(paddr);
-    return true;
-}
-
-bool ventus_rtlsim_t::pmem_write(paddr_t paddr, const void* data_, const bool mask[], uint64_t size) {
-    const uint8_t* data = static_cast<const uint8_t*>(data_);
-    paddr_t first_page_base = pmem_get_page_base(paddr, config.pmem.pagesize);
-    paddr_t first_page_end = first_page_base + config.pmem.pagesize - 1;
-    if (paddr + size - 1 > first_page_end) {
-        uint64_t size_this_copy = first_page_end - paddr + 1;
-        if (!pmem_write(first_page_end + 1, data + size_this_copy, mask + size_this_copy, size - size_this_copy))
-            return false;
-        size = size_this_copy;
-    }
-    if (pmem_map.find(first_page_base) == pmem_map.end()) {
-        if (config.pmem.auto_alloc) {
-            pmem_page_alloc(first_page_base);
-        } else {
-            logger->critical("PMEM page at 0x{:x} not allocated, cannot write", paddr);
-            return false;
-        }
-    }
-    uint8_t* buf = pmem_map.at(first_page_base) + paddr - first_page_base;
-    for (uint64_t i = 0; i < size; i++) {
-        if (mask[i]) {
-            buf[i] = data[i];
-        }
-    }
-    return true;
-}
-
-bool ventus_rtlsim_t::pmem_write(paddr_t paddr, const void* data_, uint64_t size) {
-    const uint8_t* data = static_cast<const uint8_t*>(data_);
-    paddr_t first_page_base = pmem_get_page_base(paddr, config.pmem.pagesize);
-    paddr_t first_page_end = first_page_base + config.pmem.pagesize - 1;
-    if (paddr + size - 1 > first_page_end) {
-        uint64_t size_this_copy = first_page_end - paddr + 1;
-        if (!pmem_write(first_page_end + 1, data + size_this_copy, size - size_this_copy))
-            return false;
-        size = size_this_copy;
-    }
-    if (pmem_map.find(first_page_base) == pmem_map.end()) {
-        if (config.pmem.auto_alloc) {
-            pmem_page_alloc(first_page_base);
-        } else {
-            logger->critical("PMEM page at 0x{:x} not allocated, cannot write", paddr);
-            return false;
-        }
-    }
-    uint8_t* buf = pmem_map.at(first_page_base) + paddr - first_page_base;
-    std::memcpy(buf, data, size);
-    return true;
-}
-
-bool ventus_rtlsim_t::pmem_read(paddr_t paddr, void* data_, uint64_t size) {
-    bool success = true;
-    uint8_t* data = static_cast<uint8_t*>(data_);
-    paddr_t first_page_base = pmem_get_page_base(paddr, config.pmem.pagesize);
-    paddr_t first_page_end = first_page_base + config.pmem.pagesize - 1;
-    if (paddr + size - 1 > first_page_end) {
-        uint64_t size_this_copy = first_page_end - paddr + 1;
-        success = pmem_read(first_page_end + 1, data + size_this_copy, size - size_this_copy);
-        size = size_this_copy;
-    }
-    if (pmem_map.find(first_page_base) == pmem_map.end()) {
-        logger->warn("PMEM page at 0x{:x} not allocated, read as all zero", paddr);
-        std::memset(data, 0, size);
-        return false;
-    }
-    uint8_t* buf = pmem_map.at(first_page_base) + paddr - first_page_base;
-    std::memcpy(data, buf, size);
-    return success;
 }
 
 void ventus_rtlsim_t::snapshot_fork() {
