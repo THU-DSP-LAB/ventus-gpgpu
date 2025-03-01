@@ -3,7 +3,6 @@ package top
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
 import chisel3.util._
 
-// TODO: MOVE parameters to `ventus/top'
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
   def num_sm = 2
   val SINGLE_INST: Boolean = false
@@ -13,7 +12,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   val MMU_ENABLED: Boolean = false
   def MMU_ASID_WIDTH = 16
   val wid_to_check = 2
-  def num_bank = 4
+  def num_bank = 4                  // # of banks for register file
   def num_collectorUnit = num_warp
   def num_vgpr:Int = 4096
   def num_sgpr:Int = 4096
@@ -27,7 +26,11 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def num_cluster = 1
 
   def num_sm_in_cluster = num_sm / num_cluster
-  def depth_warp = log2Ceil(num_warp)
+  def depth_warp = if (num_warp == 1) 1 else log2Ceil(num_warp)
+
+  // for register file bank access only, in operand collector
+  // Calculate the highest slice index, ensuring it does not exceed the actual width of 'wid'
+  def widSliceHigh = scala.math.min(log2Ceil(num_bank) - 1, depth_warp - 1)
 
   var num_thread = 8
 

@@ -85,9 +85,11 @@ class collectorUnit extends Module{
   val s_idle :: s_add :: s_out :: Nil = Enum(3)
   val state = RegInit(s_idle)
   // Lookup table for address transformation
+  // generate tuple: warp_id -> bank_id (bank id of r0 in this warp. this is interleave)
   val bankIdLookup = (0 until num_warp + 256).map { x =>
     (x -> x % num_bank)
   }.map { x => (x._1.U -> x._2.U) }
+  // reg addr in one bank
   val addrLookupScalar = (0 until num_warp).map { x =>
     (x -> (io.sgpr_base(x) >> log2Ceil(num_bank)).asUInt)
   }.map { x => (x._1.U -> x._2) }
@@ -99,8 +101,8 @@ class collectorUnit extends Module{
   for (i <- 0 until 4) {
 
     io.outArbiterIO(i).bits.bankID := Mux(io.control.fire && (state === s_idle),
-      io.control.bits.wid(log2Ceil(num_bank)-1, 0) + regIdxWire(i)(log2Ceil(num_bank)-1, 0),
-      controlReg.wid(log2Ceil(num_bank)-1, 0) + regIdx(i)(log2Ceil(num_bank)-1, 0))
+      io.control.bits.wid(widSliceHigh, 0) + regIdxWire(i)(log2Ceil(num_bank)-1, 0),
+      controlReg.wid(widSliceHigh, 0) + regIdx(i)(log2Ceil(num_bank)-1, 0))
     io.outArbiterIO(i).bits.rsType := Mux(io.control.fire && (state === s_idle), rsTypeWire(i), rsType(i))
 
     when(Mux(io.control.fire && (state === s_idle), rsTypeWire(i), rsType(i)) === 1.U) {
@@ -592,9 +594,9 @@ class operandCollector extends Module{
   val regW = Wire(UInt(7.W))
   regW := io.writeScalarCtrl.bits.reg_idxw >> log2Ceil(num_bank).U
 
-  wbVecBankId := io.writeVecCtrl.bits.reg_idxw(log2Ceil(num_bank)-1,0)+io.writeVecCtrl.bits.warp_id(log2Ceil(num_bank)-1,0)
+  wbVecBankId := io.writeVecCtrl.bits.reg_idxw(log2Ceil(num_bank)-1,0)+io.writeVecCtrl.bits.warp_id(widSliceHigh,0)
   wbVecBankAddr := (io.vgpr_base(io.writeVecCtrl.bits.warp_id) >> log2Ceil(num_bank).U).asUInt + (io.writeVecCtrl.bits.reg_idxw >> log2Ceil(num_bank).U)
-  wbScaBankId := io.writeScalarCtrl.bits.reg_idxw(log2Ceil(num_bank)-1,0)+io.writeScalarCtrl.bits.warp_id(log2Ceil(num_bank)-1,0)
+  wbScaBankId := io.writeScalarCtrl.bits.reg_idxw(log2Ceil(num_bank)-1,0)+io.writeScalarCtrl.bits.warp_id(widSliceHigh,0)
   wbScaBankAddr := (io.sgpr_base(io.writeScalarCtrl.bits.warp_id) >> log2Ceil(num_bank).U).asUInt + (io.writeScalarCtrl.bits.reg_idxw >> log2Ceil(num_bank).U)
   val wbScaBankAddrtest = Wire(UInt(depth_regBank.W))
   wbScaBankAddrtest := sgprW + regW
