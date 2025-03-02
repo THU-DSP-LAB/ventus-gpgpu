@@ -71,15 +71,15 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_BlockWords: Int = num_thread//16  // number of words per cacheline(block)
   def dcache_wshr_entry: Int = 4
 
-  def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
+  def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)  //  8
 
   def BytesOfWord = 32 / 8
 
-  def dcache_WordOffsetBits = log2Ceil(BytesOfWord) //a Word has 4 Bytes
+  def dcache_WordOffsetBits = log2Ceil(BytesOfWord) //a Word has 4 Bytes  =2
 
-  def dcache_BlockOffsetBits = log2Ceil(dcache_BlockWords) // select word in block
+  def dcache_BlockOffsetBits = log2Ceil(dcache_BlockWords) // select word in block =4
 
-  def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
+  def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)//=32 -8-4-2=18
 
   def dcache_MshrEntry: Int = 4
 
@@ -104,7 +104,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_portFactor: Int = 2
 
-  def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)
+  def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)  //3+log2up(4)+log2up(256)=3+2+8=13
 
   def l2cache_cache = CacheParameters(2, l2cache_NWays, l2cache_NSets, num_l2cache, l2cache_BlockWords << 2, l2cache_BlockWords << 2)
   def l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster,dcache_MshrEntry,dcache_NSets)
@@ -188,9 +188,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def max_l2cacheline = 6
 
-  def cacheline = dcache_BlockWords * 4 //128 // Math.pow(2, l2cachetagbits << 2).toInt //bytes
+  def cacheline = dcache_BlockWords * 4 //number_thread*4= 16*4(word_size=4 Byte)=64 // Math.pow(2, l2cachetagbits << 2).toInt //bytes
 
-  var l2cacheline = cacheline
+  var l2cacheline = cacheline   //number_thread*4= 16*4(word_size=4 Byte)=64
   var sharedcacheline = cacheline
 
   def l2wayBits = log2Ceil(l2cache_NWays) //4
@@ -210,9 +210,9 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def addr_tag_bits = xLen - log2Ceil(l2cacheline)
   def addr_set_bits = xLen - log2Ceil(sharedcacheline)
 
-  def numgroupl2cache = l2cacheline / dma_aligned_bulk
+  def numgroupl2cache = l2cacheline / dma_aligned_bulk  // (number_thread*4= 16*4(word_size=4 Byte) )  / 4  =64 /4 =16
 
-  def numgroupshared = num_thread * 4 / dma_aligned_bulk
+  def numgroupshared = num_thread * 4 / dma_aligned_bulk  // (number_thread*4= 16*4(word_size=4 Byte) )  / 4  =64 /4 =16
 
   def numgroupinsdmax = maxcopysize / dma_aligned_bulk
 
