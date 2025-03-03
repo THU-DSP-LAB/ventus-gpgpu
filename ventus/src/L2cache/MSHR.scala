@@ -86,7 +86,7 @@ class MSHR (params:InclusiveCacheParameters_lite)extends Module {
     data_reg := io.sinkd.bits.data
   }
 
-  io.schedule.d.valid := io.valid && sink_d_reg //为了使得最后全弹出来才拉低，需要知道这个MSHR是否还有效
+  io.schedule.d.valid := io.valid && sink_d_reg && !sche_a_valid//为了使得最后全弹出来才拉低，需要知道这个MSHR是否还有效
   io.schedule.d.bits := request
   io.schedule.d.bits.hit := false.B
   io.schedule.d.bits.dirty := false.B

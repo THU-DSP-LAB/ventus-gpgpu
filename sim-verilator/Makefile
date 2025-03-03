@@ -33,7 +33,7 @@ else
 DIR_BUILDOBJ = $(DIR_BUILDOBJ_DEBUG)
 endif
 
-SRC_CXX = sim_main.cpp cmdarg.cpp kernel.cpp
+SRC_CXX = sim_main.cpp cmdarg.cpp kernel.cpp physical_mem.cpp
 OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
 DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
 

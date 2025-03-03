@@ -55,11 +55,11 @@ extern "C" void ventus_rtlsim_add_kernel(
     ventus_rtlsim_add_kernel__delay_data_loading(sim, metadata, nullptr, finish_callback);
 }
 
-extern "C" bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base) { return sim->pmem_page_alloc(base); }
-extern "C" bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base) { return sim->pmem_page_free(base); }
+extern "C" bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base) { return sim->pmem->page_alloc(base); }
+extern "C" bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base) { return sim->pmem->page_free(base); }
 extern "C" bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size) {
-    return sim->pmem_write(dst, src, size);
+    return sim->pmem->write(dst, src, size);
 }
 extern "C" bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size) {
-    return sim->pmem_read(src, dst, size);
+    return sim->pmem->read(src, dst, size);
 }
