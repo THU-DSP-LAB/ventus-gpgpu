@@ -829,6 +829,8 @@ class SFUexe extends Module{
   val next_i_cnt = PriorityEncoder((mask_grp.asUInt & ( ~(1.U(num_thread.W)<<i_cnt)).asUInt))
   val i_valid = RegInit(false.B) // a better valid should change for each fire.
   val i_ctrl = data_buffer.bits.ctrl
+  val isExp = (i_ctrl.alu_fn === FN_EXP)
+
   val i_data1 = WireInit(VecInit(Seq.fill(num_sfu)(0.U(xLen.W))))
   val i_data2 = WireInit(VecInit(Seq.fill(num_sfu)(0.U(xLen.W))))
   val i_data3 = WireInit(VecInit(Seq.fill(num_sfu)(0.U(xLen.W))))
@@ -845,7 +847,9 @@ class SFUexe extends Module{
 
   val intDiv=VecInit(Seq.fill(num_sfu)(Module(new IntDivMod(xLen)).io))
   val floatDiv=VecInit(Seq.fill(num_sfu)(Module(new FloatDivSqrt).io))
-  val alu_out_arbiter=VecInit(Seq.fill(num_sfu)(Module(new Arbiter(UInt(xLen.W),2)).io))
+  val exp = VecInit(Seq.fill(num_sfu)(Module(new EXPFP32).io))
+
+  val alu_out_arbiter=VecInit(Seq.fill(num_sfu)(Module(new Arbiter(UInt(xLen.W),3)).io))
   alu_out_arbiter.foreach(x=>x.out.ready:=alu_out_arbiter.map(x=>x.out.valid).reduce(_&_))// i_ctrl.wfd & result_v.io.enq.ready | i_ctrl.wxd & result_x.io.enq.ready | !(i_ctrl.wxd&i_ctrl.wfd)
   //result_x.io.enq.bits:=Cat(out_data(0),i_ctrl.wxd,i_ctrl.reg_idxw,i_ctrl.wid).asTypeOf(new WriteScalarCtrl)
   //result_v.io.enq.bits:=Cat(out_data.asUInt,data_buffer.bits.mask.asUInt,i_ctrl.wfd,i_ctrl.reg_idxw,i_ctrl.wid).asTypeOf(new WriteVecCtrl)
@@ -865,35 +869,52 @@ class SFUexe extends Module{
   result_x.io.enq.valid:=state===s_finish&i_ctrl.wxd
   result_v.io.enq.valid:=state===s_finish&i_ctrl.wvd
   val o_ready= i_ctrl.isvec&result_v.io.enq.ready | !i_ctrl.isvec & result_x.io.enq.ready
-  for(i <- 0 until num_sfu)
-  {
-    alu_out_arbiter(i).in(0).bits := Mux(i_ctrl.alu_fn(0), intDiv(i).out.bits.r, intDiv(i).out.bits.q)
-    alu_out_arbiter(i).in(1).bits := floatDiv(i).out.bits.result
+
+  for (i <- 0 until num_sfu) {
+    alu_out_arbiter(i).in(0).bits  := Mux(i_ctrl.alu_fn(0), intDiv(i).out.bits.r, intDiv(i).out.bits.q)
+    alu_out_arbiter(i).in(1).bits  := floatDiv(i).out.bits.result
     alu_out_arbiter(i).in(0).valid := intDiv(i).out.valid
     alu_out_arbiter(i).in(1).valid := floatDiv(i).out.valid
-    intDiv(i).out.ready := alu_out_arbiter(i).in(0).ready
-    floatDiv(i).out.ready := alu_out_arbiter(i).in(1).ready
+    alu_out_arbiter(i).in(2).bits  := exp(i).out.bits.out
+    alu_out_arbiter(i).in(2).valid := exp(i).out.valid
+    intDiv(i).out.ready            := alu_out_arbiter(i).in(0).ready
+    floatDiv(i).out.ready          := alu_out_arbiter(i).in(1).ready
+    exp(i).out.ready               := alu_out_arbiter(i).in(2).ready
 
-    intDiv(i).in.bits.a := 1.U
-    intDiv(i).in.bits.d := 1.U
-    floatDiv(i).in.bits.a :=(0x3f800000L).U(32.W)
-    floatDiv(i).in.bits.b :=(0x3f800000L).U(32.W)
-    floatDiv(i).in.bits.c :=(0x3f800000L).U(32.W)
-    for(j <- 0 until num_grp){
-      when(j.asUInt===i_cnt & i_mask(i)){
-    intDiv(i).in.bits.a := i_data1(i)
-    intDiv(i).in.bits.d := i_data2(i)
-    floatDiv(i).in.bits.a := i_data1(i)
-    floatDiv(i).in.bits.b := i_data2(i)
-    floatDiv(i).in.bits.c := i_data3(i)}}
+    intDiv(i).in.bits.a   := 1.U
+    intDiv(i).in.bits.d   := 1.U
+    floatDiv(i).in.bits.a := (0x3f800000L).U(32.W)
+    floatDiv(i).in.bits.b := (0x3f800000L).U(32.W)
+    floatDiv(i).in.bits.c := (0x3f800000L).U(32.W)
+    exp(i).in.bits.in     := (0x3f800000L).U(32.W)
+
+    for (j <- 0 until num_grp) {
+      when(j.asUInt === i_cnt & i_mask(i)) {
+        intDiv(i).in.bits.a   := i_data1(i)
+        intDiv(i).in.bits.d   := i_data2(i)
+        floatDiv(i).in.bits.a := i_data1(i)
+        floatDiv(i).in.bits.b := i_data2(i)
+        floatDiv(i).in.bits.c := i_data3(i)
+        exp(i).in.bits.in     := i_data2(i)
+      }
+    }
+
     intDiv(i).in.bits.signed := !i_ctrl.alu_fn(1)
-    floatDiv(i).in.bits.rm := io.rm
-    floatDiv(i).in.bits.op := i_ctrl.alu_fn(2, 0)
+    floatDiv(i).in.bits.rm   := io.rm
+    floatDiv(i).in.bits.op   := i_ctrl.alu_fn(2, 0)
+    exp(i).in.bits.rm        := io.rm
 
-    intDiv(i).in.valid := !i_ctrl.fp & i_valid
-    floatDiv(i).in.valid := i_ctrl.fp & i_valid
+    intDiv(i).in.valid   := i_valid && !i_ctrl.fp && !isExp
+    floatDiv(i).in.valid := i_valid &&  i_ctrl.fp  && !isExp
+    exp(i).in.valid      := i_valid &&  isExp
+
   }
-    val i_ready = Mux(i_ctrl.fp, floatDiv(0).in.ready, intDiv(0).in.ready)
+
+  val i_ready = MuxCase(intDiv(0).in.ready, Seq(
+    (i_ctrl.fp) -> floatDiv(0).in.ready,
+    (isExp)     -> exp(0).in.ready
+  ))
+
   data_buffer.ready:=state===s_finish&o_ready
 
   val alu_out_fire = alu_out_arbiter(0).out.fire
