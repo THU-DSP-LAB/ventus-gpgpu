@@ -230,7 +230,6 @@ class CMAFP32LUTParallel[T <: Bundle](ctrlSignals: T) extends Module {
   class MULToADD extends Bundle {
     val c       = UInt(32.W)
     val index   = UInt(8.W)
-    val bypass  = Bool()
     val topCtrl = ctrlSignals.cloneType.asInstanceOf[T]
   }
   val mul   = Module(new MULFP32[MULToADD](new MULToADD))
@@ -243,7 +242,6 @@ class CMAFP32LUTParallel[T <: Bundle](ctrlSignals: T) extends Module {
   mul.io.in.bits.rm           := io.in.bits.rm
   mul.io.in.bits.ctrl.c       := io.in.bits.c
   mul.io.in.bits.ctrl.index   := io.in.bits.index
-  mul.io.in.bits.ctrl.bypass  := false.B
   mul.io.in.bits.ctrl.topCtrl := io.in.bits.ctrl
   io.in.ready                 := mul.io.in.ready
 
