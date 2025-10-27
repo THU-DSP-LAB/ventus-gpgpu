@@ -911,8 +911,8 @@ class SFUexe extends Module{
   }
 
   val i_ready = MuxCase(intDiv(0).in.ready, Seq(
-    (i_ctrl.fp) -> floatDiv(0).in.ready,
-    (isExp)     -> exp(0).in.ready
+    (isExp)     -> exp(0).in.ready,
+    (i_ctrl.fp) -> floatDiv(0).in.ready
   ))
 
   data_buffer.ready:=state===s_finish&o_ready

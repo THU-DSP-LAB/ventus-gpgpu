@@ -1,4 +1,4 @@
-package pipeline
+package pipeline 
 
 import chisel3._
 import chisel3.util._
@@ -46,6 +46,9 @@ object EXPFP32Utils {
 }
 
 import EXPFP32Utils._
+
+// All module are not designed for resue
+// I have no choice how to pass ctrl signals and bypass signals
 
 // ======================================
 //   MULFP32
@@ -227,6 +230,7 @@ class CMAFP32LUTParallel[T <: Bundle](ctrlSignals: T) extends Module {
   class MULToADD extends Bundle {
     val c       = UInt(32.W)
     val index   = UInt(8.W)
+    val bypass  = Bool()
     val topCtrl = ctrlSignals.cloneType.asInstanceOf[T]
   }
   val mul   = Module(new MULFP32[MULToADD](new MULToADD))
@@ -239,6 +243,7 @@ class CMAFP32LUTParallel[T <: Bundle](ctrlSignals: T) extends Module {
   mul.io.in.bits.rm           := io.in.bits.rm
   mul.io.in.bits.ctrl.c       := io.in.bits.c
   mul.io.in.bits.ctrl.index   := io.in.bits.index
+  mul.io.in.bits.ctrl.bypass  := false.B
   mul.io.in.bits.ctrl.topCtrl := io.in.bits.ctrl
   io.in.ready                 := mul.io.in.ready
 
@@ -269,6 +274,7 @@ class CMAFP32LUTParallel[T <: Bundle](ctrlSignals: T) extends Module {
   s5.bits.ctrl   := s4Pipe.bits.ctrl
   s4Pipe.ready   := s5.ready
 
+  // LUT stores 2^(fractional_part) for exp(x) = 2^(x * log2(e))
   val table = VecInit((0 until 256).map { i =>
     val sign = (i >> 7) & 1
     val mag  = i & 0x7f
@@ -373,34 +379,29 @@ class FilterFP32[T <: Bundle](ctrlSignals: Bundle) extends Module {
   val isNaN    = (e === "hFF".U) && (f =/= 0.U)
 
   val tooBig = (!s) && (io.in.bits.in > EXPFP32Parameters.MAX_INPUT) // +88.7
-  val tooNeg = s && (io.in.bits.in > EXPFP32Parameters.MIN_INPUT)    // -87.3
+  val tooNeg =   s  && (io.in.bits.in > EXPFP32Parameters.MIN_INPUT) // -87.3
 
   val bypass = isNaN || isInfPos || isInfNeg || tooBig || tooNeg
 
-  val filteredVal = Wire(UInt(32.W))
   val bypassVal   = Wire(UInt(32.W))
 
   when (isNaN) {
-    filteredVal := EXPFP32Parameters.ZERO
     bypassVal   := EXPFP32Parameters.NAN
   }.elsewhen (isInfPos || tooBig) {
-    filteredVal := EXPFP32Parameters.ZERO
     bypassVal   := EXPFP32Parameters.INF
   }.elsewhen (isInfNeg || tooNeg) {
-    filteredVal := EXPFP32Parameters.ZERO
     bypassVal   := EXPFP32Parameters.ZERO
   }.otherwise {
-    filteredVal := io.in.bits.in
     bypassVal   := EXPFP32Parameters.ZERO
   }
 
   val s1     = Wire(Decoupled(new OutBundle))
   val s1Pipe = s1.handshakePipeIf(true)
   s1.valid          := io.in.valid
-  s1.bits.out       := filteredVal
+  s1.bits.out       := Mux(bypass, s1Pipe.bits.out, io.in.bits.in)
   s1.bits.bypass    := bypass
-  s1.bits.bypassVal := bypassVal
-  s1.bits.ctrl      := io.in.bits.ctrl
+  s1.bits.bypassVal := Mux(bypass, bypassVal, s1Pipe.bits.bypassVal)
+  s1.bits.ctrl      := Mux(bypass, s1Pipe.bits.ctrl, io.in.bits.ctrl)
   io.in.ready       := s1.ready
 
   io.out <> s1Pipe
@@ -449,12 +450,12 @@ class EXPFP32 extends Module {
     val bypassVal = UInt(32.W)
   }
   val decompose = Module(new DecomposeFP32[DecomposeToCMA0](new DecomposeToCMA0))
-  mul0.io.out.ready                      := decompose.io.in.ready
-  decompose.io.in.valid                  := mul0.io.out.valid
-  decompose.io.in.bits.y                 := mul0.io.out.bits.result
-  decompose.io.in.bits.ctrl.rm           := filter.io.out.bits.ctrl.rm
-  decompose.io.in.bits.ctrl.bypass       := mul0.io.out.bits.ctrl.bypass
-  decompose.io.in.bits.ctrl.bypassVal    := mul0.io.out.bits.ctrl.bypassVal
+  mul0.io.out.ready                   := decompose.io.in.ready
+  decompose.io.in.valid               := mul0.io.out.valid
+  decompose.io.in.bits.y              := mul0.io.out.bits.result
+  decompose.io.in.bits.ctrl.rm        := mul0.io.out.bits.ctrl.rm
+  decompose.io.in.bits.ctrl.bypass    := mul0.io.out.bits.ctrl.bypass
+  decompose.io.in.bits.ctrl.bypassVal := mul0.io.out.bits.ctrl.bypassVal
 
   class CMA0ToCMA1 extends Bundle {
     val rm        = UInt(3.W)
@@ -471,7 +472,7 @@ class EXPFP32 extends Module {
   cma0.io.in.bits.b              := EXPFP32Parameters.C2
   cma0.io.in.bits.c              := EXPFP32Parameters.C1
   cma0.io.in.bits.rm             := decompose.io.out.bits.ctrl.rm
-  cma0.io.in.bits.ctrl.rm        := filter.io.out.bits.ctrl.rm
+  cma0.io.in.bits.ctrl.rm        := decompose.io.out.bits.ctrl.rm
   cma0.io.in.bits.ctrl.bypass    := decompose.io.out.bits.ctrl.bypass
   cma0.io.in.bits.ctrl.bypassVal := decompose.io.out.bits.ctrl.bypassVal
   cma0.io.in.bits.ctrl.yi        := decompose.io.out.bits.yi
@@ -492,7 +493,7 @@ class EXPFP32 extends Module {
   cma1.io.in.bits.c              := EXPFP32Parameters.C0
   cma1.io.in.bits.index          := cma0.io.out.bits.ctrl.yfi
   cma1.io.in.bits.rm             := cma0.io.out.bits.ctrl.rm
-  cma1.io.in.bits.ctrl.rm        := filter.io.out.bits.ctrl.rm
+  cma1.io.in.bits.ctrl.rm        := cma0.io.out.bits.ctrl.rm
   cma1.io.in.bits.ctrl.bypass    := cma0.io.out.bits.ctrl.bypass
   cma1.io.in.bits.ctrl.bypassVal := cma0.io.out.bits.ctrl.bypassVal
   cma1.io.in.bits.ctrl.yi        := cma0.io.out.bits.ctrl.yi
@@ -521,7 +522,7 @@ class EXPFP32 extends Module {
   val sign      = yi(8)
   val ei        = yi(7,0)
   val e         = (ef.zext.asSInt + Mux(sign === 1.U, -ei.zext.asSInt, ei.zext.asSInt))(7, 0)
-  val mainOut   = Cat(0.U(1.W), e(7, 0), mant)
+  val mainOut   = Cat(0.U(1.W), e(7, 0), mant) // range cutting ensures no overflow and underflow in exponent
   val out       = Mux(bypass, bypassVal, mainOut)
 
   val s18 = Wire(Decoupled(new OutBundle))
