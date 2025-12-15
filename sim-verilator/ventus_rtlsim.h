@@ -12,7 +12,6 @@ extern "C" {
 #define DLL_LOCAL
 #endif
 
-#include <stdbool.h>
 #include <stdint.h>
 
 typedef struct ventus_rtlsim_t ventus_rtlsim_t;
@@ -102,8 +101,6 @@ DLL_PUBLIC void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config)
 DLL_PUBLIC uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim);
 // Check if the simulated GPU is idle (no kernel is running).
 DLL_PUBLIC bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim);
-// Get RTL parameters (output from *out_value, return 0 on success)
-DLL_PUBLIC int ventus_rtlsim_get_parameter(const char* name, uint32_t* out_value);
 
 //
 // Init, calculate, and finish
@@ -127,6 +124,7 @@ DLL_PUBLIC const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t
 // (for example, after loading new kernel code to device memory)
 // This will take effect in the next simulation step()
 DLL_PUBLIC void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim);
+DLL_PUBLIC void ventus_rtlsim_dcache_invalidate(ventus_rtlsim_t* sim);
 
 //
 // Push new kernels to gpu for execution.
@@ -165,17 +163,6 @@ DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base)
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size);
 // copy data from device to host
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size);
-
-#ifdef ENABLE_GVM
-DLL_PUBLIC int fw_vt_dev_open();
-DLL_PUBLIC int fw_vt_dev_close();
-DLL_PUBLIC int fw_vt_buf_alloc(uint64_t size, uint64_t *vaddr, int BUF_TYPE, uint64_t taskID, uint64_t kernelID);
-DLL_PUBLIC int fw_vt_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID);
-DLL_PUBLIC int fw_vt_one_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID);
-DLL_PUBLIC int fw_vt_copy_to_dev(uint64_t dev_vaddr,const void *src_addr, uint64_t size, uint64_t taskID, uint64_t kernelID);
-DLL_PUBLIC int fw_vt_start(void* metaData, uint64_t taskID);
-DLL_PUBLIC int fw_vt_upload_kernel_file(const char* filename, int taskID);
-#endif // ENABLE_GVM
 
 #undef DLL_PUBLIC
 #undef DLL_LOCAL

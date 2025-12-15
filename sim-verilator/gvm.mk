@@ -158,11 +158,10 @@ default: lib
 
 $(VLIB_SRC_V) parameters.json &: $(VLIB_SRC_SCALA)
 	mkdir -p $(VLIB_SRC_V_DIR)
-	cd .. && ./mill ventus[6.4.0].runMain top.paramToJson
+	cd .. && ./mill ventus[6.4.0].runMain top.ParamPrintApp
 	cd .. && ./mill ventus[6.4.0].runMain circt.stage.ChiselMain --module top.GPGPU_SimTop --target chirrtl --target-dir sim-verilator/$(VLIB_SRC_V_DIR)/
 	cd $(VLIB_SRC_V_DIR)/ && firtool --split-verilog GPGPU_SimTop.fir -o .
 	mv $(VLIB_SRC_V_DIR)/GPGPU_SimTop.sv $(VLIB_SRC_V)
-	find $(VLIB_SRC_V_DIR) -name "*.sv" -type f -exec sed -i '1i\`define PRINTF_COND 1' {} \;
 
 rtl_parameters.cpp: parameters.json json2cpp.py
 	python3 json2cpp.py

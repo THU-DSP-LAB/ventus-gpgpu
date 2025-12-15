@@ -13,7 +13,6 @@ package pipeline
 import chisel3._
 import chisel3.util._
 import top.parameters._
-import gvm._
 
 class warp_scheduler extends Module{
   val io = IO(new Bundle{
@@ -35,6 +34,7 @@ class warp_scheduler extends Module{
     val warp_ready=Output(UInt(num_warp.W)) //to issue
     val flush=(ValidIO(UInt(depth_warp.W)))
     val flushCache=(ValidIO(UInt(depth_warp.W)))
+    val flushDCache_req = Input(Bool())
     val CTA2csr=ValidIO(new warpReqData) //redirect warpreq
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
@@ -139,18 +139,6 @@ class warp_scheduler extends Module{
     when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id)){
       warp_bar_cur(end_wg_id):=0.U
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
-      if(GVM_ENABLED) {
-        val bar_fire_cond = (io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)) &&
-                    ((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id))
-        val gvm_bar_done = Module(new GvmDutBarrierDone)
-        gvm_bar_done.io.clock := clock
-        gvm_bar_done.io.bar_done_fire := bar_fire_cond
-        gvm_bar_done.io.sm_id := io.warp_control.bits.ctrl.spike_info.get.sm_id.pad(32)
-        gvm_bar_done.io.wg_slot_id := end_wg_id
-        gvm_bar_done.io.pc := io.warp_control.bits.ctrl.spike_info.get.pc.pad(32)
-        gvm_bar_done.io.inst := io.warp_control.bits.ctrl.spike_info.get.inst.pad(32)
-        gvm_bar_done.io.dispatch_id := io.warp_control.bits.ctrl.spike_info.get.dispatch_id.get
-      }
     }
   }
   // collect endprg in one wg and issue flush request
@@ -164,13 +152,26 @@ class warp_scheduler extends Module{
   for(i<-0 until num_block){
     warp_endprg_mask_0(i) := (warp_endprg_cnt(i).orR === false.B) && warp_wg_valid(i)
   }
-  val need_flush = warp_endprg_mask_0.asUInt.orR
-  val flush_entry = OHToUInt(warp_endprg_mask_0.asUInt)
-  when(warp_endprg_mask_0(flush_entry) && io.flushDCache.ready){
-    warp_wg_valid(flush_entry) := false.B
+  // 注释掉原有的block结束时的flush逻辑，改为由GPGPU_top的dcache_invalidate信号控制
+  // val need_flush = warp_endprg_mask_0.asUInt.orR
+  // val flush_entry = OHToUInt(warp_endprg_mask_0.asUInt)
+  // when(warp_endprg_mask_0(flush_entry) && io.flushDCache.ready){
+  //   warp_wg_valid(flush_entry) := false.B
+  // }
+  // io.flushDCache.valid := need_flush
+  // io.flushDCache.bits := need_flush
+  
+   // 当flushDCache.ready信号有效时，仍保留清除warp_wg_valid的逻辑以复用
+  for(i <- 0 until num_block) {
+    when(warp_endprg_mask_0(i) && io.flushDCache.ready){
+      warp_wg_valid(i) := false.B
+    }
   }
-  io.flushDCache.valid := need_flush
-  io.flushDCache.bits := need_flush
+  // 从GPGPU_top传入信号
+  io.flushDCache.valid := io.flushDCache_req
+  io.flushDCache.bits := io.flushDCache_req
+  
+ 
 
 
   val warp_active=RegInit(0.U(num_warp.W))

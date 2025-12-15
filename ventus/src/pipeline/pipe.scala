@@ -14,7 +14,6 @@ import L1Cache.ICache._
 import chisel3._
 import chisel3.util._
 import top.parameters._
-import gvm._
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
@@ -47,6 +46,7 @@ class pipe(val sm_id: Int = 0) extends Module{
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
     val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
     val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
+    val flushDCache_req = Input(Bool())
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -57,28 +57,6 @@ class pipe(val sm_id: Int = 0) extends Module{
   val control=Module(new InstrDecodeV2)
   control.io.sm_id := sm_id.U
   val operand_collector=Module(new operandCollector)
-  if (GVM_ENABLED) {
-    val gvm_xreg = Module(new GvmDutXReg)
-    gvm_xreg.io.clock := clock
-    gvm_xreg.io.sm_id := sm_id.U(32.W)
-    // gvm_xreg.io.num_bank := num_bank.U(32.W)
-    // gvm_xreg.io.num_sgpr_slots := NUMBER_SGPR_SLOTS.U(32.W)
-    val scalar_flatten_banks = Wire(Vec(num_bank, UInt((NUMBER_SGPR_SLOTS / num_bank * xLen).W)))
-    for (i <- 0 until num_bank) {
-      scalar_flatten_banks(i) := operand_collector.io.scalarBanks.get(i).asUInt
-    }
-    // println(s"checkwidth${scalar_flatten_banks.asUInt.getWidth}")
-    gvm_xreg.io.xbanks := scalar_flatten_banks.asUInt
-
-    val gvm_vreg = Module(new GvmDutVReg)
-    gvm_vreg.io.clock := clock
-    gvm_vreg.io.sm_id := sm_id.U(32.W)
-    val vector_flatten_banks = Wire(Vec(num_bank, UInt((NUMBER_VGPR_SLOTS / num_bank * num_thread * xLen).W)))
-    for (i <- 0 until num_bank) {
-      vector_flatten_banks(i) := operand_collector.io.vectorBanks.get(i).asUInt
-    }
-    gvm_vreg.io.vbanks := vector_flatten_banks.asUInt
-  }
   //val issue=Module(new Issue)
   val issueX = Module(new Issue)
   val issueV = Module(new Issue)
@@ -175,6 +153,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
   //warp_sche.io.flushDCache<>lsu.io.flush_dcache
+  warp_sche.io.flushDCache_req := io.flushDCache_req
   lsu.io.flush_dcache.valid := warp_sche.io.flushDCache.valid
    lsu.io.flush_dcache.bits := warp_sche.io.flushDCache.bits
    warp_sche.io.flushDCache.ready := lsu.io.flush_dcache.ready

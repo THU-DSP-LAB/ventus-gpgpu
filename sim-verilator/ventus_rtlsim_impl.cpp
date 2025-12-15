@@ -2,69 +2,21 @@
 #include "Vdut.h"
 #include "ventus_rtlsim.h"
 #include "verilated.h"
-#include <algorithm>
 #include <csignal>
 #include <cstdint>
-#include <cstdlib>
 #include <fmt/core.h>
 #include <functional>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <spdlog/common.h>
 #include <spdlog/formatter.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <string>
-#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <utility>
 
-#include "gvm.hpp"
-
-constexpr uint64_t HALF_CYCLE_TIME = 5;
-
-//
-// cleanup at exit
-//
-static std::vector<ventus_rtlsim_t*> g_instances;
-
-// cleanup: mainly for Verilator FST waveform dump
-// tfp->close() is necessary to save complete waveform to file
-//  or the fst file may be corrupted, or lose some data at the end
-//  in this case, a .fst.hier file appears. 
-static void cleanup() {
-    for (auto* sim : g_instances) {
-        if (sim->tfp)
-            sim->tfp->close(); // save waveform to file
-        // No need to delete tfp, the process is exiting
-        // delete sim->tfp; // This will cause segfault sometimes, why?
-        sim->tfp = nullptr;
-    }
-    g_instances.clear();
-}
-
-// register cleanup function after g_instances is constructed
-// so that cleanup() is called before g_instances is destructed
-struct CleanupRegister {
-    CleanupRegister() { std::atexit(cleanup); }
-} _cleanup_register;
-
-//
-// cleanup at interrupt or abort
-//
-
-static volatile std::sig_atomic_t g_interrupt = false;
-static volatile std::sig_atomic_t g_aborted = false;
-static std::optional<struct sigaction> g_sigabort_old = std::nullopt;
-void signal_interrupt_handler(int signum) { g_interrupt = true; }
-void signal_abort_handler(int signum) { g_aborted = true; }
-
-//
-// Helpers
-//
-
-// convert log level string to spdlog level enum
+// helper
 static spdlog::level::level_enum get_log_level(const char* level) {
     if (level == nullptr) {
         // set to default level later
@@ -109,10 +61,6 @@ private:
     std::function<std::string()> m_callback;
 };
 
-//
-// RTLSIM implementation
-//
-
 void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     // copy and check sim config
     config = *config_;
@@ -146,9 +94,6 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
             sinks.push_back(console_sink);
         }
         logger = std::make_shared<spdlog::logger>("VentusRTLsim_logger", sinks.begin(), sinks.end());
-#ifdef ENABLE_GVM
-        gvm.logger = logger;
-#endif // ENABLE_GVM
         logger->set_level(get_log_level(config.log.level));
         logger->flush_on(spdlog::level::err);
 
@@ -170,6 +115,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     }
 
     // init Verilator simulation context
+    // contextp = new VerilatedContext;
     contextp = new VerilatedContext;
     contextp->debug(0);
     contextp->randReset(0);
@@ -191,29 +137,16 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     cta = new Cta(logger);
     pmem = std::make_unique<PhysicalMemory>(config.pmem.auto_alloc, config.pmem.pagesize, logger);
     need_icache_invalidate = false;
+    need_dcache_invalidate = false;
 
     // waveform traces (FST)
     if (config.waveform.enable) {
         tfp = new VerilatedFstC;
         dut->trace(tfp, config.waveform.levels);
         tfp->open(config.waveform.filename);
-        // sig abort
-        struct sigaction sa;
-        sa.sa_handler = signal_abort_handler;
-        sa.sa_flags = 0;
-        sigemptyset(&sa.sa_mask);
-        struct sigaction sa_old;
-        sigaction(SIGABRT, &sa, &sa_old);
-        g_sigabort_old = sa_old;
-        // sig interrupt
-        sa.sa_handler = signal_interrupt_handler;
-        sigaction(SIGINT, &sa, nullptr);
     } else {
         tfp = nullptr;
     }
-
-    // push into global instances, prepare cleanup at exit
-    g_instances.push_back(this);
 
     // get ready to run
     snapshot_fork(); // initial snapshot at sim_time = 0
@@ -232,7 +165,7 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     //
     // clock step
     //
-    contextp->timeInc(HALF_CYCLE_TIME);
+    contextp->timeInc(1);
     dut->clock = !dut->clock;
 
     //
@@ -297,6 +230,11 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
         }
         dut->io_icache_invalidate = need_icache_invalidate;
         need_icache_invalidate = false;
+        
+        // 处理数据缓存invalidate
+        dut->io_dcache_invalidate = need_dcache_invalidate;
+        need_dcache_invalidate = false;
+        
     }
 
     //
@@ -304,24 +242,6 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     //
     dut->eval();
     waveform_dump();
-
-    //
-    // Abort?
-    //
-    if (g_interrupt) {
-        destructor(false);
-        std::exit(130);
-    }
-    if (g_aborted) {
-        destructor(false);
-        if (g_sigabort_old.has_value()) {
-            sigaction(SIGABRT, &(g_sigabort_old.value()), nullptr);
-            g_sigabort_old = std::nullopt;
-            raise(SIGABRT); // 让进程按默认方式终止，允许Coredump
-        } else {
-            std::exit(EXIT_FAILURE);
-        }
-    }
 
     //
     // Clock output
@@ -339,13 +259,6 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     if (!step_status.time_exceed && !step_status.error && contextp->time() % config.snapshot.time_interval == 0) {
         snapshot_fork();
     }
-
-#ifdef ENABLE_GVM
-    if (contextp->time() % 2 == 1) {
-        gvm.getDut();
-        gvm.gvmStep();
-    }
-#endif // ENABLE_GVM
 
     return &step_status;
 }
@@ -399,12 +312,7 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     delete cta;
     if (tfp)
         delete tfp;
-    dut = nullptr;
-    cta = nullptr;
-    tfp = nullptr;
     delete contextp; // log system use this to get time
-    contextp = nullptr;
-    g_instances.erase(std::remove(g_instances.begin(), g_instances.end(), this), g_instances.end());
 }
 
 void ventus_rtlsim_t::snapshot_fork() {
@@ -434,15 +342,6 @@ void ventus_rtlsim_t::snapshot_fork() {
         logger->info("SNAPSHOT created, pid={}", child_pid);
     } else { // for the fork-child snapshot process
         snapshots.is_child = true;
-        // child process should exit when parent process exits
-        if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) {
-            perror("prctl(PR_SET_PDEATHSIG)");
-            std::exit(EXIT_FAILURE);
-        }
-        if (getppid() == 1) { // parent process already exited
-            std::exit(EXIT_FAILURE);
-        }
-        // wait for main process
         sigset_t set, oldset;
         siginfo_t info;
         sigemptyset(&set);
@@ -451,13 +350,11 @@ void ventus_rtlsim_t::snapshot_fork() {
         sigwaitinfo(&set, &info);                // Wait for snapshot-rollback
         sigprocmask(SIG_SETMASK, &oldset, NULL); // Change signal blocking mask back
         assert(info.si_signo == SNAPSHOT_WAKEUP_SIGNAL);
-        // main process invoked snapshot rollback
         snapshots.main_exit_time = (uint64_t)(info.si_value.sival_ptr);
         logger->info(
             "SNAPSHOT is activated, sim_time = {}, origin process exited at time {}", contextp->time(),
             snapshots.main_exit_time
         );
-        // create a new waveform dump file
         //  delete tfp;             // Cannot do this, or it will block the process
         //  (maybe because Vdut.fst was already closed in the parent process?)
         tfp = new VerilatedFstC(); // This will cause memory leak for once, but not serious. How to fix it?
@@ -529,22 +426,22 @@ void ventus_rtlsim_t::dut_reset() const {
     dut->eval();
     waveform_dump();
 
-    contextp->timeInc(HALF_CYCLE_TIME);
+    contextp->timeInc(1);
     dut->clock = 1;
     dut->eval();
     waveform_dump();
 
-    contextp->timeInc(HALF_CYCLE_TIME);
+    contextp->timeInc(1);
     dut->clock = 0;
     dut->eval();
     waveform_dump();
 
-    contextp->timeInc(HALF_CYCLE_TIME);
+    contextp->timeInc(1);
     dut->clock = 1;
     dut->eval();
     waveform_dump();
 
-    contextp->timeInc(HALF_CYCLE_TIME);
+    contextp->timeInc(1);
     dut->clock = 0;
     dut->reset = 0;
     dut->eval();

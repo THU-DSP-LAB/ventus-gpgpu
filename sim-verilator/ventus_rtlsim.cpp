@@ -1,5 +1,4 @@
 #include "ventus_rtlsim_impl.hpp"
-#include "gvmref_interface.h" // apis from spike repo
 #include <ctime>
 
 static char verilator_rand_seed_setting[128] = "+verilator+seed+10086";
@@ -47,6 +46,7 @@ extern "C" void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollbac
 }
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
+extern "C" void ventus_rtlsim_dcache_invalidate(ventus_rtlsim_t* sim) { sim->need_dcache_invalidate = true; }
 extern "C" uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim) { return sim->contextp->time(); }
 extern "C" bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim) { return sim->cta->is_idle(); }
 
@@ -76,39 +76,3 @@ extern "C" bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, con
 extern "C" bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size) {
     return sim->pmem->read(src, dst, size);
 }
-
-extern "C" int ventus_rtlsim_get_parameter(const char* name, uint32_t* out_value) {
-    if (name == nullptr || out_value == nullptr)
-        return -1;
-    auto it = rtl_parameters.find(name);
-    if (it == rtl_parameters.end())
-        return -2;
-    *out_value = it->second;
-    return 0;
-}
-#ifdef ENABLE_GVM
-extern "C" int fw_vt_dev_open() {
-    return gvmref_vt_dev_open();
-}
-extern "C" int fw_vt_dev_close() {
-    return gvmref_vt_dev_close();
-}
-extern "C" int fw_vt_buf_alloc(uint64_t size, uint64_t *vaddr, int BUF_TYPE, uint64_t taskID, uint64_t kernelID) {
-    return gvmref_vt_buf_alloc(size, vaddr, BUF_TYPE, taskID, kernelID);
-}
-extern "C" int fw_vt_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID) {
-    return gvmref_vt_buf_free(size, vaddr, taskID, kernelID);
-}
-extern "C" int fw_vt_one_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID) {
-    return gvmref_vt_one_buf_free(size, vaddr, taskID, kernelID);
-}
-extern "C" int fw_vt_copy_to_dev(uint64_t dev_vaddr,const void *src_addr, uint64_t size, uint64_t taskID, uint64_t kernelID) {
-    return gvmref_vt_copy_to_dev(dev_vaddr, src_addr, size, taskID, kernelID);
-}
-extern "C" int fw_vt_start(void* metaData, uint64_t taskID) {
-    return gvmref_vt_start(metaData, taskID);
-}
-extern "C" int fw_vt_upload_kernel_file(const char* filename, int taskID) {
-    return gvmref_vt_upload_kernel_file(filename, taskID);
-}
-#endif // ENABLE_GVM

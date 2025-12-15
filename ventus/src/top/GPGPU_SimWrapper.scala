@@ -81,6 +81,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
     val inst_cnt = if(INST_CNT) Some(Output(Vec(num_sm, UInt(32.W)))) else None
     val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(num_sm, Vec(2, UInt(32.W))))) else None
     val icache_invalidate = Input(Bool())
+    val dcache_invalidate = Input(Bool())
   })
 
   val counter = new Counter(200000)
@@ -109,6 +110,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
   io.host_rsp <> GPU.io.host_rsp
 
   GPU.io.icache_invalidate := io.icache_invalidate
+  GPU.io.dcache_invalidate := io.dcache_invalidate
 
   if(INST_CNT) io.inst_cnt.foreach{_ := GPU.io.inst_cnt.getOrElse(0.U) }
   if(INST_CNT_2) io.inst_cnt2.foreach{_ := GPU.io.inst_cnt2.getOrElse(0.U) }
