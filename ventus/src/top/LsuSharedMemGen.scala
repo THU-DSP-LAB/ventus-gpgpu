@@ -45,6 +45,8 @@ class LsuSharedMemTop(implicit p: Parameters) extends Module {
 }
 
 object LsuSharedMemGen {
+  private val TopModuleName = "LsuSharedMemTop"
+
   private def autoDirName(
     dirPrefix: String,
     numWarp: Int,
@@ -60,7 +62,8 @@ object LsuSharedMemGen {
       sharedmemCapacityBytes = sharedmemCapacityBytes
     )
     val sharedmemBandwidthBits = HardwareConfig.derivedSharedmemBandwidthBits(cfg)
-    s"${dirPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
+    val extraPrefix = if (dirPrefix.nonEmpty) s"_${dirPrefix}" else ""
+    s"${TopModuleName}${extraPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
   }
 
   private def resolveTargetDir(
@@ -80,7 +83,7 @@ object LsuSharedMemGen {
   def elaborate(
     @arg(name = "target-dir", doc = "exact output directory, overrides auto naming") targetDir: String = "",
     @arg(name = "output-root", doc = "base directory for auto-named outputs") outputRoot: String = "sim-verilator-nocache/lsuSharedMem",
-    @arg(name = "dir-prefix", doc = "prefix of the auto-named output folder") dirPrefix: String = "lsuSharedMem",
+    @arg(name = "dir-prefix", doc = "extra prefix appended after the top-module name in the auto-named output folder") dirPrefix: String = "",
     @arg(name = "num-warp", doc = "warps used by LSU/shared-memory metadata") numWarp: Int = HardwareConfig.defaults.numWarp,
     @arg(name = "num-thread", doc = "threads per warp") numThread: Int = HardwareConfig.defaults.numThread,
     @arg(name = "sharedmem-nbanks", doc = "shared memory bank count; defaults to num-thread when omitted") sharedmemNBanks: Int = -1,

@@ -5,6 +5,8 @@ import circt.stage.ChiselStage
 import mainargs.{ParserForMethods, arg, main}
 
 object SingleSMNoCacheGen {
+  private val TopModuleName = "GPGPU_top_nocache"
+
   private def autoDirName(
     dirPrefix: String,
     numWarp: Int,
@@ -20,7 +22,8 @@ object SingleSMNoCacheGen {
         sharedmemCapacityBytes = sharedmemCapacityBytes
       )
     )
-    s"${dirPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
+    val extraPrefix = if (dirPrefix.nonEmpty) s"_${dirPrefix}" else ""
+    s"${TopModuleName}${extraPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
   }
 
   private def resolveTargetDir(
@@ -40,7 +43,7 @@ object SingleSMNoCacheGen {
   def elaborate(
     @arg(name = "target-dir", doc = "exact output directory, overrides auto naming") targetDir: String = "",
     @arg(name = "output-root", doc = "base directory for auto-named outputs") outputRoot: String = "sim-verilator-nocache/singleSM",
-    @arg(name = "dir-prefix", doc = "prefix of the auto-named output folder") dirPrefix: String = "singleSM",
+    @arg(name = "dir-prefix", doc = "extra prefix appended after the top-module name in the auto-named output folder") dirPrefix: String = "",
     @arg(name = "num-warp", doc = "warps in the single SM") numWarp: Int = HardwareConfig.defaults.numWarp,
     @arg(name = "num-thread", doc = "threads per warp") numThread: Int = HardwareConfig.defaults.numThread,
     @arg(name = "num-bank", doc = "register-file banks") numBank: Int = HardwareConfig.defaults.numBank,

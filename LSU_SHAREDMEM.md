@@ -55,13 +55,13 @@ sim-verilator-nocache/lsuSharedMem/<自动命名子文件夹>/
 例如：
 
 ```text
-sim-verilator-nocache/lsuSharedMem/lsuSharedMem_warp8_thread32_smem131072B_smbank64_smbw2048/LsuSharedMemTop.sv
+sim-verilator-nocache/lsuSharedMem/LsuSharedMemTop_warp8_thread32_smem131072B_smbank64_smbw2048/LsuSharedMemTop.sv
 ```
 
 同一目录下还会有：
 
 ```text
-sim-verilator-nocache/lsuSharedMem/lsuSharedMem_warp8_thread32_smem131072B_smbank64_smbw2048/parameters.json
+sim-verilator-nocache/lsuSharedMem/LsuSharedMemTop_warp8_thread32_smem131072B_smbank64_smbw2048/parameters.json
 ```
 
 ## 子文件夹自动命名
@@ -69,7 +69,7 @@ sim-verilator-nocache/lsuSharedMem/lsuSharedMem_warp8_thread32_smem131072B_smban
 默认自动命名规则：
 
 ```text
-lsuSharedMem_warp<NUM_WARP>_thread<NUM_THREAD>_smem<BYTES>B_smbank<NBANKS>_smbw<BITS>
+LsuSharedMemTop[_<DIR_PREFIX>]_warp<NUM_WARP>_thread<NUM_THREAD>_smem<BYTES>B_smbank<NBANKS>_smbw<BITS>
 ```
 
 其中：

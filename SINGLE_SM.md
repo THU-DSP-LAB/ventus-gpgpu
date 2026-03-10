@@ -58,14 +58,14 @@ sim-verilator-nocache/singleSM/<自动命名子文件夹>/
 例如：
 
 ```text
-sim-verilator-nocache/singleSM/singleSM_warp4_thread8/dut.v
+sim-verilator-nocache/singleSM/GPGPU_top_nocache_warp4_thread8_smem65536B_smbank64_smbw2048/dut.v
 ```
 
 同一目录下还会有：
 
 ```text
-sim-verilator-nocache/singleSM/singleSM_warp4_thread8/GPGPU_top_nocache.fir
-sim-verilator-nocache/singleSM/singleSM_warp4_thread8/parameters.json
+sim-verilator-nocache/singleSM/GPGPU_top_nocache_warp4_thread8_smem65536B_smbank64_smbw2048/GPGPU_top_nocache.fir
+sim-verilator-nocache/singleSM/GPGPU_top_nocache_warp4_thread8_smem65536B_smbank64_smbw2048/parameters.json
 ```
 
 用于综合时，Verilog 文件里的 top module 名称是：
@@ -85,13 +85,13 @@ current_design GPGPU_top_nocache
 默认自动命名规则：
 
 ```text
-singleSM_warp<NUM_WARP>_thread<NUM_THREAD>
+GPGPU_top_nocache[_<DIR_PREFIX>]_warp<NUM_WARP>_thread<NUM_THREAD>_smem<BYTES>B_smbank<NBANKS>_smbw<BITS>
 ```
 
 例如：
 
 ```text
-singleSM_warp4_thread8
+GPGPU_top_nocache_warp4_thread8_smem65536B_smbank64_smbw2048
 ```
 
 当前自动命名会体现 `warp`、`thread`、shared memory 容量、bank 数和总带宽。  
@@ -101,7 +101,6 @@ singleSM_warp4_thread8
 ```bash
 ./mill -i ventus[6.4.0].runMain top.SingleSMNoCacheGen \
   --output-root sim-verilator-nocache/singleSM \
-  --dir-prefix singleSM \
   --num-warp 4 \
   --num-thread 8 \
   --sharedmem-nbanks 64 \
