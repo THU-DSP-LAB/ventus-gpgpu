@@ -41,14 +41,13 @@ const std::unordered_map<std::string, uint32_t> rtl_parameters = {
 if __name__ == "__main__":
     skip_keys = set("l2cache_cache l2cache_micro l2cache_micro_l l2cache_params l2cache_params_l".split())
 
-    # 读取 JSON 文件
-    json_file = 'parameters.json'  # JSON 文件路径
+    json_file = sys.argv[1] if len(sys.argv) > 1 else 'parameters.json'
+    cpp_file = sys.argv[2] if len(sys.argv) > 2 else 'rtl_parameters.cpp'
+
     with open(json_file, 'r') as f:
         data = json.load(f)
 
-    # 将 JSON 转换为 C++ 代码
     cpp_code = json_to_cpp(data, skip_keys=skip_keys)
 
-    # 输出 C++ 代码到文件
-    with open('rtl_parameters.cpp', 'w') as f:
+    with open(cpp_file, 'w') as f:
         f.write(cpp_code)

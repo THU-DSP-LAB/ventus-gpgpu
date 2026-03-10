@@ -3,10 +3,83 @@ package top
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
 import chisel3.util._
 
+final case class HardwareConfig(
+  numSm: Int = 2,
+  numWarp: Int = 8,
+  numThread: Int = 32,
+  numBank: Int = 4,
+  numFetch: Int = 2,
+  sizeIbuffer: Int = 2,
+  numBlock: Int = 8,
+  dcacheNSets: Int = 256,
+  dcacheNWays: Int = 2,
+  dcacheBlockWords: Int = 32,
+  dcacheMshrEntry: Int = 4,
+  dcacheMshrSubEntry: Int = 2,
+  dcacheWshrEntry: Int = 4,
+  sharedmemNBanks: Int = 32,
+  sharedmemCapacityBytes: Int = 128 * 1024,
+  lsuNumEntryEachWarp: Int = 4
+)
+
+object HardwareConfig {
+  val defaults: HardwareConfig = HardwareConfig()
+  @volatile private var current: HardwareConfig = defaults
+  val sharedmemBankWidthBits: Int = 32
+
+  def currentConfig: HardwareConfig = current
+
+  def reset(): Unit = {
+    current = defaults
+  }
+
+  def configure(next: HardwareConfig): Unit = {
+    validate(next)
+    current = next
+  }
+
+  private def requirePow2(name: String, value: Int): Unit = {
+    require(value > 0, s"$name should be positive")
+    require((value & (value - 1)) == 0, s"$name should be power of 2")
+  }
+
+  def derivedSharedmemBandwidthBits(config: HardwareConfig): Int =
+    config.sharedmemNBanks * sharedmemBankWidthBits
+
+  def derivedSharedmemBlockWords(config: HardwareConfig): Int =
+    scala.math.max(config.dcacheBlockWords, config.sharedmemNBanks)
+
+  def validate(config: HardwareConfig): Unit = {
+    require(config.numSm > 0, "numSm should be positive")
+    require(config.numWarp > 0, "numWarp should be positive")
+    require(config.numThread > 0, "numThread should be positive")
+    require(config.numBlock > 0, "numBlock should be positive")
+    require(config.numBlock <= config.numWarp, "numBlock should be no bigger than numWarp")
+    requirePow2("numThread", config.numThread)
+    requirePow2("numFetch", config.numFetch)
+    requirePow2("numBank", config.numBank)
+    require(config.numBank >= 2, "numBank should be at least 2")
+    require(config.sizeIbuffer > 0, "sizeIbuffer should be positive")
+    require(config.dcacheNSets > 0, "dcacheNSets should be positive")
+    require(config.dcacheNWays > 0, "dcacheNWays should be positive")
+    requirePow2("dcacheBlockWords", config.dcacheBlockWords)
+    require(config.dcacheMshrEntry > 0, "dcacheMshrEntry should be positive")
+    require(config.dcacheMshrSubEntry > 0, "dcacheMshrSubEntry should be positive")
+    require(config.dcacheWshrEntry > 0, "dcacheWshrEntry should be positive")
+    requirePow2("sharedmemNBanks", config.sharedmemNBanks)
+    require(config.sharedmemCapacityBytes > 0, "sharedmemCapacityBytes should be positive")
+    require(
+      config.sharedmemCapacityBytes % (derivedSharedmemBlockWords(config) * sharedmemBankWidthBits / 8) == 0,
+      "sharedmemCapacityBytes should be divisible by effective shared memory block bytes"
+    )
+    require(config.lsuNumEntryEachWarp > 0, "lsuNumEntryEachWarp should be positive")
+  }
+}
+
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
-  def num_sm = 2
-  var num_warp = 8
-  var num_thread = 32
+  def num_sm = HardwareConfig.currentConfig.numSm
+  def num_warp = HardwareConfig.currentConfig.numWarp
+  def num_thread = HardwareConfig.currentConfig.numThread
   val SINGLE_INST: Boolean = false
   val SPIKE_OUTPUT: Boolean = true
   val INST_CNT: Boolean = true
@@ -15,7 +88,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   val MMU_ENABLED: Boolean = false
   def MMU_ASID_WIDTH = mmu.SV32.asidLen
   val wid_to_check = 2
-  def num_bank = 4                  // # of banks for register file
+  def num_bank = HardwareConfig.currentConfig.numBank                  // # of banks for register file
   def num_collectorUnit = num_warp
   def num_vgpr:Int = 128*num_warp
   def num_sgpr:Int = 256*num_warp
@@ -35,14 +108,14 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def depth_thread = log2Ceil(num_thread)
 
-  def num_fetch = 2
+  def num_fetch = HardwareConfig.currentConfig.numFetch
   Predef.assert((num_fetch & (num_fetch - 1)) == 0, "num_fetch should be power of 2")
 
   def icache_align = num_fetch * 4
 
   def num_issue = 1
 
-  def size_ibuffer = 2
+  def size_ibuffer = HardwareConfig.currentConfig.sizeIbuffer
 
   def xLen = 32 // data length 32-bit
 
@@ -50,7 +123,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def addrLen = 32
 
-  def num_block = 8// not bigger than num_warp
+  def num_block = HardwareConfig.currentConfig.numBlock// not bigger than num_warp
 
   def num_warp_in_a_block = num_warp
 
@@ -64,16 +137,16 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def depth_ibuffer = log2Ceil(num_ibuffer)
 
-  def lsu_num_entry_each_warp = 4 //blocking for each warp
+  def lsu_num_entry_each_warp = HardwareConfig.currentConfig.lsuNumEntryEachWarp //blocking for each warp
 
   def lsu_nMshrEntry = num_warp // less than num_warp
 
-  def dcache_NSets: Int = 256
+  def dcache_NSets: Int = HardwareConfig.currentConfig.dcacheNSets
 
-  def dcache_NWays: Int = 2
+  def dcache_NWays: Int = HardwareConfig.currentConfig.dcacheNWays
 
-  def dcache_BlockWords: Int = 32  // number of words per cacheline(block)
-  def dcache_wshr_entry: Int = 4
+  def dcache_BlockWords: Int = HardwareConfig.currentConfig.dcacheBlockWords  // number of words per cacheline(block)
+  def dcache_wshr_entry: Int = HardwareConfig.currentConfig.dcacheWshrEntry
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
 
@@ -85,16 +158,42 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
 
-  def dcache_MshrEntry: Int = 4
+  def dcache_MshrEntry: Int = HardwareConfig.currentConfig.dcacheMshrEntry
 
-  def dcache_MshrSubEntry: Int = 2
+  def dcache_MshrSubEntry: Int = HardwareConfig.currentConfig.dcacheMshrSubEntry
   def num_sfu = (num_thread >> 2).max(1)
 
-  def sharedmem_depth = 1024
+  def sharedmem_capacityBytes = HardwareConfig.currentConfig.sharedmemCapacityBytes
 
-  def sharedmem_BlockWords = dcache_BlockWords
+  def sharedmem_nBanks = HardwareConfig.currentConfig.sharedmemNBanks
 
-  def sharemem_size = sharedmem_depth * sharedmem_BlockWords * 4 //bytes
+  def sharedmem_bankWidth = xLen
+
+  def sharedmem_totalBandwidthBits = sharedmem_nBanks * sharedmem_bankWidth
+
+  def sharedmem_BlockWords = scala.math.max(dcache_BlockWords, sharedmem_nBanks)
+
+  Predef.assert((sharedmem_nBanks & (sharedmem_nBanks - 1)) == 0, "sharedmem_nBanks should be power of 2")
+  Predef.assert((sharedmem_BlockWords & (sharedmem_BlockWords - 1)) == 0, "sharedmem_BlockWords should be power of 2")
+  Predef.assert(sharedmem_BlockWords >= sharedmem_nBanks, "sharedmem_BlockWords should be no smaller than sharedmem_nBanks")
+  Predef.assert(
+    sharedmem_capacityBytes % (sharedmem_BlockWords * BytesOfWord) == 0,
+    "sharedmem_capacityBytes should be divisible by sharedmem_BlockWords * BytesOfWord"
+  )
+
+  def sharedmem_depth = sharedmem_capacityBytes / (sharedmem_BlockWords * BytesOfWord)
+
+  Predef.assert((sharedmem_depth & (sharedmem_depth - 1)) == 0, "sharedmem_depth should be power of 2")
+
+  def sharedmem_WordOffsetBits = log2Ceil(BytesOfWord)
+
+  def sharedmem_BlockOffsetBits = log2Ceil(sharedmem_BlockWords)
+
+  def sharedmem_SetIdxBits = log2Ceil(sharedmem_depth)
+
+  def sharedmem_TagBits = xLen - (sharedmem_SetIdxBits + sharedmem_BlockOffsetBits + sharedmem_WordOffsetBits)
+
+  def sharemem_size = sharedmem_capacityBytes
 
   def l2cache_NSets: Int = 64
 
@@ -324,8 +423,9 @@ object ParametersToJson {
         json.noSpaces // 紧凑输出
       }
       
-      // save to json file
-      val writer = new PrintWriter(new File(filename))
+      val outputFile = new File(filename)
+      Option(outputFile.getParentFile).foreach(_.mkdirs())
+      val writer = new PrintWriter(outputFile)
       try {
         writer.write(jsonString)
         writer.flush()

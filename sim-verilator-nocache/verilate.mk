@@ -56,7 +56,19 @@ VLIB_DIR_BUILDOBJ = $(VLIB_DIR_BUILDOBJ_DEBUG)
 endif
 
 VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
-VLIB_SRC_V = dut.v
+SINGLE_SM_ROOT ?= singleSM
+SINGLE_SM_PREFIX ?= singleSM
+NUM_WARP ?= 8
+NUM_THREAD ?= 32
+NUM_BLOCK ?= $(NUM_WARP)
+SHAREDMEM_CAPACITY_BYTES ?= 131072
+SHAREDMEM_NBANKS ?= $(NUM_THREAD)
+SHAREDMEM_BANDWIDTH_BITS = $(shell expr $(SHAREDMEM_NBANKS) \* 32)
+GEN_DIR_NAME = $(SINGLE_SM_PREFIX)_warp$(NUM_WARP)_thread$(NUM_THREAD)_smem$(SHAREDMEM_CAPACITY_BYTES)B_smbank$(SHAREDMEM_NBANKS)_smbw$(SHAREDMEM_BANDWIDTH_BITS)
+GEN_DIR = $(SINGLE_SM_ROOT)/$(GEN_DIR_NAME)
+VLIB_SRC_V = $(GEN_DIR)/dut.v
+VLIB_SRC_FIR = $(GEN_DIR)/GPGPU_top_nocache.fir
+VLIB_PARAMS_JSON = $(GEN_DIR)/parameters.json
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp # API in these files will be exported to shared library
 VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp rtl_parameters.cpp $(VLIB_SRC_CXX_EXPORT)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
@@ -133,18 +145,22 @@ VLIB_VERILATOR_FLAGS += -CFLAGS "$(VLIB_CXXFLAGS)"
 VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS)"
 VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
+GEN_ARGS ?=
+VLIB_GEN_ARGS = --output-root sim-verilator-nocache/$(SINGLE_SM_ROOT) --dir-prefix $(SINGLE_SM_PREFIX) --num-warp $(NUM_WARP) --num-thread $(NUM_THREAD) --num-block $(NUM_BLOCK) --sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) --sharedmem-nbanks $(SHAREDMEM_NBANKS) $(GEN_ARGS)
+
 #=====================================================================
 # Build rules and targets
 #=====================================================================
 
 default: lib
 
-$(VLIB_SRC_V) parameters.json &: $(VLIB_SRC_SCALA)
-	cd .. && ./mill ventus[6.4.0].runMain circt.stage.ChiselMain --module top.GPGPU_top_nocache --target chirrtl --target-dir sim-verilator-nocache
-	firtool --verilog GPGPU_top_nocache.fir -o $(VLIB_SRC_V)
+$(VLIB_SRC_V) $(VLIB_PARAMS_JSON) &: $(VLIB_SRC_SCALA)
+	@mkdir -p $(GEN_DIR)
+	cd .. && ./mill ventus[6.4.0].runMain top.SingleSMNoCacheGen $(VLIB_GEN_ARGS)
+	firtool --verilog $(VLIB_SRC_FIR) -o $(VLIB_SRC_V)
 
-rtl_parameters.cpp: parameters.json json2cpp.py
-	python3 json2cpp.py
+rtl_parameters.cpp: $(VLIB_PARAMS_JSON) json2cpp.py
+	python3 json2cpp.py $(VLIB_PARAMS_JSON) rtl_parameters.cpp
 
 verilog: $(VLIB_SRC_V)
 
@@ -194,6 +210,6 @@ clean-verilated:
 	-rm -rf $(VLIB_DIR_BUILD)
 
 clean-verilog: clean-verilated
-	-rm -f $(VLIB_SRC_V)
+	-rm -rf $(SINGLE_SM_ROOT)
 
 .PHONY: clean-lib clean-lib-dep clean-verilated clean-verilog info-verilator install

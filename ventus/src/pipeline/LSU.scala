@@ -60,7 +60,7 @@ class DCacheCoreRsp_np extends Bundle{
 
 class ShareMemPerLaneAddr_np extends Bundle{
   val activeMask = Bool()
-  val blockOffset = UInt(dcache_BlockOffsetBits.W)
+  val blockOffset = UInt(sharedmem_BlockOffsetBits.W)
   val wordOffset1H = UInt(BytesOfWord.W)
 }
 class ShareMemCoreReq_np extends Bundle{
@@ -68,7 +68,7 @@ class ShareMemCoreReq_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val isWrite = Bool()//Vec(NLanes, Bool())
   //val tag = UInt(dcache_TagBits.W)
-  val setIdx = UInt(dcache_SetIdxBits.W)
+  val setIdx = UInt(sharedmem_SetIdxBits.W)
   val perLaneAddr = Vec(num_thread, new ShareMemPerLaneAddr_np)
   val data = Vec(num_thread, UInt(xLen.W))
 }
@@ -167,15 +167,19 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   )
   val addr_wire=Wire(UInt(xLen.W))
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
-  val tag = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
-  val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
+  val dcacheTag = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
+  val dcacheSetIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
+  val sharedTag = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1, xLen-1-sharedmem_TagBits+1), 0.U(sharedmem_TagBits.W))
+  val sharedSetIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-sharedmem_TagBits, xLen-1-sharedmem_TagBits-sharedmem_SetIdxBits+1), 0.U(sharedmem_SetIdxBits.W))
 
   val same_tag = Wire(Vec(num_thread, Bool()))
     (0 until num_thread).foreach( x =>
-      same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
+      same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(dcacheTag, dcacheSetIdx), false.B)
     )
-  val blockOffset = Wire(Vec(num_thread, UInt(dcache_BlockOffsetBits.W)))
-  (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
+  val dcacheBlockOffset = Wire(Vec(num_thread, UInt(dcache_BlockOffsetBits.W)))
+  (0 until num_thread).foreach( x => dcacheBlockOffset(x) := addr(x)(dcache_BlockOffsetBits + dcache_WordOffsetBits - 1, dcache_WordOffsetBits) )
+  val sharedBlockOffset = Wire(Vec(num_thread, UInt(sharedmem_BlockOffsetBits.W)))
+  (0 until num_thread).foreach( x => sharedBlockOffset(x) := addr(x)(sharedmem_BlockOffsetBits + sharedmem_WordOffsetBits - 1, sharedmem_WordOffsetBits) )
   val wordOffset1H = Wire(Vec(num_thread, UInt(BytesOfWord.W)))
   (0 until num_thread).foreach( x => {
   //DONE: Add Control Signals in vExeData.ctrl and define lw lh lb
@@ -213,11 +217,13 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   io.to_shared.bits.instrId := reg_entryID
   // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
   //io.to_shared.bits.tag := tag
-  io.to_shared.bits.setIdx := setIdx
+  io.to_shared.bits.setIdx := sharedSetIdx
+  val sharedLineMatch = Wire(Vec(num_thread, Bool()))
   (0 until num_thread).foreach(x => {
-    io.to_shared.bits.perLaneAddr(x).blockOffset := blockOffset(x)
+    sharedLineMatch(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-sharedmem_TagBits+1)===sharedTag && addr(x)(xLen-1-sharedmem_TagBits, xLen-1-sharedmem_TagBits-sharedmem_SetIdxBits+1)===sharedSetIdx)
+    io.to_shared.bits.perLaneAddr(x).blockOffset := sharedBlockOffset(x)
     io.to_shared.bits.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
-    io.to_shared.bits.perLaneAddr(x).activeMask := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
+    io.to_shared.bits.perLaneAddr(x).activeMask := sharedLineMatch(x)
   })
   io.to_shared.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool, VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
   io.to_shared.bits.isWrite := reg_save.ctrl.mem_cmd(1)
@@ -230,8 +236,8 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   }
 
   // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
-  io.to_dcache.bits.tag := tag
-  io.to_dcache.bits.setIdx := setIdx
+  io.to_dcache.bits.tag := dcacheTag
+  io.to_dcache.bits.setIdx := dcacheSetIdx
   io.to_dcache.bits.spike_info.foreach{ left =>
     left.pc := reg_save.ctrl.pc
     left.vaddr := addr_wire
@@ -269,22 +275,26 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   io.to_dcache.bits.opcode :=opcode_wire// fence=invalidate, atomic will split to maximum 3 instructions
   io.to_dcache.bits.param :=param_wire
 
+  val dcacheLineMatch = Wire(Vec(num_thread, Bool()))
   (0 until num_thread).foreach(x => {
-    io.to_dcache.bits.perLaneAddr(x).blockOffset := blockOffset(x)
+    dcacheLineMatch(x) := reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===dcacheTag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===dcacheSetIdx)
+    io.to_dcache.bits.perLaneAddr(x).blockOffset := dcacheBlockOffset(x)
     io.to_dcache.bits.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
     io.to_dcache.bits.perLaneAddr(x).activeMask := Mux(reg_save.ctrl.atomic,reg_save.mask(x)&& (x.asUInt===PriorityEncoder(reg_save.mask.asUInt)),
-      reg_save.mask(x) && (addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
+      dcacheLineMatch(x)
     )
 
   })
   io.to_dcache.bits.data := data_next//Mux(reg_save.ctrl.mem_cmd(0).asBool, VecInit(Seq.fill(num_thread)(0.U(xLen.W))), reg_save.in3)
  // io.to_dcache.bits.isWrite := reg_save.ctrl.mem_cmd(1)
   io.to_dcache.valid := (state===s_dcache) ||(state===s_dcache_1) ||(state===s_dcache_2)
-  val mask_next = Wire(Vec(num_thread, Bool()))
+  val dcache_mask_next = Wire(Vec(num_thread, Bool()))
+  val shared_mask_next = Wire(Vec(num_thread, Bool()))
 
   (0 until num_thread).foreach( x => {                          // update mask
-    mask_next(x) := Mux(reg_save.ctrl.atomic ,reg_save.mask(x)&& !(x.asUInt===PriorityEncoder(reg_save.mask.asUInt)),reg_save.mask(x) && !(addr(x)(xLen-1, xLen-1-dcache_TagBits+1)===tag && addr(x)(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===setIdx)
-    )})
+    dcache_mask_next(x) := Mux(reg_save.ctrl.atomic ,reg_save.mask(x)&& !(x.asUInt===PriorityEncoder(reg_save.mask.asUInt)), reg_save.mask(x) && !dcacheLineMatch(x))
+    shared_mask_next(x) := reg_save.mask(x) && !sharedLineMatch(x)
+  })
   // End of Addr Logic
 
   // FSM State Transfer
@@ -311,7 +321,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     }
     is (s_shared){
       when(io.to_shared.fire){
-        when(cnt.value>=num_thread.U || mask_next.asUInt===0.U){
+        when(cnt.value>=num_thread.U || shared_mask_next.asUInt===0.U){
           cnt.reset(); state := s_idle
         }.otherwise{
           cnt.inc(); state := s_shared
@@ -329,7 +339,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
         when(io.to_dcache.fire) {
           when((reg_save.ctrl.atomic && reg_save.ctrl.aq) || (reg_save.ctrl.atomic && reg_save.ctrl.rl)) {
             state := s_dcache_1
-          }.elsewhen(cnt.value >= num_thread.U || mask_next.asUInt === 0.U) {
+          }.elsewhen(cnt.value >= num_thread.U || dcache_mask_next.asUInt === 0.U) {
             cnt.reset();
             state := s_idle
           }.otherwise {
@@ -346,7 +356,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 
           when(reg_save.ctrl.aq && reg_save.ctrl.rl) {
             state := s_dcache_2
-          }.elsewhen(cnt.value>=num_thread.U || mask_next.asUInt===0.U){
+          }.elsewhen(cnt.value>=num_thread.U || dcache_mask_next.asUInt===0.U){
             cnt.reset(); state := s_idle
         }.otherwise{
             cnt.inc(); state :=s_dcache
@@ -357,7 +367,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     }
     is(s_dcache_2){
       when(io.to_dcache.fire){
-        when(cnt.value>=num_thread.U ||mask_next.asUInt===0.U){
+        when(cnt.value>=num_thread.U ||dcache_mask_next.asUInt===0.U){
           cnt.reset();state:=s_idle
         }.otherwise{
           cnt.inc(); state := s_dcache
@@ -389,14 +399,14 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     is (s_shared){
       // Maybe Nothing here :-)
       when(io.to_shared.fire){                                      // request is sent
-        reg_save.mask := mask_next
+        reg_save.mask := shared_mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
       }
     }
     is (s_dcache){
       when(io.to_dcache.fire){                                      // request is sent
-        reg_save.mask := mask_next
+        reg_save.mask := dcache_mask_next
       }.otherwise{
         reg_save.mask := reg_save.mask
       }

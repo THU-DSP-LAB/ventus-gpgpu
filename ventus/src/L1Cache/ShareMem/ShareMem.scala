@@ -15,12 +15,8 @@ import SRAMTemplate.SRAMTemplate
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import top.parameters.sharedmem_BlockWords
 import top.parameters.xLen
-import top.parameters.sharedmem_depth
 import top.parameters.num_thread
-import top.parameters.BytesOfWord
-import top.parameters.num_lane
 
 /*Version Note
 * DCacheCoreReq spec changed, shift some work to LSU
@@ -61,8 +57,8 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   // ******     important submodules     ******
   val BankConfArb = Module(new BankConflictArbiter)
   //val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits))
-  val DataCorssBarForWrite = Module(new DataCrossbar)
-  val DataCorssBarForRead = Module(new DataCrossbar)
+  val DataCorssBarForWrite = Module(new LaneToBankDataCrossbar)
+  val DataCorssBarForRead = Module(new BankToLaneDataCrossbar)
   /*val EntryValidArray = RegInit(
     VecInit(Seq.fill(NSets)(
       VecInit(Seq.fill(BlockWords)(
@@ -133,8 +129,9 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   val coreReqIsWrite_st2 = RegNext(coreReq_st1.isWrite)
 
   val arbAddrCrsbarOut_st1 = RegNext(BankConfArb.io.addrCrsbarOut)
-  val arbDataCrsbarSel1H_st1 = RegNext(BankConfArb.io.dataCrsbarSel1H)
-  val arbDataCrsbarSel1H_st2 = RegNext(arbDataCrsbarSel1H_st1)
+  val arbWriteDataSel1H_st1 = RegNext(BankConfArb.io.writeDataSel1H)
+  val arbReadDataSel1H_st1 = RegNext(BankConfArb.io.readDataSel1H)
+  val arbReadDataSel1H_st2 = RegNext(arbReadDataSel1H_st1)
 
   val bankConflictHolding = Bool()
   // ******     DataAccess      ******
@@ -175,10 +172,10 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
 
   // ******      data crossbar for write     ******
   DataCorssBarForWrite.io.DataIn := coreReq_st1.data
-  DataCorssBarForWrite.io.Select1H := arbDataCrsbarSel1H_st1
+  DataCorssBarForWrite.io.Select1H := arbWriteDataSel1H_st1
   // ******      data crossbar for read     ******
   DataCorssBarForRead.io.DataIn := dataAccess_data_st2
-  DataCorssBarForRead.io.Select1H := arbDataCrsbarSel1H_st2
+  DataCorssBarForRead.io.Select1H := arbReadDataSel1H_st2
 
   // ******      core rsp
   coreRsp_Q.io.deq <> io.coreRsp

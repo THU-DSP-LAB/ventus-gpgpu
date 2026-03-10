@@ -24,10 +24,8 @@ import config.config.Parameters
 * This version cant merge READ req to the same exact addr, these identical
 * reqs would pitifully be split into multiple cycles
 *
-* This version suppose NLanes = NBanks, to change this
-* DataCrossbar can be used as bidirectional
-* modify assignments of bankOffset & perBankReqCount,
-* modify ConflictBankReq_w
+* This version now supports NLanes != NBanks by splitting the data path into
+* a lane-to-bank crossbar on writes and a bank-to-lane crossbar on reads.
 */
 
 class ByteEn1HConvertor(BytesOfWord:Int=4) extends Module{
@@ -57,7 +55,18 @@ class ByteEn1HConvertor(BytesOfWord:Int=4) extends Module{
   }
 }
 
-class DataCrossbar(implicit p: Parameters) extends ShareMemModule {
+class LaneToBankDataCrossbar(implicit p: Parameters) extends ShareMemModule {
+  val io=IO(new Bundle {
+    val DataIn = Input(Vec(NLanes, UInt(WordLength.W)))
+    val DataOut = Output(Vec(NBanks, UInt(WordLength.W)))
+    val Select1H = Input(Vec(NBanks, UInt(NLanes.W)))
+  })
+  (0 until NBanks).foreach{ iofBk =>
+      io.DataOut(iofBk):= Mux1H(io.Select1H(iofBk), io.DataIn)
+  }
+}
+
+class BankToLaneDataCrossbar(implicit p: Parameters) extends ShareMemModule {
   val io=IO(new Bundle {
     val DataIn = Input(Vec(NBanks, UInt(WordLength.W)))
     val DataOut = Output(Vec(NLanes, UInt(WordLength.W)))
@@ -73,8 +82,8 @@ class AddrBundle1T(implicit p: Parameters) extends ShareMemBundle {
   val wordOffset1H = UInt(BytesOfWord.W)
 }
 object L2BCrossbar {
-  def apply[T <: Data](NLaneNBank: Int, sel: Vec[UInt], in: Vec[T]):
-  Vec[T] = VecInit((0 until NLaneNBank).map(iofBk => Mux1H(sel(iofBk), in)))
+  def apply[T <: Data](nOut: Int, sel: Vec[UInt], in: Vec[T]):
+  Vec[T] = VecInit((0 until nOut).map(iofBk => Mux1H(sel(iofBk), in)))
 }
 /*class AddrCrossbar(implicit p: Parameters) extends DCacheModule {
   val io=IO(new Bundle {
@@ -103,7 +112,8 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
   val io = IO(new Bundle{
     val coreReqArb = Input(new coreReqArb)
 
-    val dataCrsbarSel1H = Output(Vec(NBanks, UInt(NBanks.W)))
+    val writeDataSel1H = Output(Vec(NBanks, UInt(NLanes.W)))
+    val readDataSel1H = Output(Vec(NLanes, UInt(NBanks.W)))
     val addrCrsbarOut = Output(Vec(NBanks, new AddrBundle1T))
     val dataArrayEn = Output(Vec(NBanks, Bool()))
     val activeLane = Output(Vec(NLanes,Bool()))
@@ -139,7 +149,7 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
     laneActiveMask(i) := perLaneConflictReq(i).activeMask
     bankIdx(i) := perLaneConflictReq(i).bankIdx
     bankIdx1H(i) := UIntToOH(bankIdx(i))
-    bankIdxMasked(i) := bankIdx1H(i) & Fill(NLanes, laneActiveMask(i))}
+    bankIdxMasked(i) := bankIdx1H(i) & Fill(NBanks, laneActiveMask(i))}
   val perBankReq_Bin = Wire(Vec(NBanks, UInt(NLanes.W)))//transpose of bankIdxMasked
   val perBankReqCount = Wire(Vec(NBanks, UInt((log2Up(NLanes)+1).W)))
   (0 until NBanks).foreach{ i =>
@@ -163,7 +173,7 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
   val perBankActiveLaneWhenConflict1H = Wire(Vec(NBanks, UInt(NLanes.W)))
   perBankActiveLaneWhenConflict1H := perBankReq_Bin.map(Cat(_)).map(PriorityEncoderOH(_))
   val ActiveLaneWhenConflict1H = Wire(Vec(NLanes, Bool()))
-  (0 until NBanks).foreach{ i =>
+  (0 until NLanes).foreach{ i =>
     ActiveLaneWhenConflict1H(i) := Cat(perBankActiveLaneWhenConflict1H.map(_(i))).orR}
   val ReserveLaneWhenConflict1H = VecInit(((~Cat(ActiveLaneWhenConflict1H)).asUInt & Cat(laneActiveMask)).asBools.reverse)
 
@@ -182,7 +192,8 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
 
   //**************output to DataCrossbar**************
   //do not merge req to same addr from different lane. assume this optimization to be done at register level
-  io.dataCrsbarSel1H := Mux(isWrite,perBankActiveLaneWhenConflict1H,bankIdxMasked)
+  io.writeDataSel1H := perBankActiveLaneWhenConflict1H
+  io.readDataSel1H := bankIdxMasked
 
   //**************output to DataArray**************
   io.dataArrayEn := perBankActiveLaneWhenConflict1H.map(_.orR)
