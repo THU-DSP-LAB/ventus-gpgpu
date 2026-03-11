@@ -357,6 +357,21 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   }
 }
 
+class SM(
+  FakeCache: Boolean = false,
+  SV: Option[mmu.SVParam] = None,
+  smIdValue: Int = 0
+) extends Module {
+  def this() = this(false, None, 0)
+
+  private val impl = Module(new SM_wrapper(FakeCache, SV))
+
+  val io = IO(chiselTypeOf(impl.io))
+
+  impl.sm_id := smIdValue.U(impl.sm_id.getWidth.W)
+  io <> impl.io
+}
+
 @instantiable
 class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) extends Module{
   val param = (new MyConfig).toInstance

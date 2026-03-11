@@ -1,4 +1,4 @@
-# Single SM 生成说明
+# Single SM 生成说明 [Deprecated]
 
 ## 相关代码位置
 
