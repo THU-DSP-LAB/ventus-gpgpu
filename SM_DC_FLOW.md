@@ -28,7 +28,7 @@ DC 只统计逻辑面积；`SyncReadMem` 替换出的 SRAM 用 CACTI 后处理�
 1. 在 `ventus-gpgpu` 侧只做 RTL 生成，不直接启动 DC。
 2. 生成结果统一落到 `dc_compile/rtl1/<TOP>/<DESIGN>/`。
 3. `do_all_dc.sh` 只负责并行启动逻辑综合。
-4. 所有频率 run 完成后，再手动对每个 run 做 CACTI 面积后处理。
+4. 所有频率 run 完成后，再批量做 CACTI 面积后处理并导出 CSV。
 
 ## 目录约定
 
@@ -239,37 +239,91 @@ tmux ls
 - `report/breakdown_summary.rpt`
 - `data/<TOP>_post.v`
 
-## 第 6 步：对单个 run 做 CACTI 后处理并汇总总面积
-
-### 情况 A：一个 design 只有一个 run，或者你只关心最新 run
+## 第 6 步：批量做 CACTI 后处理并导出 CSV
 
 ```bash
 cd /home/mmy/work/ventus/dc_compile
 
-scripts/post/report_total_area.sh \
-  SM \
-  SM_warp8_thread32_smem131072B_smbank32_smbw1024
+python3 scripts/post/collect_total_area.py \
+  --out-csv results/sm_area_summary.csv
 ```
 
-或：
+这个脚本会：
+
+1. 遍历 `runs/<DESIGN>/<RUN>/`
+2. 自动定位对应的 `rtl1/<TOP>/<DESIGN>/`
+3. 读取 `mem.conf` 和 `metadata/seq_mems.json`
+4. 调用 CACTI 生成或复用 `postprocess/sram_area.csv`
+5. 读取每个 run 的 `report/area.rpt`
+6. 把 `logic area + sram area + total area + timing slack + 关键参数` 追加到 CSV
+
+CSV 默认是追加模式。
+如果同一个 `run_dir` 已经在 CSV 里，脚本会自动跳过，避免重复。
+
+### 常用过滤方式
+
+只统计 `SM`：
 
 ```bash
-scripts/post/report_total_area.sh \
-  LsuSharedMemTop \
-  LsuSharedMemTop_warp8_thread32_smem131072B_smbank64_smbw2048
+python3 scripts/post/collect_total_area.py \
+  --tops SM \
+  --out-csv results/sm_only.csv
 ```
 
-脚本会自动：
+只统计 `LsuSharedMemTop`：
 
-1. 读取 `rtl1/<TOP>/<DESIGN>/mem.conf`
-2. 读取 `rtl1/<TOP>/<DESIGN>/metadata/seq_mems.json`
-3. 调用 CACTI
-4. 读取该 design 最新 run 的 `report/area.rpt`
-5. 输出 `logic area + sram area + total area`
+```bash
+python3 scripts/post/collect_total_area.py \
+  --tops LsuSharedMemTop \
+  --out-csv results/lsu_sharedmem_only.csv
+```
 
-### 情况 B：一个 design 跑了多个频率
+只统计某批 design：
 
-这时建议显式指定 `RUN_DIR`：
+```bash
+python3 scripts/post/collect_total_area.py \
+  --design-regex 'smbank(8|16|32|64|128)_' \
+  --out-csv results/bank_sweep.csv
+```
+
+如果希望强制重新跑 CACTI，而不是复用已有 `postprocess/sram_area.csv`：
+
+```bash
+python3 scripts/post/collect_total_area.py \
+  --out-csv results/sm_area_summary.csv \
+  --force
+```
+
+### 输出字段
+
+CSV 中会包含这些字段：
+
+- `top`
+- `design`
+- `run_tag`
+- `run_dir`
+- `timestamp`
+- `frequency_mhz`
+- `toggle`
+- `num_warp`
+- `num_thread`
+- `num_block`
+- `sharedmem_capacity_bytes`
+- `sharedmem_nbanks`
+- `sharedmem_total_bandwidth_bits`
+- `logic_area_um2`
+- `sram_area_um2`
+- `total_area_um2`
+- `setup_slack_ns`
+- `hold_slack_ns`
+- `setup_startpoint`
+- `setup_endpoint`
+- `hold_startpoint`
+- `hold_endpoint`
+
+## 第 7 步：需要时，单独检查某个 run
+
+如果你只想临时检查某一个 run，旧脚本仍然可以直接用：
 
 ```bash
 cd /home/mmy/work/ventus/dc_compile
@@ -279,8 +333,6 @@ scripts/post/report_total_area.sh \
   SM_warp8_thread32_smem131072B_smbank32_smbw1024 \
   /home/mmy/work/ventus/dc_compile/runs/SM_warp8_thread32_smem131072B_smbank32_smbw1024/2026-03-11_10-00-00__1200MHz__Toggle0.18
 ```
-
-这样就能对某个特定频率的 run 做总面积汇总。
 
 ## 常用实验模板
 
@@ -350,6 +402,6 @@ bash do_all_dc.sh
 
 1. `ventus-gpgpu` 生成参数化 RTL 到 `dc_compile/rtl1`
 2. `dc_compile/do_all_dc.sh` 并行跑逻辑综合
-3. `scripts/post/report_total_area.sh` 对每个 run 单独补 SRAM 面积
+3. `scripts/post/collect_total_area.py` 批量补 SRAM 面积并输出 CSV
 
 `ventus-gpgpu/dc-sm-flow/` 仍保留，但只适合单个 design 的本地调试，不是主推荐路径。
