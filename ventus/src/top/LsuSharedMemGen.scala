@@ -8,7 +8,7 @@ import chisel3.util._
 import chisel3.stage.ChiselGeneratorAnnotation
 import config.config.Parameters
 import mainargs.{ParserForMethods, arg, main}
-import pipeline.{DCacheCoreReq_np, DCacheCoreRsp_np, LSUexe, MSHROutput, vExeData}
+import pipeline.{DCacheCoreReq_np, DCacheCoreRsp_np, LSUexe, MSHROutput, ShareMemCoreReq_np, vExeData}
 
 /** Synthesis-oriented wrapper for the LSU -> shared-memory path.
   *
@@ -17,7 +17,7 @@ import pipeline.{DCacheCoreReq_np, DCacheCoreRsp_np, LSUexe, MSHROutput, vExeDat
   * crossbars are all preserved. DCache stays external to keep this block much
   * smaller than a full SM while still capturing the LSU-side overhead.
   */
-class LsuSharedMemTop(implicit p: Parameters) extends Module {
+class LsuSharedMemTop(val lsuSharedmemPipeCut: Boolean = false)(implicit p: Parameters) extends Module {
   val io = IO(new Bundle {
     val lsu_req = Flipped(DecoupledIO(new vExeData))
     val lsu_rsp = DecoupledIO(new MSHROutput)
@@ -33,6 +33,7 @@ class LsuSharedMemTop(implicit p: Parameters) extends Module {
 
   val lsu = Module(new LSUexe)
   val sharedmem = Module(new SharedMemory)
+  val sharedReqPipe = if (lsuSharedmemPipeCut) Some(Module(new Queue(new ShareMemCoreReq_np, entries = 1, pipe = true, flow = false))) else None
 
   lsu.io.lsu_req <> io.lsu_req
   io.lsu_rsp <> lsu.io.lsu_rsp
@@ -46,13 +47,24 @@ class LsuSharedMemTop(implicit p: Parameters) extends Module {
   lsu.io.csr_numw := io.csr_numw
   lsu.io.csr_tid := io.csr_tid
 
-  sharedmem.io.coreReq.bits.data := lsu.io.shared_req.bits.data
-  sharedmem.io.coreReq.bits.instrId := lsu.io.shared_req.bits.instrId
-  sharedmem.io.coreReq.bits.isWrite := lsu.io.shared_req.bits.isWrite
-  sharedmem.io.coreReq.bits.setIdx := lsu.io.shared_req.bits.setIdx
-  sharedmem.io.coreReq.bits.perLaneAddr := lsu.io.shared_req.bits.perLaneAddr
-  sharedmem.io.coreReq.valid := lsu.io.shared_req.valid
-  lsu.io.shared_req.ready := sharedmem.io.coreReq.ready
+  val sharedReqSrc = Wire(DecoupledIO(new ShareMemCoreReq_np))
+  sharedReqSrc.bits := DontCare
+  sharedReqSrc.valid := false.B
+  sharedReqPipe match {
+    case Some(q) =>
+      q.io.enq <> lsu.io.shared_req
+      sharedReqSrc <> q.io.deq
+    case None =>
+      sharedReqSrc <> lsu.io.shared_req
+  }
+
+  sharedmem.io.coreReq.bits.data := sharedReqSrc.bits.data
+  sharedmem.io.coreReq.bits.instrId := sharedReqSrc.bits.instrId
+  sharedmem.io.coreReq.bits.isWrite := sharedReqSrc.bits.isWrite
+  sharedmem.io.coreReq.bits.setIdx := sharedReqSrc.bits.setIdx
+  sharedmem.io.coreReq.bits.perLaneAddr := sharedReqSrc.bits.perLaneAddr
+  sharedmem.io.coreReq.valid := sharedReqSrc.valid
+  sharedReqSrc.ready := sharedmem.io.coreReq.ready
 
   sharedmem.io.coreRsp.ready := lsu.io.shared_rsp.ready
   lsu.io.shared_rsp.valid := sharedmem.io.coreRsp.valid
@@ -61,8 +73,8 @@ class LsuSharedMemTop(implicit p: Parameters) extends Module {
   lsu.io.shared_rsp.bits.activeMask := sharedmem.io.coreRsp.bits.activeMask
 
   // Keep the LSU/shared-memory boundary visible to synthesis and reports.
-  dontTouch(lsu.io.shared_req.valid)
-  dontTouch(lsu.io.shared_req.bits.setIdx)
+  dontTouch(sharedReqSrc.valid)
+  dontTouch(sharedReqSrc.bits.setIdx)
   dontTouch(sharedmem.io.coreReq.ready)
   dontTouch(sharedmem.io.coreRsp.valid)
   dontTouch(sharedmem.io.coreRsp.bits.data)
@@ -76,7 +88,8 @@ object LsuSharedMemGen {
     numWarp: Int,
     numThread: Int,
     sharedmemCapacityBytes: Int,
-    sharedmemNBanks: Int
+    sharedmemNBanks: Int,
+    lsuSharedmemPipeCut: Boolean
   ): String = {
     val cfg = HardwareConfig.defaults.copy(
       numSm = 1,
@@ -87,7 +100,8 @@ object LsuSharedMemGen {
     )
     val sharedmemBandwidthBits = HardwareConfig.derivedSharedmemBandwidthBits(cfg)
     val extraPrefix = if (dirPrefix.nonEmpty) s"_${dirPrefix}" else ""
-    s"${TopModuleName}${extraPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
+    val pipeTag = if (lsuSharedmemPipeCut) "_pipe1" else ""
+    s"${TopModuleName}${pipeTag}${extraPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
   }
 
   private def resolveTargetDir(
@@ -97,10 +111,11 @@ object LsuSharedMemGen {
     numWarp: Int,
     numThread: Int,
     sharedmemCapacityBytes: Int,
-    sharedmemNBanks: Int
+    sharedmemNBanks: Int,
+    lsuSharedmemPipeCut: Boolean
   ): String = {
     if (targetDir.nonEmpty) targetDir
-    else s"$outputRoot/${autoDirName(dirPrefix, numWarp, numThread, sharedmemCapacityBytes, sharedmemNBanks)}"
+    else s"$outputRoot/${autoDirName(dirPrefix, numWarp, numThread, sharedmemCapacityBytes, sharedmemNBanks, lsuSharedmemPipeCut)}"
   }
 
   @main
@@ -119,7 +134,8 @@ object LsuSharedMemGen {
     @arg(name = "dcache-wshr-entry", doc = "L1D writeback queue entries reused by LSU metadata") dcacheWshrEntry: Int = HardwareConfig.defaults.dcacheWshrEntry,
     @arg(name = "sharedmem-nbanks", doc = "shared memory bank count; defaults to num-thread when omitted") sharedmemNBanks: Int = -1,
     @arg(name = "sharedmem-capacity-bytes", doc = "shared memory capacity in bytes") sharedmemCapacityBytes: Int = HardwareConfig.defaults.sharedmemCapacityBytes,
-    @arg(name = "lsu-num-entry-each-warp", doc = "LSU entry count used by LSU-side req/rsp bundles") lsuNumEntryEachWarp: Int = HardwareConfig.defaults.lsuNumEntryEachWarp
+    @arg(name = "lsu-num-entry-each-warp", doc = "LSU entry count used by LSU-side req/rsp bundles") lsuNumEntryEachWarp: Int = HardwareConfig.defaults.lsuNumEntryEachWarp,
+    @arg(name = "lsu-sharedmem-pipe-cut", doc = "insert one pipeline stage between AddrCalc output and SharedMemory input") lsuSharedmemPipeCut: Boolean = false
   ): Unit = {
     val resolvedSharedmemNBanks = if (sharedmemNBanks > 0) sharedmemNBanks else numThread
     val resolvedTargetDir = resolveTargetDir(
@@ -129,7 +145,8 @@ object LsuSharedMemGen {
       numWarp,
       numThread,
       sharedmemCapacityBytes,
-      resolvedSharedmemNBanks
+      resolvedSharedmemNBanks,
+      lsuSharedmemPipeCut
     )
 
     HardwareConfig.configure(
@@ -153,7 +170,7 @@ object LsuSharedMemGen {
     val param = (new MyConfig).toInstance
     (new ChiselStage).execute(
       Array("--target", "chirrtl", "--target-dir", resolvedTargetDir),
-      Seq(ChiselGeneratorAnnotation(() => new LsuSharedMemTop()(param)))
+      Seq(ChiselGeneratorAnnotation(() => new LsuSharedMemTop(lsuSharedmemPipeCut)(param)))
     )
 
     ParametersToJson.saveToJson(s"$resolvedTargetDir/parameters.json")

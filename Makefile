@@ -26,7 +26,10 @@ SM_TARGET_DIR ?= $(SM_OUTPUT_ROOT)/$(SM_DIR_NAME)
 LSU_SHAREDMEM_OUTPUT_ROOT ?= gen_lsu_sharedmem_verilog
 LSU_SHAREDMEM_DIR_PREFIX ?=
 LSU_SHAREDMEM_TOP_NAME := LsuSharedMemTop
-LSU_SHAREDMEM_DIR_NAME := $(LSU_SHAREDMEM_TOP_NAME)$(if $(LSU_SHAREDMEM_DIR_PREFIX),_$(LSU_SHAREDMEM_DIR_PREFIX),)_$(SM_DIR_SUFFIX)
+LSU_SHAREDMEM_PIPE_CUT ?= 0
+LSU_SHAREDMEM_PIPE_TAG := $(if $(filter 1 true TRUE yes YES,$(LSU_SHAREDMEM_PIPE_CUT)),_pipe1,)
+LSU_SHAREDMEM_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(LSU_SHAREDMEM_PIPE_CUT)),true,false)
+LSU_SHAREDMEM_DIR_NAME := $(LSU_SHAREDMEM_TOP_NAME)$(LSU_SHAREDMEM_PIPE_TAG)$(if $(LSU_SHAREDMEM_DIR_PREFIX),_$(LSU_SHAREDMEM_DIR_PREFIX),)_$(SM_DIR_SUFFIX)
 LSU_SHAREDMEM_TARGET_DIR ?= $(LSU_SHAREDMEM_OUTPUT_ROOT)/$(LSU_SHAREDMEM_DIR_NAME)
 
 DC_RTL_BASE ?= /home/mmy/work/ventus/dc_compile/rtl1
@@ -102,6 +105,7 @@ lsu-sharedmem-verilog:
 		--sharedmem-nbanks $(SHAREDMEM_NBANKS) \
 		--sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) \
 		--lsu-num-entry-each-warp $(LSU_NUM_ENTRY_EACH_WARP) \
+		--lsu-sharedmem-pipe-cut $(LSU_SHAREDMEM_PIPE_BOOL) \
 		$(GEN_ARGS)
 	cd $(LSU_SHAREDMEM_TARGET_DIR) && firtool --split-verilog --repl-seq-mem --repl-seq-mem-file=mem.conf -o . LsuSharedMemTop.fir
 	./scripts/gen_sep_mem.sh ./scripts/vlsi_mem_gen $(LSU_SHAREDMEM_TARGET_DIR)/mem.conf $(LSU_SHAREDMEM_TARGET_DIR)/
@@ -150,6 +154,7 @@ lsu-sharedmem-dc-rtl:
 		--sharedmem-nbanks $(SHAREDMEM_NBANKS) \
 		--sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) \
 		--lsu-num-entry-each-warp $(LSU_NUM_ENTRY_EACH_WARP) \
+		--lsu-sharedmem-pipe-cut $(LSU_SHAREDMEM_PIPE_BOOL) \
 		$(GEN_ARGS)
 	cd $(LSU_SHAREDMEM_DC_TARGET_DIR) && firtool --split-verilog --repl-seq-mem --repl-seq-mem-file=mem.conf -o . LsuSharedMemTop.fir
 	./scripts/gen_sep_mem.sh ./scripts/vlsi_mem_gen $(LSU_SHAREDMEM_DC_TARGET_DIR)/mem.conf $(LSU_SHAREDMEM_DC_TARGET_DIR)/
