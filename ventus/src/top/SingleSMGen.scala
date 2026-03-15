@@ -7,12 +7,23 @@ import mainargs.{ParserForMethods, arg, main}
 object SingleSMGen {
   private val TopModuleName = "SM"
 
+  private def pipeTags(
+    lsuSharedmemPipeCut: Boolean,
+    lsuDcachePipeCut: Boolean
+  ): String = {
+    val sharedTag = if (lsuSharedmemPipeCut) "_pipe1" else ""
+    val dcacheTag = if (lsuDcachePipeCut) "_dcachepipe" else ""
+    s"$sharedTag$dcacheTag"
+  }
+
   private def autoDirName(
     dirPrefix: String,
     numWarp: Int,
     numThread: Int,
     sharedmemCapacityBytes: Int,
-    sharedmemNBanks: Int
+    sharedmemNBanks: Int,
+    lsuSharedmemPipeCut: Boolean,
+    lsuDcachePipeCut: Boolean
   ): String = {
     val cfg = HardwareConfig.defaults.copy(
       numSm = 1,
@@ -23,7 +34,8 @@ object SingleSMGen {
     )
     val sharedmemBandwidthBits = HardwareConfig.derivedSharedmemBandwidthBits(cfg)
     val extraPrefix = if (dirPrefix.nonEmpty) s"_${dirPrefix}" else ""
-    s"${TopModuleName}${extraPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
+    val pipeTag = pipeTags(lsuSharedmemPipeCut, lsuDcachePipeCut)
+    s"${TopModuleName}${pipeTag}${extraPrefix}_warp${numWarp}_thread${numThread}_smem${sharedmemCapacityBytes}B_smbank${sharedmemNBanks}_smbw${sharedmemBandwidthBits}"
   }
 
   private def resolveTargetDir(
@@ -33,10 +45,12 @@ object SingleSMGen {
     numWarp: Int,
     numThread: Int,
     sharedmemCapacityBytes: Int,
-    sharedmemNBanks: Int
+    sharedmemNBanks: Int,
+    lsuSharedmemPipeCut: Boolean,
+    lsuDcachePipeCut: Boolean
   ): String = {
     if (targetDir.nonEmpty) targetDir
-    else s"$outputRoot/${autoDirName(dirPrefix, numWarp, numThread, sharedmemCapacityBytes, sharedmemNBanks)}"
+    else s"$outputRoot/${autoDirName(dirPrefix, numWarp, numThread, sharedmemCapacityBytes, sharedmemNBanks, lsuSharedmemPipeCut, lsuDcachePipeCut)}"
   }
 
   @main
@@ -58,7 +72,9 @@ object SingleSMGen {
     @arg(name = "dcache-wshr-entry", doc = "L1D writeback queue entries") dcacheWshrEntry: Int = HardwareConfig.defaults.dcacheWshrEntry,
     @arg(name = "sharedmem-nbanks", doc = "shared memory bank count; defaults to num-thread when omitted") sharedmemNBanks: Int = -1,
     @arg(name = "sharedmem-capacity-bytes", doc = "shared memory capacity per SM in bytes") sharedmemCapacityBytes: Int = HardwareConfig.defaults.sharedmemCapacityBytes,
-    @arg(name = "lsu-num-entry-each-warp", doc = "LSU queue depth per warp") lsuNumEntryEachWarp: Int = HardwareConfig.defaults.lsuNumEntryEachWarp
+    @arg(name = "lsu-num-entry-each-warp", doc = "LSU queue depth per warp") lsuNumEntryEachWarp: Int = HardwareConfig.defaults.lsuNumEntryEachWarp,
+    @arg(name = "lsu-sharedmem-pipe-cut", doc = "insert one pipeline stage between LSU shared request and SharedMemory") lsuSharedmemPipeCut: Boolean = false,
+    @arg(name = "lsu-dcache-pipe-cut", doc = "insert one pipeline stage between LSU dcache request and DataCache") lsuDcachePipeCut: Boolean = false
   ): Unit = {
     val resolvedSharedmemNBanks = if (sharedmemNBanks > 0) sharedmemNBanks else numThread
     val resolvedTargetDir = resolveTargetDir(
@@ -68,7 +84,9 @@ object SingleSMGen {
       numWarp,
       numThread,
       sharedmemCapacityBytes,
-      resolvedSharedmemNBanks
+      resolvedSharedmemNBanks,
+      lsuSharedmemPipeCut,
+      lsuDcachePipeCut
     )
 
     HardwareConfig.configure(
@@ -94,7 +112,10 @@ object SingleSMGen {
 
     (new ChiselStage).execute(
       Array("--target", "chirrtl", "--target-dir", resolvedTargetDir),
-      Seq(ChiselGeneratorAnnotation(() => new SM()))
+      Seq(ChiselGeneratorAnnotation(() => new SM(
+        lsuSharedmemPipeCut = lsuSharedmemPipeCut,
+        lsuDcachePipeCut = lsuDcachePipeCut
+      )))
     )
 
     ParametersToJson.saveToJson(s"$resolvedTargetDir/parameters.json")

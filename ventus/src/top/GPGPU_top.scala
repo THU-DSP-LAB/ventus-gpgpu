@@ -360,11 +360,13 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
 class SM(
   FakeCache: Boolean = false,
   SV: Option[mmu.SVParam] = None,
-  smIdValue: Int = 0
+  smIdValue: Int = 0,
+  lsuSharedmemPipeCut: Boolean = false,
+  lsuDcachePipeCut: Boolean = false
 ) extends Module {
-  def this() = this(false, None, 0)
+  def this() = this(false, None, 0, false, false)
 
-  private val impl = Module(new SM_wrapper(FakeCache, SV))
+  private val impl = Module(new SM_wrapper(FakeCache, SV, lsuSharedmemPipeCut, lsuDcachePipeCut))
 
   val io = IO(chiselTypeOf(impl.io))
 
@@ -373,7 +375,12 @@ class SM(
 }
 
 @instantiable
-class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) extends Module{
+class SM_wrapper(
+  FakeCache: Boolean = false,
+  SV: Option[mmu.SVParam] = None,
+  lsuSharedmemPipeCut: Boolean = false,
+  lsuDcachePipeCut: Boolean = false
+) extends Module{
   val param = (new MyConfig).toInstance
   class MMU_RVGParam(implicit val p: Parameters) extends HasRVGParameters
   @public val sm_id = IO(Input(UInt(8.W)))
@@ -472,7 +479,15 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   // **** dcache memReq ****
   l1Cache2L2Arb.io.memReqVecIn.get(1) <> dcache.io.memReq.get
   // **** dcache coreReq ****
-  dcache.io.coreReq <> pipe.io.dcache_req
+  val dcacheReqSrc = Wire(chiselTypeOf(pipe.io.dcache_req))
+  if (lsuDcachePipeCut) {
+    val dcacheReqPipe = Module(new Queue(new DCacheCoreReq_np, entries = 1, pipe = true, flow = false))
+    dcacheReqPipe.io.enq <> pipe.io.dcache_req
+    dcacheReqSrc <> dcacheReqPipe.io.deq
+  } else {
+    dcacheReqSrc <> pipe.io.dcache_req
+  }
+  dcache.io.coreReq <> dcacheReqSrc
   // **** dcache coreRsp ****
   pipe.io.dcache_rsp.valid:=dcache.io.coreRsp.valid
   pipe.io.dcache_rsp.bits.instrId:=dcache.io.coreRsp.bits.instrId
@@ -529,15 +544,25 @@ if(MMU_ENABLED) {
   }
 }
 
-
   val sharedmem = Module(new SharedMemory()(param))
-  sharedmem.io.coreReq.bits.data:=pipe.io.shared_req.bits.data
-  sharedmem.io.coreReq.bits.instrId:=pipe.io.shared_req.bits.instrId
-  sharedmem.io.coreReq.bits.isWrite:=pipe.io.shared_req.bits.isWrite
-  sharedmem.io.coreReq.bits.setIdx:=pipe.io.shared_req.bits.setIdx
-  sharedmem.io.coreReq.bits.perLaneAddr:=pipe.io.shared_req.bits.perLaneAddr
-  sharedmem.io.coreReq.valid:=pipe.io.shared_req.valid
-  pipe.io.shared_req.ready:=sharedmem.io.coreReq.ready
+  val sharedReqPipe = if (lsuSharedmemPipeCut) Some(Module(new Queue(new ShareMemCoreReq_np, entries = 1, pipe = true, flow = false))) else None
+  val sharedReqSrc = Wire(DecoupledIO(new ShareMemCoreReq_np))
+  sharedReqSrc.bits := DontCare
+  sharedReqSrc.valid := false.B
+  sharedReqPipe match {
+    case Some(q) =>
+      q.io.enq <> pipe.io.shared_req
+      sharedReqSrc <> q.io.deq
+    case None =>
+      sharedReqSrc <> pipe.io.shared_req
+  }
+  sharedmem.io.coreReq.bits.data:=sharedReqSrc.bits.data
+  sharedmem.io.coreReq.bits.instrId:=sharedReqSrc.bits.instrId
+  sharedmem.io.coreReq.bits.isWrite:=sharedReqSrc.bits.isWrite
+  sharedmem.io.coreReq.bits.setIdx:=sharedReqSrc.bits.setIdx
+  sharedmem.io.coreReq.bits.perLaneAddr:=sharedReqSrc.bits.perLaneAddr
+  sharedmem.io.coreReq.valid:=sharedReqSrc.valid
+  sharedReqSrc.ready:=sharedmem.io.coreReq.ready
 
   sharedmem.io.coreRsp.ready:=pipe.io.shared_rsp.ready
   pipe.io.shared_rsp.valid:=sharedmem.io.coreRsp.valid

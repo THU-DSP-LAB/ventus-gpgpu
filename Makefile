@@ -18,9 +18,14 @@ LSU_NUM_ENTRY_EACH_WARP ?= 4
 SM_OUTPUT_ROOT ?= gen_sm_verilog
 SM_DIR_PREFIX ?=
 SM_TOP_NAME := SM
+SM_SHAREDMEM_PIPE_CUT ?= 0
+SM_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_SHAREDMEM_PIPE_CUT)),true,false)
+SM_DCACHE_PIPE_CUT ?= 0
+SM_DCACHE_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_DCACHE_PIPE_CUT)),true,false)
+SM_PIPE_TAG := $(if $(filter 1 true TRUE yes YES,$(SM_SHAREDMEM_PIPE_CUT)),_pipe1,)$(if $(filter 1 true TRUE yes YES,$(SM_DCACHE_PIPE_CUT)),_dcachepipe,)
 SM_SHAREDMEM_BW_BITS := $(shell expr $(SHAREDMEM_NBANKS) \* 32)
 SM_DIR_SUFFIX := warp$(NUM_WARP)_thread$(NUM_THREAD)_smem$(SHAREDMEM_CAPACITY_BYTES)B_smbank$(SHAREDMEM_NBANKS)_smbw$(SM_SHAREDMEM_BW_BITS)
-SM_DIR_NAME := $(SM_TOP_NAME)$(if $(SM_DIR_PREFIX),_$(SM_DIR_PREFIX),)_$(SM_DIR_SUFFIX)
+SM_DIR_NAME := $(SM_TOP_NAME)$(SM_PIPE_TAG)$(if $(SM_DIR_PREFIX),_$(SM_DIR_PREFIX),)_$(SM_DIR_SUFFIX)
 SM_TARGET_DIR ?= $(SM_OUTPUT_ROOT)/$(SM_DIR_NAME)
 
 LSU_SHAREDMEM_OUTPUT_ROOT ?= gen_lsu_sharedmem_verilog
@@ -85,6 +90,8 @@ sm-verilog:
 		--sharedmem-nbanks $(SHAREDMEM_NBANKS) \
 		--sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) \
 		--lsu-num-entry-each-warp $(LSU_NUM_ENTRY_EACH_WARP) \
+		--lsu-sharedmem-pipe-cut $(SM_PIPE_BOOL) \
+		--lsu-dcache-pipe-cut $(SM_DCACHE_PIPE_BOOL) \
 		$(GEN_ARGS)
 	cd $(SM_TARGET_DIR) && firtool --split-verilog --repl-seq-mem --repl-seq-mem-file=mem.conf -o . SM.fir
 	./scripts/gen_sep_mem.sh ./scripts/vlsi_mem_gen $(SM_TARGET_DIR)/mem.conf $(SM_TARGET_DIR)/
@@ -129,6 +136,8 @@ sm-dc-rtl:
 		--sharedmem-nbanks $(SHAREDMEM_NBANKS) \
 		--sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) \
 		--lsu-num-entry-each-warp $(LSU_NUM_ENTRY_EACH_WARP) \
+		--lsu-sharedmem-pipe-cut $(SM_PIPE_BOOL) \
+		--lsu-dcache-pipe-cut $(SM_DCACHE_PIPE_BOOL) \
 		$(GEN_ARGS)
 	cd $(SM_DC_TARGET_DIR) && firtool --split-verilog --repl-seq-mem --repl-seq-mem-file=mem.conf -o . SM.fir
 	./scripts/gen_sep_mem.sh ./scripts/vlsi_mem_gen $(SM_DC_TARGET_DIR)/mem.conf $(SM_DC_TARGET_DIR)/
