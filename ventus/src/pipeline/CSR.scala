@@ -360,7 +360,7 @@ class CSRFile extends Module {
   io.lsu_numw := wg_wf_count
 }
 
-class CSRexe extends Module {
+class CSRexe(val csrResultPipeCut: Boolean = false) extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new csrExeData))
     val out = Decoupled(new WriteScalarCtrl())
@@ -378,6 +378,11 @@ class CSRexe extends Module {
     val lsu_numw= Output(UInt(xLen.W))
     val simt_rpc = Output(UInt(xLen.W))
   })
+  class CsrRespStage extends Bundle {
+    val isVec = Bool()
+    val scalar = new WriteScalarCtrl
+    val vector = new WriteVecCtrl
+  }
   val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
   vCSR.foreach(x=>{
     x.ctrl:=io.in.bits.ctrl
@@ -400,28 +405,58 @@ class CSRexe extends Module {
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   result.io.deq<>io.out
-
-  io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid & result_v.io.enq.ready
-
-  result.io.enq.valid:=io.in.fire & !vCSR(io.in.bits.ctrl.wid).wb_isvec
-  result.io.enq.bits:=0.U.asTypeOf(new WriteScalarCtrl)
-  result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  result.io.enq.bits.wxd:= !vCSR(io.in.bits.ctrl.wid).wb_isvec
-  result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
-  result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
-
   result_v.io.deq <> io.out_v
 
-  result_v.io.enq.valid := io.in.fire & vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result.io.enq.valid := false.B
+  result.io.enq.bits := 0.U.asTypeOf(new WriteScalarCtrl)
+  result_v.io.enq.valid := false.B
   result_v.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
-  result_v.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
-  result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
-  result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
-  result_v.io.enq.bits.warp_id := io.in.bits.ctrl.wid
-  result_v.io.enq.bits.wvd_mask:= VecInit.fill(num_thread)(true.B)
 
-  if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
-  if(SPIKE_OUTPUT) result_v.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+  if (csrResultPipeCut) {
+    val respStage = Module(new Queue(new CsrRespStage, 1, pipe = false, flow = false))
+
+    io.in.ready := respStage.io.enq.ready & !io.CTA2csr.valid
+    respStage.io.enq.valid := io.in.fire
+    respStage.io.enq.bits := 0.U.asTypeOf(new CsrRespStage)
+    respStage.io.enq.bits.isVec := vCSR(io.in.bits.ctrl.wid).wb_isvec
+    respStage.io.enq.bits.scalar.reg_idxw := io.in.bits.ctrl.reg_idxw
+    respStage.io.enq.bits.scalar.wxd := !vCSR(io.in.bits.ctrl.wid).wb_isvec
+    respStage.io.enq.bits.scalar.wb_wxd_rd := vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
+    respStage.io.enq.bits.scalar.warp_id := io.in.bits.ctrl.wid
+    respStage.io.enq.bits.vector.reg_idxw := io.in.bits.ctrl.reg_idxw
+    respStage.io.enq.bits.vector.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
+    respStage.io.enq.bits.vector.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
+    respStage.io.enq.bits.vector.warp_id := io.in.bits.ctrl.wid
+    respStage.io.enq.bits.vector.wvd_mask := VecInit.fill(num_thread)(true.B)
+    if (SPIKE_OUTPUT) {
+      respStage.io.enq.bits.scalar.spike_info.get := io.in.bits.ctrl.spike_info.get
+      respStage.io.enq.bits.vector.spike_info.get := io.in.bits.ctrl.spike_info.get
+    }
+
+    result.io.enq.valid := respStage.io.deq.valid & !respStage.io.deq.bits.isVec
+    result.io.enq.bits := respStage.io.deq.bits.scalar
+    result_v.io.enq.valid := respStage.io.deq.valid & respStage.io.deq.bits.isVec
+    result_v.io.enq.bits := respStage.io.deq.bits.vector
+    respStage.io.deq.ready := Mux(respStage.io.deq.bits.isVec, result_v.io.enq.ready, result.io.enq.ready)
+  } else {
+    io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid & result_v.io.enq.ready
+
+    result.io.enq.valid:=io.in.fire & !vCSR(io.in.bits.ctrl.wid).wb_isvec
+    result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
+    result.io.enq.bits.wxd:= !vCSR(io.in.bits.ctrl.wid).wb_isvec
+    result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
+    result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
+
+    result_v.io.enq.valid := io.in.fire & vCSR(io.in.bits.ctrl.wid).wb_isvec
+    result_v.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
+    result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
+    result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
+    result_v.io.enq.bits.warp_id := io.in.bits.ctrl.wid
+    result_v.io.enq.bits.wvd_mask:= VecInit.fill(num_thread)(true.B)
+
+    if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+    if(SPIKE_OUTPUT) result_v.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+  }
   (0 until 3).foreach(x=>{
     io.rm(x):=vCSR(io.rm_wid(x)).frm
   })

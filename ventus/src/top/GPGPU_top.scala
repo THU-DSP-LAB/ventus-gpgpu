@@ -362,11 +362,23 @@ class SM(
   SV: Option[mmu.SVParam] = None,
   smIdValue: Int = 0,
   lsuSharedmemPipeCut: Boolean = false,
-  lsuDcachePipeCut: Boolean = false
+  lsuDcachePipeCut: Boolean = false,
+  lsuAddrCalcPipeCut: Boolean = false,
+  operandCollectorRfPipeCut: Boolean = false,
+  operandCrossbarPipeCut: Boolean = false,
+  operandIssuePipeCut: Boolean = false,
+  ibufferIssuePipeCut: Boolean = false,
+  csrResultPipeCut: Boolean = false,
+  csrIssuePipeCut: Boolean = false,
+  simtPipeCut: Boolean = false,
+  fpuInputPipeCut: Boolean = false,
+  tensorCoreInputPipeCut: Boolean = false,
+  tensorCoreWbPipeCut: Boolean = false,
+  writebackOutPipeCut: Boolean = false
 ) extends Module {
-  def this() = this(false, None, 0, false, false)
+  def this() = this(false, None, 0, false, false, false, false, false, false, false, false, false, false, false, false, false, false)
 
-  private val impl = Module(new SM_wrapper(FakeCache, SV, lsuSharedmemPipeCut, lsuDcachePipeCut))
+  private val impl = Module(new SM_wrapper(FakeCache, SV, lsuSharedmemPipeCut, lsuDcachePipeCut, lsuAddrCalcPipeCut, operandCollectorRfPipeCut, operandCrossbarPipeCut, operandIssuePipeCut, ibufferIssuePipeCut, csrResultPipeCut, csrIssuePipeCut, simtPipeCut, fpuInputPipeCut, tensorCoreInputPipeCut, tensorCoreWbPipeCut, writebackOutPipeCut))
 
   val io = IO(chiselTypeOf(impl.io))
 
@@ -379,7 +391,19 @@ class SM_wrapper(
   FakeCache: Boolean = false,
   SV: Option[mmu.SVParam] = None,
   lsuSharedmemPipeCut: Boolean = false,
-  lsuDcachePipeCut: Boolean = false
+  lsuDcachePipeCut: Boolean = false,
+  lsuAddrCalcPipeCut: Boolean = false,
+  operandCollectorRfPipeCut: Boolean = false,
+  operandCrossbarPipeCut: Boolean = false,
+  operandIssuePipeCut: Boolean = false,
+  ibufferIssuePipeCut: Boolean = false,
+  csrResultPipeCut: Boolean = false,
+  csrIssuePipeCut: Boolean = false,
+  simtPipeCut: Boolean = false,
+  fpuInputPipeCut: Boolean = false,
+  tensorCoreInputPipeCut: Boolean = false,
+  tensorCoreWbPipeCut: Boolean = false,
+  writebackOutPipeCut: Boolean = false
 ) extends Module{
   val param = (new MyConfig).toInstance
   class MMU_RVGParam(implicit val p: Parameters) extends HasRVGParameters
@@ -406,7 +430,7 @@ class SM_wrapper(
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
   cta2warp.io.CTArsp<>io.CTArsp
-  val pipe=Module(new pipe())
+  val pipe=Module(new pipe(lsuAddrCalcPipeCut, operandCollectorRfPipeCut, operandCrossbarPipeCut, operandIssuePipeCut, ibufferIssuePipeCut, csrResultPipeCut, csrIssuePipeCut, simtPipeCut, fpuInputPipeCut, tensorCoreInputPipeCut, tensorCoreWbPipeCut, writebackOutPipeCut))
   pipe.sm_id := sm_id
   pipe.io.pc_reset:=true.B
   io.inst_cnt.foreach(_ := pipe.io.inst_cnt.getOrElse(0.U))

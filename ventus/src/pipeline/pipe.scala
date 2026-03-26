@@ -30,7 +30,20 @@ class ICachePipeRsp_np extends Bundle{
   val status = UInt(2.W)
 }
 
-class pipe() extends Module{
+class pipe(
+  val lsuAddrCalcPipeCut: Boolean = false,
+  val operandCollectorRfPipeCut: Boolean = false,
+  val operandCrossbarPipeCut: Boolean = false,
+  val operandIssuePipeCut: Boolean = false,
+  val ibufferIssuePipeCut: Boolean = false,
+  val csrResultPipeCut: Boolean = false,
+  val csrIssuePipeCut: Boolean = false,
+  val simtPipeCut: Boolean = false,
+  val fpuInputPipeCut: Boolean = false,
+  val tensorCoreInputPipeCut: Boolean = false,
+  val tensorCoreWbPipeCut: Boolean = false,
+  val writebackOutPipeCut: Boolean = false
+) extends Module{
   val sm_id = IO(Input(UInt(8.W)))
   val io = IO(new Bundle{
     val icache_req = (DecoupledIO(new ICachePipeReq_np))
@@ -57,7 +70,7 @@ class pipe() extends Module{
   //val pcfifo=Module(new PCfifo)
   val control=Module(new InstrDecodeV2)
   control.io.sm_id := sm_id
-  val operand_collector=Module(new operandCollector)
+  val operand_collector=Module(new operandCollector(operandCollectorRfPipeCut, operandCrossbarPipeCut))
   if (GVM_ENABLED) {
     val gvm_xreg = Module(new GvmDutXReg)
     gvm_xreg.io.clock := clock
@@ -86,12 +99,14 @@ class pipe() extends Module{
   val alu=Module(new ALUexe)
   val valu=Module(new vALUv2(num_thread, num_lane))
   val fpu=Module(new FPUexe(num_thread,num_lane))
-  val lsu=Module(new LSUexe)
+  val lsu=Module(new LSUexe(lsuAddrCalcPipeCut))
   val sfu=Module(new SFUexe)
   val mul=Module(new vMULv2(num_thread,num_lane))
   val tensorcore=Module(new vTCexe)
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,7))
+  val wbOutXStage = Queue(wb.io.out_x, if (writebackOutPipeCut) 1 else 0, pipe = false, flow = false)
+  val wbOutVStage = Queue(wb.io.out_v, if (writebackOutPipeCut) 1 else 0, pipe = false, flow = false)
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
@@ -112,6 +127,11 @@ class pipe() extends Module{
   val scoreb=VecInit(Seq.fill(num_warp)(Module(new Scoreboard).io))
   val ibuffer=Module(new InstrBufferV2)
   val ibuffer2issue=Module(new ibuffer2issue)
+  val ibufferIssueStages = if (ibufferIssuePipeCut) {
+    Some(Seq.fill(num_warp)(Module(new Queue(new CtrlSigs, 1, pipe = false, flow = false, hasFlush = true))))
+  } else {
+    None
+  }
   if(INST_CNT) {
     io.inst_cnt.foreach(_ := ibuffer2issue.io.cnt.getOrElse(0.U))
   }
@@ -122,31 +142,49 @@ class pipe() extends Module{
     io.inst_cnt.foreach( _ := 0.U)
   }
   //  val exe_acq_reg=Module(new Queue(new CtrlSigs,1,pipe=true))
-  val exe_dataX=Module(new Module{
-    val io = IO(new Bundle{
-      val enq = Flipped(DecoupledIO(new vExeData))
-      val deq = DecoupledIO(Output(new vExeData))
-    })
-    io.deq <> io.enq
-  })
-  val exe_dataV = Module(new Module {
-    val io = IO(new Bundle {
-      val enq = Flipped(DecoupledIO(new vExeData))
-      val deq = DecoupledIO(Output(new vExeData))
-    })
-    io.deq <> io.enq
-  })
+  val exe_dataX_src = Wire(DecoupledIO(new vExeData))
+  val exe_dataV_src = Wire(DecoupledIO(new vExeData))
+  val exe_dataX = Queue(exe_dataX_src, if (operandIssuePipeCut) 1 else 0, pipe = false, flow = false)
+  val exe_dataV = Queue(exe_dataV_src, if (operandIssuePipeCut) 1 else 0, pipe = false, flow = false)
+  class SimtStageData extends Bundle {
+    val branch = new simtExeData
+    val rpc = UInt(xLen.W)
+  }
   val simt_stack=Module(new branch_join(num_thread))
   val branch_back=Module(new Branch_back)
-  val csrfile=Module(new CSRexe())
+  val csrfile=Module(new CSRexe(csrResultPipeCut))
+  val csrIssueStage = Queue(issueX.io.out_CSR, if (csrIssuePipeCut) 1 else 0, pipe = false, flow = false)
+  val simtStageSrc = Wire(DecoupledIO(new SimtStageData))
+  val simtStage = Queue(simtStageSrc, if (simtPipeCut) 1 else 0, pipe = false, flow = false)
+  val fpuInputStage = Queue(issueV.io.out_vFPU, if (fpuInputPipeCut) 1 else 0, pipe = false, flow = false)
+  val tensorCoreInputStage = Queue(issueV.io.out_TC, if (tensorCoreInputPipeCut) 1 else 0, pipe = false, flow = false)
+  val tensorCoreWbStage = Queue(tensorcore.io.out_v, if (tensorCoreWbPipeCut) 1 else 0, pipe = false, flow = false)
 
   io.externalFlushPipe.valid:=warp_sche.io.flush.valid|warp_sche.io.flushCache.valid
   io.externalFlushPipe.bits:=Mux(warp_sche.io.flush.valid,warp_sche.io.flush.bits,warp_sche.io.flushCache.bits)
 
-  csrfile.io.lsu_wid:=lsu.io.csr_wid
-  lsu.io.csr_pds:=csrfile.io.lsu_pds
-  lsu.io.csr_tid:=csrfile.io.lsu_tid
-  lsu.io.csr_numw:=csrfile.io.lsu_numw
+  if (lsuAddrCalcPipeCut) {
+    // CSR pre-fetch: drive csrfile with the incoming instruction's wid (from the pipe-level
+    // dispatch bus, physically co-located with csrfile), then register the CSR outputs here
+    // before forwarding to LSUexe.  This eliminates the long-wire round trip:
+    //   AddrCalc_reg_save_ctrl_wid_reg (deep inside pipe_lsu)
+    //   -> csrfile (pipe_csrfile) -> csr_pds_used_reg (back in pipe_lsu)
+    // which was 1.83 ns at 1 GHz.  With the register placed here the two paths become:
+    //   issueV_wid_reg -> csrfile mux -> csr_lsu_*_prereg  (all local to pipe)
+    //   csr_lsu_*_prereg -> wire -> AddrCalc.csr_*_used_reg  (no mux, just wire)
+    csrfile.io.lsu_wid := lsu.io.lsu_req.bits.ctrl.wid
+    val csr_lsu_numw_prereg = RegEnable(csrfile.io.lsu_numw, lsu.io.lsu_req.fire)
+    val csr_lsu_pds_prereg  = RegEnable(csrfile.io.lsu_pds,  lsu.io.lsu_req.fire)
+    val csr_lsu_tid_prereg  = RegEnable(csrfile.io.lsu_tid,  lsu.io.lsu_req.fire)
+    lsu.io.csr_numw := csr_lsu_numw_prereg
+    lsu.io.csr_pds  := csr_lsu_pds_prereg
+    lsu.io.csr_tid  := csr_lsu_tid_prereg
+  } else {
+    csrfile.io.lsu_wid := lsu.io.csr_wid
+    lsu.io.csr_pds  := csrfile.io.lsu_pds
+    lsu.io.csr_tid  := csrfile.io.lsu_tid
+    lsu.io.csr_numw := csrfile.io.lsu_numw
+  }
   if (SPIKE_OUTPUT) {
     when(csrfile.io.in.valid && csrfile.io.in.bits.ctrl.custom_signal_0){
       printf(p"sm ${sm_id} warp ${Decimal(csrfile.io.in.bits.ctrl.wid)} " +
@@ -166,8 +204,8 @@ class pipe() extends Module{
 
   warp_sche.io.pc_req<>io.icache_req
   warp_sche.io.warp_control<>issueX.io.out_warpscheduler
-  warp_sche.io.issued_warp.bits:=exe_dataX.io.enq.bits.ctrl.wid // not used
-  warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
+  warp_sche.io.issued_warp.bits:=exe_dataX_src.bits.ctrl.wid // not used
+  warp_sche.io.issued_warp.valid:=exe_dataX_src.fire // not used
   warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
@@ -236,12 +274,39 @@ class pipe() extends Module{
   warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
-    ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
-    ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i)
-    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
-    if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
-      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
-    val ctrl=ibuffer.io.out(i).bits
+    val issueCtrlBits = Wire(new CtrlSigs)
+    val issueCtrlValid = Wire(Bool())
+    issueCtrlBits := ibuffer.io.out(i).bits
+    issueCtrlValid := ibuffer.io.out(i).valid
+    ibuffer.io.out(i).ready := false.B
+
+    if (ibufferIssuePipeCut) {
+      val stage = ibufferIssueStages.get(i)
+      stage.io.enq.bits := ibuffer.io.out(i).bits
+      stage.io.enq.valid := ibuffer.io.out(i).valid
+      stage.flush := warp_sche.io.flush.valid && (warp_sche.io.flush.bits === i.U)
+      ibuffer.io.out(i).ready := stage.io.enq.ready
+      issueCtrlBits := stage.io.deq.bits
+      issueCtrlValid := stage.io.deq.valid
+      stage.io.deq.ready := false.B
+    }
+
+    ibuffer2issue.io.in(i).bits:=issueCtrlBits
+    ibuffer2issue.io.in(i).valid:=issueCtrlValid & warp_sche.io.warp_ready(i)
+    if (ibufferIssuePipeCut) {
+      ibufferIssueStages.get(i).io.deq.ready := ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
+    } else {
+      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
+    }
+    if(SINGLE_INST) {
+      ibuffer2issue.io.in(i).valid:=issueCtrlValid & !scoreb(i).delay
+      if (ibufferIssuePipeCut) {
+        ibufferIssueStages.get(i).io.deq.ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay
+      } else {
+        ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay
+      }
+    }
+    val ctrl=issueCtrlBits
     /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
         Mux(ctrl.csr.orR,csrfile.io.in.ready,
@@ -251,10 +316,10 @@ class pipe() extends Module{
                 Mux(ctrl.isvec,valu.io.in.ready,
                   Mux(ctrl.barrier,warp_sche.io.warp_control.ready,alu.io.in.ready))))))))*/
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
-    scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
+    scoreb(i).ibuffer_if_ctrl:=issueCtrlBits
     scoreb(i).if_ctrl:= Mux((i.asUInt === ibuffer2issue.io.out_x.bits.wid) && ibuffer2issue.io.out_x.fire, ibuffer2issue.io.out_x.bits,ibuffer2issue.io.out_v.bits)
-    scoreb(i).wb_v_ctrl:=wb.io.out_v.bits
-    scoreb(i).wb_x_ctrl:=wb.io.out_x.bits
+    scoreb(i).wb_v_ctrl:=wbOutVStage.bits
+    scoreb(i).wb_x_ctrl:=wbOutXStage.bits
     scoreb(i).fence_end:=lsu.io.fence_end(i)
     scoreb(i).if_fire:=Mux(((i.asUInt===ibuffer2issue.io.out_x.bits.wid)&&ibuffer2issue.io.out_x.fire) ||
       ((i.asUInt===ibuffer2issue.io.out_v.bits.wid)&&ibuffer2issue.io.out_v.fire), true.B,false.B)
@@ -285,8 +350,8 @@ class pipe() extends Module{
   scoreb(op_colX_out_wid).op_colX_out_fire := operand_collector.io.out(1).fire
 
 
-  scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
-  scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
+  scoreb(wbOutXStage.bits.warp_id).wb_x_fire:=wbOutXStage.fire
+  scoreb(wbOutVStage.bits.warp_id).wb_v_fire:=wbOutVStage.fire
 
   // ibuffer2issue模块的IO都是实际发射但尚未执行的指令，在这检查undefined instruction
   when(ibuffer2issue.io.out_x.fire){
@@ -304,11 +369,11 @@ class pipe() extends Module{
 
   operand_collector.io.controlV<>ibuffer2issue.io.out_v//ibuffer2issue.io.out.bits
   operand_collector.io.controlX<>ibuffer2issue.io.out_x//ibuffer2issue.io.out.bits
-  operand_collector.io.writeVecCtrl<>wb.io.out_v
-  operand_collector.io.writeScalarCtrl<>wb.io.out_x
+  operand_collector.io.writeVecCtrl<>wbOutVStage
+  operand_collector.io.writeScalarCtrl<>wbOutXStage
 
   simt_stack.io.input_wid:=operand_collector.io.out(0).bits.control.wid//ibuffer2issue.io.out.bits.wid
-  csrfile.io.simt_wid := operand_collector.io.out(0).bits.control.wid // todo check this
+  csrfile.io.simt_wid := issueV.io.out_SIMT.bits.wid
 
   when(io.icache_req.fire&(io.icache_req.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_req.bits.warpid},pc=0x${Hexadecimal(io.icache_req.bits.addr)}\n")
@@ -316,11 +381,11 @@ class pipe() extends Module{
   when(io.icache_rsp.fire&(io.icache_rsp.bits.warpid===2.U)){
     //printf(p"wid=${io.icache_rsp.bits.warpid},pc=0x${Hexadecimal(io.icache_rsp.bits.addr)},inst=0x${Hexadecimal(io.icache_rsp.bits.data)}\n")
   }
-  when(exe_dataX.io.deq.fire&(exe_dataX.io.deq.bits.ctrl.wid===2.U)){
-    //printf(p"wid=${exe_dataX.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataX.io.deq.bits.ctrl.inst)}\n")
+  when(exe_dataX.fire&(exe_dataX.bits.ctrl.wid===2.U)){
+    //printf(p"wid=${exe_dataX.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataX.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataX.bits.ctrl.inst)}\n")
   }
-  when(exe_dataV.io.deq.fire&(exe_dataV.io.deq.bits.ctrl.wid===2.U)) {
-    //printf(p"wid=${exe_dataV.io.deq.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataV.io.deq.bits.ctrl.inst)}\n")
+  when(exe_dataV.fire&(exe_dataV.bits.ctrl.wid===2.U)) {
+    //printf(p"wid=${exe_dataV.bits.ctrl.wid},pc=0x${Hexadecimal(exe_dataV.bits.ctrl.pc)},inst=0x${Hexadecimal(exe_dataV.bits.ctrl.inst)}\n")
   }
 
 
@@ -368,25 +433,25 @@ class pipe() extends Module{
   //  }
 
   {
-    exe_dataX.io.enq.bits.ctrl := operand_collector.io.out(1).bits.control
-    exe_dataX.io.enq.bits.in1 := operand_collector.io.out(1).bits.alu_src1
-    exe_dataX.io.enq.bits.in2 := operand_collector.io.out(1).bits.alu_src2
-    exe_dataX.io.enq.bits.in3 := operand_collector.io.out(1).bits.alu_src3
-    exe_dataX.io.enq.bits.mask.foreach(_ := true.B)
-    exe_dataX.io.enq.valid:=operand_collector.io.out(1).valid
-    operand_collector.io.out(1).ready := exe_dataX.io.enq.ready
+    exe_dataX_src.bits.ctrl := operand_collector.io.out(1).bits.control
+    exe_dataX_src.bits.in1 := operand_collector.io.out(1).bits.alu_src1
+    exe_dataX_src.bits.in2 := operand_collector.io.out(1).bits.alu_src2
+    exe_dataX_src.bits.in3 := operand_collector.io.out(1).bits.alu_src3
+    exe_dataX_src.bits.mask.foreach(_ := true.B)
+    exe_dataX_src.valid:=operand_collector.io.out(1).valid
+    operand_collector.io.out(1).ready := exe_dataX_src.ready
 
-    exe_dataV.io.enq.bits.ctrl := operand_collector.io.out(0).bits.control
-    exe_dataV.io.enq.bits.in1 := operand_collector.io.out(0).bits.alu_src1
-    exe_dataV.io.enq.bits.in2 := operand_collector.io.out(0).bits.alu_src2
-    exe_dataV.io.enq.bits.in3 := operand_collector.io.out(0).bits.alu_src3
-    exe_dataV.io.enq.bits.mask := (operand_collector.io.out(0).bits.mask.zipWithIndex.map { case (x, y) => x & simt_stack.io.out_mask(y) })
-    exe_dataV.io.enq.valid := operand_collector.io.out(0).valid
-    operand_collector.io.out(0).ready := exe_dataV.io.enq.ready
+    exe_dataV_src.bits.ctrl := operand_collector.io.out(0).bits.control
+    exe_dataV_src.bits.in1 := operand_collector.io.out(0).bits.alu_src1
+    exe_dataV_src.bits.in2 := operand_collector.io.out(0).bits.alu_src2
+    exe_dataV_src.bits.in3 := operand_collector.io.out(0).bits.alu_src3
+    exe_dataV_src.bits.mask := (operand_collector.io.out(0).bits.mask.zipWithIndex.map { case (x, y) => x & simt_stack.io.out_mask(y) })
+    exe_dataV_src.valid := operand_collector.io.out(0).valid
+    operand_collector.io.out(0).ready := exe_dataV_src.ready
   }
   //  exe_acq_reg.io.deq.ready:=exe_data.io.enq.ready//ibuffer2issue.io.out.ready:=exe_data.io.enq.ready
-  issueV.io.in<>exe_dataV.io.deq
-  issueX.io.in<>exe_dataX.io.deq
+  issueV.io.in<>exe_dataV
+  issueX.io.in<>exe_dataX
 
   issueV.io.out_vALU<>valu.io.in
   issueX.io.out_vALU.ready := false.B
@@ -394,25 +459,31 @@ class pipe() extends Module{
   issueX.io.out_LSU.ready := false.B
   issueX.io.out_sALU<>alu.io.in
   issueV.io.out_sALU.ready := false.B
-  issueX.io.out_CSR<>csrfile.io.in
+  csrfile.io.in <> csrIssueStage
   issueV.io.out_CSR.ready := false.B
-  issueV.io.out_SIMT<>simt_stack.io.branch_ctl
+  simtStageSrc.valid := issueV.io.out_SIMT.valid
+  simtStageSrc.bits.branch := issueV.io.out_SIMT.bits
+  simtStageSrc.bits.rpc := csrfile.io.simt_rpc
+  issueV.io.out_SIMT.ready := simtStageSrc.ready
+  simt_stack.io.branch_ctl.valid := simtStage.valid
+  simt_stack.io.branch_ctl.bits := simtStage.bits.branch
+  simt_stack.io.pc_reconv.valid := simtStage.valid
+  simt_stack.io.pc_reconv.bits := simtStage.bits.rpc
+  simtStage.ready := simt_stack.io.branch_ctl.ready && simt_stack.io.pc_reconv.ready
   issueX.io.out_SIMT.ready := false.B
   issueV.io.out_SFU<>sfu.io.in
   issueX.io.out_SFU.ready := false.B
   //simt_stack.io.branch_ctl<>Queue(issue.io.out_SIMT,1,flow = true)
   simt_stack.io.if_mask<>valu.io.out2simt_stack
   simt_stack.io.fetch_ctl<>branch_back.io.in1
-  simt_stack.io.pc_reconv.bits := csrfile.io.simt_rpc
-  simt_stack.io.pc_reconv.valid := issueV.io.out_SIMT.valid//true.B //todo check this
 
   alu.io.out2br<>branch_back.io.in0
 
   issueV.io.out_MUL<>mul.io.in
   issueX.io.out_MUL.ready := false.B
-  issueV.io.out_TC<>tensorcore.io.in
+  tensorcore.io.in <> tensorCoreInputStage
   issueX.io.out_TC.ready := false.B
-  issueV.io.out_vFPU<>fpu.io.in
+  fpu.io.in <> fpuInputStage
   issueX.io.out_vFPU.ready := false.B
   issueX.io.out_warpscheduler <> warp_sche.io.warp_control
   issueV.io.out_warpscheduler.ready := false.B
@@ -441,7 +512,7 @@ class pipe() extends Module{
   wb.io.in_v(2)<>lsu2wb.io.out_v
   wb.io.in_v(3)<>sfu.io.out_v
   wb.io.in_v(4)<>mul.io.out_v
-  wb.io.in_v(5)<>tensorcore.io.out_v
+  wb.io.in_v(5)<>tensorCoreWbStage
   wb.io.in_v(6)<>csrfile.io.out_v
 
   issue_stall:=(~issueX.io.in.ready).asBool | (~issueV.io.in.ready).asBool//scoreb.io.delay | issue.io.in.ready

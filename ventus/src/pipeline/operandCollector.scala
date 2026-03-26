@@ -515,7 +515,10 @@ class instDemux extends Module{
   io.vgpr_baseOut := io.vgpr_baseIn
 
 }
-class operandCollector extends Module{
+class operandCollector(
+  val regfileReadPipeCut: Boolean = false,
+  val crossbarPipeCut: Boolean = false
+) extends Module{
   val io=IO(new Bundle {
     val controlX=Flipped(Decoupled(new CtrlSigs()))
     val controlV=Flipped(Decoupled(new CtrlSigs()))
@@ -541,24 +544,36 @@ class operandCollector extends Module{
   val Demux = Module(new instDemux)
   // connecting Arbiters and banks
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).outArbiterIO <> Arbiter.io.readArbiterIO(i)})
+  val scalarRsIdx = Wire(Vec(num_bank, UInt(depth_regBank.W)))
+  val vectorRsIdx = Wire(Vec(num_bank, UInt(depth_regBank.W)))
   (0 until num_bank).foreach(i=>{
-    vectorBank(i).rsidx := Arbiter.io.readArbiterOutVector(i).bits.rsAddr
-    scalarBank(i).rsidx := Arbiter.io.readArbiterOutScalar(i).bits.rsAddr
+    scalarRsIdx(i) := Mux(regfileReadPipeCut.B, RegNext(Arbiter.io.readArbiterOutScalar(i).bits.rsAddr), Arbiter.io.readArbiterOutScalar(i).bits.rsAddr)
+    vectorRsIdx(i) := Mux(regfileReadPipeCut.B, RegNext(Arbiter.io.readArbiterOutVector(i).bits.rsAddr), Arbiter.io.readArbiterOutVector(i).bits.rsAddr)
+    vectorBank(i).rsidx := vectorRsIdx(i)
+    scalarBank(i).rsidx := scalarRsIdx(i)
     Arbiter.io.readArbiterOutVector(i).ready := true.B
     Arbiter.io.readArbiterOutScalar(i).ready := true.B
   })
   // connecting crossbar and banks, as well as signal readchosen. Readchosen needs to delay one tick to match bank reading
-  crossBar.io.chosenScalar := RegNext(Arbiter.io.readchosenScalar)
-  crossBar.io.validArbiterScalar := RegNext(VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)))
-  crossBar.io.chosenVector := RegNext(Arbiter.io.readchosenVector)
-  crossBar.io.validArbiterVector := RegNext(VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)))
+  val regfileReadLatency = if (regfileReadPipeCut) 2 else 1
+  crossBar.io.chosenScalar := ShiftRegister(Arbiter.io.readchosenScalar, regfileReadLatency)
+  crossBar.io.validArbiterScalar := ShiftRegister(VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)), regfileReadLatency)
+  crossBar.io.chosenVector := ShiftRegister(Arbiter.io.readchosenVector, regfileReadLatency)
+  crossBar.io.validArbiterVector := ShiftRegister(VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)), regfileReadLatency)
   for( i <- 0 until num_bank){
     crossBar.io.dataInScalar.rs(i) := scalarBank(i).rs
     crossBar.io.dataInVector.rs(i) := vectorBank(i).rs
     crossBar.io.dataInVector.v0(i) := vectorBank(i).v0
   }
   // connecting crossbar and collector units
-  (0 until num_collectorUnit).foreach(i => {collectorUnits(i).bankIn <> crossBar.io.out(i)})
+  val crossbarQueues = Seq.fill(num_collectorUnit, 4)(
+    Module(new Queue(new crossbar2CU, if (crossbarPipeCut) 1 else 0, pipe=false, flow=false)))
+  (0 until num_collectorUnit).foreach { i =>
+    (0 until 4).foreach { j =>
+      crossbarQueues(i)(j).io.enq <> crossBar.io.out(i)(j)
+      collectorUnits(i).bankIn(j) <> crossbarQueues(i)(j).io.deq
+    }
+  }
 
   //CU allocation
   val widReg = RegInit(VecInit.fill(num_collectorUnit)(0.U(log2Ceil(num_collectorUnit).W)))
@@ -573,8 +588,11 @@ class operandCollector extends Module{
   Demux.io.in(1) <> io.controlX
   Demux.io.sgpr_baseIn := io.sgpr_base
   Demux.io.vgpr_baseIn := io.vgpr_base
+  val dispatchQueues = Seq.fill(num_collectorUnit)(
+    Module(new Queue(new CtrlSigs, 1, pipe=false, flow=false)))
   for(i <- 0 until num_collectorUnit){
-    collectorUnits(i).control <> Demux.io.out(i)
+    dispatchQueues(i).io.enq <> Demux.io.out(i)
+    collectorUnits(i).control <> dispatchQueues(i).io.deq
     collectorUnits(i).sgpr_base := Demux.io.sgpr_baseOut
     collectorUnits(i).vgpr_base := Demux.io.vgpr_baseOut
   }

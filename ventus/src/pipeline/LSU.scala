@@ -110,7 +110,7 @@ object ByteExtract{
   }
 }
 
-class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Module{
+class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W), val addrCalcPipeCut: Boolean = false) extends Module{
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
     val csr_wid = Output(UInt(depth_warp.W))
@@ -125,7 +125,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     val to_dcache = DecoupledIO(new DCacheCoreReq_np)
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
-  val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2:: Nil = Enum(6)
+  val s_idle :: s_save :: s_calc :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2:: Nil = Enum(7)
   val cnt = new Counter(n = num_thread)
   val state = RegInit(init = s_idle)
 
@@ -137,6 +137,12 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   io.flush_dcache.ready := state === s_idle
   val reg_entryID = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
 
+  // When addrCalcPipeCut: latch CSR inputs in s_save, use them in s_calc to break the
+  // reg_save.ctrl.wid -> io.csr_wid -> csrfile -> io.csr_numw -> multiply chain.
+  val csr_numw_used = if (addrCalcPipeCut) RegNext(io.csr_numw) else io.csr_numw
+  val csr_pds_used  = if (addrCalcPipeCut) RegNext(io.csr_pds)  else io.csr_pds
+  val csr_tid_used  = if (addrCalcPipeCut) RegNext(io.csr_tid)  else io.csr_tid
+
   val addr = Wire(Vec(num_thread, UInt(xLen.W)))
   val is_shared = Wire(Vec(num_thread, Bool()))
   val all_shared = Wire(Bool())
@@ -147,7 +153,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
                   Mux(reg_save.ctrl.is_vls12,
                     reg_save.in1(x)+reg_save.in2(x),
-                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((csr_tid_used + x.asUInt),0.U(2.W) ) ) + csr_pds_used + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*csr_numw_used)<<depth_thread)
                   ),
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
@@ -205,7 +211,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   io.to_mshr.bits.tag.isvec := reg_save.ctrl.isvec
   io.to_mshr.bits.tag.unsigned := reg_save.ctrl.mem_unsigned
   io.to_mshr.bits.tag.wordOffset1H := wordOffset1H
-  io.to_mshr.valid := state===s_save & (reg_save.ctrl.mem_cmd.orR)
+  io.to_mshr.valid := (if (addrCalcPipeCut) state===s_calc else state===s_save) & (reg_save.ctrl.mem_cmd.orR)
   io.to_mshr.bits.tag.isWrite := reg_save.ctrl.mem_cmd(1)
   if(SPIKE_OUTPUT){
     io.to_mshr.bits.tag.spike_info.get:=reg_save.ctrl.spike_info.get
@@ -307,17 +313,32 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
       cnt.reset()
     }
     is (s_save){
-      when(reg_save.ctrl.mem_cmd.orR){ // read or write
-        when(all_shared && !is_flush){ // shared memory
-          when(io.to_mshr.fire){state := s_shared}.otherwise{state := s_save}
-        }.otherwise{ // dcache
-            when(io.to_mshr.fire) {
-              state := s_dcache
-            }.otherwise {
-              state := s_save
+      if (addrCalcPipeCut) {
+        when(reg_save.ctrl.mem_cmd.orR) { state := s_calc }.otherwise { state := s_idle }
+      } else {
+        when(reg_save.ctrl.mem_cmd.orR){ // read or write
+          when(all_shared && !is_flush){ // shared memory
+            when(io.to_mshr.fire){state := s_shared}.otherwise{state := s_save}
+          }.otherwise{ // dcache
+              when(io.to_mshr.fire) {
+                state := s_dcache
+              }.otherwise {
+                state := s_save
+              }
             }
+        }.otherwise{ state := s_idle }
+      }
+    }
+    is (s_calc){
+      if (addrCalcPipeCut) {
+        when(reg_save.ctrl.mem_cmd.orR){ // read or write
+          when(all_shared && !is_flush){ // shared memory
+            when(io.to_mshr.fire){state := s_shared}.otherwise{state := s_calc}
+          }.otherwise{ // dcache
+            when(io.to_mshr.fire){state := s_dcache}.otherwise{state := s_calc}
           }
-      }.otherwise{ state := s_idle }
+        }.otherwise{ state := s_idle }
+      }
     }
     is (s_shared){
       when(io.to_shared.fire){
@@ -392,8 +413,17 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
       }.otherwise{reg_save := RegInit(0.U.asTypeOf(new vExeData))}
     }
     is (s_save){
-      when(reg_save.ctrl.mem_cmd.orR){//===1.U){  // read
-        when(io.to_mshr.fire){reg_entryID := io.idx_entry}  // get entryID from MSHR
+      if (!addrCalcPipeCut) {
+        when(reg_save.ctrl.mem_cmd.orR){//===1.U){  // read
+          when(io.to_mshr.fire){reg_entryID := io.idx_entry}  // get entryID from MSHR
+        }
+      }
+    }
+    is (s_calc){
+      if (addrCalcPipeCut) {
+        when(reg_save.ctrl.mem_cmd.orR){
+          when(io.to_mshr.fire){reg_entryID := io.idx_entry}
+        }
       }
     }
     is (s_shared){
@@ -537,7 +567,7 @@ class LSU2WB extends Module{
     }
   })
 }
-class LSUexe() extends Module{
+class LSUexe(val addrCalcPipeCut: Boolean = false) extends Module{
 // default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
   val io = IO(new Bundle{
     val lsu_req = Flipped(DecoupledIO(new vExeData()))
@@ -561,7 +591,7 @@ class LSUexe() extends Module{
   val InputFIFO = Module(new Queue(new vExeData, entries=1, pipe=true))
   InputFIFO.io.enq <> io.lsu_req
 
-  val AddrCalc = Module(new AddrCalculate(sharedmemory_addr_max))
+  val AddrCalc = Module(new AddrCalculate(sharedmemory_addr_max, addrCalcPipeCut))
   AddrCalc.io.from_fifo <> InputFIFO.io.deq
   io.dcache_req <> AddrCalc.io.to_dcache
   io.shared_req <> AddrCalc.io.to_shared

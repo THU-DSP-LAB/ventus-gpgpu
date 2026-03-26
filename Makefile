@@ -22,7 +22,31 @@ SM_SHAREDMEM_PIPE_CUT ?= 0
 SM_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_SHAREDMEM_PIPE_CUT)),true,false)
 SM_DCACHE_PIPE_CUT ?= 0
 SM_DCACHE_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_DCACHE_PIPE_CUT)),true,false)
-SM_PIPE_TAG := $(if $(filter 1 true TRUE yes YES,$(SM_SHAREDMEM_PIPE_CUT)),_pipe1,)$(if $(filter 1 true TRUE yes YES,$(SM_DCACHE_PIPE_CUT)),_dcachepipe,)
+SM_ADDR_CALC_PIPE_CUT ?= 0
+SM_ADDR_CALC_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_ADDR_CALC_PIPE_CUT)),true,false)
+SM_OPERAND_RF_PIPE_CUT ?= 0
+SM_OPERAND_RF_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_OPERAND_RF_PIPE_CUT)),true,false)
+SM_OPERAND_CROSSBAR_PIPE_CUT ?= 0
+SM_OPERAND_CROSSBAR_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_OPERAND_CROSSBAR_PIPE_CUT)),true,false)
+SM_OPERAND_ISSUE_PIPE_CUT ?= 0
+SM_OPERAND_ISSUE_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_OPERAND_ISSUE_PIPE_CUT)),true,false)
+SM_IBUFFER_ISSUE_PIPE_CUT ?= 0
+SM_IBUFFER_ISSUE_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_IBUFFER_ISSUE_PIPE_CUT)),true,false)
+SM_CSR_RESULT_PIPE_CUT ?= 0
+SM_CSR_RESULT_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_CSR_RESULT_PIPE_CUT)),true,false)
+SM_CSR_ISSUE_PIPE_CUT ?= 0
+SM_CSR_ISSUE_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_CSR_ISSUE_PIPE_CUT)),true,false)
+SM_SIMT_PIPE_CUT ?= 0
+SM_SIMT_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_SIMT_PIPE_CUT)),true,false)
+SM_FPU_INPUT_PIPE_CUT ?= 0
+SM_FPU_INPUT_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_FPU_INPUT_PIPE_CUT)),true,false)
+SM_TENSORCORE_INPUT_PIPE_CUT ?= 0
+SM_TENSORCORE_INPUT_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_TENSORCORE_INPUT_PIPE_CUT)),true,false)
+SM_TENSORCORE_WB_PIPE_CUT ?= 0
+SM_TENSORCORE_WB_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_TENSORCORE_WB_PIPE_CUT)),true,false)
+SM_WRITEBACK_OUT_PIPE_CUT ?= 0
+SM_WRITEBACK_OUT_PIPE_BOOL := $(if $(filter 1 true TRUE yes YES,$(SM_WRITEBACK_OUT_PIPE_CUT)),true,false)
+SM_PIPE_TAG := $(if $(filter 1 true TRUE yes YES,$(SM_SHAREDMEM_PIPE_CUT)),_pipe1,)$(if $(filter 1 true TRUE yes YES,$(SM_DCACHE_PIPE_CUT)),_dcachepipe,)$(if $(filter 1 true TRUE yes YES,$(SM_ADDR_CALC_PIPE_CUT)),_addrpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_OPERAND_RF_PIPE_CUT)),_ocpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_OPERAND_CROSSBAR_PIPE_CUT)),_ocxbarpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_OPERAND_ISSUE_PIPE_CUT)),_opissuepipe,)$(if $(filter 1 true TRUE yes YES,$(SM_IBUFFER_ISSUE_PIPE_CUT)),_ibufpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_CSR_RESULT_PIPE_CUT)),_csrpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_CSR_ISSUE_PIPE_CUT)),_csrissuepipe,)$(if $(filter 1 true TRUE yes YES,$(SM_SIMT_PIPE_CUT)),_simtpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_FPU_INPUT_PIPE_CUT)),_fpuinpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_TENSORCORE_INPUT_PIPE_CUT)),_tcinpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_TENSORCORE_WB_PIPE_CUT)),_tcwbpipe,)$(if $(filter 1 true TRUE yes YES,$(SM_WRITEBACK_OUT_PIPE_CUT)),_wboutpipe,)
 SM_SHAREDMEM_BW_BITS := $(shell expr $(SHAREDMEM_NBANKS) \* 32)
 SM_DIR_SUFFIX := warp$(NUM_WARP)_thread$(NUM_THREAD)_smem$(SHAREDMEM_CAPACITY_BYTES)B_smbank$(SHAREDMEM_NBANKS)_smbw$(SM_SHAREDMEM_BW_BITS)
 SM_DIR_NAME := $(SM_TOP_NAME)$(SM_PIPE_TAG)$(if $(SM_DIR_PREFIX),_$(SM_DIR_PREFIX),)_$(SM_DIR_SUFFIX)
@@ -91,8 +115,20 @@ sm-verilog:
 		--sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) \
 		--lsu-num-entry-each-warp $(LSU_NUM_ENTRY_EACH_WARP) \
 		--lsu-sharedmem-pipe-cut $(SM_PIPE_BOOL) \
-		--lsu-dcache-pipe-cut $(SM_DCACHE_PIPE_BOOL) \
-		$(GEN_ARGS)
+				--lsu-dcache-pipe-cut $(SM_DCACHE_PIPE_BOOL) \
+				--lsu-addr-calc-pipe-cut $(SM_ADDR_CALC_PIPE_BOOL) \
+				--operand-rf-pipe-cut $(SM_OPERAND_RF_PIPE_BOOL) \
+				--operand-crossbar-pipe-cut $(SM_OPERAND_CROSSBAR_PIPE_BOOL) \
+				--operand-issue-pipe-cut $(SM_OPERAND_ISSUE_PIPE_BOOL) \
+				--ibuffer-issue-pipe-cut $(SM_IBUFFER_ISSUE_PIPE_BOOL) \
+				--csr-result-pipe-cut $(SM_CSR_RESULT_PIPE_BOOL) \
+				--csr-issue-pipe-cut $(SM_CSR_ISSUE_PIPE_BOOL) \
+				--simt-pipe-cut $(SM_SIMT_PIPE_BOOL) \
+				--fpu-input-pipe-cut $(SM_FPU_INPUT_PIPE_BOOL) \
+				--tensorcore-input-pipe-cut $(SM_TENSORCORE_INPUT_PIPE_BOOL) \
+				--tensorcore-wb-pipe-cut $(SM_TENSORCORE_WB_PIPE_BOOL) \
+				--writeback-out-pipe-cut $(SM_WRITEBACK_OUT_PIPE_BOOL) \
+				$(GEN_ARGS)
 	cd $(SM_TARGET_DIR) && firtool --split-verilog --repl-seq-mem --repl-seq-mem-file=mem.conf -o . SM.fir
 	./scripts/gen_sep_mem.sh ./scripts/vlsi_mem_gen $(SM_TARGET_DIR)/mem.conf $(SM_TARGET_DIR)/
 	@echo "sm-verilog output dir: $(SM_TARGET_DIR)"
@@ -137,8 +173,20 @@ sm-dc-rtl:
 		--sharedmem-capacity-bytes $(SHAREDMEM_CAPACITY_BYTES) \
 		--lsu-num-entry-each-warp $(LSU_NUM_ENTRY_EACH_WARP) \
 		--lsu-sharedmem-pipe-cut $(SM_PIPE_BOOL) \
-		--lsu-dcache-pipe-cut $(SM_DCACHE_PIPE_BOOL) \
-		$(GEN_ARGS)
+				--lsu-dcache-pipe-cut $(SM_DCACHE_PIPE_BOOL) \
+				--lsu-addr-calc-pipe-cut $(SM_ADDR_CALC_PIPE_BOOL) \
+				--operand-rf-pipe-cut $(SM_OPERAND_RF_PIPE_BOOL) \
+				--operand-crossbar-pipe-cut $(SM_OPERAND_CROSSBAR_PIPE_BOOL) \
+				--operand-issue-pipe-cut $(SM_OPERAND_ISSUE_PIPE_BOOL) \
+				--ibuffer-issue-pipe-cut $(SM_IBUFFER_ISSUE_PIPE_BOOL) \
+				--csr-result-pipe-cut $(SM_CSR_RESULT_PIPE_BOOL) \
+				--csr-issue-pipe-cut $(SM_CSR_ISSUE_PIPE_BOOL) \
+				--simt-pipe-cut $(SM_SIMT_PIPE_BOOL) \
+				--fpu-input-pipe-cut $(SM_FPU_INPUT_PIPE_BOOL) \
+				--tensorcore-input-pipe-cut $(SM_TENSORCORE_INPUT_PIPE_BOOL) \
+				--tensorcore-wb-pipe-cut $(SM_TENSORCORE_WB_PIPE_BOOL) \
+				--writeback-out-pipe-cut $(SM_WRITEBACK_OUT_PIPE_BOOL) \
+				$(GEN_ARGS)
 	cd $(SM_DC_TARGET_DIR) && firtool --split-verilog --repl-seq-mem --repl-seq-mem-file=mem.conf -o . SM.fir
 	./scripts/gen_sep_mem.sh ./scripts/vlsi_mem_gen $(SM_DC_TARGET_DIR)/mem.conf $(SM_DC_TARGET_DIR)/
 	@echo "dc-rtl output dir: $(SM_DC_TARGET_DIR)"
