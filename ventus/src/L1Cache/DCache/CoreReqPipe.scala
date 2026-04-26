@@ -306,7 +306,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val Control_st1 = CoreReq_pipeReg_st0_st1.deq.bits.Ctrl
   val fromReplay_st1 = CoreReq_pipeReg_st0_st1.deq.bits.fromReplay
   io.read_Req_dA.bits.foreach(_.setIdx := Cat(CoreReq_pipeReg_st0_st1.deq.bits.Req.setIdx,OHToUInt(io.tA_Hit_st1.waymask))) // dA r req addr
-  when((CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate)&& io.hasDirty){
+  when(flushDirtyReq_st0){
     io.read_Req_dA.bits.foreach(_.setIdx := Cat(io.tA_dirtySetIdx_st0,OHToUInt(io.tA_dirtyWayMask_st0)))
   }
   io.Req_st1_RTAB.bits.CoreReqData := CoreReq_pipeReg_st0_st1.deq.bits.Req
