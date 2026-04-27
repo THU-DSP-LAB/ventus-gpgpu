@@ -426,8 +426,26 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   FluInvMemReq_st1.a_opcode := Mux(FluInvIsPut_st1,TLAOp_PutFull,TLAOp_Flush)
   FluInvMemReq_st1.a_param := Mux(FluInvIsPut_st1, 0.U, Mux(CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush, TLAParam_Flush, TLAParam_Inv))
   val dirtySetIdx_st1 = RegNext(io.tA_dirtySetIdx_st0)
-  FluInvMemReq_st1.a_addr.get := Cat(io.tA_dirtyTag_st1, dirtySetIdx_st1, 0.U((WordLength - TagBits - SetIdxBits).W))
-  FluInvMemReq_st1.a_data := io.dA_data
+  // === backprop1024-001 fix: FluInvMemReq identity snapshot ===
+  // flush sweep 期间 io.dA_data / io.tA_dirtyTag_st1 / dirtySetIdx_st1 是 live 信号，
+  // 当 memReq_Q 反压、FluInvMemReq 不能 fire 时，下一个 sub-flush 的迭代会让这些
+  // live 信号继续推进，导致 holding 中的 writeback 的 (a_addr, a_data) 不再属于
+  // 同一条 dirty cacheline，最终把别的 line（甚至全 0）写回 PMEM。
+  // 同 gaussian fix #6 ReadHit snapshot 的形态，扩展到 flush 写回路径。
+  val fluInvLiveAddr = Cat(io.tA_dirtyTag_st1, dirtySetIdx_st1, 0.U((WordLength - TagBits - SetIdxBits).W))
+  val fluInvSnapData = Reg(Vec(BlockWords, UInt(WordLength.W)))
+  val fluInvSnapAddr = Reg(UInt(WordLength.W))
+  val fluInvSnapValid = RegInit(false.B)
+  when(FluInvMemReq_valid && FluInvIsPut_st1 && !fluInvSnapValid){
+    fluInvSnapData := io.dA_data
+    fluInvSnapAddr := fluInvLiveAddr
+    fluInvSnapValid := true.B
+  }
+  when(io.MissReq_Mem.fire && FluInvMemReq_valid){
+    fluInvSnapValid := false.B
+  }
+  FluInvMemReq_st1.a_addr.get := Mux(fluInvSnapValid, fluInvSnapAddr, fluInvLiveAddr)
+  FluInvMemReq_st1.a_data := Mux(fluInvSnapValid, fluInvSnapData, io.dA_data)
   FluInvMemReq_st1.a_source := DontCare
   FluInvMemReq_st1.hasCoreRsp := false.B
   FluInvMemReq_st1.coreRspInstrId := DontCare
