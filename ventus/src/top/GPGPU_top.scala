@@ -384,6 +384,8 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   val l1dMshrFullCycles = sumPerfCounter(_.mshrFullCycles)
   val l1dRtabReplays = sumPerfCounter(_.rtabReplays)
   val l1dBankConflictCycles = sumPerfCounter(_.bankConflictCycles)
+  val l1dCoreReqPipePipelined = sumPerfCounter(_.coreReqPipePipelinedCycles)
+  val l1dMemRspPipeDecoupled = sumPerfCounter(_.memRspPipeDecoupledCycles)
   val l1dTotalMiss = l1dReadMiss + l1dWriteMiss
   val l1dTotalHit = l1dTotalReq - l1dTotalMiss
 
@@ -435,6 +437,8 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   val totalL1dMshrFullCycles = RegInit(0.U(64.W))
   val totalL1dRtabReplays = RegInit(0.U(64.W))
   val totalL1dBankConflictCycles = RegInit(0.U(64.W))
+  val totalL1dCoreReqPipePipelined = RegInit(0.U(64.W))
+  val totalL1dMemRspPipeDecoupled = RegInit(0.U(64.W))
   val perfStartPulse = io.host_req.fire && !perfWindowStarted
   val perfDumpPulse = io.perfDump && perfWindowStarted && !perfWindowPrinted
   when(perfStartPulse){
@@ -472,6 +476,8 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     totalL1dMshrFullCycles := totalL1dMshrFullCycles + l1dMshrFullCycles
     totalL1dRtabReplays := totalL1dRtabReplays + l1dRtabReplays
     totalL1dBankConflictCycles := totalL1dBankConflictCycles + l1dBankConflictCycles
+    totalL1dCoreReqPipePipelined := totalL1dCoreReqPipePipelined + l1dCoreReqPipePipelined
+    totalL1dMemRspPipeDecoupled := totalL1dMemRspPipeDecoupled + l1dMemRspPipeDecoupled
   }
   sm_wrapper.foreach { sm =>
     sm.perfEnable := perfWindowStarted || perfStartPulse
@@ -510,6 +516,8 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   val summaryL1dMshrFullCycles = includeCurrentWindow(totalL1dMshrFullCycles, l1dMshrFullCycles)
   val summaryL1dRtabReplays = includeCurrentWindow(totalL1dRtabReplays, l1dRtabReplays)
   val summaryL1dBankConflictCycles = includeCurrentWindow(totalL1dBankConflictCycles, l1dBankConflictCycles)
+  val summaryL1dCoreReqPipePipelined = includeCurrentWindow(totalL1dCoreReqPipePipelined, l1dCoreReqPipePipelined)
+  val summaryL1dMemRspPipeDecoupled = includeCurrentWindow(totalL1dMemRspPipeDecoupled, l1dMemRspPipeDecoupled)
   val summaryTotalIssued = summaryScalarIssued + summaryVectorIssued
   val summaryTotalClassIssued = summaryComputeIssued + summaryMemIssued + summaryCtrlIssued
 
@@ -549,6 +557,8 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     printf(p"[PROGRAM ${programId}] [L1D PERF] MSHR full cycles    : ${l1dMshrFullCycles}\n")
     printf(p"[PROGRAM ${programId}] [L1D PERF] RTAB replays        : ${l1dRtabReplays}\n")
     printf(p"[PROGRAM ${programId}] [L1D PERF] bank conflict cyc   : ${l1dBankConflictCycles}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] coreReqPipe pipelined cyc : ${l1dCoreReqPipePipelined}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] memRspPipe decoupled cyc  : ${l1dMemRspPipeDecoupled}\n")
   }
   when((perfDumpPulse || io.perfDumpSummary) && summaryProgramWindows =/= 0.U){
     printf(p"\n[TESTCASE TOTAL] [PMU] accumulated summary across ${summaryProgramWindows} program windows\n")
@@ -586,6 +596,8 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     printf(p"[TESTCASE TOTAL] [L1D PERF] MSHR full cycles    : ${summaryL1dMshrFullCycles}\n")
     printf(p"[TESTCASE TOTAL] [L1D PERF] RTAB replays        : ${summaryL1dRtabReplays}\n")
     printf(p"[TESTCASE TOTAL] [L1D PERF] bank conflict cyc   : ${summaryL1dBankConflictCycles}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] coreReqPipe pipelined cyc : ${summaryL1dCoreReqPipePipelined}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] memRspPipe decoupled cyc  : ${summaryL1dMemRspPipeDecoupled}\n")
   }
 
   for(i <- 0 until NL2Cache){

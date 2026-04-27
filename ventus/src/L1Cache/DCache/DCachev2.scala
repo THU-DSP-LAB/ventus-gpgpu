@@ -46,6 +46,11 @@ class DCachePerfCounters extends Bundle {
   val mshrFullCycles = UInt(64.W)
   val rtabReplays = UInt(64.W)
   val bankConflictCycles = UInt(64.W)
+  // Pipelining-effectiveness counters — direct evidence that v2's flow
+  // restructuring is firing. v1 has no equivalent structures so these
+  // tie to 0 there.
+  val coreReqPipePipelinedCycles = UInt(64.W) // st0_valid && st1_valid in CoreReqPipe
+  val memRspPipeDecoupledCycles  = UInt(64.W) // dcache write && coreRsp emit same cycle in MemRspPipe
 }
 
 class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends DCacheModule{
@@ -103,6 +108,8 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   val mshrFullCyclesCnt = RegInit(0.U(64.W))
   val rtabReplayCnt = RegInit(0.U(64.W))
   val bankConflictCyclesCnt = RegInit(0.U(64.W))
+  val coreReqPipePipelinedCnt = RegInit(0.U(64.W))
+  val memRspPipeDecoupledCnt  = RegInit(0.U(64.W))
   for(i <- 0 until BlockWords){
     DataAccesses(i).io.r.req.valid := coreReqPipe.io.read_Req_dA.valid || memRspPipe.io.dAReplace_rReq_valid
     DataAccesses(i).io.r.req.bits := Mux(memRspPipe.io.dAReplace_rReq_valid,
@@ -398,6 +405,8 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
     mshrFullCyclesCnt := 0.U
     rtabReplayCnt := 0.U
     bankConflictCyclesCnt := 0.U
+    coreReqPipePipelinedCnt := 0.U
+    memRspPipeDecoupledCnt := 0.U
   }.otherwise{
     when(perfCoreReqFire){
       totalReqCnt := totalReqCnt + 1.U
@@ -446,6 +455,18 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
     }
     when(perfBankConflictFire){
       bankConflictCyclesCnt := bankConflictCyclesCnt + 1.U
+    }
+    // CoreReqPipe pipelining engaged: ≥2 stages busy at once (st0 enqueueing
+    // while st1 is processing the previous request). v1 had a single
+    // combined probe stage so this couldn't happen.
+    when(io.perfEnable && coreReqPipe.io.st0_valid && coreReqPipe.io.st1_valid){
+      coreReqPipePipelinedCnt := coreReqPipePipelinedCnt + 1.U
+    }
+    // MemRspPipe decoupling engaged: same cycle the side-pipe writes the
+    // refilled block into the data SRAM AND emits a coreRsp. In v1 these
+    // shared a stage and could not co-occur.
+    when(io.perfEnable && memRspPipe.io.dAmemRsp_wReq_valid && memRspPipe.io.memRsp_coreRsp.valid){
+      memRspPipeDecoupledCnt := memRspPipeDecoupledCnt + 1.U
     }
   }
   MMU_ENABLED match{
@@ -566,6 +587,8 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   io.perf.mshrFullCycles := mshrFullCyclesCnt
   io.perf.rtabReplays := rtabReplayCnt
   io.perf.bankConflictCycles := bankConflictCyclesCnt
+  io.perf.coreReqPipePipelinedCycles := coreReqPipePipelinedCnt
+  io.perf.memRspPipeDecoupledCycles := memRspPipeDecoupledCnt
   // print 
   if(DCACHE_DEBUG){
     when(io.coreReq.fire){
