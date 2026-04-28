@@ -111,6 +111,7 @@ class CSRFile extends Module {
     val lsu_tid = Output(UInt(xLen.W))
     val lsu_pds = Output(UInt(xLen.W))
     val lsu_numw= Output(UInt(xLen.W))
+    val lsu_numt= Output(UInt(xLen.W))
   })
 
   // Machine Trap-Vector Base-Address Register (mtvec)
@@ -355,9 +356,10 @@ class CSRFile extends Module {
     threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)<<depth_thread//threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
   }
   //todo check function of this signals//fix by rk
-  io.lsu_tid := wf_tag_dispatch * num_thread.asUInt
+  io.lsu_tid := wf_tag_dispatch * wf_size_dispatch
   io.lsu_pds := pds_baseaddr
   io.lsu_numw := wg_wf_count
+  io.lsu_numt := wf_size_dispatch
 }
 
 class CSRexe extends Module {
@@ -376,6 +378,7 @@ class CSRexe extends Module {
     val lsu_tid = Output(UInt(xLen.W))
     val lsu_pds = Output(UInt(xLen.W))
     val lsu_numw= Output(UInt(xLen.W))
+    val lsu_numt= Output(UInt(xLen.W))
     val simt_rpc = Output(UInt(xLen.W))
   })
   val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
@@ -393,6 +396,7 @@ class CSRexe extends Module {
   io.lsu_tid:=vCSR(io.lsu_wid).lsu_tid
   io.lsu_pds:=vCSR(io.lsu_wid).lsu_pds
   io.lsu_numw:=vCSR(io.lsu_wid).lsu_numw
+  io.lsu_numt:=vCSR(io.lsu_wid).lsu_numt
   io.simt_rpc:=vCSR(io.simt_wid).simt_rpc
 
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire

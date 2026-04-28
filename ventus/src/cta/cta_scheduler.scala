@@ -100,7 +100,7 @@ trait ctainfo_host_to_cu extends Bundle {
   val num_thread_per_wf = UInt(log2Ceil(CONFIG.GPU.NUM_THREAD+1).W)   // Number of thread in each wf
   //val num_gds = UInt(log2Ceil(CONFIG.WG.NUM_GDS_MAX+1).W)           // Number of Global Data Share used by this WG
   val gds_base = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // GDS base address of this WG
-  val pds_base = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // PDS base addr of this WG, convert to WF base addr in CUinterface
+  val pds_base = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // PDS pool base; CU interface derives a resident WG slot base
   val start_pc = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                      // Program start pc address
   val csr_kernel = UInt(CONFIG.GPU.MEM_ADDR_WIDTH)                    // Meta-data base address
   val asid_kernel = if(CONFIG.GPU.MMU_ENABLE) Some(UInt(CONFIG.GPU.ASID_WIDTH)) else None // Virtual memory space ID

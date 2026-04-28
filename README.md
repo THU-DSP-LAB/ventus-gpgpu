@@ -137,10 +137,9 @@ struct meta_data {
     uint64_t pdsSize;             // Size of private memory per thread
     uint64_t sgprUsage;           // Scalar register usage per warp
     uint64_t vgprUsage;           // Vector register usage per warp
-    uint64_t pdsBaseAddr;         // Base address of kernel private memory. 
-                                  // This value will be converted by the driver/test stimuli 
-                                  // into the starting address for each workgroup, 
-                                  // with an offset calculated as wf_size * wg_size * pdsSize.
+    uint64_t pdsBaseAddr;         // Base address of the resident private-memory pool.
+                                  // CTA/CU dispatch maps each resident workgroup slot to
+                                  // pdsBaseAddr + slot_linear * wf_size * wg_size * pdsSize.
     uint64_t num_buffer;          // Number of buffers (includes instruction buffer, kernel 
                                   // argument buffer, and private memory)
     uint64_t buffer_base[num_buffer];  // Base address of each buffer
@@ -171,7 +170,8 @@ The `.data` file contains initialization data for all buffers defined in the `.m
 
 - **Private Memory**:
   - Accessed by each thread using a dedicated instruction.
-  - `allocSize` is the total size of private memory for the kernel.
+  - `pdsSize` is the private-memory size per thread; a resident workgroup slot occupies
+    `wf_size * wg_size * pdsSize` bytes.
 
 - **Global Memory**:
   - Private memory and global memory share the same hierarchy and are accessed via the L2 cache.

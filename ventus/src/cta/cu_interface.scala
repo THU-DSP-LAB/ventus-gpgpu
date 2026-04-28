@@ -76,7 +76,7 @@ class cu_interface extends Module {
   val splitter_lds_addr = WireInit(fifo.io.deq.bits.lds_base)
   val splitter_sgpr_addr = Reg(UInt(log2Ceil(NUM_SGPR).W)) // sgpr base of WF, its value steps num_sgpr_per_wf every time
   val splitter_vgpr_addr = Reg(UInt(log2Ceil(NUM_VGPR).W)) // vgpr base of WF, its value steps num_vgpr_per_wf every time
-  val splitter_pds_addr = Reg(UInt(MEM_ADDR_WIDTH))        // pds  base of WF, its value steps num_pds_per_wf  every time
+  val splitter_pds_addr = Reg(UInt(MEM_ADDR_WIDTH))        // resident WG PDS slot base, shared by every WF in the WG
   val splitter_load_new = (splitter_cnt === 0.U) && fifo.io.deq.valid   // A new WG will be loaded to splitter
   val splitter_num_thread = Reg(UInt(log2Ceil(NUM_THREAD_PER_WG_MAX+1).W))  // number of active thread left in this WG
   fifo.io.deq.ready := (splitter_cnt === 1.U) && wf_sent
@@ -248,7 +248,6 @@ class cu_interface extends Module {
   splitter_pds_addr := MuxCase(splitter_pds_addr, Seq(
     // PDS pool is organized by resident WG slot: slot_linear = cu_id * NUM_WG_SLOT + wg_slot_id.
     splitter_load_new -> (fifo.io.deq.bits.pds_base + wg_slot_linear * pds_bytes_per_wg),
-    io.cu_wf_new(fifo.io.deq.bits.cu_id).fire -> (splitter_pds_addr + fifo.io.deq.bits.num_pds_per_wf),
   ))
   splitter_num_thread := MuxCase(splitter_num_thread, Seq(
     // 这里乘法器过大，考虑使用固件CPU算好

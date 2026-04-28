@@ -116,6 +116,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     val csr_wid = Output(UInt(depth_warp.W))
     val csr_pds = Input(UInt(xLen.W))
     val csr_numw = Input(UInt(xLen.W))
+    val csr_numt = Input(UInt(xLen.W))
     val csr_tid = Input(UInt(xLen.W))
     val to_mshr = DecoupledIO(new Bundle{
       val tag = new MshrTag
@@ -144,10 +145,15 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
+    val privateByteOffset = reg_save.in1(x) + reg_save.in2(x)
+    val wordBaseOffset = Cat(privateByteOffset(31,2), 0.U(2.W))
+    val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, privateByteOffset(1,0))
+    val pdsWordStride = wordBaseOffset * io.csr_numw * io.csr_numt
+    val pdsLaneSlot = Cat(io.csr_tid + x.asUInt, 0.U(2.W))
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
                   Mux(reg_save.ctrl.is_vls12,
                     reg_save.in1(x)+reg_save.in2(x),
-                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+                    byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride
                   ),
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
@@ -477,7 +483,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 //         }
 //         log_str += p"@"
 //         when(false.B){
-//           //(reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+//           // PDS: csr_pds + align4(offset) * csr_numw * csr_numt + (csr_tid + lane) * 4 + byte_lane
 //         }.otherwise{
 //           //(reg_save.in1 zip reg_save.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
 //           addr.reverse.foreach{ x =>
@@ -546,6 +552,7 @@ class LSUexe() extends Module{
     val csr_wid = Output(UInt(depth_warp.W))
     val csr_pds = Input(UInt(xLen.W))
     val csr_numw = Input(UInt(xLen.W))
+    val csr_numt = Input(UInt(xLen.W))
     val csr_tid = Input(UInt(xLen.W))
   })
   val sharedmemory_addr_max = sharemem_size.U(32.W)
@@ -585,6 +592,7 @@ class LSUexe() extends Module{
   AddrCalc.io.csr_tid:=io.csr_tid
   AddrCalc.io.csr_pds:=io.csr_pds
   AddrCalc.io.csr_numw:=io.csr_numw
+  AddrCalc.io.csr_numt:=io.csr_numt
 }
 
 class ShiftBoard(val depth:Int) extends Module{
