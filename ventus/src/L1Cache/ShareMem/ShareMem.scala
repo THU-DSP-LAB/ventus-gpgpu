@@ -52,6 +52,17 @@ class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
 }
 
+class ShareMemGrantMeta(implicit p: Parameters) extends ShareMemBundle{
+  val instrId = UInt(WIdBits.W)
+  val isWrite = Bool()
+  val setIdx = UInt(SetIdxBits.W)
+  val activeMask = Vec(NLanes, Bool())
+  val addrCrsbarOut = Vec(NBanks, new AddrBundle1T)
+  val dataCrsbarSel1H = Vec(NBanks, UInt(NBanks.W))
+  val dataArrayEn = Vec(NBanks, Bool())
+  val data = Vec(NLanes, UInt(WordLength.W))
+}
+
 class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   val io = IO(new Bundle{
     val coreReq = Flipped(DecoupledIO(new ShareMemCoreReq))
@@ -72,12 +83,11 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   val DepthCoreRsp_Q: Int = num_thread
   val coreRsp_Q = Module(new Queue(new ShareMemCoreRsp,entries = DepthCoreRsp_Q,flow=false,pipe=true))
   //this queue also work as a pipeline reg, so cannot flow
-  val coreRsp_QAlmstFull = Wire(Bool())
 
   // ******      Arbiter      ******
   val coreReq_st1 = RegEnable(io.coreReq.bits, io.coreReq.fire)
   BankConfArb.io.coreReqArb.enable := io.coreReq.fire
-  BankConfArb.io.coreReqArb.isWrite := Mux(RegNext(BankConfArb.io.bankConflict),coreReq_st1.isWrite,io.coreReq.bits.isWrite)
+  BankConfArb.io.coreReqArb.isWrite := Mux(BankConfArb.io.busy,coreReq_st1.isWrite,io.coreReq.bits.isWrite)
   BankConfArb.io.coreReqArb.perLaneAddr := io.coreReq.bits.perLaneAddr
 
   // ******      valid write      ******
@@ -118,25 +128,33 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   }*/
 
   // ******     pipeline regs      ******
-  val coreReqisValidWrite_st1 = RegInit(false.B)
-  coreReqisValidWrite_st1 := (io.coreReq.fire && io.coreReq.bits.isWrite) || (coreReqisValidWrite_st1 && RegNext(BankConfArb.io.bankConflict))
-  val coreReqisValidRead_comb = (io.coreReq.fire && !io.coreReq.bits.isWrite) || RegNext(BankConfArb.io.bankConflict && !BankConfArb.io.bankConflict_isWrite, false.B)
-  val coreReqisValidRead_st1  = RegInit(false.B)
-  coreReqisValidRead_st1 := (io.coreReq.fire && !io.coreReq.bits.isWrite) || (coreReqisValidRead_st1 && RegNext(BankConfArb.io.bankConflict))//这个信号不是给Data Array用的哈
-  // 新增的coreReqisValidRead_comb应当与原_st1只差一个RegNext，验证一下
-  assert(RegNext(coreReqisValidRead_comb, false.B) === coreReqisValidRead_st1)
-  val coreReqisValidRead_st2 = RegNext(coreReqisValidRead_st1)//TODO verification for bank conflict
-  val coreReqisValidWrite_st2 = RegNext(coreReqisValidWrite_st1)
+  val activeReq = Wire(new ShareMemCoreReq)
+  activeReq := Mux(BankConfArb.io.busy,coreReq_st1,io.coreReq.bits)
 
-  val coreReqInstrId_st2 = RegNext(coreReq_st1.instrId)
-  val coreReqActvMask_st2 = ShiftRegister(BankConfArb.io.activeLane,2)
-  val coreReqIsWrite_st2 = RegNext(coreReq_st1.isWrite)
+  val grantMeta = Wire(new ShareMemGrantMeta)
+  grantMeta.instrId := activeReq.instrId
+  grantMeta.isWrite := activeReq.isWrite
+  grantMeta.setIdx := activeReq.setIdx
+  grantMeta.activeMask := BankConfArb.io.activeLane
+  grantMeta.addrCrsbarOut := BankConfArb.io.addrCrsbarOut
+  grantMeta.dataCrsbarSel1H := BankConfArb.io.dataCrsbarSel1H
+  grantMeta.dataArrayEn := BankConfArb.io.dataArrayEn
+  grantMeta.data := activeReq.data
 
-  val arbAddrCrsbarOut_st1 = RegNext(BankConfArb.io.addrCrsbarOut)
-  val arbDataCrsbarSel1H_st1 = RegNext(BankConfArb.io.dataCrsbarSel1H)
-  val arbDataCrsbarSel1H_st2 = RegNext(arbDataCrsbarSel1H_st1)
+  val rspPipe_st1_valid = RegInit(false.B)
+  val rspPipe_st1_bits = Reg(new ShareMemGrantMeta)
+  val rspPipe_st1_dataValid = RegInit(false.B)
+  val rspPipe_st1_data = Reg(Vec(NBanks, UInt(WordLength.W)))
+  val rspPipe_st2_valid = RegInit(false.B)
+  val rspPipe_st2_bits = Reg(new ShareMemGrantMeta)
+  val rspPipe_st2_data = Reg(Vec(NBanks, UInt(WordLength.W)))
 
-  val bankConflictHolding = Bool()
+  val rspPipe_st2_ready = !rspPipe_st2_valid || coreRsp_Q.io.enq.ready
+  val rspPipe_st1_canMove = rspPipe_st1_valid && rspPipe_st2_ready
+  val rspPipe_st1_ready = !rspPipe_st1_valid || rspPipe_st1_canMove
+  BankConfArb.io.grantReady := rspPipe_st1_ready
+  val grantFire = BankConfArb.io.grantValid && BankConfArb.io.grantReady
+
   // ******     DataAccess      ******
   //值得注意的是，当读写请求同时来临时，如果读写地址相同，读不应该直接传递写的内容，而是返回旧的内容
   //这是因为流水线设计里，读请求类型中访问Data array比写类型请求滞后一个流水级
@@ -152,44 +170,72 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
       singlePort = false,
       bypassWrite = true
     ))
-    DataAccess.io.w.req.valid := coreReqisValidWrite_st1 && RegNext(BankConfArb.io.dataArrayEn(i), false.B)
+    DataAccess.io.w.req.valid := grantFire && grantMeta.isWrite && grantMeta.dataArrayEn(i)
     DataAccess.io.w.req.bits.data := DataCorssBarForWrite.io.DataOut(i).asTypeOf(Vec(BytesOfWord,UInt(8.W)))
     //this setIdx = setIdx + wayIdx + bankOffset
     if(BlockOffsetBits-BankIdxBits>0) {
-      DataAccess.io.w.req.bits.setIdx := Cat(coreReq_st1.setIdx,arbAddrCrsbarOut_st1(i).bankOffset.getOrElse(false.B))
+      DataAccess.io.w.req.bits.setIdx := Cat(grantMeta.setIdx,grantMeta.addrCrsbarOut(i).bankOffset.getOrElse(false.B))
     } else {
-      DataAccess.io.w.req.bits.setIdx := coreReq_st1.setIdx
+      DataAccess.io.w.req.bits.setIdx := grantMeta.setIdx
     }
     DataAccess.io.w.req.bits.waymask.foreach(_ :=
-      arbAddrCrsbarOut_st1(i).wordOffset1H)
+      grantMeta.addrCrsbarOut(i).wordOffset1H)
 
-    DataAccess.io.r.req.valid := coreReqisValidRead_comb && BankConfArb.io.dataArrayEn(i)
+    DataAccess.io.r.req.valid := grantFire && !grantMeta.isWrite && grantMeta.dataArrayEn(i)
     if(BlockOffsetBits-BankIdxBits>0)
       DataAccess.io.r.req.bits.setIdx := Cat(
-      Mux(io.coreReq.fire, io.coreReq.bits.setIdx, coreReq_st1.setIdx),//setIdx
-      BankConfArb.io.addrCrsbarOut(i).bankOffset.getOrElse(false.B))//bankOffset
-    else DataAccess.io.r.req.bits.setIdx := Mux(io.coreReq.fire, io.coreReq.bits.setIdx, coreReq_st1.setIdx)
+      grantMeta.setIdx,//setIdx
+      grantMeta.addrCrsbarOut(i).bankOffset.getOrElse(false.B))//bankOffset
+    else DataAccess.io.r.req.bits.setIdx := grantMeta.setIdx
     Cat(DataAccess.io.r.resp.data.reverse)
   }
-  val dataAccess_data_st2 = RegEnable(VecInit(DataAccessesRRsp),coreReqisValidRead_st1)
 
   // ******      data crossbar for write     ******
-  DataCorssBarForWrite.io.DataIn := coreReq_st1.data
-  DataCorssBarForWrite.io.Select1H := arbDataCrsbarSel1H_st1
+  DataCorssBarForWrite.io.DataIn := grantMeta.data
+  DataCorssBarForWrite.io.Select1H := grantMeta.dataCrsbarSel1H
   // ******      data crossbar for read     ******
-  DataCorssBarForRead.io.DataIn := dataAccess_data_st2
-  DataCorssBarForRead.io.Select1H := arbDataCrsbarSel1H_st2
+  DataCorssBarForRead.io.DataIn := rspPipe_st2_data
+  DataCorssBarForRead.io.Select1H := rspPipe_st2_bits.dataCrsbarSel1H
+
+  val rspPipe_st1_dataNext = VecInit(DataAccessesRRsp)
+  when(rspPipe_st2_ready){
+    rspPipe_st2_valid := rspPipe_st1_valid
+    when(rspPipe_st1_valid){
+      rspPipe_st2_bits := rspPipe_st1_bits
+      rspPipe_st2_data := Mux(rspPipe_st1_dataValid,rspPipe_st1_data,rspPipe_st1_dataNext)
+    }
+  }
+  when(rspPipe_st1_valid && !rspPipe_st1_dataValid && !rspPipe_st1_canMove){
+    rspPipe_st1_dataValid := true.B
+    rspPipe_st1_data := rspPipe_st1_dataNext
+  }
+  when(rspPipe_st1_ready){
+    rspPipe_st1_valid := grantFire
+    rspPipe_st1_dataValid := false.B
+    when(grantFire){
+      rspPipe_st1_bits := grantMeta
+    }
+  }
 
   // ******      core rsp
   coreRsp_Q.io.deq <> io.coreRsp
-  coreRsp_Q.io.enq.valid := coreReqisValidRead_st2 || coreReqisValidWrite_st2
-  coreRsp_Q.io.enq.bits.isWrite := coreReqIsWrite_st2
-  coreRsp_Q.io.enq.bits.data := DataCorssBarForRead.io.DataOut
-  coreRsp_Q.io.enq.bits.instrId := coreReqInstrId_st2
-  coreRsp_Q.io.enq.bits.activeMask := coreReqActvMask_st2
-  coreRsp_QAlmstFull := coreRsp_Q.io.count === DepthCoreRsp_Q.asUInt - 2.U
+  coreRsp_Q.io.enq.valid := rspPipe_st2_valid
+  coreRsp_Q.io.enq.bits.isWrite := rspPipe_st2_bits.isWrite
+  coreRsp_Q.io.enq.bits.data := Mux(
+    rspPipe_st2_bits.isWrite,
+    VecInit(Seq.fill(NLanes)(0.U(WordLength.W))),
+    DataCorssBarForRead.io.DataOut
+  )
+  coreRsp_Q.io.enq.bits.instrId := rspPipe_st2_bits.instrId
+  coreRsp_Q.io.enq.bits.activeMask := rspPipe_st2_bits.activeMask
+
+  val stalledRspBits = RegNext(coreRsp_Q.io.enq.bits.asUInt)
+  when(RegNext(coreRsp_Q.io.enq.valid && !coreRsp_Q.io.enq.ready, false.B)){
+    assert(coreRsp_Q.io.enq.valid)
+    assert(coreRsp_Q.io.enq.bits.asUInt === stalledRspBits)
+  }
 
   // ******      core req ready
   //coreReq_ok_to_in := MshrAccess.io.missReq.ready && !missRspFromMshr_st2 && !io.memRsp.valid && coreRsp_Q.io.enq.ready && !Arbiter.io.bankConflict
-  io.coreReq.ready := !RegNext(BankConfArb.io.bankConflict) && !coreRsp_QAlmstFull && !coreReqisValidWrite_st1
+  io.coreReq.ready := BankConfArb.io.reqReady
 }
