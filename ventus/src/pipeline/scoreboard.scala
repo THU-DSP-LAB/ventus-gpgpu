@@ -60,6 +60,10 @@ class CtrlSigs extends Bundle {
   val atomic= Bool()
   val aq = Bool()
   val rl = Bool()
+  // DMA control signals
+  val dma = Bool()
+  val funct = UInt(3.W)
+  val copysize = UInt(2.W)
   //override def cloneType: CtrlSigs.this.type = new CtrlSigs().asInstanceOf[this.type]
   val asid = if(MMU_ENABLED) Some(UInt(KNL_ASID_WIDTH.W)) else None
 }

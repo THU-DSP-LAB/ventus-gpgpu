@@ -50,6 +50,7 @@ class Issue extends Module{
     val out_CSR=DecoupledIO(new csrExeData())
     val out_MUL=DecoupledIO(new vExeData)
     val out_TC=DecoupledIO(new vExeData)
+    val out_DMA=DecoupledIO(new vExeData)
   })
   val inputBuf=Queue.apply(io.in,0)//Module(new Queue(new vExeData,entries = 1,pipe=true))
 
@@ -64,6 +65,7 @@ class Issue extends Module{
   io.out_SFU.bits:=inputBuf.bits
   io.out_LSU.bits:=inputBuf.bits
   io.out_TC.bits:=inputBuf.bits
+  io.out_DMA.bits:=inputBuf.bits
   io.out_SIMT.bits.PC_branch:=inputBuf.bits.in3(0)
   io.out_SIMT.bits.PC_execute := inputBuf.bits.ctrl.pc
   //io.out_SIMT.bits.PC_reconv := inputBuf.bits.in1(0)
@@ -85,6 +87,7 @@ class Issue extends Module{
   io.out_CSR.bits.in1:=inputBuf.bits.in1(0)
 
   io.out_TC.valid:=false.B
+  io.out_DMA.valid:=false.B
   io.out_sALU.valid:=false.B
   io.out_vALU.valid:=false.B
   io.out_SIMT.valid:=false.B
@@ -95,7 +98,13 @@ class Issue extends Module{
   io.out_CSR.valid:=false.B
   io.out_SFU.valid:=false.B
   inputBuf.ready:=false.B
-  when(inputBuf.bits.ctrl.tc){
+  when(inputBuf.bits.ctrl.dma && inputBuf.bits.ctrl.funct === 4.U){
+    io.out_warpscheduler.valid:=inputBuf.valid
+    inputBuf.ready:=io.out_warpscheduler.ready
+  }.elsewhen(inputBuf.bits.ctrl.dma){
+    io.out_DMA.valid:=inputBuf.valid
+    inputBuf.ready:=io.out_DMA.ready
+  }.elsewhen(inputBuf.bits.ctrl.tc){
     io.out_TC.valid:=inputBuf.valid
     inputBuf.ready:=io.out_TC.ready
   }.elsewhen(inputBuf.bits.ctrl.sfu){
@@ -215,6 +224,7 @@ class IssueV2 extends Module {
     val out_CSR = DecoupledIO(new csrExeData())
     val out_MUL = DecoupledIO(new vExeData)
     val out_TC = DecoupledIO(new vExeData)
+    val out_DMA = DecoupledIO(new vExeData)
   })
   class vALU_SIMT_Comb extends Bundle{
     val en = UInt(2.W) // high: SIMT, low: vALU
@@ -230,6 +240,7 @@ class IssueV2 extends Module {
   val arb_CSR = Module(new RRArbiter(new csrExeData, num_issue))
   val arb_MUL = Module(new RRArbiter(new vExeData, num_issue))
   val arb_TC = Module(new RRArbiter(new vExeData, num_issue))
+  val arb_DMA = Module(new RRArbiter(new vExeData, num_issue))
 
   val inputBuf = io.in.map{Queue.apply(_, 0)}
   (0 until num_issue).foreach{ i =>
@@ -242,7 +253,14 @@ class IssueV2 extends Module {
     arb_CSR.io.in(i).valid := false.B
     arb_MUL.io.in(i).valid := false.B
     arb_TC.io.in(i).valid := false.B
-    when(inputBuf(i).deq().ctrl.tc){  // TC
+    arb_DMA.io.in(i).valid := false.B
+    when(inputBuf(i).deq().ctrl.dma && inputBuf(i).deq().ctrl.funct === 4.U){  // DMA fence
+      arb_warpscheduler.io.in(i).valid := inputBuf(i).valid
+      inputBuf(i).ready := arb_warpscheduler.io.in(i).ready
+    }.elsewhen(inputBuf(i).deq().ctrl.dma){  // DMA data
+      arb_DMA.io.in(i).valid := inputBuf(i).valid
+      inputBuf(i).ready := arb_DMA.io.in(i).ready
+    }.elsewhen(inputBuf(i).deq().ctrl.tc){  // TC
       arb_TC.io.in(i).valid := inputBuf(i).valid
       inputBuf(i).ready := arb_TC.io.in(i).ready
     }.elsewhen(inputBuf(i).deq().ctrl.sfu){ // SFU
@@ -271,6 +289,7 @@ class IssueV2 extends Module {
       inputBuf(i).ready := arb_sALU.io.in(i).ready
     }
 
+    arb_DMA.io.in(i).bits := inputBuf(i).bits
     arb_TC.io.in(i).bits := inputBuf(i).bits
     arb_SFU.io.in(i).bits := inputBuf(i).bits
     arb_vFPU.io.in(i).bits := inputBuf(i).bits
@@ -299,6 +318,7 @@ class IssueV2 extends Module {
       arb_vALU.io.in(i).bits.en := "b01".U(2.W)
     }
   }
+  io.out_DMA <> arb_DMA.io.out
   io.out_TC <> arb_TC.io.out
   io.out_SFU <> arb_SFU.io.out
   io.out_vFPU <> arb_vFPU.io.out

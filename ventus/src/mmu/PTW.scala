@@ -82,7 +82,7 @@ import MMUParam._
 
 class PTW_Req(SV: SVParam) extends Bundle{
   val vpn = UInt(SV.vpnLen.W)
-  val paddr = UInt(SV.xLen.W)
+  val paddr = UInt(SV.xLen.W)                     //maybe bug ,palen.W is better
   val curlevel = UInt(log2Ceil(SV.levels + 1).W)
   val source = UInt(depth_ptw_source.W)
 }

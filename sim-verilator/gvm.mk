@@ -7,10 +7,12 @@ export MAKEFLAGS += +r
 RELEASE ?= 0
 PREFIX ?= $(CURDIR)/install
 GVM_REF_DIR ?= ../../install/lib
+GVM_REF_INCLUDE_DIR ?= ../../spike/gvmref
 GVM_TRACE ?= 1
 VLIB_RANDOMIZE_FLAGS ?=
 
-export RTL_GVM_ENABLED = true
+RTL_GVM_ENABLED ?= true
+export RTL_GVM_ENABLED
 
 #=====================================================================
 # Helpers
@@ -104,6 +106,7 @@ endif
 #VLIB_VERILATOR_FLAGS += -Wall
 VLIB_VERILATOR_FLAGS += -Wno-WIDTHEXPAND
 VLIB_VERILATOR_FLAGS += -Wno-WIDTHTRUNC
+VLIB_VERILATOR_FLAGS += -Wno-PINMISSING
 # Define macros for Verilog
 # random init
 VLIB_VERILATOR_FLAGS += -DPRINTF_COND=1
@@ -137,7 +140,11 @@ VLIB_CFLAGS += -fPIC
 VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
+VLIB_CXXFLAGS += -I$(abspath $(GVM_REF_INCLUDE_DIR))
+ENABLE_GVM ?= 1
+ifeq ($(ENABLE_GVM),1)
 VLIB_CXXFLAGS += -DENABLE_GVM=1
+endif
 #VLIB_CXXFLAGS += -fsanitize=address,undefined
 VLIB_LDFLAGS += -lc
 ifeq ($(MOLD),1)
@@ -146,7 +153,9 @@ endif
 
 VLIB_VERILATOR_FLAGS += --threads $(VLIB_NPROC_SIM)
 VLIB_VERILATOR_FLAGS += --threads-dpi none
+ifneq ($(filter 1 yes true on,$(GVM_TRACE)),)
 VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
+endif
 VLIB_VERILATOR_FLAGS += -j $(VLIB_NPROC_CPU)
 VLIB_VERILATOR_FLAGS += -CFLAGS "$(VLIB_CXXFLAGS)"
 VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS)"
@@ -182,6 +191,7 @@ $(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
 $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
+	  $(VLIB_DIR_BUILDOBJ)/Vdut.o \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
 	  -lspdlog -lfmt -pthread -lpthread -lz -latomic \
 	  -lgvmref -L$(GVM_REF_DIR) -Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'
@@ -214,12 +224,16 @@ clean-lib-dep: clean-lib
 	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.d
 	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.d
 
-clean-verilated: 
+clean-verilated:
 	-rm -rf $(VLIB_DIR_BUILD)
 
-clean-verilog: clean-verilated
-	-rm -r $(VLIB_SRC_V_DIR)
+clean-gvm:
+	-rm -rf $(VLIB_DIR_BUILD)
+	-rm -rf $(VLIB_SRC_V_DIR)
+
+clean-verilog: clean-verilated clean-gvm
+	-rm -f $(VLIB_SRC_V)
 
 clean: clean-verilog clean-verilated
 
-.PHONY: clean-lib clean-lib-dep clean-verilated clean-verilog info-verilator install
+.PHONY: clean-lib clean-lib-dep clean-verilated clean-gvm clean-verilog info-verilator install

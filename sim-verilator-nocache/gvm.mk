@@ -7,6 +7,7 @@ export MAKEFLAGS += +r
 RELEASE ?= 0
 PREFIX ?= $(CURDIR)/install
 GVM_REF_DIR ?= ../../install/lib
+GVM_REF_INCLUDE_DIR ?= ../../spike/gvmref
 GVM_TRACE ?= 1
 
 export RTL_GVM_ENABLED = true
@@ -134,6 +135,7 @@ VLIB_CFLAGS += -fPIC
 VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
+VLIB_CXXFLAGS += -I$(abspath $(GVM_REF_INCLUDE_DIR))
 VLIB_CXXFLAGS += -DENABLE_GVM=1
 #VLIB_CXXFLAGS += -fsanitize=address,undefined
 VLIB_LDFLAGS += -lc
@@ -178,6 +180,7 @@ $(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
 $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
+	  $(VLIB_DIR_BUILDOBJ)/Vdut.o \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
 	  -lspdlog -lfmt -pthread -lpthread -lz -latomic \
 	  -lgvmref -L$(GVM_REF_DIR) -Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'

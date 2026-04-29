@@ -29,3 +29,10 @@ sim-verilator-nocache/verilog-out/
 
 gen_fpga_verilog/
 ventus/src/L1Cache/DCache/AGENT_CONTEXT/
+
+copilot_doc
+doc_tma
+.github
+copilot_rule
+package.json
+package-lock.json

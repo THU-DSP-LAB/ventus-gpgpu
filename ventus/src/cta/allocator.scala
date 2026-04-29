@@ -142,6 +142,8 @@ class allocator extends Module {
   // Some signal/reg declaration
   //
   val wg = Reg(io.wgbuffer_wg_new.bits.cloneType) // WG info got from wg_buffer
+  // Fix: ensure debug wg_id register has proper reset (x-initial-unique safe)
+  if(CONFIG.DEBUG) { when(reset.asBool) { wg.wg_id.get := 0.U } }
   val alloc_task_ok = Wire(Bool())                // FSM 'alloc' state tasks finished
 
   // =

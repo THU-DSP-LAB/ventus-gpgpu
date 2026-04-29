@@ -43,6 +43,7 @@ class ShareMemCoreReq(implicit p: Parameters) extends ShareMemBundle{
   val setIdx = UInt(SetIdxBits.W)
   val perLaneAddr = Vec(NLanes, new ShareMemPerLaneAddr)
   val data = Vec(NLanes, UInt(WordLength.W))
+  val sourceTag = Bool() // Routing tag: false=pipe, true=DMA. Survives bank-conflict replays.
 }
 
 class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
@@ -50,11 +51,13 @@ class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
   val isWrite = Bool()
   val data = Vec(NLanes, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
+  val sourceTag = Bool() // Routing tag: false=pipe, true=DMA. Mirrors request sourceTag.
 }
 
 class ShareMemGrantMeta(implicit p: Parameters) extends ShareMemBundle{
   val instrId = UInt(WIdBits.W)
   val isWrite = Bool()
+  val sourceTag = Bool()
   val setIdx = UInt(SetIdxBits.W)
   val activeMask = Vec(NLanes, Bool())
   val addrCrsbarOut = Vec(NBanks, new AddrBundle1T)
@@ -134,6 +137,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   val grantMeta = Wire(new ShareMemGrantMeta)
   grantMeta.instrId := activeReq.instrId
   grantMeta.isWrite := activeReq.isWrite
+  grantMeta.sourceTag := activeReq.sourceTag
   grantMeta.setIdx := activeReq.setIdx
   grantMeta.activeMask := BankConfArb.io.activeLane
   grantMeta.addrCrsbarOut := BankConfArb.io.addrCrsbarOut
@@ -228,6 +232,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   )
   coreRsp_Q.io.enq.bits.instrId := rspPipe_st2_bits.instrId
   coreRsp_Q.io.enq.bits.activeMask := rspPipe_st2_bits.activeMask
+  coreRsp_Q.io.enq.bits.sourceTag := rspPipe_st2_bits.sourceTag
 
   val stalledRspBits = RegNext(coreRsp_Q.io.enq.bits.asUInt)
   when(RegNext(coreRsp_Q.io.enq.valid && !coreRsp_Q.io.enq.ready, false.B)){

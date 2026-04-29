@@ -11,6 +11,7 @@ import L1Cache.ShareMem.SharedMemory
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public, Instantiate}
 import config.config.Parameters
 import gvm._
+import mmu.L1TlbAutoReflect
 
 class SMIO_icache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheBundle {
   val req = DecoupledIO(new ICacheMemReq_p(SV.getOrElse(mmu.SV32)))
@@ -60,6 +61,7 @@ class SM_wrapper_nocache() extends Module {
   sharedmem.io.coreReq.bits.isWrite:=pipe.io.shared_req.bits.isWrite
   sharedmem.io.coreReq.bits.setIdx:=pipe.io.shared_req.bits.setIdx
   sharedmem.io.coreReq.bits.perLaneAddr:=pipe.io.shared_req.bits.perLaneAddr
+  sharedmem.io.coreReq.bits.sourceTag:=false.B // No DMA in nocache variant
   sharedmem.io.coreReq.valid:=pipe.io.shared_req.valid
   pipe.io.shared_req.ready:=sharedmem.io.coreReq.ready
   sharedmem.io.coreRsp.ready:=pipe.io.shared_rsp.ready
@@ -114,6 +116,36 @@ class SM_wrapper_nocache() extends Module {
       cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_lds_base_dispatch
     )
     gvm_cta2warp.io.rtl_num_thread := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_size_dispatch.pad(32)
+  }
+
+  // DMA ports: tie off for nocache variant (no L2 arbiter in this config)
+  // DMA L2 cache requests are sunk; L2 responses never arrive.
+  pipe.io.dma_cache_req.ready := false.B
+  pipe.io.dma_cache_rsp.valid := false.B
+  pipe.io.dma_cache_rsp.bits := DontCare
+  // DMA shared memory requests are sunk.
+  pipe.io.dma_shared_req.ready := false.B
+  pipe.io.dma_shared_rsp.valid := false.B
+  pipe.io.dma_shared_rsp.bits := DontCare
+  // fence_end_dma: consumed inside pipe by warp scheduler; sink for observability.
+  pipe.io.fence_end_dma.ready := true.B
+  // DMA TLB: identity-mapping bypass (nocache variant has no L1 TLB)
+  val dma_tlb_state = RegInit(false.B) // false=idle, true=reply
+  val dma_tlb_paddr = Reg(UInt(mmu.SV32.paLen.W))
+  when(!dma_tlb_state && pipe.io.dma_tlb_req.valid) {
+    dma_tlb_state := true.B
+    dma_tlb_paddr := pipe.io.dma_tlb_req.bits.vaddr
+  }
+  when(dma_tlb_state && pipe.io.dma_tlb_rsp.ready) {
+    dma_tlb_state := false.B
+  }
+  pipe.io.dma_tlb_req.ready      := !dma_tlb_state
+  pipe.io.dma_tlb_rsp.valid      := dma_tlb_state
+  pipe.io.dma_tlb_rsp.bits.paddr := dma_tlb_paddr
+  // Deadlock detection: DMA instructions should never reach pipe in nocache builds.
+  when(!reset.asBool) {
+    assert(!pipe.io.dma_cache_req.valid,
+      "DMA L2 request reached nocache build - DMA instructions not supported in this configuration")
   }
 }
 

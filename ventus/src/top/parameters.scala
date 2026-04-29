@@ -140,11 +140,24 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sig_length = 33
 
-  def num_cache_in_sm = 2
+  def num_cache_in_sm = 3  // icache + dcache + dma
 
   def num_l2cache = 1
 
   def l1tlb_ways = 8
+
+  // DMA parameters
+  def max_dma_inst = if(num_warp >= 4) num_warp else 4  // max DMA instructions in flight
+  def max_dma_tag = 8
+  def max_l2cacheline = 6
+  def dma_data_width = num_thread * xLen  // DMA data width matches L2 cacheline
+  def dma_temp_mem_depth = 8  // depth of temporary memory in DMA
+  def BitsOfByte = 8
+  def dma_aligned_bulk = 4  // 4 bytes alignment
+  def l2cacheline = dcache_BlockWords * BytesOfWord  // bytes per L2 cacheline
+  def addr_tag_bits = xLen - log2Ceil(l2cacheline)
+  def numgroupl2cache = l2cacheline / dma_aligned_bulk
+  def numgroupshared = num_thread  // number of groups sent to shared memory per transfer
 
   val LDS_BASE = 0x70000000  // LDS base address: a hyperparameter used within each SM
 

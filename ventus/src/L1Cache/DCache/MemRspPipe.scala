@@ -145,7 +145,8 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     // allocateWrite 只能在 memRsp 真正进入 st1 pipeReg 后发起。
     // 否则当前一笔 memRsp 还在处理时，队头上已经露出来的下一笔 memRsp 会提前覆盖 allocate 上下文。
     val memRspEnqFire = MemRsp_pipeReg_st0_st1.enq.fire
-    tAAllocateWriteReq_valid := memRspEnqFire && memRspisRead && !io.MSHRMissRspOutUCached // cached read response
+    val cachedReadRefillAllocFire = memRspEnqFire && memRspisRead && !io.MSHRMissRspOutUCached
+    tAAllocateWriteReq_valid := cachedReadRefillAllocFire // cached read response
     // regular read 的 line data 可能要先于 st1 pipeReg 被 MSHR missRspOut 消费，
     // 因此只要 memRsp 到了队头，就先把整条 line 记下来，避免后面 metadata/data 错位。
     when(io.memRsp.valid && memRspisRead && !memRspisSpecial){
@@ -194,6 +195,7 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     val needReplace_pulse = io.needReplace && st1_valid
     val needReplace_pending = RegInit(false.B)
     val needReplace_eff = needReplace_pending || needReplace_pulse
+        val cachedReadRefillPending = RegInit(false.B)
     // dirty replace 一旦开始，到本次 allocate 写回(tag/data)完成前，屏蔽新的 coreReq 进入。
     // 否则 victim line 仍可能被新的 hit 请求读/写，破坏 replace 期间采样到的旧数据。
     val blockCoreReqReg = RegInit(false.B)
@@ -202,7 +204,14 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     }.elsewhen(blockCoreReqReg && dAReq_valid){
       blockCoreReqReg := false.B
     }
-    io.blockCoreReq := blockCoreReqReg || needReplace_pulse
+        // cached refill 在 st0 发起 allocate 后，到 st1 真正把 line 写回 dA 之前，
+        // 不能让 replay/coreReq 提前以 tag-hit 方式读到旧 data。
+        when(cachedReadRefillAllocFire){
+            cachedReadRefillPending := true.B
+        }.elsewhen(cachedReadRefillPending && dAReq_valid){
+            cachedReadRefillPending := false.B
+        }
+        io.blockCoreReq := blockCoreReqReg || needReplace_pulse || cachedReadRefillPending
     val allocateSetIdx_st1 = RegInit(0.U(SetIdxBits.W))
     when(io.tAAllocateWriteReq.valid){
       allocateSetIdx_st1 := io.tAAllocateWriteReq.bits.setIdx

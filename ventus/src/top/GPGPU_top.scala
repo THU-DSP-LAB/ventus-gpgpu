@@ -309,6 +309,11 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
         sm_wrapper(i).l2tlbRsp.get(0) <> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM))
         sm_tlb_xbar.io.req_l1(i * NCacheInSM + 1) <> genXbarReq(sm_wrapper(i).l2tlbReq.get(1), (i * NCacheInSM + 1).U)
         sm_wrapper(i).l2tlbRsp.get(1) <> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 1))
+        // DMA TLB port (index 2): connect to xbar
+        if(NCacheInSM > 2) {
+          sm_tlb_xbar.io.req_l1(i * NCacheInSM + 2) <> genXbarReq(sm_wrapper(i).l2tlbReq.get(2), (i * NCacheInSM + 2).U)
+          sm_wrapper(i).l2tlbRsp.get(2) <> genXbarRsp(sm_tlb_xbar.io.rsp_l1(i * NCacheInSM + 2))
+        }
       }
 
       // l2tlb <-> l2c
@@ -736,7 +741,22 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   dcache.io.perfReset := io.perfReset
   io.dcache_perf := dcache.io.perf
 
-  assert(num_cache_in_sm == 2, "Now only support 2 L1 Caches(one L1I and one L1D) in a single SM")
+  // **** DMA L2 cache port (index=2) ****
+  l1Cache2L2Arb.io.memReqVecIn.get(2) <> pipe.io.dma_cache_req
+  // DMA L2 cache response
+  pipe.io.dma_cache_rsp.valid := l1Cache2L2Arb.io.memRspVecOut(2).valid
+  pipe.io.dma_cache_rsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_source
+  pipe.io.dma_cache_rsp.bits.d_addr := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_addr
+  pipe.io.dma_cache_rsp.bits.d_data := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_data
+  pipe.io.dma_cache_rsp.bits.d_opcode := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_opcode
+  pipe.io.dma_cache_rsp.bits.d_param := l1Cache2L2Arb.io.memRspVecOut(2).bits.d_param
+  l1Cache2L2Arb.io.memRspVecOut(2).ready := pipe.io.dma_cache_rsp.ready
+  // **** DMA shared memory (arbitrated with pipe) ****
+  // Arbiter: pipe shared_req (priority 0) vs DMA shared_req (priority 1)
+  val sharedReqArb = Module(new Arbiter(new ShareMemCoreReq_np, 2))
+  // DMA fence_end_dma is consumed inside pipe by warp scheduler; keep this sink for observability.
+  pipe.io.fence_end_dma.ready := true.B
+
 if(MMU_ENABLED) {
   val l1tlb: Seq[mmu.L1TlbIO] = SV match {
     case Some(sv) => Seq.fill(num_cache_in_sm)(Module(new L1TLB(sv, l1tlb_ways, Debug = true)))
@@ -777,29 +797,71 @@ if(MMU_ENABLED) {
       icache.io.TLBRsp.get <> l1tlb(0).io.out
       l1tlb(1).io.in <> dcache.io.TLBReq.get
       dcache.io.TLBRsp.get <> l1tlb(1).io.out
+      // DMA TLB (index 2): connect to pipe DMA TLB ports
+      if(num_cache_in_sm > 2) {
+        l1tlb(2).io.in.valid       := pipe.io.dma_tlb_req.valid
+        l1tlb(2).io.in.bits.vaddr  := pipe.io.dma_tlb_req.bits.vaddr
+        l1tlb(2).io.in.bits.asid   := pipe.io.dma_tlb_req.bits.asid
+        pipe.io.dma_tlb_req.ready  := l1tlb(2).io.in.ready
+
+        pipe.io.dma_tlb_rsp.valid  := l1tlb(2).io.out.valid
+        pipe.io.dma_tlb_rsp.bits.paddr := l1tlb(2).io.out.bits.paddr
+        l1tlb(2).io.out.ready      := pipe.io.dma_tlb_rsp.ready
+      }
     }
     case None => {
 
     }
   }
 }
+if(!MMU_ENABLED) {
+  // DMA TLB identity-mapping bypass when MMU is disabled
+  // Inline 2-cycle bypass: s_idle accepts req, s_reply returns paddr=vaddr
+  val dma_tlb_state = RegInit(false.B) // false=idle, true=reply
+  val dma_tlb_paddr = Reg(UInt(mmu.SV32.paLen.W))
+  when(!dma_tlb_state && pipe.io.dma_tlb_req.valid) {
+    dma_tlb_state := true.B
+    dma_tlb_paddr := pipe.io.dma_tlb_req.bits.vaddr // identity mapping
+  }
+  when(dma_tlb_state && pipe.io.dma_tlb_rsp.ready) {
+    dma_tlb_state := false.B
+  }
+  pipe.io.dma_tlb_req.ready      := !dma_tlb_state
+  pipe.io.dma_tlb_rsp.valid      := dma_tlb_state
+  pipe.io.dma_tlb_rsp.bits.paddr := dma_tlb_paddr
+}
 
 
   val sharedmem = Module(new SharedMemory()(param))
-  sharedmem.io.coreReq.bits.data:=pipe.io.shared_req.bits.data
-  sharedmem.io.coreReq.bits.instrId:=pipe.io.shared_req.bits.instrId
-  sharedmem.io.coreReq.bits.isWrite:=pipe.io.shared_req.bits.isWrite
-  sharedmem.io.coreReq.bits.setIdx:=pipe.io.shared_req.bits.setIdx
-  sharedmem.io.coreReq.bits.perLaneAddr:=pipe.io.shared_req.bits.perLaneAddr
-  sharedmem.io.coreReq.valid:=pipe.io.shared_req.valid
-  pipe.io.shared_req.ready:=sharedmem.io.coreReq.ready
+  // Shared memory request arbitration: pipe (port 0, higher priority) vs DMA (port 1)
+  sharedReqArb.io.in(0) <> pipe.io.shared_req
+  sharedReqArb.io.in(1) <> pipe.io.dma_shared_req
+  sharedmem.io.coreReq.bits.data:=sharedReqArb.io.out.bits.data
+  sharedmem.io.coreReq.bits.instrId:=sharedReqArb.io.out.bits.instrId
+  sharedmem.io.coreReq.bits.isWrite:=sharedReqArb.io.out.bits.isWrite
+  sharedmem.io.coreReq.bits.setIdx:=sharedReqArb.io.out.bits.setIdx
+  sharedmem.io.coreReq.bits.perLaneAddr:=sharedReqArb.io.out.bits.perLaneAddr
+  sharedmem.io.coreReq.bits.sourceTag:= sharedReqArb.io.chosen === 1.U // false=pipe, true=DMA
+  sharedmem.io.coreReq.valid:=sharedReqArb.io.out.valid
+  sharedReqArb.io.out.ready:=sharedmem.io.coreReq.ready
 
-  sharedmem.io.coreRsp.ready:=pipe.io.shared_rsp.ready
-  pipe.io.shared_rsp.valid:=sharedmem.io.coreRsp.valid
-  pipe.io.shared_rsp.bits.data:=sharedmem.io.coreRsp.bits.data
-  pipe.io.shared_rsp.bits.instrId:=sharedmem.io.coreRsp.bits.instrId
-  pipe.io.shared_rsp.bits.activeMask:=sharedmem.io.coreRsp.bits.activeMask
-  // pipe.io.shared_rsp.bits.isWrite:=sharedmem.io.coreRsp.bits.isWrite
+  // Shared memory response routing via sourceTag embedded in each response.
+  // sourceTag propagates through SharedMemory's pipeline stages, surviving
+  // bank-conflict replays (1 request → N responses all carry the same tag).
+  val shared_rsp_from_dma = sharedmem.io.coreRsp.bits.sourceTag
+
+  // Shared memory response routing
+  pipe.io.shared_rsp.valid := sharedmem.io.coreRsp.valid && !shared_rsp_from_dma
+  pipe.io.shared_rsp.bits.data := sharedmem.io.coreRsp.bits.data
+  pipe.io.shared_rsp.bits.instrId := sharedmem.io.coreRsp.bits.instrId
+  pipe.io.shared_rsp.bits.activeMask := sharedmem.io.coreRsp.bits.activeMask
+
+  pipe.io.dma_shared_rsp.valid := sharedmem.io.coreRsp.valid && shared_rsp_from_dma
+  pipe.io.dma_shared_rsp.bits.data := sharedmem.io.coreRsp.bits.data
+  pipe.io.dma_shared_rsp.bits.instrId := sharedmem.io.coreRsp.bits.instrId
+  pipe.io.dma_shared_rsp.bits.activeMask := sharedmem.io.coreRsp.bits.activeMask
+
+  sharedmem.io.coreRsp.ready := Mux(shared_rsp_from_dma, pipe.io.dma_shared_rsp.ready, pipe.io.shared_rsp.ready)
   
   if(GVM_ENABLED){
     val WF_ID_WIDTH = log2Ceil(num_warp_in_a_block)

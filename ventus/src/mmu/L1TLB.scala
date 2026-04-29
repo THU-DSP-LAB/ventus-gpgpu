@@ -61,7 +61,7 @@ class L1TlbAutoForward(SV: SVParam) extends L1TlbIO(SV, false){
   val cState = RegNext(nState)
 
   io.l2_req.bits.asid := tlb_req.asid
-  io.l2_req.bits.vpn := tlb_req.vaddr(SV.offsetLen-1, 0)
+  io.l2_req.bits.vpn := tlb_req.vaddr(SV.offsetLen-1, 0)  //looks like bug
   io.out.bits.paddr := tlb_rsp
   io.in.ready := cState === s_idle || cState === s_reply
   io.out.valid := cState === s_reply

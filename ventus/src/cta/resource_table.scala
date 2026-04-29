@@ -200,7 +200,7 @@ class resource_table_handler(NUM_CU_LOCAL: Int, NUM_RESOURCE: Int, NUM_RT_RESULT
     (!io.alloc.fire && !io.dealloc.fire) -> wg_cu,
   ))
 
-  val wg_id = if(CONFIG.DEBUG) Some(Reg(UInt(CONFIG.WG.WG_ID_WIDTH))) else None
+  val wg_id = if(CONFIG.DEBUG) Some(RegInit(0.U(CONFIG.WG.WG_ID_WIDTH))) else None
   if(CONFIG.DEBUG){
     wg_id.get := Mux1H(Seq(
       io.alloc.fire -> io.alloc.bits.wg_id.get,
@@ -603,7 +603,7 @@ class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG
   when(io.en && io.data.addr2.wr.en) {addr2.write(io.data.addr2.wr.addr, io.data.addr2.wr.data)}
 
   // For debug
-  val wgid = if(CONFIG.DEBUG) Some(Reg(Vec(NUM_WG_SLOT, UInt(CONFIG.WG.WG_ID_WIDTH)))) else None
+  val wgid = if(CONFIG.DEBUG) Some(RegInit(VecInit.fill(NUM_WG_SLOT)(0.U(CONFIG.WG.WG_ID_WIDTH)))) else None
   val valid = if(CONFIG.DEBUG) Some(RegInit(VecInit.fill(NUM_WG_SLOT)(false.B))) else None
   if(CONFIG.DEBUG) {
     when(io.en && io.data.wgid.get.wr.en) {(wgid.get)(io.data.wgid.get.wr.addr) := io.data.wgid.get.wr.data}

@@ -26,6 +26,9 @@ class warp_scheduler extends Module{
     val pc_rsp=Flipped(Valid(new ICachePipeRsp_np)) //icache miss state
     val branch = Flipped(DecoupledIO(new BranchCtrl)) //branch, flush pipeline
     val warp_control=Flipped(DecoupledIO(new warpSchedulerExeData)) //engprg and barrier
+    val dma_issue = Flipped(ValidIO(UInt(depth_warp.W)))
+    val dma_complete = Flipped(ValidIO(UInt(depth_warp.W)))
+    val dma_issue_allow = Output(Vec(num_warp, Bool()))
     val issued_warp=Flipped(Valid(UInt(depth_warp.W))) //not use
     val scoreboard_busy=Input(UInt(num_warp.W)) //scoreboard race
     val exe_busy=Input(UInt(num_warp.W)) //exe race
@@ -37,6 +40,8 @@ class warp_scheduler extends Module{
     val flush=(ValidIO(UInt(depth_warp.W)))
     val flushCache=(ValidIO(UInt(depth_warp.W)))
     val CTA2csr=ValidIO(new warpReqData) //redirect warpreq
+    val dma_fence_wait_dbg = Output(UInt(num_warp.W))
+    val dma_inflight_dbg = Output(Vec(num_warp, UInt(log2Ceil(max_dma_inst + 1).W)))
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
     val flushDCache = Decoupled(Bool())
@@ -47,6 +52,9 @@ class warp_scheduler extends Module{
 
   val warp_end=io.warp_control.fire&io.warp_control.bits.ctrl.simt_stack_op
   val warp_end_id=io.warp_control.bits.ctrl.wid
+  val is_dma_fence = io.warp_control.bits.ctrl.dma && io.warp_control.bits.ctrl.funct === 4.U
+  val warp_ctrl_is_dma_fence = io.warp_control.fire && is_dma_fence
+  val warp_ctrl_is_barrier = io.warp_control.fire && !io.warp_control.bits.ctrl.simt_stack_op && !is_dma_fence
   val current_warp=RegInit(0.U(depth_warp.W))
   val next_warp=WireInit(current_warp)
   io.branch.ready:= !io.flushCache.valid
@@ -134,14 +142,14 @@ class warp_scheduler extends Module{
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
   warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
-  when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
+  when(warp_ctrl_is_barrier){ // means traditional barrier
     warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id)){
       warp_bar_cur(end_wg_id):=0.U
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
       if(GVM_ENABLED) {
-        val bar_fire_cond = (io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)) &&
+        val bar_fire_cond = warp_ctrl_is_barrier &&
                     ((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id))
         val gvm_bar_done = Module(new GvmDutBarrierDone)
         gvm_bar_done.io.clock := clock
@@ -176,13 +184,56 @@ class warp_scheduler extends Module{
 
 
   val warp_active=RegInit(0.U(num_warp.W))
+  val dmaInflightWidth = log2Ceil(max_dma_inst + 1)
+  val maxInflightPerWarp = max_dma_inst.U(dmaInflightWidth.W)
+  val dma_inflight_cnt = RegInit(VecInit(Seq.fill(num_warp)(0.U(dmaInflightWidth.W))))
+  val dma_fence_wait = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val dma_issue_allow = Wire(Vec(num_warp, Bool()))
+
+  for (i <- 0 until num_warp) {
+    val issue_hit = io.dma_issue.valid && io.dma_issue.bits === i.U
+    val complete_hit = io.dma_complete.valid && io.dma_complete.bits === i.U
+    val can_inc = dma_inflight_cnt(i) =/= maxInflightPerWarp
+    val allow_issue = can_inc || complete_hit
+    val inc_en = issue_hit && allow_issue
+    val dec_en = complete_hit && dma_inflight_cnt(i) =/= 0.U
+    val cnt_after_io = dma_inflight_cnt(i) + inc_en.asUInt - dec_en.asUInt
+    val fence_issue_here = warp_ctrl_is_dma_fence && io.warp_control.bits.ctrl.wid === i.U
+
+    dma_issue_allow(i) := allow_issue
+
+    when(!reset.asBool) {
+      assert(!(issue_hit && !allow_issue), s"DMA inflight overflow on warp $i")
+      assert(!(complete_hit && dma_inflight_cnt(i) === 0.U && !issue_hit), s"DMA inflight underflow on warp $i")
+      when(io.warpReq.fire && io.warpReq.bits.wid === i.U) {
+        assert(dma_inflight_cnt(i) === 0.U, s"Warp reuse before DMA inflight drains on warp $i")
+        assert(!dma_fence_wait(i), s"Warp reuse while DMA fence wait is still set on warp $i")
+      }
+    }
+
+    dma_inflight_cnt(i) := Mux(io.pc_reset, 0.U, cnt_after_io)
+    dma_fence_wait(i) := Mux(
+      io.pc_reset,
+      false.B,
+      Mux(
+        fence_issue_here,
+        cnt_after_io =/= 0.U,
+        Mux(cnt_after_io === 0.U, false.B, dma_fence_wait(i))
+      )
+    )
+  }
+
+  io.dma_issue_allow := dma_issue_allow
 
 
 
   warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt&Fill(num_warp,io.warpReq.fire))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt )).asUInt
-  val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
+  val dma_fence_wait_bits = Cat(dma_fence_wait.reverse)
+  val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt | dma_fence_wait_bits)).asUInt
   io.warp_ready:=warp_ready
   io.barrier_busy := warp_bar_data
+  io.dma_fence_wait_dbg := dma_fence_wait_bits
+  io.dma_inflight_dbg := dma_inflight_cnt
   for (i<- num_warp-1 to 0 by -1){
     pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 
     when(pc_ready(i)){next_warp:=i.asUInt}

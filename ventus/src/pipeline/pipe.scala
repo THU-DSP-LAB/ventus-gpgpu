@@ -11,10 +11,15 @@
 package pipeline
 
 import L1Cache.ICache._
+import L1Cache.{DCacheMemReq_p, DCacheMemRsp}
 import chisel3._
 import chisel3.util._
+import config.config.Parameters
 import top.parameters._
+import config.config._
+import L1Cache.MyConfig
 import gvm._
+import mmu.{L1TlbReq, L1TlbRsp, SV32}
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
@@ -31,6 +36,7 @@ class ICachePipeRsp_np extends Bundle{
 }
 
 class pipe() extends Module{
+  implicit val p: Parameters = (new MyConfig).toInstance
   val sm_id = IO(Input(UInt(8.W)))
   val io = IO(new Bundle{
     val icache_req = (DecoupledIO(new ICachePipeReq_np))
@@ -52,6 +58,15 @@ class pipe() extends Module{
     val perfReset = Input(Bool())
     val perf_pipeline = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
     val perf_inst_class = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
+    // DMA ports
+    val dma_cache_req = DecoupledIO(new DCacheMemReq_p)
+    val dma_cache_rsp = Flipped(DecoupledIO(new DCacheMemRsp))
+    val dma_shared_req = DecoupledIO(new ShareMemCoreReq_np)
+    val dma_shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    // DMA TLB ports
+    val dma_tlb_req = DecoupledIO(new L1TlbReq(SV32))
+    val dma_tlb_rsp = Flipped(DecoupledIO(new L1TlbRsp(SV32)))
+    val fence_end_dma = DecoupledIO(UInt(depth_warp.W))
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -84,6 +99,7 @@ class pipe() extends Module{
   val sfu=Module(new SFUexe)
   val mul=Module(new vMULv2(num_thread,num_lane))
   val tensorcore=Module(new vTCexe)
+  val dma_core=Module(new DMA_core)
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,7))
 
@@ -405,6 +421,30 @@ class pipe() extends Module{
   issueX.io.out_MUL.ready := false.B
   issueV.io.out_TC<>tensorcore.io.in
   issueX.io.out_TC.ready := false.B
+  // DMA connections
+  val dma_issue_wid = issueX.io.out_DMA.bits.ctrl.wid
+  val dma_issue_allow = warp_sche.io.dma_issue_allow(dma_issue_wid)
+  dma_core.io.dma_req.valid := issueX.io.out_DMA.valid && dma_issue_allow
+  dma_core.io.dma_req.bits := issueX.io.out_DMA.bits
+  issueX.io.out_DMA.ready := dma_core.io.dma_req.ready && dma_issue_allow
+  issueV.io.out_DMA.ready := false.B
+  warp_sche.io.dma_issue.valid := dma_core.io.dma_req.fire
+  warp_sche.io.dma_issue.bits := dma_issue_wid
+  io.dma_cache_req <> dma_core.io.dma_cache_req
+  dma_core.io.dma_cache_rsp <> io.dma_cache_rsp
+  io.dma_shared_req <> dma_core.io.shared_req
+  dma_core.io.shared_rsp <> io.dma_shared_rsp
+  io.dma_tlb_req <> dma_core.io.to_l2TLB
+  dma_core.io.from_l2TLB <> io.dma_tlb_rsp
+  io.fence_end_dma.valid := dma_core.io.fence_end_dma.valid
+  io.fence_end_dma.bits := dma_core.io.fence_end_dma.bits
+  // DESIGN INVARIANT: fence_end_dma.ready must be unconditionally true.
+  // Temp_mem s_reset state requires single-beat fire to exit.
+  // Scheduler dma_complete consumes via .fire (ready && valid).
+  // Changing ready to conditional WILL deadlock the DMA completion path.
+  dma_core.io.fence_end_dma.ready := true.B
+  warp_sche.io.dma_complete.valid := dma_core.io.fence_end_dma.fire
+  warp_sche.io.dma_complete.bits := dma_core.io.fence_end_dma.bits
   issueV.io.out_vFPU<>fpu.io.in
   issueX.io.out_vFPU.ready := false.B
   issueX.io.out_warpscheduler <> warp_sche.io.warp_control

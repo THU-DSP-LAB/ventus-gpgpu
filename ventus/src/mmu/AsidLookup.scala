@@ -5,7 +5,7 @@ import chisel3.util._
 
 class AsidLookupEntry(SV: SVParam) extends Bundle{
   val asid = UInt(SV.asidLen.W)
-  val ptbr = UInt(SV.xLen.W)
+  val ptbr = UInt(SV.xLen.W)             //maybe bug, palen.W is better
   val valid = Bool()
 }
 
