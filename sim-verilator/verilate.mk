@@ -8,6 +8,8 @@ RELEASE ?= 0
 PREFIX ?= $(CURDIR)/install
 
 export RTL_GVM_ENABLED = false
+VLIB_MILL = ./mill --no-server
+VLIB_MILL_LOCK = ../build/mill-generate.lock
 
 #=====================================================================
 # Helpers
@@ -50,6 +52,9 @@ MOLD = $(shell which mold)
 
 VLIB_DIR_SCALA = ../ventus/src
 VLIB_DIR_BUILD = build/libVentusRTL
+VLIB_GEN_DIR = build/generated/rtl
+VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
+VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
 VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug
 VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release
 ifeq ($(RELEASE),1)
@@ -59,9 +64,9 @@ VLIB_DIR_BUILDOBJ = $(VLIB_DIR_BUILDOBJ_DEBUG)
 endif
 
 VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
-VLIB_SRC_V = dut.v
+VLIB_SRC_V = $(VLIB_GEN_DIR)/dut.v
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp # API in these files will be exported to shared library
-VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp rtl_parameters.cpp $(VLIB_SRC_CXX_EXPORT)
+VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) $(VLIB_SRC_CXX_EXPORT)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
 VLIB_VERILATOR_INPUT = $(VLIB_SRC_V) $(VLIB_SRC_CXX_ABSPATH)
 VLIB_VERILATOR_OUTPUT = $(VLIB_DIR_BUILDOBJ)/libVdut.a
@@ -142,11 +147,15 @@ VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 default: lib
 
-$(VLIB_SRC_V) parameters.json &: $(VLIB_SRC_SCALA)
-	cd .. && ./mill ventus[6.4.0].runMain top.emitVerilog
-	mv GPGPU_SimTop.v $(VLIB_SRC_V)
-rtl_parameters.cpp: parameters.json json2cpp.py
-	python3 json2cpp.py
+$(VLIB_SRC_V) $(VLIB_PARAMS_JSON) &: $(VLIB_SRC_SCALA)
+	mkdir -p $(VLIB_GEN_DIR)
+	mkdir -p $(dir $(VLIB_MILL_LOCK))
+	flock $(VLIB_MILL_LOCK) -c 'cd .. && $(VLIB_MILL) ventus[6.4.0].runMain top.emitVerilog --target-dir sim-verilator/$(VLIB_GEN_DIR) --params-json sim-verilator/$(VLIB_PARAMS_JSON)'
+	mv $(VLIB_GEN_DIR)/GPGPU_SimTop.v $(VLIB_SRC_V)
+
+$(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
+	mkdir -p $(dir $@)
+	python3 json2cpp.py $< $@
 
 verilog: $(VLIB_SRC_V)
 
@@ -197,9 +206,9 @@ clean-verilated:
 
 clean-gvm:
 	-rm -rf build/libVentusGVM
-	-rm -rf verilog-out
+	-rm -rf build/generated/gvm
 
 clean-verilog: clean-verilated clean-gvm
-	-rm -f $(VLIB_SRC_V)
+	-rm -rf $(VLIB_GEN_DIR)
 
 .PHONY: clean-lib clean-lib-dep clean-verilated clean-verilog clean-gvm info-verilator install

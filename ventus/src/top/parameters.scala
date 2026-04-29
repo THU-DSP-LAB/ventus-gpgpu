@@ -327,28 +327,22 @@ object ParametersToJson {
    * @param pretty 是否格式化输出
    */
   def saveToJson(filename: String = "parameters.json", pretty: Boolean = true): Unit = {
+    val parameters = extractAllParameters()
+    val json = Json.obj(parameters.toSeq: _*) // convert to json
+
+    val jsonString = if (pretty) {
+      json.spaces2  // 使用2空格缩进的格式化输出
+    } else {
+      json.noSpaces // 紧凑输出
+    }
+
+    // save to json file
+    val writer = new PrintWriter(new File(filename))
     try {
-      val parameters = extractAllParameters()
-      val json = Json.obj(parameters.toSeq: _*) // convert to json
-      
-      val jsonString = if (pretty) {
-        json.spaces2  // 使用2空格缩进的格式化输出
-      } else {
-        json.noSpaces // 紧凑输出
-      }
-      
-      // save to json file
-      val writer = new PrintWriter(new File(filename))
-      try {
-        writer.write(jsonString)
-        writer.flush()
-      } finally {
-        writer.close()
-      }
-    } catch {
-      case e: Exception =>
-        println(s"❌ Error saving parameters to JSON file: ${e.getMessage}")
-        e.printStackTrace()
+      writer.write(jsonString)
+      writer.flush()
+    } finally {
+      writer.close()
     }
   }
   

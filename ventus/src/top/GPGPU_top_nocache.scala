@@ -288,6 +288,9 @@ class GPGPU_top_nocache() extends Module {
     }
   }
 
+}
+
+object nocacheParamToJson extends App {
   import top.ParametersToJson
-  ParametersToJson.saveToJson("sim-verilator-nocache/parameters.json")
+  ParametersToJson.saveToJson(BuildOutputArgs.paramsJson(args))
 }

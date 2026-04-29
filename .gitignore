@@ -1,4 +1,5 @@
 out/
+build/
 .bsp/
 .idea/
 .mill-bin/
