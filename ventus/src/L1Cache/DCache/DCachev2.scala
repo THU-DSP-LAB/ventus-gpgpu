@@ -158,6 +158,7 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   // st0
   coreReqPipe.io.CoreReq                <> CoreReqArb.io.out
   coreReqPipe.io.RTABHit                := ReplayTable.io.checkRTABhit
+  coreReqPipe.io.RTAB_full              := ReplayTable.io.RTAB_full
   coreReqPipe.io.hasDirty               := TagAccess.io.hasDirty_st0.get
   coreReqPipe.io.MSHREmpty              := MshrAccess.io.empty
   coreReqPipe.io.SMSHREmpty             := SMshrAccess.io.empty

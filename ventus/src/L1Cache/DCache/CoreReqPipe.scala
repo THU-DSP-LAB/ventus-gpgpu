@@ -71,6 +71,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val SMSHR_ProbeStatus   = Input(new SMSHRprobeOut(NMshrEntry))
     val WSHR_CheckResult    = Input(new WSHRCheckResult(NWshrEntry))
     val Mshr_st1_ready      = Input(Bool())
+    val RTAB_full           = Input(Bool())
     val memRsp_coreRsp      = Flipped(DecoupledIO(new CoreRspPipe_st2))
 
     val tagFromCore_tA_st1  = Output(UInt(dcache_TagBits.W))
@@ -557,7 +558,13 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
       }
     }.otherwise{st1_ready := true.B}
   }.otherwise{// when requesting RTAB
-    when(ReplayType === UCacheHitDirty){ // when hit in UCache and dirty, will write back to memory
+    // nn64k-006-pathA-hang fix: hold st1 when RTAB has no room. Without this,
+    // an in-flight st1 request that was admitted past the DCachev2 allowIn1
+    // gate before RTAB filled up could overwrite a live entry and bump ptr,
+    // breaking the strict-FIFO invariant ptr_w == ptr_r at empty.
+    when(io.RTAB_full){
+      st1_ready := false.B
+    }.elsewhen(ReplayType === UCacheHitDirty){ // when hit in UCache and dirty, will write back to memory
       st1_ready := io.MissReq_Mem.ready && (evictstateReg === evictrsp)
     }.otherwise{
       st1_ready := true.B
