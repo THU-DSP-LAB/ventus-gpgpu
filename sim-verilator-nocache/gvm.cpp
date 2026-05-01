@@ -206,9 +206,11 @@ void gvm_t::getDut() {
   getDutInsnDispatch(); // 添加新指令条目，其中不关心的指令直接置为 single_insn_cmp.cmp_pass = 1
   getDutInsnFinish(); // 标记指令条目为已完成，维护 dut_done 与 dut_result
   // 为了降低开销，不再每周期读取全量标量/向量寄存器堆
-  // 仅在新warp分配时，读取并同步标量寄存器堆到REF
+  // 仅在新warp分配时，读取并同步标量/向量寄存器堆到REF
   getDutXReg();
+  getDutVReg();
   getDutWarpNewSetRefXReg();
+  getDutWarpNewSetRefVReg();
   clearGlobal(); // 清空全局变量
 }
 
@@ -544,6 +546,49 @@ void gvm_t::getDutXReg() {
   }
 }
 
+void gvm_t::getDutVReg() {
+  if (g_cta2warp_data.empty()) {
+    return;
+  }
+  if (g_warp_vreg_init_data.empty()) {
+    logger->warn("GVM WARN[VREG_SYNC]: no vreg snapshot this cycle when new warp exists, skip vreg sync");
+    return;
+  }
+  for (const auto& item : g_cta2warp_data) {
+    auto warp_it = dut_active_warps.find({ item.software_wg_id, item.software_warp_id });
+    if (warp_it == dut_active_warps.end()) {
+      continue;
+    }
+    auto& warp = warp_it->second;
+    const WarpVRegInitData* snapshot = nullptr;
+    for (const auto& vreg_item : g_warp_vreg_init_data) {
+      if (vreg_item.sm_id == warp.sm_id && vreg_item.hardware_warp_id == warp.hardware_warp_id) {
+        snapshot = &vreg_item;
+        break;
+      }
+    }
+    if (snapshot == nullptr) {
+      logger->warn(
+          "GVM WARN[VREG_SYNC]: no vreg snapshot for sm_id {}, hardware_warp_id {}, skip vreg sync",
+          warp.sm_id, warp.hardware_warp_id
+      );
+      continue;
+    }
+    warp.curr_vreg.resize(warp.vreg_usage);
+    if (snapshot->vreg_data.size() < warp.vreg_usage) {
+      logger->error(
+          "GVM INTERNAL error: vreg snapshot too small for warp sw_wg={}, sw_warp={}, snapshot_size={}, vreg_usage={}",
+          warp.software_wg_id, warp.software_warp_id, snapshot->vreg_data.size(), warp.vreg_usage
+      );
+      assert(0);
+      continue;
+    }
+    for (uint32_t i = 0; i < warp.vreg_usage; ++i) {
+      warp.curr_vreg[i] = snapshot->vreg_data[i];
+    }
+  }
+}
+
 void gvm_t::getDutWarpNewSetRefXReg() {
   // 这个函数是为了解决以下问题：
   // REF 对每一个 warp 的标量寄存器都是零初始化的；
@@ -571,6 +616,28 @@ void gvm_t::getDutWarpNewSetRefXReg() {
   }
 }
 
+void gvm_t::getDutWarpNewSetRefVReg() {
+  for (const auto& item : g_cta2warp_data) {
+    auto warp_it = dut_active_warps.find({ item.software_wg_id, item.software_warp_id });
+    if (warp_it == dut_active_warps.end()) {
+      logger->error(
+          "GVM INTERNAL error: cannot find new warp for vreg sync, software_wg_id={}, software_warp_id={}",
+          item.software_wg_id, item.software_warp_id
+      );
+      assert(0);
+      continue;
+    }
+    auto &warp = warp_it->second;
+
+    gvmref_warp_vreg_t vreg_data;
+    vreg_data.vreg.resize(warp.vreg_usage);
+    for (uint32_t i = 0; i < warp.vreg_usage; ++i) {
+      vreg_data.vreg[i] = warp.curr_vreg[i];
+    }
+    gvmref_set_warp_vreg(item.software_wg_id, item.software_warp_id, warp.vreg_usage, vreg_data);
+  }
+}
+
 void gvm_t::clearGlobal() {
   // 清空全局变量
   g_cta2warp_data.clear();
@@ -578,6 +645,7 @@ void gvm_t::clearGlobal() {
   // g_sgprUsage.clear();
   g_xreg_wb_data.clear();
   g_warp_xreg_init_data.clear();
+  g_warp_vreg_init_data.clear();
   g_vreg_wb_data.clear();
   g_bar_done_data.clear();
 }

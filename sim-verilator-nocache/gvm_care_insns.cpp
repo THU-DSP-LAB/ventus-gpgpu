@@ -73,6 +73,9 @@
   {0xfc00707f, 0x08001057, "VFSUB_VV_             "},\
   {0xfc00707f, 0x90001057, "VFMUL_VV_             "},\
   {0x8000707f, 0x0000202b, "VLW_V_                "},\
+  {0xfff0707f, 0x80d02072, "CSRR_V_GL_ID_X_       "},\
+  {0xfff0707f, 0x80e02072, "CSRR_V_GL_ID_Y_       "},\
+  {0xfff0707f, 0x80f02072, "CSRR_V_GL_ID_Z_       "},\
   {0xfc0ff07f, 0x4c001057, "VFSQRT_V_             "},\
   {0xfc00707f, 0xa0001057, "VFMADD_VV_            "},\
   {0xfc00707f, 0x88006057, "VREMU_VX_             "},\
@@ -84,6 +87,8 @@
   {0xfc00707f, 0x94006057, "VMUL_VX_              "},\
   {0xfc00707f, 0x00003057, "VADD_VI_              "},\
   {0xfc00707f, 0x00001057, "VFADD_VV_             "},\
+  {0xfc00707f, 0x80001057, "VFDIV_VV_             "},\
+  {0xfc0ff07f, 0x48019057, "VFCVT_F_X_V_          "},\
   {0xfc00707f, 0x00000057, "VADD_VV_              "},\
   {0x0000707f, 0x0000407b, "VLBU12_V_             "},\
   {0xfc00707f, 0xa4006057, "VMADD_VX_             "},\
@@ -113,6 +118,8 @@
   {0xfc00707f, 0xa0001057, "VFMADD_VV_            "},\
   {0xfc00707f, 0x18001057, "VFMAX_VV_             "},\
   {0xfc00707f, 0x00001057, "VFADD_VV_             "},\
+  {0xfc00707f, 0x80001057, "VFDIV_VV_             "},\
+  {0xfc0ff07f, 0x48019057, "VFCVT_F_X_V_          "},\
   
   
 

@@ -93,6 +93,33 @@ void c_GvmDutWarpXRegInit(int sm_id,
   target->xreg_data[static_cast<size_t>(xreg_word_idx)] = static_cast<uint32_t>(xreg_word);
 }
 
+// New warp VRegs
+void c_GvmDutWarpVRegInit(int sm_id,
+                           int hardware_warp_id,
+                           int vreg_word,
+                           int vreg_word_idx,
+                           int thread_idx) {
+  WarpVRegInitData* target = nullptr;
+  for (auto& item : g_warp_vreg_init_data) {
+    if (item.sm_id == static_cast<uint32_t>(sm_id)
+        && item.hardware_warp_id == static_cast<uint32_t>(hardware_warp_id)) {
+      target = &item;
+      break;
+    }
+  }
+  if (target == nullptr) {
+    g_warp_vreg_init_data.push_back({static_cast<uint32_t>(sm_id), static_cast<uint32_t>(hardware_warp_id), {}});
+    target = &g_warp_vreg_init_data.back();
+  }
+  if (target->vreg_data.size() <= static_cast<size_t>(vreg_word_idx)) {
+    target->vreg_data.resize(static_cast<size_t>(vreg_word_idx) + 1);
+  }
+  if (target->vreg_data[static_cast<size_t>(vreg_word_idx)].size() <= static_cast<size_t>(thread_idx)) {
+    target->vreg_data[static_cast<size_t>(vreg_word_idx)].resize(static_cast<size_t>(thread_idx) + 1);
+  }
+  target->vreg_data[static_cast<size_t>(vreg_word_idx)][static_cast<size_t>(thread_idx)] = static_cast<uint32_t>(vreg_word);
+}
+
 // VReg Writeback
 void c_GvmDutVRegWriteback(int sm_id,
                             int rd_data,    

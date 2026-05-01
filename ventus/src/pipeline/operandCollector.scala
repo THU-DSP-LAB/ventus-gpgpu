@@ -526,18 +526,26 @@ class operandCollector extends Module{
     val vgpr_base = Input(Vec(num_warp,UInt((VGPR_ID_WIDTH+1).W)))
     val gvmWarpHwId = if (GVM_ENABLED) Some(Input(UInt(depth_warp.W))) else None
     val gvmWarpSgprBase = if (GVM_ENABLED) Some(Input(UInt((SGPR_ID_WIDTH + 1).W))) else None
+    val gvmWarpVgprBase = if (GVM_ENABLED) Some(Input(UInt((VGPR_ID_WIDTH + 1).W))) else None
     val gvmWarpXRegs = if (GVM_ENABLED) Some(Output(Vec(NUMBER_SGPR_SLOTS / num_warp, UInt(xLen.W)))) else None
+    val gvmWarpVRegs = if (GVM_ENABLED) Some(Output(Vec(NUMBER_VGPR_SLOTS / num_warp, Vec(num_thread, UInt(xLen.W))))) else None
   })
   val collectorUnits = VecInit(Seq.fill(num_collectorUnit)(Module(new collectorUnit).io))
   val Arbiter = Module(new operandArbiter)
   val vectorBank = VecInit(Seq.fill(num_bank)(Module(new FloatRegFileBank).io))
   val scalarBank = VecInit(Seq.fill(num_bank)(Module(new RegFileBank).io))
   if (GVM_ENABLED) {
-    val gvmWarpBase = io.gvmWarpSgprBase.get >> log2Ceil(num_bank).U
+    val gvmWarpSgprBase = io.gvmWarpSgprBase.get >> log2Ceil(num_bank).U
+    val gvmWarpVgprBase = io.gvmWarpVgprBase.get >> log2Ceil(num_bank).U
     for (regIdx <- 0 until NUMBER_SGPR_SLOTS / num_warp) {
       val bankId = (io.gvmWarpHwId.get(widSliceHigh, 0) + regIdx.U)(log2Ceil(num_bank) - 1, 0)
-      val bankAddr = gvmWarpBase + (regIdx.U >> log2Ceil(num_bank).U)
+      val bankAddr = gvmWarpSgprBase + (regIdx.U >> log2Ceil(num_bank).U)
       io.gvmWarpXRegs.get(regIdx) := scalarBank(bankId).all_regs.get(bankAddr)
+    }
+    for (regIdx <- 0 until NUMBER_VGPR_SLOTS / num_warp) {
+      val bankId = (io.gvmWarpHwId.get(widSliceHigh, 0) + regIdx.U)(log2Ceil(num_bank) - 1, 0)
+      val bankAddr = gvmWarpVgprBase + (regIdx.U >> log2Ceil(num_bank).U)
+      io.gvmWarpVRegs.get(regIdx) := vectorBank(bankId).all_regs.get(bankAddr)
     }
   }
   val crossBar = Module(new crossBar)

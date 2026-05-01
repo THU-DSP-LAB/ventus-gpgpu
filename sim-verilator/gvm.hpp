@@ -54,7 +54,9 @@ private:
   void getDutVRegWbFinish();
   void getDutBarDone();
   void getDutXReg(); // 根据新 warp 的 DPI 快照更新 XReg 条目
+  void getDutVReg(); // 根据新 warp 的 DPI 快照更新 VReg 条目
   void getDutWarpNewSetRefXReg();
+  void getDutWarpNewSetRefVReg();
   void clearGlobal(); // 清空全局变量
 
   // gvmStep() 相关函数

@@ -64,15 +64,23 @@ class pipe() extends Module{
   val operand_collector=Module(new operandCollector)
   if (GVM_ENABLED) {
     val gvm_xreg_init = Module(new GvmDutWarpXRegInit)
+    val gvm_vreg_init = Module(new GvmDutWarpVRegInit)
     gvm_xreg_init.io.clock := clock
     gvm_xreg_init.io.reset := reset.asBool
     gvm_xreg_init.io.fire := io.warpReq.fire
     gvm_xreg_init.io.sm_id := sm_id
     gvm_xreg_init.io.hardware_warp_id := io.warpReq.bits.wid.pad(32)
     gvm_xreg_init.io.xregs := operand_collector.io.gvmWarpXRegs.get.asUInt
+    gvm_vreg_init.io.clock := clock
+    gvm_vreg_init.io.reset := reset.asBool
+    gvm_vreg_init.io.fire := io.warpReq.fire
+    gvm_vreg_init.io.sm_id := sm_id
+    gvm_vreg_init.io.hardware_warp_id := io.warpReq.bits.wid.pad(32)
+    gvm_vreg_init.io.vregs := operand_collector.io.gvmWarpVRegs.get.asUInt
 
     operand_collector.io.gvmWarpHwId.get := io.warpReq.bits.wid
     operand_collector.io.gvmWarpSgprBase.get := io.warpReq.bits.CTAdata.dispatch2cu_sgpr_base_dispatch
+    operand_collector.io.gvmWarpVgprBase.get := io.warpReq.bits.CTAdata.dispatch2cu_vgpr_base_dispatch
   }
   //val issue=Module(new Issue)
   val issueX = Module(new Issue)

@@ -52,6 +52,12 @@ struct WarpXRegInitData {
   std::vector<uint32_t> xreg_data;
 };
 extern std::vector<WarpXRegInitData> g_warp_xreg_init_data;
+struct WarpVRegInitData {
+  uint32_t sm_id;
+  uint32_t hardware_warp_id;
+  std::vector<std::vector<uint32_t>> vreg_data;
+};
+extern std::vector<WarpVRegInitData> g_warp_vreg_init_data;
 extern uint32_t g_sgprUsage; // num of sgpr used in one warp
 extern uint32_t g_vgprUsage; // num of vgpr used in one warp
 

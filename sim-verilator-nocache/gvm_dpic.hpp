@@ -38,6 +38,12 @@ void c_GvmDutWarpXRegInit(int sm_id,
                            int hardware_warp_id,
                            int xreg_word,
                            int xreg_word_idx);
+// New warp VReg snapshot
+void c_GvmDutWarpVRegInit(int sm_id,
+                           int hardware_warp_id,
+                           int vreg_word,
+                           int vreg_word_idx,
+                           int thread_idx);
 // VReg Writeback  
 void c_GvmDutVRegWriteback(int sm_id,
                             int rd_data,     // 单个线程的向量数据
