@@ -289,7 +289,7 @@ for(i<- 0 until params.cache.sets){
   io.read.ready := ((wipeDone && !io.write.fire) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
   io.result.valid := Mux(flush_issue_regnext, io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue, false.B), valid_signal)
   io.result.bits.hit := (hit || (setQuash && tagMatch )|| timely_hit) && (!about_replace)
-  io.result.bits.way  := Mux(flush_issue_regnext, RegNext(flush_way, false.B),Mux(hit, OHToUInt(hits), Mux(setQuash && tagMatch,RegNext(io.write.bits.way),Mux(timely_hit,io.write.bits.way,victimWay))))
+  io.result.bits.way  := Mux(flush_issue_regnext, RegNext(flush_way, false.B),Mux(setQuash && tagMatch, RegNext(io.write.bits.way), Mux(timely_hit, io.write.bits.way, Mux(hit, OHToUInt(hits), victimWay))))
   io.result.bits.put    :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.put)
   io.result.bits.data   :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.data)
   io.result.bits.offset :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.offset)
