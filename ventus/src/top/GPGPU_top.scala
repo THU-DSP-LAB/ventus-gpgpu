@@ -192,6 +192,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     val cycle_cnt = Input(UInt(20.W))
     val perfDump = Input(Bool())
     val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val asid_fill = if(MMU_ENABLED) Some(Input(Flipped(ValidIO(new mmu.AsidLookupEntry(SV.get))))) else None
     val icache_invalidate = Input(Bool())
   })
@@ -354,6 +355,11 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   io.host_req<>cta.io.host2CTA
   io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U)})
   io.inst_cnt2.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt2.getOrElse(0.U)})
+  for (i <- 0 until NSms) {
+    io.pmu.pipeline(i) := sm_wrapper(i).pipeline_perf.getOrElse(0.U.asTypeOf(new PipelinePerfCounters))
+    io.pmu.instClass(i) := sm_wrapper(i).inst_class_perf.getOrElse(0.U.asTypeOf(new InstClassPerfCounters))
+    io.pmu.dcache.get(i) := sm_wrapper(i).dcache_perf
+  }
 
   def sumPerfCounter(select: DCachePerfCounters => UInt): UInt = {
     sm_wrapper.map(sm => select(sm.dcache_perf)).reduce(_ + _)

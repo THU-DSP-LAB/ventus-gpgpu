@@ -87,6 +87,12 @@ int parse_arg(
                 }
                 config->sim_time_max = simtime;
             }
+        } else if (args[argid] == "--hang-timeout") {
+            if (++argid >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
+            } else {
+                config->hang_timeout = std::stoull(args[argid]);
+            }
         } else if (args[argid] == "--waveform") {
             config->waveform.enable = true;
             config->waveform.time_begin = 0;
@@ -201,6 +207,8 @@ int cmdarg_help(int exit_id) {
               << "           taskid   uint    // 可选，若无则为不归属任何task的独立kernel。必须指向之前已经申明的task\n"
               << "\n"
               << "--snapshot INTERVAL uint    // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能\n"
-              << "--sim-time-max NUM  uint    // number of simulation cycles" << std::endl;
+              << "--sim-time-max NUM  uint    // number of simulation cycles\n"
+              << "--hang-timeout NUM  uint    // 0 disables PMU watchdog; otherwise timeout in simulation time units"
+              << std::endl;
     exit(exit_id);
 }

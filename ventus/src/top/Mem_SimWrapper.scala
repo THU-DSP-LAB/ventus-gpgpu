@@ -86,6 +86,7 @@ class GPGPU_SimTop extends Module {
     val host_rsp = DecoupledIO(new CTA2host_data)
     val perfDump = Input(Bool())
     val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val mem = new Mem_SimIO(DATA_BYTE_LEN, ADDR_WIDTH = parameters.MEM_ADDR_WIDTH)
     val cnt = Output(UInt(32.W))
     val icache_invalidate = Input(Bool())
@@ -99,6 +100,7 @@ class GPGPU_SimTop extends Module {
   io.host_rsp <> gpgpu.io.host_rsp
   gpgpu.io.perfDump := io.perfDump
   gpgpu.io.perfDumpSummary := io.perfDumpSummary
+  io.pmu := gpgpu.io.pmu
   io.cnt <> gpgpu.io.cnt
   //io.inst_cnt <> gpgpu.io.inst_cnt
 

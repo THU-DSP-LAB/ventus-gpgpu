@@ -78,6 +78,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))  // L2 cache response
     val perfDump = Input(Bool())
     val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val asid_fill = if(MMU_ENABLED) Some(Flipped(ValidIO(new AsidLookupEntry(SV.getOrElse(mmu.SV32))))) else None
     val cnt = Output(UInt(32.W))
     val inst_cnt = if(INST_CNT) Some(Output(Vec(num_sm, UInt(32.W)))) else None
@@ -98,6 +99,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
   GPU.io.cycle_cnt := counter.value
   GPU.io.perfDump := io.perfDump
   GPU.io.perfDumpSummary := io.perfDumpSummary
+  io.pmu := GPU.io.pmu
   if(MMU_ENABLED){
     GPU.io.asid_fill.foreach{ _ <> io.asid_fill.get }
   }

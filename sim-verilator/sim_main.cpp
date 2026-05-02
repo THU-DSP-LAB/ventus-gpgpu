@@ -74,7 +74,7 @@ int main(int argc, char* argv[]) {
     const ventus_rtlsim_step_result_t* result;
     while (1) {
         result = ventus_rtlsim_step(sim);
-        if (result->error || result->idle || result->time_exceed) {
+        if (result->error || result->idle || result->time_exceed || result->hang) {
             break;
         }
     }
@@ -82,7 +82,7 @@ int main(int argc, char* argv[]) {
     //
     // Finish simulation, release resources
     //
-    if (!result->error && !result->time_exceed && result->idle) {
+    if (!result->error && !result->time_exceed && !result->hang && result->idle) {
         for (int i = 0; i < 10000; i++) {
             ventus_rtlsim_step(sim); // 额外运行一会儿，等待缓存invalidate结束
         }

@@ -28,6 +28,7 @@ extern "C" void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config)
     config->snapshot.filename = "logs/ventus_rtlsim.snapshot.fst";
     config->verilator.argc = 0;
     config->verilator.argv = nullptr;
+    config->hang_timeout = 0;
 
     timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
@@ -46,6 +47,12 @@ extern "C" void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollbac
     delete sim;
 }
 extern "C" void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim) { sim->dump_testcase_pmu_summary(); }
+extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim) {
+    if (sim == nullptr) {
+        return {};
+    }
+    return sim->pmu_view();
+}
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
 extern "C" uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim) { return sim->contextp->time(); }

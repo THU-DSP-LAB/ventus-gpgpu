@@ -128,6 +128,7 @@ class GPGPU_top_nocache() extends Module {
     val dcache_rsp = Vec(num_sm, Flipped(DecoupledIO(new DCacheCoreRsp_np)))
     val perfDump = Input(Bool())
     val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = false))
     val icache_invalidate = Input(Bool())
   })
   val cta = Module(new CTAinterface)
@@ -211,6 +212,8 @@ class GPGPU_top_nocache() extends Module {
 
     sm_wrapper(i).perfEnable := perfWindowStarted || perfStartPulse
     sm_wrapper(i).perfReset := perfStartPulse
+    io.pmu.pipeline(i) := sm_wrapper(i).pipeline_perf.getOrElse(0.U.asTypeOf(new PipelinePerfCounters))
+    io.pmu.instClass(i) := sm_wrapper(i).inst_class_perf.getOrElse(0.U.asTypeOf(new InstClassPerfCounters))
     io.icache(i).req :<>= sm_wrapper(i).icache.req
     sm_wrapper(i).icache.rsp :<>= io.icache(i).rsp
     sm_wrapper(i).icache_invalidate := io.icache_invalidate

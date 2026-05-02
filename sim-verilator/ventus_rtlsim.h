@@ -80,13 +80,64 @@ typedef struct {
         int argc;          // 注意argc可以为0
         const char** argv; // 共有argc个char*字符串，[0]成员不是程序名，而是首个verilator参数
     } verilator;
+    uint64_t hang_timeout; // 0 disables PMU progress watchdog; otherwise timeout in simulation time units.
 } ventus_rtlsim_config_t;
 
 typedef struct {
     bool error;       // Simulation got fatal error, or RTL $finish()
     bool time_exceed; // Simulation time exceeds limit
     bool idle;        // All given kernels has finished
+    bool hang;        // PMU progress watchdog detected no issue/memory progress for too long.
 } ventus_rtlsim_step_result_t;
+
+typedef struct {
+    uint64_t active_cycles;
+    uint64_t total_scalar_issued;
+    uint64_t total_vector_issued;
+    uint64_t exec_structural_hazard_cycles_x;
+    uint64_t exec_structural_hazard_cycles_v;
+    uint64_t data_dep_stall_cycles;
+    uint64_t barrier_stall_cycles;
+    uint64_t control_hazard_flush_count;
+    uint64_t frontend_stall_cycles;
+    uint64_t lsu_backpressure_cycles;
+    uint64_t ibuffer_full_cycles;
+} ventus_rtlsim_pipeline_pmu_t;
+
+typedef struct {
+    uint64_t compute_issued;
+    uint64_t mem_issued;
+    uint64_t ctrl_issued;
+} ventus_rtlsim_inst_class_pmu_t;
+
+typedef struct {
+    uint64_t total_req;
+    uint64_t read_req;
+    uint64_t write_req;
+    uint64_t read_miss;
+    uint64_t write_miss;
+    uint64_t read_primary_miss;
+    uint64_t read_secondary_miss;
+    uint64_t read_primary_full_miss;
+    uint64_t read_secondary_full_miss;
+    uint64_t write_fresh_miss;
+    uint64_t write_inflight_miss;
+    uint64_t replacements;
+    uint64_t dirty_writebacks;
+    uint64_t mshr_full_cycles;
+    uint64_t rtab_replays;
+    uint64_t bank_conflict_cycles;
+    uint64_t core_req_pipe_pipelined_cycles;
+    uint64_t mem_rsp_pipe_decoupled_cycles;
+} ventus_rtlsim_dcache_pmu_t;
+
+typedef struct {
+    uint32_t num_sm;
+    bool has_dcache;
+    const ventus_rtlsim_pipeline_pmu_t *pipeline;
+    const ventus_rtlsim_inst_class_pmu_t *inst_class;
+    const ventus_rtlsim_dcache_pmu_t *dcache;
+} ventus_rtlsim_pmu_t;
 
 // =
 // API functions:
@@ -119,6 +170,9 @@ DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* con
 DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
 // Ask RTL to print the accumulated testcase PMU summary once.
 DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
+// Return a read-only view of the latest PMU counters sampled after the most recent step().
+// The pointed-to storage is owned by sim and may change after the next ventus_rtlsim_step().
+DLL_PUBLIC ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim);
 
 // Calculate 1 unit-time of simulation.
 // Return the result of this step: ok, error, time_exceed, or idle.

@@ -55,6 +55,7 @@ VLIB_DIR_BUILD = build/libVentusRTL
 VLIB_GEN_DIR = build/generated/rtl
 VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
 VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
+VLIB_PMU_SNAPSHOT_INC = $(VLIB_GEN_DIR)/pmu_snapshot_copy.inc
 VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug
 VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release
 ifeq ($(RELEASE),1)
@@ -129,6 +130,7 @@ VLIB_CFLAGS += -fPIC
 VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
+VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
 VLIB_LDFLAGS += -lc
 ifeq ($(MOLD),1)
 VLIB_LDFLAGS += -fuse-ld=mold
@@ -157,13 +159,17 @@ $(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
 	mkdir -p $(dir $@)
 	python3 json2cpp.py $< $@
 
+$(VLIB_PMU_SNAPSHOT_INC): $(VLIB_PARAMS_JSON) gen_pmu_snapshot_inc.py
+	mkdir -p $(dir $@)
+	python3 gen_pmu_snapshot_inc.py $< $@
+
 verilog: $(VLIB_SRC_V)
 
-verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX)
+verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
