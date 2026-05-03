@@ -61,7 +61,7 @@ class CTA2warp extends Module{
   val idx_using = RegInit(0.U(num_warp.W))  // current active warps in sm
 
   io.CTAreq.ready:=(~idx_using.andR)
-  val data = Reg(Vec(num_warp,UInt(TAG_WIDTH.W))) // every hw_warp record its wg&wf id
+  val data = RegInit(VecInit(Seq.fill(num_warp)(0.U(TAG_WIDTH.W)))) // every hw_warp record its wg&wf id
   io.wg_id_tag:=data(io.wg_id_lookup)
   val idx_next_allocate = PriorityEncoder(~idx_using)
   //idx_using:=Mux(io.warpRsp.fire&io.CTAreq.fire,idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt&(1.U<<idx_next_allocate).asUInt,

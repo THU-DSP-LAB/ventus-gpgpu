@@ -130,7 +130,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   val cnt = new Counter(n = num_thread)
   val state = RegInit(init = s_idle)
 
-  val reg_save = Reg(new vExeData)
+  val reg_save = RegInit(0.U.asTypeOf(new vExeData))
   val is_flush = RegInit(false.B)
   io.csr_wid:=reg_save.ctrl.wid
   //val rdy_fromFIFO = Reg(Bool())

@@ -37,7 +37,7 @@ class MSHRv2 extends Module{
   val complete = VecInit(currentMask.map{_===0.U}).asUInt & used
   val output_entry = Mux(complete.orR, PriorityEncoder(complete), 0.U)
   val valid_entry = Mux(used.andR, 0.U, PriorityEncoder(~used))
-  val reg_req = Reg(new MshrTag)
+  val reg_req = RegInit(0.U.asTypeOf(new MshrTag))
 
   val s_idle :: s_add  :: s_out :: Nil = Enum(3)
   val state = RegInit(s_idle)

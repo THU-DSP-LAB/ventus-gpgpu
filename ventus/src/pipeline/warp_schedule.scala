@@ -167,7 +167,7 @@ class warp_scheduler extends Module{
     warp_endprg_mask_0(i) := (warp_endprg_cnt(i).orR === false.B) && warp_wg_valid(i)
   }
   val need_flush = warp_endprg_mask_0.asUInt.orR
-  val flush_entry = OHToUInt(warp_endprg_mask_0.asUInt)
+  val flush_entry = PriorityEncoder(warp_endprg_mask_0.asUInt)
   when(warp_endprg_mask_0(flush_entry) && io.flushDCache.ready){
     warp_wg_valid(flush_entry) := false.B
   }
