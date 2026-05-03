@@ -843,6 +843,45 @@ void gvm_t::stepRef() {
               gvmref_step_return_info.insn_result.vreg_result.reg_idx;
             cur_insn.single_insn_cmp.ref_result.vreg_result.mask =
               unpack_to_array(gvmref_step_return_info.insn_result.vreg_result.mask, warp_it->second.num_thread);
+
+            // 浮点指令结果即时修正：若 DUT/REF 有 bit 差异但误差在容差内，将 DUT 的值覆写到 REF
+            // 这样后续的分支指令看到相同的寄存器值，避免因微小浮点差异导致分支方向不同
+            if (cur_insn.single_insn_cmp.dut_done
+                && isInsnCareCached(cur_insn.insn, fp32_vreg_insns, fp32_vreg_cache)) {
+              bool need_fix = false;
+              bool has_real_error = false;
+              for (uint32_t i = 0; i < warp_it->second.num_thread; i++) {
+                if (cur_insn.single_insn_cmp.dut_result.vreg_result.mask[i]) {
+                  uint32_t dut_rd = cur_insn.single_insn_cmp.dut_result.vreg_result.rd[i];
+                  uint32_t ref_rd = cur_insn.single_insn_cmp.ref_result.vreg_result.rd[i];
+                  if (dut_rd != ref_rd) {
+                    float dut_val = *reinterpret_cast<float*>(&dut_rd);
+                    float ref_val = *reinterpret_cast<float*>(&ref_rd);
+                    if (std::abs(dut_val - ref_val) <= fp32_atol + fp32_rtol * std::abs(ref_val)) {
+                      need_fix = true;
+                    } else {
+                      has_real_error = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (need_fix && !has_real_error) {
+                gvmref_warp_single_vreg_t fix_data;
+                fix_data.reg_idx = cur_insn.single_insn_cmp.dut_result.vreg_result.reg_idx;
+                fix_data.data.assign(
+                    cur_insn.single_insn_cmp.dut_result.vreg_result.rd.begin(),
+                    cur_insn.single_insn_cmp.dut_result.vreg_result.rd.begin() + warp_it->second.num_thread);
+                gvmref_set_warp_single_vreg(item.software_wg_id, item.software_warp_id, fix_data);
+                // 同步修正 ref_result，使 doSingleInsnCmp 不报错
+                for (uint32_t i = 0; i < warp_it->second.num_thread; i++) {
+                  if (cur_insn.single_insn_cmp.dut_result.vreg_result.mask[i]) {
+                    cur_insn.single_insn_cmp.ref_result.vreg_result.rd[i] =
+                        cur_insn.single_insn_cmp.dut_result.vreg_result.rd[i];
+                  }
+                }
+              }
+            }
             break;
         }
         if (cur_insn.single_insn_cmp.ref_done == 0) {
