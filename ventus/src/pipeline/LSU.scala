@@ -439,13 +439,19 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
         printf(common_prefix + p"lsu.w x ${reg_save.ctrl.reg_idx2} op ${reg_save.ctrl.mop} ${Hexadecimal(reg_save.in3(0))} @ ${Hexadecimal(reg_save.in1(0))}+${Hexadecimal(reg_save.in2(0))}\n")
       }
     } .otherwise {
-      val addr_print: Printable = addr.reverse.map { x => p" ${Hexadecimal(x)}" }.reduceOption(_ + _).getOrElse(p"")
+      // 打印格式带 lane index "[lN]=ADDR"，便于 debug 时直接读 lane→paddr 对应关系
+      val addr_print: Printable = addr.zipWithIndex.reverse.map { case (x, i) =>
+        p" [l${i}]=${Hexadecimal(x)}"
+      }.reduceOption(_ + _).getOrElse(p"")
       when(reg_save.ctrl.mem_cmd === IDecode.M_XRD) {
         printf(common_prefix + p"lsu.r v${reg_save.ctrl.reg_idx3} op ${reg_save.ctrl.mop} @" + addr_print + p"\n")
       } .elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XWR) {
         val idx = Mux(reg_save.ctrl.disable_mask, reg_save.ctrl.reg_idx2, reg_save.ctrl.reg_idxw)
-        val in3_print: Printable = reg_save.in3.reverse.map { x => p"${Hexadecimal(x)} " }.reduceOption(_ + _).getOrElse(p"")
-        printf(common_prefix + p"lsu.w v${idx} op ${reg_save.ctrl.mop} mask ${Binary(reg_save.mask.asUInt)} " + in3_print + p"@" + addr_print + p"\n")
+        // store 把 data 与 addr 同 lane 配对："[lN]=DATA@ADDR"
+        val store_print: Printable = reg_save.in3.zip(addr).zipWithIndex.reverse.map { case ((d, a), i) =>
+          p" [l${i}]=${Hexadecimal(d)}@${Hexadecimal(a)}"
+        }.reduceOption(_ + _).getOrElse(p"")
+        printf(common_prefix + p"lsu.w v${idx} op ${reg_save.ctrl.mop} mask ${Binary(reg_save.mask.asUInt)}" + store_print + p"\n")
       }
     }
   }
