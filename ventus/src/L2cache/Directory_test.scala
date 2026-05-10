@@ -184,9 +184,14 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
         }
         status_reg(i).dirty(j) := false.B
 
-      }.elsewhen(io.result.valid && io.result.bits.hit && (io.result.bits.opcode === PutPartialData || io.result.bits.opcode === PutFullData) && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt) {
+      // bfs4096-002 iter5 fix #2: status_reg 推进改用 io.result.fire（不再看 .valid）。
+      // ready=0 反压时若按 .valid 推进，会让 status_reg.dirty 在 N 拍清零 → N+1 拍
+      // result.bits.dirty (组合读 status_reg) 跟塌 → enq.valid 自塌 → evict 漏 enq。
+      // 改 fire 让推进只在握手成功那拍发生。hit+write 路径同改保对称。
+      // 配套：Scheduler.scala:255 (#1) + Scheduler.scala:217 (#3)。详见 checkpoint_3_iter5.md。
+      }.elsewhen(io.result.fire && io.result.bits.hit && (io.result.bits.opcode === PutPartialData || io.result.bits.opcode === PutFullData) && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt) {
         status_reg(i).dirty(j) := true.B
-      }.elsewhen(io.result.valid && !io.result.bits.hit && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt && !not_replace) {
+      }.elsewhen(io.result.fire && !io.result.bits.hit && io.result.bits.way===j.asUInt && io.result.bits.set===i.asUInt && !not_replace) {
         status_reg(i).valid(j) := false.B
         status_reg(i).dirty(j) := false.B
       }.elsewhen(io.write.valid && io.write.bits.set===i.asUInt && io.write.bits.way===j.asUInt) {

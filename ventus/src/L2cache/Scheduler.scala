@@ -214,7 +214,11 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.mixed:= directory.io.result.valid&& (OHToUInt(tagMatches)===i.asUInt) && (directory.io.result.bits.opcode=/= m.io.status.opcode)
   }
 
-  requests.io.push.valid      := directory.io.result.valid && (!directory.io.result.bits.hit) && !directory.io.result.bits.flush
+  // bfs4096-002 iter5 fix #3: push.valid 看 result.fire 而非 result.valid。
+  // ListBuffer 流式 push（push.ready 不满就持续 1）+ result.valid hold（#1 反压触发后）
+  // 会让 push.fire 多拍 → 重复 push 同 mshr_index 链表。配套 #1 + #2 一并使用。
+  // 详见 bugs/bfs4096-002/checkpoint_3_iter5.md。
+  requests.io.push.valid      := directory.io.result.fire && (!directory.io.result.bits.hit) && !directory.io.result.bits.flush
   requests.io.push.bits.data.data  := directory.io.result.bits.data
   requests.io.push.bits.data.mask  := directory.io.result.bits.mask
   requests.io.push.bits.data.put   := directory.io.result.bits.put
@@ -252,7 +256,19 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
 
 
-  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,requests.io.push.ready)
+  // bfs4096-002 iter5 fix #1: directory.result fork 点反压补齐（Mux 改 needPush/needEnq AND）。
+  // 原 Mux(hit, enq.ready, push.ready) 在 miss+dirty / flush+last_flush / flush+dirty
+  // 路径漏 enq.ready：dir_result_buffer 满 + 新 dirty victim 时 result.fire=1 但
+  // enq.fire=0，evict event 静默丢失 → SourceD 永不写回 mem → 后续 GetBlock 拿 stale
+  // (cacheline 0x90000200 9 byte mismatch)。改 AND 后 fork 必须双 ready。
+  // 配套：#2 (Directory_test.scala status_reg → fire) + #3 (push.valid → fire)。
+  // 详见 bugs/bfs4096-002/checkpoint_3_iter5.md。
+  val needPush = !directory.io.result.bits.hit && !directory.io.result.bits.flush
+  val needEnq  = directory.io.result.bits.hit ||
+                 directory.io.result.bits.dirty ||
+                 directory.io.result.bits.last_flush
+  directory.io.result.ready := (!needPush || requests.io.push.ready) &&
+                               (!needEnq  || dir_result_buffer.io.enq.ready)
 
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)
