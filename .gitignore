@@ -30,3 +30,6 @@ sim-verilator-nocache/verilog-out/
 
 gen_fpga_verilog/
 ventus/src/L1Cache/DCache/AGENT_CONTEXT/
+
+# Codex CLI marker file
+.codex
