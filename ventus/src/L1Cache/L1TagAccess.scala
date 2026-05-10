@@ -76,6 +76,10 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
     val dirtyMask_st1 = Output(UInt((dcache_BlockWords * BytesOfWord).W))
     // 分配写要替换的 cacheline 的 dirty mask
     val replace_dirty_mask_st1 = Output(UInt((dcache_BlockWords * BytesOfWord).W))
+    // bfs4096-002 fix iter1: ST1 cycle 真有新 dispatch 的严格 gate（= deq.valid）。
+    // 用于 dirtyMaskWriteArb.in(1).valid，防止 cache_hit/probeIsWrite_st1 在 deq.bits
+    // 持续保持高电平时长期重写同一 set。详见下方对应注释 + checkpoint_3.md 迭代 1。
+    val coreReq_st1_valid = Input(Bool())
   })
   //TagAccess internal parameters
   val Length_Replace_time_SRAM: Int = 10
@@ -287,16 +291,26 @@ if(MMU_ENABLED) {
   dirtyMaskArb.io.in(2).bits.setIdx := choosenDirtySetIdx_st0
 
 
-  // 从 perLaneAddr_st1 中构造要写入的dirty mask
-  // WireInit不是只执行一次的初始化，而是每个时钟周期都会将Wire重置为初始值,这是组合逻辑，不是寄存器逻辑
-  // 会产生类似这样的组合逻辑: assign dirtyMaskPerCL[0] = (条件0满足且blockOffset==0) ? 新值 : 0;
-  // dirtyMaskPerCL_init 代表本次要写入的 dirty mask 的初始值，需要与原有的值相或得到本次写入的 dirty mask
-  val dirtyMaskPerCL_init = WireInit(VecInit(Seq.fill(dcache_BlockWords)(0.U(BytesOfWord.W))))
+  // bfs4096-002 fix iter4: dirtyMaskPerCL_init 多 lane 同 word coalescing 漏写 bug。
+  // 旧 for + `:=` 对 dynamic-index Vec slot 是 last-write-wins——多 lane 同 blockOffset
+  // 不同 wordOffset1H 时仅最大 idx 落地，其它 byte dirty bit 静默丢失（247 条 mismatch
+  // 之根：sm 0 wg 80 lane 18+19 同 word 漏 byte 18 → 880 µs 后 stale read）。
+  // 修法：per-word OR-reduce 所有同 blockOffset active lane 的 wordOffset1H，与
+  // DCache.scala:188-190 dataReqCrossBar.MaskOut 数据路径设计对称。
+  // 与 iter1/iter2 正交可叠加。详见 bugs/bfs4096-002/checkpoint_3_iter4.md。
+
+  // 从 perLaneAddr_st1 中构造要写入的 dirty mask（per-word OR-reduce 同 blockOffset 所有 active lane）
+  val dirtyMaskPerCL_init = Wire(Vec(dcache_BlockWords, UInt(BytesOfWord.W)))
   val dirtyMaskPerCL = WireInit(VecInit(Seq.fill(dcache_BlockWords)(0.U(BytesOfWord.W))))
-  for (i <- 0 until num_lane) {
-    when(io.perLaneAddr_st1(i).activeMask) {
-      dirtyMaskPerCL_init(io.perLaneAddr_st1(i).blockOffset) := io.perLaneAddr_st1(i).wordOffset1H 
-    }
+  for (j <- 0 until dcache_BlockWords) {
+    val perWordContrib = VecInit((0 until num_lane).map { i =>
+      Mux(
+        io.perLaneAddr_st1(i).activeMask && io.perLaneAddr_st1(i).blockOffset === j.U,
+        io.perLaneAddr_st1(i).wordOffset1H,
+        0.U(BytesOfWord.W)
+      )
+    })
+    dirtyMaskPerCL_init(j) := perWordContrib.reduce(_ | _)
   }
   dirtyMaskPerCL := (dirtyMaskPerCL_init.asUInt | dirtyMaskAccess.io.r.resp.data(OHToUInt(iTagChecker.io.waymask))).asTypeOf(dirtyMaskPerCL)
 
@@ -309,7 +323,15 @@ if(MMU_ENABLED) {
   dirtyMaskWriteArb.io.in(0).valid := io.needReplace.get
   dirtyMaskWriteArb.io.in(0).bits.apply(data = 0.U, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
   // 在常规读写命中时，即第一级流水发起写请求，只有这个写请求是给阵列写实际值
-  dirtyMaskWriteArb.io.in(1).valid := iTagChecker.io.cache_hit && io.probeIsWrite_st1.get
+  // bfs4096-002 fix iter1: 加 io.coreReq_st1_valid gate (cache_hit && probeIsWrite_st1 之外)。
+  // cache_hit 与 probeIsWrite_st1 都来自 Queue.deq.bits（不随 deq.valid 归零），
+  // 两次 dispatch 之间持续高电平，让 in(1).valid 长期重写 RegNext(setIdx) 的 set，
+  // 把上次写入的 dirty bit 抹掉 → evict 用错 mask → byte 级 mismatch。
+  // 用 deq.valid 严格 gate 让 valid 仅在真有新 dispatch 拉高。
+  // E 方案 (下方 replace_dirty_mask_st1) 修 evict 输出端，与本修法互不冲突。
+  // 详见 bugs/bfs4096-002/checkpoint_3.md 迭代 1。
+  dirtyMaskWriteArb.io.in(1).valid :=
+    io.coreReq_st1_valid && iTagChecker.io.cache_hit && io.probeIsWrite_st1.get
   dirtyMaskWriteArb.io.in(1).bits.apply(data = dirtyMaskPerCL.asUInt, setIdx = RegNext(io.probeRead.bits.setIdx), waymask = iTagChecker.io.waymask)
   // 只有当 flushChoosen 拉高时，读出来 dirty mask 才会被用到，需要被写0
   // 这里的 valid 需要用 RegNext 延迟一周期是因为在dcache的顶层模块将 InvOrFluMemReqValid_st1 里也延了一个clk
@@ -365,12 +387,29 @@ if(MMU_ENABLED) {
   val tagnset = Cat(tagBodyAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1)), //tag
     allocateWrite_st1.setIdx)
 
+  // bfs4096-002 fix iter2: a_addrReplacement_st1 与 mask 路径对称的 RegEnable 锁存。
+  // 旧版纯组合 Cat：tagAccessRArb.in(2) "port 空就用" 默认填充让 R 端口在 P+1 拍切到
+  // choosenDirtySetIdx_st0，r.resp.data 漂到无关 set，组合 a_addr 跟漂；DCachev2:146
+  // 在 P+1 拍 when(replaceReadResp){...} 采样时已漂走 → PutPart 写错 cacheline。
+  // 修法：P 拍 RegEnable(io.needReplace.get) 锁住 raw 组合值，与 mask 路径 (E 方案) 同款。
+  // 同型 latent: choosenDirtyTag_st1 也直出 r.resp.data，flush 路径未覆盖（待回视）。
+  // 详见 bugs/bfs4096-002/checkpoint_4_5_iter2.md + checkpoint_3_iter2.md。
+  val a_addrReplacement_st1_raw = Cat(tagnset, //setIdx
+    0.U((dcache_BlockOffsetBits + dcache_WordOffsetBits).W)) //blockOffset+wordOffset
+
   if (!readOnly) {
-    io.a_addrReplacement_st1.get := Cat(tagnset, //setIdx
-      0.U((dcache_BlockOffsetBits + dcache_WordOffsetBits).W)) //blockOffset+wordOffset
+    io.a_addrReplacement_st1.get :=
+      RegEnable(a_addrReplacement_st1_raw, 0.U, io.needReplace.get)
   }
-  // 需要将dirtyMaskAccess读出的数据与way_dirtyAfterValid相与，因为
-  io.replace_dirty_mask_st1 := dirtyMaskAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1)).asUInt 
+  // bfs4096-002 fix (E 方案): 在 needReplace=1 (T0) 那拍把 dirtyMaskAccess 的 read
+  // resp 锁进 reg；T1 SRAM 内部 bypassWrite 污染成 0 不再有任何后果（下游 DCachev2
+  // L149 replaceMaskReg / L314 replaceMaskSel fallback 都消费 latched 值）。
+  // 不动 in(0) 写时机 / in(1) WriteHit / in(2) 预读 / flush 路径，只保护 evict 输出端。
+  // 详见 bugs/bfs4096-002/checkpoint_3.md (迭代 2) + checkpoint_4_5_D_failed.md。
+  val replace_dirty_mask_st1_raw =
+    dirtyMaskAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1)).asUInt
+  io.replace_dirty_mask_st1 :=
+    RegEnable(replace_dirty_mask_st1_raw, 0.U, io.needReplace.get)
 
   tagBodyAccess.io.w.req.valid := io.allocateWriteTagSRAMWValid_st1//meta_entry_t::allocate
   tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)

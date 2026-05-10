@@ -222,6 +222,11 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   TagAccess.io.probeIsUncache_st1       := coreReqPipe.io.coreReq_Control_st1.isUncached
   TagAccess.io.tagready_st1    := coreReqPipe.io.st1_ready
   TagAccess.io.perLaneAddr_st1 := coreReqPipe.io.perLaneAddr_st1
+  // bfs4096-002 fix: 把 ST1 队头有效信号（CoreReq_pipeReg_st0_st1.deq.valid）接入 TagAccess，
+  // 用作 dirtyMaskWriteArb.in(1).valid 的严格 gate。否则 cache_hit 与 probeIsWrite_st1
+  // 在两次 dispatch 之间持续保持高电平，导致 in(1) 长期重写同一 set 的 dirty mask。
+  // 详见 L1TagAccess.scala:312 注释 + bugs/bfs4096-002/checkpoint_3.md 迭代 1。
+  TagAccess.io.coreReq_st1_valid := coreReqPipe.io.st1_valid
   if(MMU_ENABLED){
     TagAccess.io.asidFromCore_st1.get := coreReqPipe.io.asidFromCore_tA_st1.get
   }
