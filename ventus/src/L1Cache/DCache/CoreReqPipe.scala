@@ -66,6 +66,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     
     val tA_Hit_st1          = Input(new hitStatus(NWays, TagBits))
     val tA_dirtyTag_st1     = Input(UInt(TagBits.W))
+    // bfs4096-001 partial-write clobber fix: byte-level dirty mask of the chosen flush victim
+    val tA_dirtyMask_st1    = Input(UInt((BlockWords * BytesOfWord).W))
     val tA_dirtyAsid_st1    = if(MMU_ENABLED) {Some(Input(UInt(asidLen.W)))} else None
     val MSHR_ProbeStatus    = Input(new MSHRprobeOut(NMshrEntry, NMshrSubEntry))
     val SMSHR_ProbeStatus   = Input(new SMSHRprobeOut(NMshrEntry))
@@ -424,7 +426,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   // dirty line 需要 PutFull 把 victim line 写回；否则发 Flush / Invalidate hint 到下层。
   // 这类请求不需要给 core 立即返回普通 load/store coreRsp。
   // flu or inv mem req
-  FluInvMemReq_st1.a_opcode := Mux(FluInvIsPut_st1,TLAOp_PutFull,TLAOp_Flush)
+  // bfs4096-001 partial-write clobber fix: PutPartialData on dirty writeback (not PutFullData)
+  FluInvMemReq_st1.a_opcode := Mux(FluInvIsPut_st1,TLAOp_PutPart,TLAOp_Flush)
   FluInvMemReq_st1.a_param := Mux(FluInvIsPut_st1, 0.U, Mux(CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush, TLAParam_Flush, TLAParam_Inv))
   val dirtySetIdx_st1 = RegNext(io.tA_dirtySetIdx_st0)
   // === backprop1024-001 fix: FluInvMemReq identity snapshot ===
@@ -436,10 +439,13 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val fluInvLiveAddr = Cat(io.tA_dirtyTag_st1, dirtySetIdx_st1, 0.U((WordLength - TagBits - SetIdxBits).W))
   val fluInvSnapData = Reg(Vec(BlockWords, UInt(WordLength.W)))
   val fluInvSnapAddr = Reg(UInt(WordLength.W))
+  // bfs4096-001 partial-write clobber fix: snapshot dirty byte-mask alongside addr/data
+  val fluInvSnapMask = Reg(UInt((BlockWords * BytesOfWord).W))
   val fluInvSnapValid = RegInit(false.B)
   when(FluInvMemReq_valid && FluInvIsPut_st1 && !fluInvSnapValid){
     fluInvSnapData := io.dA_data
     fluInvSnapAddr := fluInvLiveAddr
+    fluInvSnapMask := io.tA_dirtyMask_st1
     fluInvSnapValid := true.B
   }
   when(io.MissReq_Mem.fire && FluInvMemReq_valid){
@@ -451,7 +457,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   FluInvMemReq_st1.hasCoreRsp := false.B
   FluInvMemReq_st1.coreRspInstrId := DontCare
   FluInvMemReq_st1.activeMask := VecInit(Seq.fill(NLanes)(false.B))
-  FluInvMemReq_st1.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
+  FluInvMemReq_st1.a_mask :=
+    Mux(fluInvSnapValid, fluInvSnapMask, io.tA_dirtyMask_st1).asTypeOf(Vec(BlockWords, UInt(BytesOfWord.W)))
   FluInvMemReq_valid :=
     (FluInvIsPut_st1 || (FluInvIsFluL2_st1 && !FluInvL2MemReqIssuedReg)) &&
       CoreReq_pipeReg_st0_st1.deq.valid

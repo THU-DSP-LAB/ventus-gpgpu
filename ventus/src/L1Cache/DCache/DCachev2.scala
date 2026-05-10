@@ -126,9 +126,19 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   val replaceDataValid = RegInit(false.B)
   val replaceDataReg = Reg(Vec(BlockWords, UInt(WordLength.W)))
   val replaceAddrReg = Reg(UInt(WordLength.W))
+  // bfs4096-001 partial-write clobber fix: 与 data / addr 一起 hold victim 的字节级 dirty mask。
+  val replaceMaskReg = Reg(UInt((BlockWords * BytesOfWord).W))
+  // L1TagAccess.io.{a_addrReplacement_st1, replace_dirty_mask_st1, asidReplacement_st1}
+  // 后缀虽是 _st1 实为 SRAM r.resp.data 直出 wire，与 replaceReadResp 同步在 cycle N+1
+  // 出值，本 when 块直接抓即可——若再 RegNext 等于退到 cycle N（SRAM resp 未出，
+  // holdRead=true 让信号保留旧值）→ stale。
+  // 历史成因：backprop1024-001 (commit 08e296c8) 给 addr 加 RegNext 是 latent bug，在
+  // backprop 数据集未显现；bfs4096-001 patch 机械模仿到 mask 才让 stale 显形。
+  // 本次一并修正 addr / mask / asid。详见 bugs/bfs4096-001/checkpoint_3.md。
   when(replaceReadResp){
     replaceDataReg := VecInit(DataAccessReadSRAMRRsp)
-    replaceAddrReg := RegNext(TagAccess.io.a_addrReplacement_st1.get)
+    replaceAddrReg := TagAccess.io.a_addrReplacement_st1.get
+    replaceMaskReg := TagAccess.io.replace_dirty_mask_st1
     replaceDataValid := true.B
   }
   when(replaceMemReqFire){
@@ -183,6 +193,8 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
     coreReqPipe.io.tA_dirtyAsid_st1.get := TagAccess.io.dirtyASID_st1.get
   }
   coreReqPipe.io.tA_dirtyTag_st1   := TagAccess.io.dirtyTag_st1.get
+  // bfs4096-001 fix: 透传 byte 级 dirty mask 给 CoreReqPipe（flush/invalidate 走 PutPartialData）。
+  coreReqPipe.io.tA_dirtyMask_st1  := TagAccess.io.dirtyMask_st1
   coreReqPipe.io.MSHR_ProbeStatus  := MshrAccess.io.probeOut_st1
   coreReqPipe.io.SMSHR_ProbeStatus := SMshrAccess.io.probeOut_st1
   coreReqPipe.io.WSHR_CheckResult  := WshrAccess.io.checkresult
@@ -280,16 +292,23 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   RTAB_pushedIdx_st2.io.enq.valid := MemReqArb.io.out.valid
   RTAB_pushedIdx_st2.io.enq.bits  := ReplayTable.io.RTABpushedIdx
   RTAB_pushedIdx_st2.io.deq.ready := memReq_Q.io.deq.ready
-  dirtyReplaceMemReq.a_opcode := 0.U//PutFullData
+  // bfs4096-001 partial-write clobber fix: 改用 PutPartialData + 字节级 mask。
+  // 旧实现用 PutFullData + 全 1 mask，会让某 SM 的整行写回覆盖别的 SM 在同一
+  // cacheline 不同 byte 上合法写入的内容（多 SM 共享 cacheline 时累积污染）。
+  dirtyReplaceMemReq.a_opcode := TLAOp_PutPart
   dirtyReplaceMemReq.a_param := 0.U//regular write
   dirtyReplaceMemReq.a_source := DontCare//wait for WSHR
+  // Sel 的 false 分支：hold 寄存器尚未 valid 时直接走 live 信号。
+  // 同上注释——_st1 信号已是 SRAM resp 那拍的 wire，三件套都不能 RegNext。
   val replaceDataSel = Mux(replaceDataValid, replaceDataReg, VecInit(DataAccessReadSRAMRRsp))
-  val replaceAddrSel = Mux(replaceDataValid, replaceAddrReg, RegNext(TagAccess.io.a_addrReplacement_st1.get))
+  val replaceAddrSel = Mux(replaceDataValid, replaceAddrReg, TagAccess.io.a_addrReplacement_st1.get)
+  val replaceMaskSel = Mux(replaceDataValid, replaceMaskReg, TagAccess.io.replace_dirty_mask_st1)
   dirtyReplaceMemReq.a_addr.get := replaceAddrSel
   if(MMU_ENABLED){
-    dirtyReplaceMemReq.Asid.get := RegNext(TagAccess.io.asidReplacement_st1.get)
+    // asidReplacement_st1 同样是 SRAM resp 直出 wire，与 addr/mask 同时机更新，不能 RegNext。
+    dirtyReplaceMemReq.Asid.get := TagAccess.io.asidReplacement_st1.get
   }
-  dirtyReplaceMemReq.a_mask := VecInit(Seq.fill(BlockWords)(Fill(BytesOfWord,1.U)))
+  dirtyReplaceMemReq.a_mask := replaceMaskSel.asTypeOf(Vec(BlockWords, UInt(BytesOfWord.W)))
   dirtyReplaceMemReq.a_data := replaceDataSel//wait for data SRAM in next cycle
   dirtyReplaceMemReq.hasCoreRsp := false.B
   dirtyReplaceMemReq.coreRspInstrId := DontCare
