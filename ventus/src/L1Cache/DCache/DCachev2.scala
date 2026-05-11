@@ -69,8 +69,12 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,AsidBits = asidLen,readOnly=false))
   val WshrAccess = Module(new DCacheWSHR(Depth = NWshrEntry))
   val ReplayTable = Module(new L1RTAB())
-  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry, asidLen))
-  val SMshrAccess = Module(new SpecialMSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, asidLen))
+  // The MSHR class's `InstrIdBits` parameter (formerly `WIdBits` in V1 cache era) sets
+  // the width of MSHRmissReq/RspOut.instrId. V2 carries an MSHR index in this field, not
+  // a warp id; see L1MSHR.scala and bugs/bfs4096-003/phase_4_report.md. Pass
+  // max(WIdBits, log2Up(NMshrEntry)) so NMshrEntry can exceed num_warp.
+  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(WIdBits, log2Up(NMshrEntry)), NMshrEntry, NMshrSubEntry, asidLen))
+  val SMshrAccess = Module(new SpecialMSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(WIdBits, log2Up(NMshrEntry)), NMshrEntry, asidLen))
   val DataAccesses = Seq.tabulate(BlockWords) { i =>
     Module(new SRAMTemplate(
       gen=UInt(8.W),

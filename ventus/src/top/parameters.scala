@@ -80,7 +80,19 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_NWays: Int = 2
 
   def dcache_BlockWords: Int = 32  // number of words per cacheline(block)
-  def dcache_wshr_entry: Int = 4
+  // WSHR tracks outstanding dirty writeback transactions awaiting AccessAck
+  // from L2. Too few entries cause a three-way livelock between L1
+  // WSHR / memReq_Q / memRspPipe.st1 under burst dirty evictions
+  // (slots saturate -> pushReq.ready=0 -> wshrPass=0 -> memReq_Q.deq.ready=0
+  // -> memRspPipe stuck on memReq state -> no WSHRPopReq -> WSHR cannot drain).
+  // 100% reproducible at depth=4 on bfs_4096 baseline; partial relief at
+  // depth=8 (peak hits 8/8 still triggers livelock after ~4.26 ms sim).
+  // See bugs/bfs4096-003/phase_4_report.md. Monitor `wshrMaxUsed` debug
+  // counter (DCacheWSHR.scala) to validate the budget under new workloads.
+  // CONSTRAINT: dcache_wshr_entry <= dcache_MshrEntry (Chisel assert in
+  // DCache.scala) -- WSHR pushedIdx is encoded into a_source sharing the
+  // MSHR-width source field.
+  def dcache_wshr_entry: Int = 16
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
 
@@ -92,7 +104,30 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
 
-  def dcache_MshrEntry: Int = 4
+  // MSHR (Miss Status Holding Register) tracks outstanding read misses.
+  // Coupling constraint (after the V2 decoupling in this patch):
+  //   dcache_MshrEntry >= dcache_wshr_entry (Chisel assert in
+  //   DCache.scala:1037) -- a_source field width = 3 + log2Up(dcache_MshrEntry)
+  //   + log2Up(dcache_NSets), and the WSHR pushedIdx is encoded into the
+  //   same field at the MSHR-width slot (DCachev2.scala:571:
+  //   Cat("d0", WshrAccess.io.pushedIdx, setIdx)).
+  //
+  // Historical note: the MSHRmiss{Req,RspOut}.instrId field's declared width
+  // was `WIdBits = log2Up(num_warp)`, which used to alias MSHR idx with warp
+  // id (the V1 cache assumed 1 outstanding miss per warp). After the V2
+  // refactor the field carries the MSHR entry index, not a warp id, but the
+  // stale width pinned NMshrEntry <= num_warp. This patch passes
+  // `math.max(WIdBits, log2Up(NMshrEntry))` to MSHR/SpecialMSHR/MSHRmissRspOut
+  // at instantiation sites (DCachev2 / MemRspPipe / CoreReqPipe) so that
+  // NMshrEntry can grow past num_warp. Commit 2 renames the misnamed
+  // parameter to `InstrIdBits` for clarity.
+  //
+  // WARNING: setting dcache_MshrEntry=4 forces dcache_wshr_entry<=4, which
+  // re-triggers the WSHR-full livelock documented in
+  // bugs/bfs4096-003/phase_4_report.md. Keep both at 16 unless wshrMaxUsed
+  // counter shows you have headroom to shrink.
+  // Monitor `mshrMaxUsed` debug counter (L1MSHR.scala) to validate.
+  def dcache_MshrEntry: Int = 16
 
   def dcache_MshrSubEntry: Int = 2
   def dcache_MshrSet: Int = 2

@@ -312,7 +312,11 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   })
 
   // ******     important submodules     ******
-  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, WIdBits = WIdBits, NMshrEntry, NMshrSubEntry, asidLen))
+  // NOTE: V1 caller mirrors the V2 fix; see DCachev2.scala:72 and
+  // bugs/bfs4096-003/phase_4_report.md. V1 path is not elaborated, but the
+  // named arg must match L1MSHR.scala's renamed parameter to keep the file
+  // compilable.
+  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(WIdBits, log2Up(NMshrEntry)), NMshrEntry, NMshrSubEntry, asidLen))
   //val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val readmiss_st0_st1_match= Wire(Bool())

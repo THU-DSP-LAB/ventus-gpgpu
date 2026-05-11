@@ -84,8 +84,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val CacheHit_st1        = Output(Bool())
     val Req_st1_RTAB        = ValidIO(new RTABReq())
     val CheckReq_WSHR       = Output(new WSHRreq)
-    val Probe_SMSHR         = DecoupledIO(new SMSHRmissReq(bABits, tIBits, WIdBits, asidLen))//TODO add special MSHR
-    val MissReq_MSHR        = DecoupledIO(new MSHRmissReq(bABits, tIBits, WIdBits, asidLen))
+    // {S}MSHRmissReq.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
+    // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
+    val Probe_SMSHR         = DecoupledIO(new SMSHRmissReq(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen))//TODO add special MSHR
+    val MissReq_MSHR        = DecoupledIO(new MSHRmissReq(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen))
     val MissCached_MSHR     = Output(Bool())
     val st1_valid           = Output(Bool())
     val st1_ready           = Output(Bool())

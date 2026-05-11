@@ -41,10 +41,12 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
 
          //st1
          val memRsp_coreRsp     = DecoupledIO(new CoreRspPipe_st2)
-         val MSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, WIdBits, asidLen)))
+         // MSHRmissRspOut.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
+         // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
+         val MSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen)))
          val MSHRMissRspOutAsid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
 
-         val SMSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, WIdBits, asidLen)))
+         val SMSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen)))
          val SMSHRMissRspOutAsid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
 
          val dAmemRsp_wReq         = Output(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets * NWays, BytesOfWord)))

@@ -27,15 +27,15 @@ class MSHRprobeOut(val NEntry:Int, val NSub:Int) extends Bundle {
   val probeStatus = UInt(3.W)
   val a_source = UInt(log2Up(NEntry).W)
 }
-class MSHRmissReq(val bABits: Int, val tIWdith: Int, val WIdBits: Int, val AsidBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
+class MSHRmissReq(val bABits: Int, val tIWdith: Int, val InstrIdBits: Int, val AsidBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
   val blockAddr = UInt(bABits.W)
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(InstrIdBits.W)
   val targetInfo = UInt(tIWdith.W)
   //val ASID = UInt(AsidBits.W)
 }
-class SMSHRmissReq (val bABits: Int, val tIWdith: Int, val WIdBits: Int, val AsidBits: Int) extends Bundle{
+class SMSHRmissReq (val bABits: Int, val tIWdith: Int, val InstrIdBits: Int, val AsidBits: Int) extends Bundle{
   val blockAddr = UInt(bABits.W)
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(InstrIdBits.W)
   val targetInfo = UInt(tIWdith.W)
   val wordOffset = UInt(dcache_BlockOffsetBits.W)
   val Type = UInt(2.W) // 1-lr 2- sc 3-amo 0- normal
@@ -49,10 +49,10 @@ class SMSHRprobeOut(val NEntry: Int) extends Bundle{
 class MSHRmissRspIn(val NEntry: Int) extends Bundle {//Use this bundle when a block return from Lower cache
   val instrId = UInt(log2Up(NEntry).W)
 }
-class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val WIdBits: Int, val AsidBits: Int) extends Bundle {
+class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val InstrIdBits: Int, val AsidBits: Int) extends Bundle {
   val targetInfo = UInt(tIWdith.W)
   val blockAddr = UInt(bABits.W)
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(InstrIdBits.W)
   val UncacheRsp = Bool()
   //val ASID = UInt(AsidBits.W)
   //val burst = Bool()//This bit indicate the Rsp transaction comes from subentry
@@ -99,17 +99,17 @@ object MSHRStatus{
   def ReturnMatch : UInt = 4.U(3.W)
 }
 
-class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:Int, val NMshrSubEntry:Int, val AsidBits:Int) extends Module {
+class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEntry:Int, val NMshrSubEntry:Int, val AsidBits:Int) extends Module {
   val io = IO(new Bundle {
     val probe = Flipped(ValidIO(new MSHRprobe(bABits,AsidBits)))
     val probeAsid = if(MMU_ENABLED) {Some(Input(UInt(AsidBits.W)))} else None
     val probeOut_st1 = Output(new MSHRprobeOut(NMshrEntry, NMshrSubEntry))
-    val missReq = Flipped(Decoupled(new MSHRmissReq(bABits, tIWidth, WIdBits, AsidBits)))
+    val missReq = Flipped(Decoupled(new MSHRmissReq(bABits, tIWidth, InstrIdBits, AsidBits)))
     val missCached_st1 = Input(Bool()) // 0-cached 1-no cache
     val UncacheRsp = Output(Bool())//0-cached 1-no cache
     val missReqAsid = if(MMU_ENABLED) {Some(Input(UInt(AsidBits.W)))} else None
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
-    val missRspOut = Decoupled(new MSHRmissRspOut(bABits, tIWidth, WIdBits,AsidBits))
+    val missRspOut = Decoupled(new MSHRmissRspOut(bABits, tIWidth, InstrIdBits,AsidBits))
     val missRspOutAsid = if(MMU_ENABLED) {Some(Output(UInt(AsidBits.W)))} else None
     //For InOrFlu
     val empty = Output(Bool())
@@ -129,7 +129,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
-  val instrId_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(WIdBits.W)))) //TODO remove this
+  val instrId_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(InstrIdBits.W)))) //TODO remove this
   val targetInfo_Accesss = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(tIWidth.W))))))
   val cacheStatus_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(false.B)))
 
@@ -378,7 +378,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
   val missRspTargetInfo_st0 = targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
   val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
   //val missRspASID_st0 = ASID_Access(entryMatchMissRsp)
-  val missRspOut_st1 = Module(new Queue(new MSHRmissRspOut(bABits, tIWidth, WIdBits, AsidBits),1,true,false))
+  val missRspOut_st1 = Module(new Queue(new MSHRmissRspOut(bABits, tIWidth, InstrIdBits, AsidBits),1,true,false))
   missRspOut_st1.io.enq.valid := io.missRspIn.valid && !(subentryStatusForRsp.io.used===0.U)
   missRspOut_st1.io.enq.bits.targetInfo := missRspTargetInfo_st0
   missRspOut_st1.io.enq.bits.blockAddr := missRspBlockAddr_st0
@@ -421,13 +421,22 @@ class MSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:I
       releasing_stall(iofEn) := true.B
     }
   }
+
+  // Debug counter: peak MSHR (read-miss tracking) occupancy. Surfaced via
+  // dontTouch so verilator emits it to the FST trace. Used together with
+  // wshrMaxUsed (DCacheWSHR.scala) to validate the
+  // dcache_MshrEntry / dcache_wshr_entry budgets after the bfs4096-003
+  // livelock fix (see top/parameters.scala comments).
+  val mshrMaxUsed = RegInit(0.U(log2Ceil(NMshrEntry + 1).W))
+  when(io.usedEntries > mshrMaxUsed){ mshrMaxUsed := io.usedEntries }
+  dontTouch(mshrMaxUsed)
 }
-class SpecialMSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshrEntry:Int, val AsidBits:Int) extends Module {
+class SpecialMSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEntry:Int, val AsidBits:Int) extends Module {
   val io = IO(new Bundle {
-    val missReq = Flipped(Decoupled(new SMSHRmissReq(bABits, tIWidth, WIdBits, AsidBits)))
+    val missReq = Flipped(Decoupled(new SMSHRmissReq(bABits, tIWidth, InstrIdBits, AsidBits)))
     val missReqAsid = if(MMU_ENABLED) {Some(Input(UInt(AsidBits.W)))} else None
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(NMshrEntry)))
-    val missRspOut = Decoupled(new MSHRmissRspOut(bABits, tIWidth, WIdBits,AsidBits))
+    val missRspOut = Decoupled(new MSHRmissRspOut(bABits, tIWidth, InstrIdBits,AsidBits))
     val missRspOutAsid = if(MMU_ENABLED) {Some(Output(UInt(AsidBits.W)))} else None
     val empty = Output(Bool())
     val probeOut_st1 = Output(new SMSHRprobeOut(NMshrEntry))
@@ -470,7 +479,7 @@ class SpecialMSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshr
   val missRspTargetInfo_st0 = targetInfo_access(entryMatchMissRsp)
   val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
   //val missRspASID_st0 = ASID_Access(entryMatchMissRsp)
-  val missRspOut_st1 = Module(new Queue(new MSHRmissRspOut(bABits, tIWidth, WIdBits, AsidBits),1,true,false))
+  val missRspOut_st1 = Module(new Queue(new MSHRmissRspOut(bABits, tIWidth, InstrIdBits, AsidBits),1,true,false))
   io.missRspIn.ready := missRspOut_st1.io.enq.ready && !io.missReq.valid
   missRspOut_st1.io.enq.valid := io.missRspIn.valid && !io.missReq.valid
   missRspOut_st1.io.enq.bits.targetInfo := missRspTargetInfo_st0
@@ -498,5 +507,15 @@ class SpecialMSHR(val bABits: Int, val tIWidth: Int, val WIdBits: Int, val NMshr
         entry_valid(iofEn) := false.B
       }
     }//order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
+
+  // Debug counter: peak MSHR occupancy seen during the run. Surfaced via
+  // dontTouch so verilator emits it to the FST trace. Used together with
+  // wshrMaxUsed (DCacheWSHR.scala) to validate the
+  // dcache_MshrEntry / dcache_wshr_entry budgets after the bfs4096-003
+  // livelock fix (see top/parameters.scala comments).
+  val mshrUsedCnt = PopCount(entry_valid)
+  val mshrMaxUsed = RegInit(0.U(log2Ceil(NMshrEntry + 1).W))
+  when(mshrUsedCnt > mshrMaxUsed){ mshrMaxUsed := mshrUsedCnt }
+  dontTouch(mshrMaxUsed)
 }
 

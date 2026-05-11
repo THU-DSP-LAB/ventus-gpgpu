@@ -68,5 +68,15 @@ class DCacheWSHR(Depth:Int) extends Module{
   }.elsewhen(io.popReq.valid){
     valid(io.popReq.bits) := false.B
   }
+
+  // Debug counter: peak WSHR occupancy seen during the run. Surfaced via
+  // dontTouch so verilator emits it to the FST trace and post-run analysis
+  // can read it directly (without rebuilding the design). Used to validate
+  // that the Depth budget is sufficient -- if `wshrMaxUsed == Depth` on a
+  // workload, the WSHR is saturating and the livelock documented in
+  // bugs/bfs4096-003/phase_4_report.md may re-emerge.
+  val wshrMaxUsed = RegInit(0.U(log2Ceil(Depth + 1).W))
+  when(io.usedEntries > wshrMaxUsed){ wshrMaxUsed := io.usedEntries }
+  dontTouch(wshrMaxUsed)
 }
 
