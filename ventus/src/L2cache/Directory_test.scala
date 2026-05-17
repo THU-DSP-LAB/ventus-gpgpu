@@ -293,8 +293,44 @@ for(i<- 0 until params.cache.sets){
   val flush_issue_regnext = RegNext(flush_issue, false.B)
   io.read.ready := ((wipeDone && !io.write.fire) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
   io.result.valid := Mux(flush_issue_regnext, io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue, false.B), valid_signal)
-  io.result.bits.hit := (hit || (setQuash && tagMatch )|| timely_hit) && (!about_replace)
-  io.result.bits.way  := Mux(flush_issue_regnext, RegNext(flush_way, false.B),Mux(setQuash && tagMatch, RegNext(io.write.bits.way), Mux(timely_hit, io.write.bits.way, Mux(hit, OHToUInt(hits), victimWay))))
+
+  // bfs4096-004 fix: 把 io.result.bits 的 {hit, way, dirty, victim_tag} 4 个字段从纯组合
+  // 改为 RegEnable(comb, ren1) 锁存版本，避开 Decoupled 反压窗口里 directory.write
+  // 改写 ways / hits / status_reg 导致 result.bits 中途突变的 race。
+  //
+  // 现场（anchor v3 fst @bfs_4096，N=16）：
+  //   t=2_945_435  visited lookup 命中 way=1，result.bits.way=1，result.ready=0（dir_result_buffer 反压）
+  //   t=2_945_505  另一 MSHR_5 的 dir write fire (set=28, way=15, tag=0x90030)；与上面同 set
+  //   t=2_945_514  组合表达式 OHToUInt(hits) 因 ways(28)/hits 被刷新而变成 15，
+  //                io.result.bits.way 在反压期间从 1 突变到 15
+  //   t=2_945_605  dir_result_buffer 终于 enq fire，way=15 入队（不再是 lookup 时的 1）
+  //   t=2_945_635  sourceD HIT 路径用 way=15 读 BankedStore (set=28, way=15)，
+  //                拿到 12 拍前 MSHR_5 刚 fill 的 grEdges 数据，串污染回 L1 dcache
+  //
+  // 修法采用 Mux(ren1, comb, reg) 风格而不是直接 reg：RegEnable 在 ren1=1 那拍 reg 还是
+  // 上次锁存值（要等下一个 clock edge 才更新），但 valid_signal 在 ren1=1 当周期就是 1
+  // (line 284)。若同拍 ready=1（零反压 fire），下游会拿到 stale reg。Mux on ren1 让
+  // 当拍直接走 comb 表达式（与 valid 同步），反压期间走 reg（稳定）。
+  //
+  // 范围最小化：flush 路径（flush_issue_regnext=1 分支）完全保持原样——flush 时
+  // io.write.ready=0（line 277），dir.write 不可能 fire，没有反压期被改写的 race。
+  // about_replace（line 289）也不动——它仍每拍重算，但只在 ren1 那拍被 sample 到
+  // result_hit_reg，反压期出现的新 about_replace=1 不再传到下游，正向修复。
+  val result_hit_comb        = (hit || (setQuash && tagMatch) || timely_hit) && (!about_replace)
+  val normal_way_comb        = Mux(setQuash && tagMatch, RegNext(io.write.bits.way),
+                                   Mux(timely_hit, io.write.bits.way,
+                                       Mux(hit, OHToUInt(hits), victimWay)))
+  val normal_dirty_comb      = Mux(not_replace, false.B, (status_reg(set).dirty(normal_way_comb)).asBool)
+  val normal_victim_tag_comb = ways(normal_way_comb).tag
+
+  val result_hit_reg         = RegEnable(result_hit_comb,        ren1)
+  val normal_way_reg         = RegEnable(normal_way_comb,        ren1)
+  val normal_dirty_reg       = RegEnable(normal_dirty_comb,      ren1)
+  val normal_victim_tag_reg  = RegEnable(normal_victim_tag_comb, ren1)
+
+  io.result.bits.hit := Mux(ren1, result_hit_comb, result_hit_reg)
+  io.result.bits.way  := Mux(flush_issue_regnext, RegNext(flush_way, false.B),
+                             Mux(ren1, normal_way_comb, normal_way_reg))
   io.result.bits.put    :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.put)
   io.result.bits.data   :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.data)
   io.result.bits.offset :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.offset)
@@ -306,10 +342,15 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.opcode :=Mux(flush_issue_regnext, Hint, read_bits_reg.opcode)
 
   io.result.bits.mask   :=Mux(flush_issue_regnext, Fill(params.mask_bits,1.U),read_bits_reg.mask)
-  io.result.bits.dirty  :=Mux(flush_issue_regnext, RegNext(status_reg(flush_set).dirty(flush_way), false.B), Mux(not_replace,false.B,(status_reg(set).dirty(io.result.bits.way)).asBool))
+  io.result.bits.dirty  :=Mux(flush_issue_regnext, RegNext(status_reg(flush_set).dirty(flush_way), false.B),
+                              Mux(ren1, normal_dirty_comb, normal_dirty_reg))
   io.result.bits.last_flush :=Mux(flush_issue_regnext, RegNext(flushDone, false.B),false.B)
   io.result.bits.flush  := RegNext(flush_issue, false.B)
-  io.result.bits.victim_tag:= ways(io.result.bits.way).tag
+  // bfs4096-004 fix: victim_tag 原本隐式依赖 io.result.bits.way 已经按 flush_issue_regnext 分支选过，
+  // 现在 way 已改为锁存版本，必须在这里显式 mux 出 flush 分支（用 ways(RegNext(flush_way)).tag），
+  // 否则反压期间 ways(...) 仍是组合读，会被 dir.write 改 ways 后污染 victim_tag。
+  io.result.bits.victim_tag := Mux(flush_issue_regnext, ways(RegNext(flush_way, false.B)).tag,
+                                   Mux(ren1, normal_victim_tag_comb, normal_victim_tag_reg))
   //todo what's the function of flush
   io.result.bits.l2cidx := Mux(flush_issue_regnext, 0.U, read_bits_reg.l2cidx)
   io.result.bits.param  := Mux(flush_issue_regnext, 0.U, read_bits_reg.param)
