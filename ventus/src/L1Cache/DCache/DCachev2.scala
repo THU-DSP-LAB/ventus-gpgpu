@@ -89,8 +89,14 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
     // pipelines
   val coreReqPipe = Module(new CoreReqPipe)
   val memRspPipe = Module(new MemRspPipe)
-  val memRsp_Q = Module(new Queue(new DCacheMemRsp,entries = 2,flow=false,pipe=false))
-  val memReq_Q = Module(new Queue(new WshrMemReqV2,entries = 8,flow=false,pipe=false))
+  // [bfs4096-005] memRsp_Q 2→8, memReq_Q 8→32: L1↔L2 dead embrace 缓解
+  // 因果链 (run_d_postfix hang @3_750_265 ps): memRsp_Q 满(2)+ tagRequestStatus
+  // FSM 卡 memReq state + WSHR slot 9 read 序列化 → memReq_Q 反压 → MemRspPipe
+  // 永不让出 → fill 永不前进 → 死锁。memReq_Q=32 对齐 per-SM source identity
+  // 上限 (WSHR16+MSHR16)，memRsp_Q=8 给 fill 流水线足够 burst 缓冲。
+  // 注: 治标 (降低触发概率)，不治本 (MemRspPipe FSM 缺陷封存)。
+  val memRsp_Q = Module(new Queue(new DCacheMemRsp,entries = 8,flow=false,pipe=false))
+  val memReq_Q = Module(new Queue(new WshrMemReqV2,entries = 32,flow=false,pipe=false))
   val RTAB_pushedIdx_st2 = Module(new Queue(UInt(NRTABs.W),entries = 8,flow=false,pipe=false))
   val MemReqArb = Module(new Arbiter(new WshrMemReqV2, 2))
   val CoreReqArb = Module(new Arbiter(new DCacheCoreReq, 2))

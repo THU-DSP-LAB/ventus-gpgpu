@@ -187,7 +187,10 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>{
     m.io.allocate.valid:=false.B
     m.io.allocate.bits:=0.U.asTypeOf(new Status(params))
-    when (directory.io.result.valid && alloc && s && !directory.io.result.bits.hit && !directory.io.result.bits.flush){
+    // bfs4096-005 Phase 4.5 fix: directory.io.result.valid 改 .fire, 跟 line 221 requests.io.push 对称
+    // 避免反压多周期内 mshr_insertOH 漂移导致 zombie MSHR (上游 Get 发出但 ListBuffer 没落账,
+    // 旧响应数据按 source ID 广播污染换主后的 MSHR data_reg). 详见 phase_4_report.md.
+    when (directory.io.result.fire && alloc && s && !directory.io.result.bits.hit && !directory.io.result.bits.flush){
       m.io.allocate.valid := true.B
       m.io.allocate.bits.set := directory.io.result.bits.set
       m.io.allocate.bits.tag := directory.io.result.bits.tag
