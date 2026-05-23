@@ -126,6 +126,8 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
   // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits, AsidBits = AsidBits))
   val cachehit_hold = Module(new Queue(new tagCheckerResult(way),1))
+  // bfs4096-007 v15: hit_st1_raw 前置 Wire 声明, 给下方 in(1).valid 用 (实际赋值在 L355)
+  val hit_st1_raw = Wire(Bool())
   //SRAM to store tag
   val tagBodyAccess = Module(new SRAMTemplate(
     UInt(tagBits.W),
@@ -330,8 +332,15 @@ if(MMU_ENABLED) {
   // 用 deq.valid 严格 gate 让 valid 仅在真有新 dispatch 拉高。
   // E 方案 (下方 replace_dirty_mask_st1) 修 evict 输出端，与本修法互不冲突。
   // 详见 bugs/bfs4096-002/checkpoint_3.md 迭代 1。
+  // bfs4096-007 v15 fix: iter1 的 coreReq_st1_valid gate 只保证 valid 不溢出 dispatch
+  // 间, 但 iTagChecker.io.cache_hit (live combinational on SRAM r.resp.data) 在 ST1
+  // stall 多拍时 SRAM raddr 被 in(0)/in(2) 偷走 → resp 漂到无关 set → cache_hit 反映
+  // ST0 而非 ST1 entry → ST1 实际 miss 时 in(1).valid 误拉高 → dirtyMaskAccess 错位写
+  // → bfs4096-007 byte mismatch. 改用 hit_st1_raw (cachehit_hold 出来的 ST1-held hit).
+  // L335 setIdx/waymask 在 valid=0 时永不写 SRAM, 不需联动改 (root cause 在 valid 源).
+  // 详见 bugs/bfs4096-007/checkpoint_15_valid_gate.md。
   dirtyMaskWriteArb.io.in(1).valid :=
-    io.coreReq_st1_valid && iTagChecker.io.cache_hit && io.probeIsWrite_st1.get
+    io.coreReq_st1_valid && hit_st1_raw && io.probeIsWrite_st1.get
   dirtyMaskWriteArb.io.in(1).bits.apply(data = dirtyMaskPerCL.asUInt, setIdx = RegNext(io.probeRead.bits.setIdx), waymask = iTagChecker.io.waymask)
   // 只有当 flushChoosen 拉高时，读出来 dirty mask 才会被用到，需要被写0
   // 这里的 valid 需要用 RegNext 延迟一周期是因为在dcache的顶层模块将 InvOrFluMemReqValid_st1 里也延了一个clk
@@ -352,7 +361,8 @@ if(MMU_ENABLED) {
   cachehit_hold.io.deq.ready := probeReadBuf.ready
   //val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
   val holdValid_st1 = cachehit_hold.io.deq.valid
-  val hit_st1_raw = Mux(holdValid_st1, cachehit_hold.io.deq.bits.hit, iTagChecker.io.cache_hit)
+  // bfs4096-007 v15: hit_st1_raw 已在 L130 前置 Wire 声明, 此处 := 赋值给 in(1).valid 用
+  hit_st1_raw := Mux(holdValid_st1, cachehit_hold.io.deq.bits.hit, iTagChecker.io.cache_hit)
   val waymask_st1_raw = Mux(holdValid_st1, cachehit_hold.io.deq.bits.waymask, iTagChecker.io.waymask)
   io.hit_st1 := hit_st1_raw && probeReadBuf.valid//RegNext(io.probeRead.fire) //todo remove
   io.hitStatus_st1.hit := hit_st1_raw && probeReadBuf.valid
