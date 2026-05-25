@@ -38,6 +38,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val hasDirty       = Input(Bool())
     val MSHREmpty      = Input(Bool())
     val SMSHREmpty     = Input(Bool())
+    val fillPipeDrained = Input(Bool())   // bfs4096-008 §9 drain-before-invalidate (cached-read fill pipe 已空)
     val tA_dirtySetIdx_st0 = Input(UInt(dcache_SetIdxBits.W))
     val tA_dirtyWayMask_st0= Input(UInt(dcache_NWays.W))
     val reqSource      = Input(Bool()) // 1- from RTAB 0 - from io
@@ -192,7 +193,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val FlushInvstateReg = RegInit(idle)
   val FlushInvstateReg_next = WireInit(FlushInvstateReg)
   val fluInvReq_st0 = io.CoreReq.valid && (CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate)
-  val fluInvStartOk_st0 = fluInvReq_st0 && io.MSHREmpty && io.SMSHREmpty
+  val fluInvStartOk_st0 = fluInvReq_st0 && io.MSHREmpty && io.SMSHREmpty && io.fillPipeDrained//bfs4096-008 §9: invalidate 启动须 cached-read fill pipe 已 drain (覆盖 MSHREmpty 漏的 W1/st1 窗口)
   val flushDirtyReq_st0 = fluInvStartOk_st0 && io.hasDirty && (FlushInvstateReg === idle)
   io.flushDirty_tA := flushDirtyReq_st0
   val FluInv_st1 = CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush || CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isInvalidate
@@ -220,7 +221,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
       st0_ready := CoreReq_pipeReg_st0_st1.enq.ready && io.MSHREmpty && io.SMSHREmpty
     }.elsewhen(CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate){
         when(FlushInvstateReg === idle){
-          when(!io.MSHREmpty || !io.SMSHREmpty){
+          when(!io.MSHREmpty || !io.SMSHREmpty || !io.fillPipeDrained){//bfs4096-008 §9: fill pipe 未 drain 时 invalidate 停 st0 (仅 idle 态 gate, FSM 离 idle 后不再 gate=死锁免疫)
             st0_valid := false.B
             st0_ready := false.B
           }.elsewhen(io.hasDirty){

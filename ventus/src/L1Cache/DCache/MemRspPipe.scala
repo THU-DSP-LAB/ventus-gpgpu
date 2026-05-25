@@ -71,6 +71,9 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
          val memReq_ready          = Input(Bool())
          // dirty replace 期间禁止 core 新请求进入，避免 victim line 仍可 write-hit
          val blockCoreReq          = Output(Bool())
+         // bfs4096-008 §9 drain-before-invalidate: cached-read fill 流水线是否已 drain
+         //   (memRsp_Q head 无 cached read[W1] + st1 无 pending commit)。给 CoreReqPipe invalidate 启动门槛。
+         val fillPipeDrained       = Output(Bool())
 
     })
     // st0
@@ -202,6 +205,11 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     val tagRequestStatus = RegInit(idle)
     val tagRequestStatus_next = WireInit(tagRequestStatus)
     val st1_valid = MemRsp_pipeReg_st0_st1.deq.valid && MemRsp_pipeReg_st0_st1.deq.bits.isRead && MemRsp_pipeReg_st0_st1.deq.bits.isCached
+    // bfs4096-008 §9 drain-before-invalidate: cached-read fill 不在 memRsp_Q head(W1) 且不在 st1(pending commit)。
+    //   W1 覆盖: cachedReadAtHead 与 MSHR 清 subentry(L1MSHR missRspIn.valid=io.memRsp.valid&&memRspisRead)同拍对齐
+    //   → 窗口一开就 drain=0 挡 invalidate 启动。只追"会置 way_valid 的 cached read"; special/uncache 不计入。
+    val cachedReadAtHead = io.memRsp.valid && memRspisRead && !io.MSHRMissRspOutUCached
+    io.fillPipeDrained := !cachedReadAtHead && !st1_valid
     val needReplace_pulse = io.needReplace && st1_valid
     val needReplace_pending = RegInit(false.B)
     val needReplace_eff = needReplace_pending || needReplace_pulse

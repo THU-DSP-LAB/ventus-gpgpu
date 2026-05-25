@@ -123,6 +123,19 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
   val Replacement = Module(new ReplacementUnit(Length_Replace_time_SRAM, way))
 
   val allocateWrite_st1 = RegEnable(io.allocateWrite.bits, io.allocateWrite.fire)
+  // ====== bfs4096-008 fillWayMask 修复 (要素①+②, codex v6 审过逻辑; dup-tag 诊断 build 用 counter) ======
+  // 要素①: allocate 决策拍(T+1)锁存 victim waymask + Set_is_full, 冻结到 commit,
+  //   切断 "way_valid 早置 → validOfSet 翻 → live waymask 自反馈漂移" 环 (early-valid 空壳根因)。
+  //   T+1 = RegNext(allocateWrite.fire): allocateWrite_st1.setIdx 此拍才持有本 fill 目标 set,
+  //   Replacement.io.waymask_st1 此拍才首次描述本 fill (timeAccess holdRead resp 同拍出)。
+  //   T+1 用 raw (已对齐本 fill); T+2.. 用 held (冻结对抗反压窗口漂移)。
+  val allocateLatchEn = RegNext(io.allocateWrite.fire, false.B)
+  val lockedWayMask   = Mux(allocateLatchEn,
+                            Replacement.io.waymask_st1,
+                            RegEnable(Replacement.io.waymask_st1, 0.U(way.W), allocateLatchEn))
+  val lockedSetIsFull = Mux(allocateLatchEn,
+                            Replacement.io.Set_is_full,
+                            RegEnable(Replacement.io.Set_is_full, false.B, allocateLatchEn))
   // ******      tag_array::probe    ******
   val iTagChecker = Module(new tagChecker(way=way,tagIdxBits=tagBits, AsidBits = AsidBits))
   val cachehit_hold = Module(new Queue(new tagCheckerResult(way),1))
@@ -172,13 +185,13 @@ if(MMU_ENABLED) {
   ASIDAccessRArb.io.in(1).bits.setIdx := choosenDirtySetIdx_st0
   iTagChecker.io.ASID_of_set.get := ASIDAccess.io.r.resp.data
   iTagChecker.io.ASID_from_pipe.get := io.asidFromCore_st1.get
-  val asidReplacement_st1 = ASIDAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1))
+  val asidReplacement_st1 = ASIDAccess.io.r.resp.data(OHToUInt(lockedWayMask))//要素①
   val choosenDirtyASID_st1 = Wire(UInt(AsidBits.W))
   io.asidReplacement_st1.get := asidReplacement_st1
   choosenDirtyASID_st1 := ASIDAccess.io.r.resp.data(OHToUInt(choosenDirtyWayMask_st1))
   io.dirtyASID_st1.get := choosenDirtyASID_st1
   ASIDAccess.io.w.req.valid := io.allocateWriteTagSRAMWValid_st1
-  ASIDAccess.io.w.req.bits.apply(data = io.allocateWriteAsid_st1.get, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
+  ASIDAccess.io.w.req.bits.apply(data = io.allocateWriteAsid_st1.get, setIdx = allocateWrite_st1.setIdx, waymask = lockedWayMask)//要素①
 }
   //SRAM for replacement policy
   //store last_access_time for LRU, or last_fill_time for FIFO
@@ -323,7 +336,7 @@ if(MMU_ENABLED) {
   // 分配写在st1确定是否需要替换，如果要替换，读出的dirty mask就是被用到，需要在这个阶段发起写0请求
   // 默认 io.needReplace.get 只会拉高一个周期，且不会被阻塞
   dirtyMaskWriteArb.io.in(0).valid := io.needReplace.get
-  dirtyMaskWriteArb.io.in(0).bits.apply(data = 0.U, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
+  dirtyMaskWriteArb.io.in(0).bits.apply(data = 0.U, setIdx = allocateWrite_st1.setIdx, waymask = lockedWayMask)//要素①
   // 在常规读写命中时，即第一级流水发起写请求，只有这个写请求是给阵列写实际值
   // bfs4096-002 fix iter1: 加 io.coreReq_st1_valid gate (cache_hit && probeIsWrite_st1 之外)。
   // cache_hit 与 probeIsWrite_st1 都来自 Queue.deq.bits（不随 deq.valid 归零），
@@ -377,7 +390,7 @@ if(MMU_ENABLED) {
     }.elsewhen(io.flushChoosen.get){//tag_array::flush_one
       way_dirty(choosenDirtySetIdx_st0)(OHToUInt(choosenDirtyWayMask_st0)) := false.B
     }.elsewhen(io.needReplace.get) {
-      way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := false.B
+      way_dirty(allocateWrite_st1.setIdx)(OHToUInt(lockedWayMask)) := false.B//要素①
     }.elsewhen(iTagChecker.io.cache_hit && io.probeIsUncache_st1 && probeReadBuf.ready){
       way_dirty(RegNext(io.probeRead.bits.setIdx))(OHToUInt(iTagChecker.io.waymask)) := false.B
     }
@@ -387,14 +400,14 @@ if(MMU_ENABLED) {
 
 
   if (!readOnly) {
-    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)).asBool && RegNext(io.allocateWrite.fire, false.B)
-    io.replaceValidVictim_st1.get := RegNext(io.allocateWrite.fire, false.B) && Replacement.io.Set_is_full
+    io.needReplace.get := way_dirty(allocateWrite_st1.setIdx)(OHToUInt(lockedWayMask)).asBool && RegNext(io.allocateWrite.fire, false.B)//要素①
+    io.replaceValidVictim_st1.get := RegNext(io.allocateWrite.fire, false.B) && lockedSetIsFull//要素①
   }
   // ******      tag_array::allocate    ******
   Replacement.io.validOfSet := Reverse(Cat(way_valid(allocateWrite_st1.setIdx)))//Reverse(Cat(way_valid(io.allocateWrite.bits.setIdx)))
   Replacement.io.timeOfSet_st1 := timeAccess.io.r.resp.data//meta_entry_t::get_access_time
-  io.waymaskReplacement_st1 := Replacement.io.waymask_st1//tag_array::replace_choice
-  val tagnset = Cat(tagBodyAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1)), //tag
+  io.waymaskReplacement_st1 := lockedWayMask//tag_array::replace_choice (要素①: 锁存 way 导出 → 透传 MemRspPipe data-write/victim-read)
+  val tagnset = Cat(tagBodyAccess.io.r.resp.data(OHToUInt(lockedWayMask)), //tag 要素①
     allocateWrite_st1.setIdx)
 
   // bfs4096-002 fix iter2: a_addrReplacement_st1 与 mask 路径对称的 RegEnable 锁存。
@@ -417,22 +430,50 @@ if(MMU_ENABLED) {
   // 不动 in(0) 写时机 / in(1) WriteHit / in(2) 预读 / flush 路径，只保护 evict 输出端。
   // 详见 bugs/bfs4096-002/checkpoint_3.md (迭代 2) + checkpoint_4_5_D_failed.md。
   val replace_dirty_mask_st1_raw =
-    dirtyMaskAccess.io.r.resp.data(OHToUInt(Replacement.io.waymask_st1)).asUInt
+    dirtyMaskAccess.io.r.resp.data(OHToUInt(lockedWayMask)).asUInt//要素①
   io.replace_dirty_mask_st1 :=
     RegEnable(replace_dirty_mask_st1_raw, 0.U, io.needReplace.get)
 
   tagBodyAccess.io.w.req.valid := io.allocateWriteTagSRAMWValid_st1//meta_entry_t::allocate
-  tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = Replacement.io.waymask_st1)
+  tagBodyAccess.io.w.req.bits.apply(data = io.allocateWriteData_st1, setIdx = allocateWrite_st1.setIdx, waymask = lockedWayMask)//要素①
 
 
-  when(RegNext(io.allocateWrite.fire, false.B) && !Replacement.io.Set_is_full){//meta_entry_t::allocate TODO
-    way_valid(allocateWrite_st1.setIdx)(OHToUInt(Replacement.io.waymask_st1)) := true.B
+  // 要素②: way_valid gate 从 RegNext(allocateWrite.fire)(T+1 早置) 改为 allocateWriteTagSRAMWValid_st1
+  //   (= dAmemRsp_wReq_valid, 与 tag/data 同 commit 拍) → way_valid 与 tag/data 原子提交, 消除 early-valid 窗口。
+  //   waymask 用 lockedWayMask(要素①), !Set_is_full 守卫换 lockedSetIsFull(snapshot 一致)。
+  when(io.allocateWriteTagSRAMWValid_st1 && !lockedSetIsFull){//meta_entry_t::allocate TODO
+    way_valid(allocateWrite_st1.setIdx)(OHToUInt(lockedWayMask)) := true.B
   }.elsewhen(io.invalidateAll){//tag_array::invalidate_all()
     way_valid := VecInit(Seq.fill(set)(VecInit(Seq.fill(way)(false.B))))
   }.elsewhen (iTagChecker.io.cache_hit && io.probeIsUncache_st1) {
     way_valid(probeReadBuf.bits.setIdx)(OHToUInt(iTagChecker.io.waymask)) := false.B
   }
   assert(!(io.allocateWrite.valid && io.invalidateAll))
+  // ====== bfs4096-008 诊断 build: 4 个不变量降级 non-fatal counter (codex v7: 保留可观测性, 不 $stop, 跑完看趋势) ======
+  // #13 要素① 锁存的 victim way 必须 one-hot (factor① 正确性 ⇒ count 应=0)
+  val lockedWayMaskBadCount = RegInit(0.U(32.W))
+  when(allocateLatchEn && (PopCount(lockedWayMask) =/= 1.U)){ lockedWayMaskBadCount := lockedWayMaskBadCount + 1.U }
+  dontTouch(lockedWayMaskBadCount)
+  // #18 §9 验收: way_valid commit 与 invalidateAll 不得同拍 (drain 门槛奏效 ⇒ count 应=0)
+  val commitVsInvCount = RegInit(0.U(32.W))
+  when(io.allocateWriteTagSRAMWValid_st1 && io.invalidateAll){ commitVsInvCount := commitVsInvCount + 1.U }
+  dontTouch(commitVsInvCount)
+  // #19 §9.6 uncache benign: uncache 清 valid 不得命中 pending fill victim way (benign ⇒ count 应=0)
+  val uncacheVictimCount = RegInit(0.U(32.W))
+  when(iTagChecker.io.cache_hit && io.probeIsUncache_st1 && allocateLatchEn && (iTagChecker.io.waymask === lockedWayMask)){ uncacheVictimCount := uncacheVictimCount + 1.U }
+  dontTouch(uncacheVictimCount)
+  // #14 dup-tag (核心观测): 命中端同 set ≥2 way 同 tag 都 valid → PopCount(waymask)>1。
+  //   双要素+§9 应消除 ⇒ count 应=0。首例 printf 现场 (setIdx/tag/waymask) 供修根因 (codex v7 §4.3)。
+  val dupTagCount = RegInit(0.U(32.W))
+  val dupTagFirst = RegInit(true.B)
+  when(iTagChecker.io.cache_hit && (PopCount(iTagChecker.io.waymask) > 1.U)){
+    dupTagCount := dupTagCount + 1.U
+    when(dupTagFirst){
+      dupTagFirst := false.B
+      printf(p"DUPTAG set=${probeReadBuf.bits.setIdx} tag=${io.tagFromCore_st1} waymask=${iTagChecker.io.waymask}\n")
+    }
+  }
+  dontTouch(dupTagCount)
 
 
     //set一般值为128。
