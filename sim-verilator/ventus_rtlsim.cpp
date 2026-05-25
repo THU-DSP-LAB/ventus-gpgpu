@@ -1,6 +1,8 @@
 #include "ventus_rtlsim_impl.hpp"
 #include "../../spike/gvmref/gvmref_interface.h"
 #include <ctime>
+#include <cstdlib>  // bfs4096-008 Phase 0.2: getenv/strtol for VENTUS_VERILATOR_SEED
+#include <cstdio>   // bfs4096-008 Phase 0.2: printf actual seed
 
 static char verilator_rand_seed_setting[128] = "+verilator+seed+10086";
 static char* verilator_runtime_args_default[] = { verilator_rand_seed_setting };
@@ -30,9 +32,22 @@ extern "C" void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config)
     config->verilator.argv = nullptr;
     config->hang_timeout = 0;
 
-    timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    snprintf(verilator_rand_seed_setting, sizeof(verilator_rand_seed_setting), "+verilator+seed+%ld", ts.tv_nsec);
+    // bfs4096-008 Phase 0.2: seed control —— 读 ENV VAR VENTUS_VERILATOR_SEED.
+    //   设了非空 → 用固定 seed (dive 可复现);  未设 → 保持原 nsec 随机 (default 行为不变).
+    //   总是打印实际 seed, 便于后续按 seed 复现 mismatch.
+    long verilator_seed_value;
+    const char* env_seed = getenv("VENTUS_VERILATOR_SEED");
+    if (env_seed != nullptr && env_seed[0] != '\0') {
+        verilator_seed_value = strtol(env_seed, nullptr, 0);
+        printf("[INFO] Verilator seed: %ld (from VENTUS_VERILATOR_SEED)\n", verilator_seed_value);
+    } else {
+        timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        verilator_seed_value = ts.tv_nsec;
+        printf("[INFO] Verilator seed: %ld (nsec random)\n", verilator_seed_value);
+    }
+    fflush(stdout);
+    snprintf(verilator_rand_seed_setting, sizeof(verilator_rand_seed_setting), "+verilator+seed+%ld", verilator_seed_value);
     config->verilator.argc = sizeof(verilator_runtime_args_default) / sizeof(verilator_runtime_args_default[0]);
     config->verilator.argv = (const char**)(verilator_runtime_args_default);
 }
