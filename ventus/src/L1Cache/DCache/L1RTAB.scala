@@ -42,6 +42,10 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     val checkRTABhit        = Output(Bool())
     val mshrFull            = Input(Bool())
     val LRexist             = Input(Bool())
+    // bfs4096-006 fix: fill 写 dA 的 valid (来自 memRspPipe.io.dAmemRsp_wReq_valid)。
+    // fillConflict 类型的 replay 必须等 fill 完才 inject (refillWrite_valid 0→0 稳定后)，
+    // 否则下一拍 fill 余拍仍在写 → 又触发 fillConflictSt1 → 又 enq RTAB → livelock。
+    val refillWrite_valid   = Input(Bool())
     val RTABpushedIdx       = Output(UInt(log2Up(NRTABs).W))
     val pushedWSHRIdxUpdate = Flipped(ValidIO(new WSHRIdxUpdate))
   })
@@ -183,6 +187,10 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   }.elsewhen(Replay_type(popPtr) === EntryFull && EntryValid(popPtr) && !io.mshrFull){
     injectCoreReq_valid := true.B
   }.elsewhen(Replay_type(popPtr) === SCLRexist && EntryValid(popPtr) && !io.LRexist){
+    injectCoreReq_valid := true.B
+  }.elsewhen(Replay_type(popPtr) === fillConflict && EntryValid(popPtr) && !io.refillWrite_valid){
+    // bfs4096-006 fix: 等 fill 完 (refillWrite_valid=0) 才 replay。fill 完后 tag SRAM 已 commit 新 tag,
+    // cost req replay 在 ST1 会 tag miss → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way。
     injectCoreReq_valid := true.B
   }.otherwise{
     injectCoreReq_valid := false.B

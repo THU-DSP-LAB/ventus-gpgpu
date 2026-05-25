@@ -46,6 +46,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // memRspPipe 正在对 dA 写回(refill)时的 blockAddr，用于规避与 st0 同拍访问同一 cacheline
     val refillWrite_valid = Input(Bool())
     val refillWrite_blockAddr = Input(UInt(bABits.W))
+    // bfs4096-006 fix: refill 写入的精确 dA row id = Cat(set, victim_way)。
+    // 现有 refillWrite_blockAddr 是 tag+set 只挡同 cacheline，但本 bug 是
+    // 跨 cacheline (不同 tag) 同 (set, way) 物理 row 撞 → 必须按 row 比较。
+    val refillWrite_setIdx = Input(UInt(log2Ceil(NSets * NWays).W))
     val refillWrite_asid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
     // MSHR missRspIn 处理期间的“原子态”指示：同拍 mshrStatus 尚未更新，外部不应插入同块的 secondary miss
     val mshrReleasing_valid = Input(Bool())
@@ -357,6 +361,24 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   io.CacheHit_st1 := CacheHit_st1
   io.WriteHit_st1 := WriteHit_st1
   missMemReq_valid := (CacheMiss_st1 && !FluInv_st1 || UCReqHitNDirty) && CoreReq_pipeReg_st0_st1.deq.fire && !io.Req_st1_RTAB.valid && io.MSHR_ProbeStatus.probeStatus === 0.U
+  // bfs4096-006 fix: 检测 hit-read 与 fill write 同拍撞同 dA row。
+  // 物理上 dA SRAM 的 row 索引是 Cat(set, way)；当 hit-read 命中 way A、fill 正在写 way A，
+  // 即使 tag 不同 (两条不同 cacheline)，dA SRAM 物理位置的 ownership 已经被 fill 抢走。
+  // dA SRAM bypassWrite=true 会把 fresh fill data forward 给 hit-read，造成跨 cacheline 数据污染
+  // (cost tag 0x90034 命中却拿到 visited 数据 0x01010101)。
+  // 触发条件 [A] hit-read [B] fill 同拍 [C] Cat(set, hit_way) == Cat(set, victim_way) [D] bypassWrite=true。
+  // 必须 qualify deq.valid && ReadHit_st1：否则非 hit 场景 OHToUInt(0.U)=0 会与 fill_setIdx 任何 way=0 撞误报。
+  // wire 定义提到 RTAB elsewhen 链之前，使下方 elsewhen 分支可直接引用 fillConflictSt1。
+  // 见 bugs/bfs4096-006/phase_4_report.md §III + §VI.4。
+  val hitReadSetIdx_st1 = Cat(
+    CoreReq_pipeReg_st0_st1.deq.bits.Req.setIdx,
+    OHToUInt(io.tA_Hit_st1.waymask)
+  )
+  val fillConflictSt1 =
+    CoreReq_pipeReg_st0_st1.deq.valid &&
+    ReadHit_st1 &&
+    io.refillWrite_valid &&
+    (io.refillWrite_setIdx === hitReadSetIdx_st1)
   // RTABReqType req
   val Req_RTAB_st1_valid = Wire(Bool())
   Req_RTAB_st1_valid := false.B
@@ -386,8 +408,18 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   }.elsewhen(Control_st1.isSC && io.SMSHR_ProbeStatus.LRexist){
     Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
     ReplayType := SCLRexist
+  }.elsewhen(fillConflictSt1){
+    // bfs4096-006 fix: 接入 elsewhen 链最末，与上方分支 (多为 miss/UC/SC) 互斥。
+    // 理论上 fillConflictSt1 ⇒ ReadHit_st1，与 readHitWSHR (Read+WSHR Hit) 也互斥
+    // (WSHR hit 要求 same blockAddr 在 WSHR；fillConflict 要求 dA row ownership 已转走)。
+    Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
+    ReplayType := fillConflict
   }
-  io.read_Req_dA.valid := ReadHit_st1 || UCReqHitDirty || flushDirtyReq_st0
+  // bfs4096-006 fix: gate 掉 dA read 避免被 bypass 污染。replay 出来后 tag 已 update，
+  // 同 way 的 tag 已经是 fill 后新 tag (例: visited 0x90002)，原 hit-read 的 tag (cost 0x90034) 不再 match → miss
+  // → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way (visited 此时是 MRU 不会被选中)。
+  val realReadHit_st1 = ReadHit_st1 && !fillConflictSt1
+  io.read_Req_dA.valid := realReadHit_st1 || UCReqHitDirty || flushDirtyReq_st0
 
   //missReq 2 mem, request type and data generator
   OpcodeGen.io.coreReqCtrl := Control_st1

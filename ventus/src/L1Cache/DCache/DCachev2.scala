@@ -187,8 +187,14 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   coreReqPipe.io.reqSource              := CoreReqArb.io.out.valid && ReplayTable.io.coreReq_replay.valid
   coreReqPipe.io.Probe_tA_ready         := TagAccess.io.probeRead.ready
   coreReqPipe.io.blockCoreReq           := blockCoreReq
-  coreReqPipe.io.refillWrite_valid      := memRspPipe.io.dAmemRsp_wReq_valid
+  // bfs4096-006 fix: refillWrite_valid 透给 coreReqPipe / RTAB 时用 intent (=memRspPipe.st1_valid)，
+  // 而不是 dAmemRsp_wReq_valid (=st1_valid && st1_ready)——后者经过 st1_ready 与 coreReqPipe
+  // memRsp_coreRsp.ready 形成 combinational cycle。intent 路径破环代价：fill stall 时 hit 保守 replay。
+  coreReqPipe.io.refillWrite_valid      := memRspPipe.io.dAmemRsp_wReq_intent
   coreReqPipe.io.refillWrite_blockAddr  := memRspPipe.io.dAmemRsp_wReq_blockAddr
+  // bfs4096-006 fix: 透传 fill 的精确 dA row id (Cat(set, victim_way))，CoreReqPipe ST1 用以检测
+  // hit-read 与 fill 同拍撞同 dA row (bypassWrite=true 跨 cacheline 数据污染场景)。
+  coreReqPipe.io.refillWrite_setIdx     := memRspPipe.io.dAmemRsp_wReq_setIdx
   if(MMU_ENABLED){
     coreReqPipe.io.refillWrite_asid.get := memRspPipe.io.dAmemRsp_wReq_asid.get
   }
@@ -273,6 +279,10 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   //rtab
   ReplayTable.io.mshrFull := MshrAccess.io.full
   ReplayTable.io.LRexist  := SMshrAccess.io.probeOut_st1.LRexist
+  // bfs4096-006 fix: 让 L1RTAB 看到 fill timing。fillConflict 类型的 replay 必须等
+  // fill 完 (refillWrite_intent=0) 才 inject，避免 fill 多拍写 dA 时反复 livelock。
+  // 用 intent (=st1_valid) 而非 valid (=st1_valid && st1_ready)，与 coreReqPipe 一致破组合环。
+  ReplayTable.io.refillWrite_valid := memRspPipe.io.dAmemRsp_wReq_intent
   ReplayTable.io.pushedWSHRIdxUpdate.valid := WshrAccess.io.pushReq.valid
   ReplayTable.io.pushedWSHRIdxUpdate.bits.wshrIdx  := WshrAccess.io.pushedIdx
   ReplayTable.io.pushedWSHRIdxUpdate.bits.RTABIdx  := RTAB_pushedIdx_st2.io.deq.bits

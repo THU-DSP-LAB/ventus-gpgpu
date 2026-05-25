@@ -53,6 +53,15 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
          val dAmemRsp_wReq_valid   = Output(Bool())
          // dAmemRsp_wReq_valid 拉高时，对应的写回 cacheline blockAddr（tag+set），用于 coreReqPipe 做同拍冲突规避
          val dAmemRsp_wReq_blockAddr = Output(UInt(bABits.W))
+         // bfs4096-006 fix: 暴露 fill 写入的精确 dA row = Cat(set, victim_way)。
+         // 现有 dAmemRsp_wReq_blockAddr 只含 tag+set 不含 way，无法区分"跨 cacheline 同 (set, way) 撞"的场景。
+         // CoreReqPipe ST1 用这个比对 hit-read 命中的 Cat(set, hit_way) 检测 fillConflictSt1。
+         val dAmemRsp_wReq_setIdx    = Output(UInt(log2Ceil(NSets * NWays).W))
+         // bfs4096-006 fix: fill intent (= st1_valid, 不含 st1_ready 反馈)。
+         // dAmemRsp_wReq_valid = st1_valid && st1_ready 与下游 memRsp_coreRsp.ready 形成组合环
+         // (FIRRTL detected combinational cycle)。给 coreReqPipe 用 intent 破环，代价是 fill stall
+         // 时 hit 被保守 replay (fill stall 没写 dA 不会污染，replay 走 1 轮 latency 影响极小)。
+         val dAmemRsp_wReq_intent    = Output(Bool())
          val dAmemRsp_wReq_asid = if(MMU_ENABLED) Some(Output(UInt(asidLen.W))) else None
          val dAReplace_rReq        = Output(Vec(BlockWords, new SRAMBundleA(NSets * NWays)))
          val dAReplace_rReq_valid  = Output(Bool())
@@ -259,6 +268,11 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     MemRsp_pipeReg_st0_st1.deq.ready := st1_ready
     io.dAmemRsp_wReq_valid := dAReq_valid
     io.dAmemRsp_wReq_blockAddr := get_blockAddr(MemRsp_pipeReg_st0_st1.deq.bits.Rsp.d_addr)
+    // bfs4096-006 fix: 所有 BlockWords 共享同一 setIdx (= Cat(d_source.setIdx, OHToUInt(tAWayMask)))，
+    // 取第 0 个 word 的 setIdx 即可代表本次 fill 的目标 dA row。
+    io.dAmemRsp_wReq_setIdx := io.dAmemRsp_wReq(0).setIdx
+    // bfs4096-006 fix: 不含 st1_ready 反馈的 intent 信号，给 coreReqPipe / L1RTAB 用以破组合环。
+    io.dAmemRsp_wReq_intent := st1_valid
     if(MMU_ENABLED){
       io.dAmemRsp_wReq_asid.get := missRspAsid_st1.get
     }

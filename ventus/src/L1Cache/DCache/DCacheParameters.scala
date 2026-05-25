@@ -57,6 +57,11 @@ trait HasDCacheParameter extends HasL1CacheParameters {
   def writeMissHitWSHR: UInt = 7.U(4.W)
   def hitRTAB: UInt = 8.U(4.W)
   def SCLRexist: UInt = 9.U(4.W)
+  // bfs4096-006 fix: hit-read 与 fill write 同拍撞同 dA row (Cat(set, way))。
+  // dA SRAM bypassWrite=true 会把 fill data forward 给 hit-read，造成跨 cacheline 数据污染
+  // (cost tag 命中但拿到 visited 数据)。CoreReqPipe ST1 检测到此条件即 enq RTAB 等 fill 完再 replay。
+  // 见 bugs/bfs4096-006/phase_4_report.md §III.2 / §VI.4。
+  def fillConflict: UInt = 10.U(4.W)
   //TL params
   def TLAOp_Get       : UInt = 4.U(3.W)
   def TLAOp_PutFull   : UInt = 0.U(3.W)
