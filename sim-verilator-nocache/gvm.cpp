@@ -756,6 +756,17 @@ void gvm_t::checkRetire() {
 
 
 void gvm_t::stepRef() {
+  auto step_ref_until_insn = [&](uint32_t software_wg_id, uint32_t software_warp_id,
+                                 gvmref_step_return_info_t* ret) -> bool {
+    do {
+      gvmref_step(software_wg_id, software_warp_id, ret);
+      if (ret->insn_executed) {
+        return true;
+      }
+    } while (!ret->wg_done);
+    return false;
+  };
+
   for (auto& item : retire_info.warp_retire_cnt) {
     // 分别步进 REF 的每个 warp
     auto warp_it = dut_active_warps.find({ item.software_wg_id, item.software_warp_id });
@@ -774,7 +785,10 @@ void gvm_t::stepRef() {
       auto& cur_insn = warp_it->second.insns[warp_it->second.next_retire_dispatch_id];
 
       if (cur_insn.extended) {
-        gvmref_step(item.software_wg_id, item.software_warp_id, &gvmref_step_return_info); // 跳过 regext
+        if (!step_ref_until_insn(item.software_wg_id, item.software_warp_id, &gvmref_step_return_info)) { // 跳过 regext
+          setFatalMismatch("REF reached done while skipping extended instruction");
+          return;
+        }
       }
 
       // 确认 DUT 与 REF 的 PC 一致
@@ -794,12 +808,19 @@ void gvm_t::stepRef() {
       }
 
       // 步进 REF 并维护 insn_t.single_insn_cmp
-      gvmref_step(item.software_wg_id, item.software_warp_id, &gvmref_step_return_info);
+      if (!step_ref_until_insn(item.software_wg_id, item.software_warp_id, &gvmref_step_return_info)) {
+        setFatalMismatch("REF reached done before stepping retired instruction");
+        return;
+      }
       uint32_t next2_gvmref_pc = gvmref_get_next_pc(item.software_wg_id, item.software_warp_id);
       if (next2_gvmref_pc == next_gvmref_pc) {
         logger->debug(fmt::format("GVM info: REF PC not advanced after step on sm_id: {}, hardware_warp_id: {}, software_wg_id: {}, software_warp_id: {}. REF next PC before step: 0x{:08x}, after step: 0x{:08x}",
           item.sm_id, item.hardware_warp_id, item.software_wg_id, item.software_warp_id, next_gvmref_pc, next2_gvmref_pc));
-        if (isInsnCareCached(cur_insn.insn, barrier_insns, barrier_care_cache)) {
+        if (isInsnCareCached(gvmref_step_return_info.insn, barrier_insns, barrier_care_cache)) {
+          if (!isInsnCareCached(cur_insn.insn, barrier_insns, barrier_care_cache)) {
+            setFatalMismatch("REF barrier retry matched non-barrier DUT instruction");
+            return;
+          }
           if (item.barrier_retry) {
             logger->error(
                 "GVM INTERNAL error: barrier_retry already set before, sw_wg={}, sw_warp={}",
@@ -933,13 +954,18 @@ void gvm_t::stepRef() {
       }
 
       // 步进 REF 并维护 insn_t.single_insn_cmp
-      gvmref_step(item.software_wg_id, item.software_warp_id, &gvmref_step_return_info);
+      if (!step_ref_until_insn(item.software_wg_id, item.software_warp_id, &gvmref_step_return_info)) {
+        setFatalMismatch("REF reached done before retrying barrier instruction");
+        return;
+      }
       uint32_t next2_gvmref_pc = gvmref_get_next_pc(item.software_wg_id, item.software_warp_id);
       if (next2_gvmref_pc == next_gvmref_pc) {
         logger->debug(fmt::format("GVM info: REF PC not advanced after step on sm_id: {}, hardware_warp_id: {}, software_wg_id: {}, software_warp_id: {}. REF next PC before step: 0x{:08x}, after step: 0x{:08x}",
           item.sm_id, item.hardware_warp_id, item.software_wg_id, item.software_warp_id, next_gvmref_pc, next2_gvmref_pc));
-        setFatalMismatch("REF PC not advanced after stepping over barrier instruction");
-        return;
+        logger->debug(
+            "GVM info: REF barrier is still waiting for the workgroup; keep barrier unretired and retry later"
+        );
+        continue;
       }
       // assert(next2_gvmref_pc != next_gvmref_pc); // REF 的 PC 应当已经更新
 
