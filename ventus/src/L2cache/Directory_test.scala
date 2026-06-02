@@ -229,7 +229,21 @@ for(i<- 0 until params.cache.sets){
   val victim_LFSR = lfsr
 
 
-  val victimWay = victim_LFSR(params.wayBits-1,0)//replacer_array(set)
+  // bfs4096-010 fix A（触发层）: victim 选择优先填 invalid way（invalid-first）。
+  //   根因: 原 `victimWay = victim_LFSR(...)` 纯 LFSR 随机, 不查 status_reg(set).valid,
+  //         即便 set 还有空闲(invalid) way 也可能盲选中 valid+dirty way 当 victim →
+  //         触发 L2 evict-vs-fill WAR(dirty victim readback 被同事务 fill 写早覆盖) →
+  //         把新住户数据当 victim 写回旧地址(cost DRAM 0x90004100 整行被 graph 污染)。
+  //   改法: 有 invalid way 时优先选第一个 invalid(不 evict, 不踢 dirty victim);
+  //         set 全 valid 时才退回原 LFSR 随机。
+  //   注: 触发层缓解, 非治本——set 满时 LFSR 仍可选 dirty victim, WAR 仍 latent,
+  //       根治需 fix B(保证 evict readback 早于同事务 fill write)。
+  //       详见 bugs/bfs4096-010/checkpoint_3_rtl_dive.md + phase_4_report.md §8。
+  val validVec   = status_reg(set).valid.asUInt          // 当前 set 每 way 的 valid 位(NWays 位)
+  val invalidVec = ~validVec                             // bit w = 1 表示 way w 空闲(invalid)
+  val victimWay  = Mux(invalidVec.orR,                   // 有 invalid way?
+                       PriorityEncoder(invalidVec),      //   有 → 选第一个 invalid way
+                       victim_LFSR(params.wayBits-1,0))  //   全 valid → 退回原 LFSR 随机
 
   val setQuash_1 = wen && io.write.bits.set === io.read.bits.set //表示write到上次读出来的set
 
