@@ -213,9 +213,18 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     }}
   }
 
+  // nn64k-007 Phase 4.5 迭代6: 算 mixed 的同时收集 mixedVec, 用于驱动 directory.io.resv_clear(撤销孤儿)。
+  val mixedVec = Wire(Vec(params.mshrs, Bool()))
   mshrs.zipWithIndex.foreach { case (m, i) =>
-    m.io.mixed:= directory.io.result.valid&& (OHToUInt(tagMatches)===i.asUInt) && (directory.io.result.bits.opcode=/= m.io.status.opcode)
+    mixedVec(i) := directory.io.result.valid && (OHToUInt(tagMatches)===i.asUInt) && (directory.io.result.bits.opcode =/= m.io.status.opcode)
+    m.io.mixed := mixedVec(i)
   }
+  // mixed 落空撤销线: tagMatches one-hot ⇒ 至多一个 MSHR 被标 mixed; 把它的 (set,way) 喂回 Directory
+  // 清其 reservation(该 MSHR 注定不再 io.write.fire, 见 MSHR.scala:121-123 mixed 抑制 sche_dir_valid)。
+  val mixedOH = mixedVec.asUInt
+  directory.io.resv_clear.valid    := mixedOH.orR
+  directory.io.resv_clear.bits.set := Mux1H(mixedOH, mshrs.map(_.io.status.set))
+  directory.io.resv_clear.bits.way := Mux1H(mixedOH, mshrs.map(_.io.status.way))
 
   // bfs4096-002 iter5 fix #3: push.valid 看 result.fire 而非 result.valid。
   // ListBuffer 流式 push（push.ready 不满就持续 1）+ result.valid hold（#1 反压触发后）

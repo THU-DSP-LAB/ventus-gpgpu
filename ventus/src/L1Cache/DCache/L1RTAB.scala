@@ -10,6 +10,9 @@ class RTABReq (implicit p: Parameters) extends DCacheBundle{
   val CoreReqData = new DCacheCoreReq
   val wshrIdx = UInt(log2Up(NWshrEntry).W)
   val mshrIdx = UInt(log2Up(NMshrEntry).W)
+  // bfs4096-009 fix: ReadMissFillWait enq 时本 block 的 fill 是否已 commit
+  // (覆盖 enq 同拍 / pre-enq=RTAB_full 期间 commit 这两种 edge，否则 entry 入表后 watch 不到唯一 pulse)
+  val fillAlreadyCommitted = Bool()
 }
 
 class RTABUpdate (implicit p: Parameters) extends DCacheBundle{
@@ -46,6 +49,10 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     // fillConflict 类型的 replay 必须等 fill 完才 inject (refillWrite_valid 0→0 稳定后)，
     // 否则下一拍 fill 余拍仍在写 → 又触发 fillConflictSt1 → 又 enq RTAB → livelock。
     val refillWrite_valid   = Input(Bool())
+    // bfs4096-009 fix: 真实 fill commit (=memRspPipe.dAmemRsp_wReq_valid，含 st1_ready，非 intent) + blockAddr，
+    // 给 ReadMissFillWait per-entry sticky fillCommitted 置位。只进 Reg 不参与 inject 组合放行 → loop-free。
+    val fillCommit_valid    = Input(Bool())
+    val fillCommit_blockAddr= Input(UInt(bABits.W))
     val RTABpushedIdx       = Output(UInt(log2Up(NRTABs).W))
     val pushedWSHRIdxUpdate = Flipped(ValidIO(new WSHRIdxUpdate))
   })
@@ -55,6 +62,9 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   val mshr_idx   = RegInit(VecInit(Seq.fill(NRTABs)(0.U(log2Up(NMshrEntry).W))))
   val RTABlink_idx = RegInit(VecInit(Seq.fill(NRTABs)(0.U((log2Up(NRTABs)+1).W)))) //highest bit for valid
   val EntryValid = RegInit(VecInit(Seq.fill(NRTABs)(false.B)))
+  // bfs4096-009 fix: ReadMissFillWait entry 等的 block 是否已 commit。enq 按 fillAlreadyCommitted 初始化，
+  // 入表后再 per-entry 地址匹配 watch 后续 commit pulse。inject 只看本 Reg(loop-free)。
+  val fillCommitted = RegInit(VecInit(Seq.fill(NRTABs)(false.B)))
   val ptr = RegInit(0.U(log2Up(NRTABs).W))
   val ptr_r = RegInit(0.U(log2Up(NRTABs).W))// when update and request is for same 
   //val seq_Q = Module(new Queue(UInt(log2Up(NRTABs).W),NRTABs,false,false)) // hold the new ptr idx for pop req
@@ -86,6 +96,10 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
 
 
   ptrEnqValid := false.B
+  // bfs4096-009 fix: st1 enq 写 ptr_w 那条 entry 的 fillCommitted 初值 ——
+  // ReadMissFillWait 用入表时的 fillAlreadyCommitted(覆盖同拍/pre-enq commit)，其它 type 清 0。
+  val enqFillCommitted_init = Mux(io.RTABReq_st1.valid && io.RTABReq_st1.bits.ReqType === ReadMissFillWait,
+                                  io.RTABReq_st1.bits.fillAlreadyCommitted, false.B)
   // RTAB push req st1
   when(io.RTABReq_st1.valid && !io.RTABReq_st0.valid){ //st1 request but no st0 hit
     Req_access(ptr_w) := io.RTABReq_st1.bits.CoreReqData
@@ -93,6 +107,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     wshr_idx(ptr_w) := io.RTABReq_st1.bits.wshrIdx
     mshr_idx(ptr_w) := io.RTABReq_st1.bits.mshrIdx
     EntryValid(ptr_w) := true.B
+    fillCommitted(ptr_w) := enqFillCommitted_init   // bfs4096-009: st1 enq 写 ptr_w → 按 RMFW? 初始化(覆盖三入队分支)
     ptr := ptr_w + 1.U
   }.elsewhen(io.RTABReq_st1.valid && (bAMatch_st0) ){ //st1 request and st0 hit in RTAB entry
     //st1
@@ -101,6 +116,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     wshr_idx(ptr_w) := io.RTABReq_st1.bits.wshrIdx
     mshr_idx(ptr_w) := io.RTABReq_st1.bits.mshrIdx
     EntryValid(ptr_w) := true.B
+    fillCommitted(ptr_w) := enqFillCommitted_init   // bfs4096-009: st1 enq 写 ptr_w → 按 RMFW? 初始化(覆盖三入队分支)
     ptr := ptr_w_2 + 1.U
     //st0
     Req_access(ptr_w_2) := io.RTABReq_st0.bits.CoreReqData
@@ -109,12 +125,14 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     mshr_idx(ptr_w_2) := DontCare
     RTABlink_idx(bAMatchIdx) := Cat(1.U,ptr_w_2)
     EntryValid(ptr_w_2) := true.B
+    fillCommitted(ptr_w_2) := false.B   // bfs4096-009: ptr_w_2 恒为 st0 hitRTAB link entry，非 RMFW，清 0
   }.elsewhen(io.RTABReq_st1.valid && (bAMatch_st1) && io.RTABReq_st0.valid){ //st1 request and st0 hit in st1 req
     Req_access(ptr_w) := io.RTABReq_st1.bits.CoreReqData
     Replay_type(ptr_w) := io.RTABReq_st1.bits.ReqType
     wshr_idx(ptr_w) := io.RTABReq_st1.bits.wshrIdx
     mshr_idx(ptr_w) := io.RTABReq_st1.bits.mshrIdx
     EntryValid(ptr_w) := true.B
+    fillCommitted(ptr_w) := enqFillCommitted_init   // bfs4096-009: st1 enq 写 ptr_w → 按 RMFW? 初始化(覆盖三入队分支)
     ptr := ptr_w_2 + 1.U
     //st0
     Req_access(ptr_w_2) := io.RTABReq_st0.bits.CoreReqData
@@ -123,6 +141,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     mshr_idx(ptr_w_2) := DontCare
     RTABlink_idx(ptr_w) := Cat(1.U,ptr_w_2)
     EntryValid(ptr_w_2) := true.B
+    fillCommitted(ptr_w_2) := false.B   // bfs4096-009: ptr_w_2 恒为 st0 hitRTAB link entry，非 RMFW，清 0
   }.elsewhen(bAMatch_st0 && io.RTABReq_st0.valid){ // only st0 request
     Req_access(ptr_w) := io.RTABReq_st0.bits.CoreReqData
     Replay_type(ptr_w) := hitRTAB
@@ -130,6 +149,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     mshr_idx(ptr_w) := DontCare
     RTABlink_idx(bAMatchIdx) := Cat(1.U,ptr_w)
     EntryValid(ptr_w) := true.B
+    fillCommitted(ptr_w) := enqFillCommitted_init   // bfs4096-009: st1 enq 写 ptr_w → 按 RMFW? 初始化(覆盖三入队分支)
     ptr := ptr_w + 1.U
   }
 
@@ -181,6 +201,16 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     }
 
   }
+  // bfs4096-009 fix: 入表后 per-entry watch 本 block fill commit pulse(真实 commit）。
+  // guard !(本拍 enq 到该 entry)：本拍 enq 的 entry 由 enqFillCommitted_init 负责，避免对同一 fillCommitted(i)
+  // last-connect 双写歧义(codex round6 §B 要求 guard 必须 per-entry，不能全局屏蔽本拍所有 watch)。
+  for(i <- 0 until NRTABs){
+    when(io.fillCommit_valid && EntryValid(i) && (Replay_type(i) === ReadMissFillWait) &&
+         (io.fillCommit_blockAddr === Cat(Req_access(i).tag, Req_access(i).setIdx)) &&
+         !(io.RTABReq_st1.valid && (ptr_w === i.U))){
+      fillCommitted(i) := true.B
+    }
+  }
   val injectCoreReq_valid = Wire(Bool())
   when(Replay_type(popPtr) === 0.U && EntryValid(popPtr)){
     injectCoreReq_valid := true.B
@@ -191,6 +221,10 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   }.elsewhen(Replay_type(popPtr) === fillConflict && EntryValid(popPtr) && !io.refillWrite_valid){
     // bfs4096-006 fix: 等 fill 完 (refillWrite_valid=0) 才 replay。fill 完后 tag SRAM 已 commit 新 tag,
     // cost req replay 在 ST1 会 tag miss → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way。
+    injectCoreReq_valid := true.B
+  }.elsewhen(Replay_type(popPtr) === ReadMissFillWait && EntryValid(popPtr) && fillCommitted(popPtr)){
+    // bfs4096-009 fix: 本 block fill 已 commit(fillCommitted Reg)→ 放出去 re-probe 必 tag hit。
+    // 只看 Reg 旧值，不把 io.fillCommit_valid 组合并入 injectCoreReq_valid → loop-free(codex round6 §B)。
     injectCoreReq_valid := true.B
   }.otherwise{
     injectCoreReq_valid := false.B

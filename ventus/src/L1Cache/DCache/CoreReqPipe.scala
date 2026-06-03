@@ -47,6 +47,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // memRspPipe 正在对 dA 写回(refill)时的 blockAddr，用于规避与 st0 同拍访问同一 cacheline
     val refillWrite_valid = Input(Bool())
     val refillWrite_blockAddr = Input(UInt(bABits.W))
+    // bfs4096-009 fix: 真实 fill commit (=memRspPipe.dAmemRsp_wReq_valid，含 st1_ready，非上面 intent 的 refillWrite_valid)
+    // + blockAddr。给 ReadMissFillWait 的 commit-seen latch(覆盖 RTAB_full / st1 stall 期间已 commit 的 edge)。
+    val fillCommit_valid = Input(Bool())
+    val fillCommit_blockAddr = Input(UInt(bABits.W))
     // bfs4096-006 fix: refill 写入的精确 dA row id = Cat(set, victim_way)。
     // 现有 refillWrite_blockAddr 是 tag+set 只挡同 cacheline，但本 bug 是
     // 跨 cacheline (不同 tag) 同 (set, way) 物理 row 撞 → 必须按 row 比较。
@@ -186,6 +190,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   io.Req_st0_RTAB.bits.ReqType     := DontCare
   io.Req_st0_RTAB.bits.mshrIdx     := DontCare
   io.Req_st0_RTAB.bits.wshrIdx     := DontCare
+  io.Req_st0_RTAB.bits.fillAlreadyCommitted := false.B   // bfs4096-009: st0/hitRTAB 路径不消费此字段
   io.Req_st0_RTAB.valid            := io.RTABHit && io.CoreReq.valid && !io.reqSource
   io.CoreReq.ready := st0_ready
   //Flush L2 FSM
@@ -380,6 +385,31 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     ReadHit_st1 &&
     io.refillWrite_valid &&
     (io.refillWrite_setIdx === hitReadSetIdx_st1)
+  // bfs4096-009 fix: ReadMissFillWait trigger —— 当前 st1 read-miss 在驻留 st1 期间撞过同 block missRspIn 释放。
+  // clear 分支 (!deq.valid || deq.fire) 优先 → 排除 st1 空时 stale deq.bits 误触发(codex round5/6 §A.1)；
+  // mshrReleasingSameBlock_st1(CoreReqPipe:300) 本身不带 deq.valid，靠这里 + ReadMiss_st1 qualify；
+  // latch straddleBlockAddr 绑定到所属 req，trigger 再复查 blockAddr 匹配(跨 req 兜底)。
+  val straddledRelease_st1  = RegInit(false.B)
+  val straddleBlockAddr_st1 = Reg(UInt(bABits.W))
+  when(!CoreReq_pipeReg_st0_st1.deq.valid || CoreReq_pipeReg_st0_st1.deq.fire){
+    straddledRelease_st1 := false.B
+  }.elsewhen(ReadMiss_st1 && mshrReleasingSameBlock_st1){
+    straddledRelease_st1  := true.B
+    straddleBlockAddr_st1 := BlockAddr_st1
+  }
+  val readMissFillWait_st1 = CoreReq_pipeReg_st0_st1.deq.valid && ReadMiss_st1 &&
+    ( mshrReleasingSameBlock_st1 ||
+      (straddledRelease_st1 && (straddleBlockAddr_st1 === BlockAddr_st1)) )
+  // bfs4096-009 fix: commit-seen —— 当前 st1 req 驻留期间见过本 block 真实 fill commit。clear 同上优先。
+  // 随 RTABReq.fillAlreadyCommitted 带入(同拍 commit 用组合 OR 补)，覆盖 commit 与 enq 同拍 / commit 在 enq 前两种 edge。
+  val fillCommitSeen_st1 = RegInit(false.B)
+  when(!CoreReq_pipeReg_st0_st1.deq.valid || CoreReq_pipeReg_st0_st1.deq.fire){
+    fillCommitSeen_st1 := false.B
+  }.elsewhen(io.fillCommit_valid && (io.fillCommit_blockAddr === BlockAddr_st1)){
+    fillCommitSeen_st1 := true.B
+  }
+  io.Req_st1_RTAB.bits.fillAlreadyCommitted := fillCommitSeen_st1 ||
+    (io.fillCommit_valid && (io.fillCommit_blockAddr === BlockAddr_st1))
   // RTABReqType req
   val Req_RTAB_st1_valid = Wire(Bool())
   Req_RTAB_st1_valid := false.B
@@ -415,6 +445,11 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // (WSHR hit 要求 same blockAddr 在 WSHR；fillConflict 要求 dA row ownership 已转走)。
     Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
     ReplayType := fillConflict
+  }.elsewhen(readMissFillWait_st1){
+    // bfs4096-009 fix: read-miss 撞同 block in-flight fill → 挂 RTAB 等 commit replay re-probe hit。
+    // 与 fillConflictSt1(要求 ReadHit)天然互斥; 抑制第二条 memReq(L364 !Req_st1_RTAB.valid)+ MSHR alloc(L533 !Req_RTAB_st1_valid)。
+    Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
+    ReplayType := ReadMissFillWait
   }
   // bfs4096-006 fix: gate 掉 dA read 避免被 bypass 污染。replay 出来后 tag 已 update，
   // 同 way 的 tag 已经是 fill 后新 tag (例: visited 0x90002)，原 hit-read 的 tag (cost 0x90034) 不再 match → miss

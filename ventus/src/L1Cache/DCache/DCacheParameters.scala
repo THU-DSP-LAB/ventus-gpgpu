@@ -62,6 +62,10 @@ trait HasDCacheParameter extends HasL1CacheParameters {
   // (cost tag 命中但拿到 visited 数据)。CoreReqPipe ST1 检测到此条件即 enq RTAB 等 fill 完再 replay。
   // 见 bugs/bfs4096-006/phase_4_report.md §III.2 / §VI.4。
   def fillConflict: UInt = 10.U(4.W)
+  // bfs4096-009 fix: read-miss 撞上同 block in-flight fill(撞 missRspIn 释放窗口、被 L1MSHR:177
+  // entry_valid 过滤降级 primary）→ 挂 RTAB 等本 block fill commit 再 replay，re-probe tag hit，
+  // 全程零第二条 memReq → 无 dup-tag。见 bugs/bfs4096-009/phase_3_analysis_v7_replay_design.md。
+  def ReadMissFillWait: UInt = 11.U(4.W)
   //TL params
   def TLAOp_Get       : UInt = 4.U(3.W)
   def TLAOp_PutFull   : UInt = 0.U(3.W)

@@ -464,13 +464,24 @@ if(MMU_ENABLED) {
   dontTouch(uncacheVictimCount)
   // #14 dup-tag (核心观测): 命中端同 set ≥2 way 同 tag 都 valid → PopCount(waymask)>1。
   //   双要素+§9 应消除 ⇒ count 应=0。首例 printf 现场 (setIdx/tag/waymask) 供修根因 (codex v7 §4.3)。
+  // bfs4096-010 fix (诊断 counter 自身误报修复): 原检测用裸 live iTagChecker.cache_hit/waymask (无 hold 保护) 会假阳性 —
+  //   tagAccessRArb in(0)=allocateWrite 优先级 > in(1)=probe (L157-166), allocateWrite.valid 拍抢 tag SRAM raddr,
+  //   iTagChecker.tag_of_set (=tagBodyAccess live r.resp.data, holdRead=true, L364) 反映 allocateWrite.setIdx 的 tag,
+  //   与 iTagChecker.way_valid (registered probe setIdx, L368) 错配 → raddr 切换 cross-cycle 瞬态凑出虚假 waymask=0b11。
+  //   实证 bugs/bfs4096-010: 物理 cell Mem[5]=0x9000290007 (仅 way1=0x90002), DUPTAG fire 拍 R0_addr=31≠probe set5,
+  //   R0_data=0x9000290002 不等任何真实 cell = 纯瞬态 (waveform-analyst v2 物理 cell vs live resp 对照)。
+  //   修法 gate (waveform-analyst v3 现有 fst 实测确认实际起效机制, 更正 "hold 洗 waymask" 的初始假设):
+  //     ① probeReadBuf.valid: glitch 拍 probe buf 空(无真实 probe in st1) → 不检测。消除已知两拍误报的主因。
+  //        (注: glitch 拍 holdValid_st1=0, hit_st1_raw/waymask_st1_raw 回落 live 仍 0b11, 并未被 hold 洗净 → 不能只靠 waymask_st1_raw。)
+  //     ② !io.allocateWrite.valid: 挡 allocateWrite(tagAccessRArb in0 优先) 抢 raddr 的拍(v2 实证 glitch 主源), 覆盖 probeReadBuf.valid=1 的 corner。
+  //   残留: SRAM holdRead 下"上拍 allocate read 滞留 resp"corner 未必全挡 → rebuild 重跑实测 DUPTAG 是否归零(真实 dup-tag 才该 fire)。
   val dupTagCount = RegInit(0.U(32.W))
   val dupTagFirst = RegInit(true.B)
-  when(iTagChecker.io.cache_hit && (PopCount(iTagChecker.io.waymask) > 1.U)){
+  when((hit_st1_raw && probeReadBuf.valid && !io.allocateWrite.valid) && (PopCount(waymask_st1_raw) > 1.U)){
     dupTagCount := dupTagCount + 1.U
     when(dupTagFirst){
       dupTagFirst := false.B
-      printf(p"DUPTAG set=${probeReadBuf.bits.setIdx} tag=${io.tagFromCore_st1} waymask=${iTagChecker.io.waymask}\n")
+      printf(p"DUPTAG set=${probeReadBuf.bits.setIdx} tag=${io.tagFromCore_st1} waymask=${waymask_st1_raw}\n")
     }
   }
   dontTouch(dupTagCount)

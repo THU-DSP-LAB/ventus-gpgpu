@@ -199,6 +199,10 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   if(MMU_ENABLED){
     coreReqPipe.io.refillWrite_asid.get := memRspPipe.io.dAmemRsp_wReq_asid.get
   }
+  // bfs4096-009 fix: 真实 fill commit (=dAmemRsp_wReq_valid, 含 st1_ready) 给 CoreReqPipe commit-seen latch。
+  // 区别于上面 refillWrite_valid 用的 intent —— commit-seen 要"真写进去了"，且只进 Reg 不组合回 ready/valid。
+  coreReqPipe.io.fillCommit_valid     := memRspPipe.io.dAmemRsp_wReq_valid
+  coreReqPipe.io.fillCommit_blockAddr := memRspPipe.io.dAmemRsp_wReq_blockAddr
   coreReqPipe.io.mshrReleasing_valid     := MshrAccess.io.releasing_valid
   coreReqPipe.io.mshrReleasing_blockAddr := MshrAccess.io.releasing_blockAddr
   if(MMU_ENABLED){
@@ -284,6 +288,9 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   // fill 完 (refillWrite_intent=0) 才 inject，避免 fill 多拍写 dA 时反复 livelock。
   // 用 intent (=st1_valid) 而非 valid (=st1_valid && st1_ready)，与 coreReqPipe 一致破组合环。
   ReplayTable.io.refillWrite_valid := memRspPipe.io.dAmemRsp_wReq_intent
+  // bfs4096-009 fix: 真实 fill commit 给 RTAB ReadMissFillWait per-entry sticky fillCommitted
+  ReplayTable.io.fillCommit_valid     := memRspPipe.io.dAmemRsp_wReq_valid
+  ReplayTable.io.fillCommit_blockAddr := memRspPipe.io.dAmemRsp_wReq_blockAddr
   ReplayTable.io.pushedWSHRIdxUpdate.valid := WshrAccess.io.pushReq.valid
   ReplayTable.io.pushedWSHRIdxUpdate.bits.wshrIdx  := WshrAccess.io.pushedIdx
   ReplayTable.io.pushedWSHRIdxUpdate.bits.RTABIdx  := RTAB_pushedIdx_st2.io.deq.bits
