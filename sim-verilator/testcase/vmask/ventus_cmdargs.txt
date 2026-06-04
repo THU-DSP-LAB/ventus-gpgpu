@@ -1,0 +1,4 @@
+# vector mask writeback regression
+--kernel name=vmask,metafile=vmask.metadata,datafile=vmask.data
+--sim-time-max 200000
+--dump-mem 0x90000040,0x9000005c
