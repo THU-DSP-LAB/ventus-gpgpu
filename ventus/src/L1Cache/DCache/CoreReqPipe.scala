@@ -218,8 +218,15 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // probe SMSHR MSHR and tag
     when(CoreReqControl_st0.isRead || CoreReqControl_st0.isWrite|| CoreReqControl_st0.isAMO || CoreReqControl_st0.isLR || CoreReqControl_st0.isSC){
       // 避免 refill / 前一条 read miss 与当前同块请求在 st0 同拍推进，导致后续 MSHR 可见性错位
-      st0_valid  := io.CoreReq.valid && io.Probe_tA_ready && !refillSameBlock_st0 && !pendingReadMissSameBlock_st0
-      st0_ready := CoreReq_pipeReg_st0_st1.enq.ready && io.Probe_tA_ready && !refillSameBlock_st0 && !pendingReadMissSameBlock_st0
+      // vecadd4096-001/nn64k-008 fix (v4 主窗口 gate, 收窄自 v2): flush/invalidate FSM 离 idle 期间, 只挡写类
+      //   (isWrite 直接置 L1 way_dirty:L1TagAccess:388; isAMO/isSC 保守纳入=memory-ordering, 非 L1 dirty producer) 进 st0
+      //   → 防新写 write-hit 把已 sweep 行置 dirty, 被 responding invalidateAll(L1TagAccess:446) 裸清丢 → L2 stale。
+      //   read/LR 放行: 不写 way_dirty 不制造 dirty, 挡它们对 flush 原子性无益, 反 stall bfs 合法 read 引入 lost-update
+      //   回归(二分坐实 v2 全挡炸 bfs 7/10; codex §1.1(e) 建议只挡写)。caveat: read-miss fill 若与 invalidateAll 同/后拍
+      //   到达, allocate-valid 优先(L1TagAccess:444) 可能留 clean-valid line —— 不丢 dirty, 但 invalidate 后非保证空。
+      //   ★注入本分支内(非外层覆盖) → 保留 RTAB-hit 吸收/flush 指令/WaitMSHR 控制握手(v1 外层覆盖破坏 RTAB 堵死教训)。
+      st0_valid  := io.CoreReq.valid && io.Probe_tA_ready && !refillSameBlock_st0 && !pendingReadMissSameBlock_st0 && (FlushInvstateReg === idle || !(CoreReqControl_st0.isWrite || CoreReqControl_st0.isAMO || CoreReqControl_st0.isSC))
+      st0_ready := CoreReq_pipeReg_st0_st1.enq.ready && io.Probe_tA_ready && !refillSameBlock_st0 && !pendingReadMissSameBlock_st0 && (FlushInvstateReg === idle || !(CoreReqControl_st0.isWrite || CoreReqControl_st0.isAMO || CoreReqControl_st0.isSC))
     }.elsewhen(CoreReqControl_st0.isWaitMSHR){
       //wait until MSHR empty
       st0_valid  := io.CoreReq.valid && io.MSHREmpty && io.SMSHREmpty
