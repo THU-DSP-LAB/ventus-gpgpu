@@ -448,8 +448,10 @@ class vALUexe extends Module{
       result.io.enq.bits.wvd_mask(x):=true.B
     }
   })
+  result.io.enq.bits.wvd_mask:=io.in.bits.mask
   when(io.in.bits.ctrl.writemask){
     result.io.enq.bits.wb_wvd_rd(0):=Mux(io.in.bits.ctrl.readmask,alu(0).out,VecInit((0 until num_thread).map(x=>{Mux(io.in.bits.mask(x),alu(x).out(0),0.U)})).asUInt)
+    result.io.enq.bits.wvd_mask.foreach(_:=false.B)
     result.io.enq.bits.wvd_mask(0):=1.U
     when((io.in.bits.ctrl.alu_fn===FN_VMNAND)|(io.in.bits.ctrl.alu_fn===FN_VMNOR)|(io.in.bits.ctrl.alu_fn===FN_VMXNOR)){
       result.io.enq.bits.wb_wvd_rd(0):=VecInit((0 until num_thread).map(x=>{Mux(io.in.bits.mask(x),!alu(x).out(0),false.B)})).asUInt
@@ -459,7 +461,6 @@ class vALUexe extends Module{
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
   result.io.enq.bits.wvd:=io.in.bits.ctrl.wvd
-  result.io.enq.bits.wvd_mask:=io.in.bits.mask
   result.io.enq.valid:=io.in.valid&io.in.bits.ctrl.wvd&(!io.in.bits.ctrl.simt_stack)
   if (SPIKE_OUTPUT) {
     result.io.enq.bits.spike_info.get := io.in.bits.ctrl.spike_info.get
@@ -541,10 +542,12 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
         result.io.enq.bits.wvd_mask(x) := true.B
       }
     })
+    result.io.enq.bits.wvd_mask := io.in.bits.mask
     when(io.in.bits.ctrl.writemask) {
       result.io.enq.bits.wb_wvd_rd(0) := Mux(io.in.bits.ctrl.readmask, alu(0).out, VecInit((0 until num_thread).map(x => {
         Mux(io.in.bits.mask(x), alu(x).out(0), 0.U)
       })).asUInt)
+      result.io.enq.bits.wvd_mask.foreach(_ := false.B)
       result.io.enq.bits.wvd_mask(0) := 1.U
       when((io.in.bits.ctrl.alu_fn === FN_VMNAND) | (io.in.bits.ctrl.alu_fn === FN_VMNOR) | (io.in.bits.ctrl.alu_fn === FN_VMXNOR)) {
         result.io.enq.bits.wb_wvd_rd(0) := VecInit((0 until num_thread).map(x => {
@@ -556,7 +559,6 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     result.io.enq.bits.warp_id := io.in.bits.ctrl.wid
     result.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
     result.io.enq.bits.wvd := io.in.bits.ctrl.wvd
-    result.io.enq.bits.wvd_mask := io.in.bits.mask
     result.io.enq.valid := io.in.valid & io.in.bits.ctrl.wvd & (!io.in.bits.ctrl.simt_stack)
 
     result2simt.io.enq.bits.wid := io.in.bits.ctrl.wid
