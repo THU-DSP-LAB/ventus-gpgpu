@@ -412,6 +412,8 @@ class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
   io.out_x <> result_x.io.deq
 }
 class vALUexe extends Module{
+  require(num_thread <= xLen, s"vector mask writeback packs $num_thread mask bits into one $xLen-bit lane")
+
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val out = DecoupledIO(new WriteVecCtrl())
@@ -476,6 +478,7 @@ class vALUexe extends Module{
 
 class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
   assert(softThread % hardThread == 0)
+  require(softThread <= xLen, s"vector mask writeback packs $softThread mask bits into one $xLen-bit lane")
   //assert(softThread > 2 && hardThread > 1)
 
   class vExeData2(num_thread: Int = softThread) extends vExeData{
