@@ -1,0 +1,16 @@
+# vmask.data code-buffer disassembly
+# metadata buffer: base=0x80000000, size=0x30 bytes
+# source words: vmask.data lines 25-36
+
+80000000: 900000b7    lui     x1, 0x90000
+80000004: 0d007057    vsetvli x0, x0, e32, m1, ta, ma
+80000008: 0200e087    vle32.v v1, (x1)
+8000000c: 02008113    addi    x2, x1, 32
+80000010: 02016107    vle32.v v2, (x2)
+80000014: 04008193    addi    x3, x1, 64
+80000018: 0201e187    vle32.v v3, (x3)
+8000001c: 661121d7    vmand.mm v3, v1, v2
+80000020: 0201e1a7    vse32.v v3, (x3)
+80000024: 0000400b    endprg  x0, x0, x0
+80000028: 0000400b    endprg  x0, x0, x0
+8000002c: 0000400b    endprg  x0, x0, x0
