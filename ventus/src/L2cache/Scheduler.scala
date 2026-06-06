@@ -251,6 +251,14 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,requests.io.push.ready)
 
+  val dir_result_requires_buffer = directory.io.result.valid &&
+    !directory.io.result.bits.hit &&
+    (directory.io.result.bits.dirty || directory.io.result.bits.last_flush)
+  assert(
+    !(dir_result_requires_buffer && directory.io.result.ready && !dir_result_buffer.io.enq.ready),
+    "L2 Scheduler dropped a dirty/last_flush directory result before dir_result_buffer accepted it"
+  )
+
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)
   val merge_data = (requests.io.data.data & full_mask) | (schedule.d.bits.data & (~full_mask).asUInt)
