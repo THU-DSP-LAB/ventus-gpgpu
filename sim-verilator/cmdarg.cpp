@@ -101,6 +101,20 @@ int parse_arg(
             config->waveform.enable = true;
             config->waveform.time_begin = 0;
             config->waveform.time_end = -1;
+        } else if (args[argid] == "--waveform-window") {
+            if (argid + 2 >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid, args.end()));
+            } else {
+                uint64_t time_begin = std::stoull(args[++argid]);
+                uint64_t time_end = std::stoull(args[++argid]);
+                if (time_end <= time_begin) {
+                    std::cout << "Error: --waveform-window needs END > BEGIN\n";
+                    cmdarg_error(std::vector<std::string>(args.begin() + argid - 2, args.begin() + argid + 1));
+                }
+                config->waveform.enable = true;
+                config->waveform.time_begin = time_begin;
+                config->waveform.time_end = time_end;
+            }
         } else if (args[argid] == "--snapshot") {
             if (++argid >= args.size()) {
                 cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
@@ -254,6 +268,7 @@ int cmdarg_help(int exit_id) {
         << "\n"
         << "--dump-mem BEGIN,END uint,uint   // 仿真结束后打印指定的内存地址范围[BEGIN,END]，4字节对齐\n"
         << "--waveform                       // 导出仿真波形fst文件，默认位置logs/\n"
+        << "--waveform-window BEGIN END      // 只导出[BEGIN,END)窗口内的fst波形\n"
         << "--sim-time-max NUM   uint        // number of simulation cycles\n"
         << "--snapshot INTERVAL  uint        // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能\n"
         << std::endl;
