@@ -112,6 +112,8 @@ Run with `--help` to view all options. Commonly used ones include:
   Loads command-line options from the specified file (equivalent to passing the file contents directly as arguments).
 * `--waveform`
   Enables waveform export. Generated FST files are placed in the `logs` directory and can be viewed with **gtkwave**.
+* `--waveform-window BEGIN END`
+  Enables waveform export only for the `[BEGIN, END)` simulation-time window. This is useful after an assertion identifies the failure cycle.
 * `--dump-mem 0x90001000,0x90001020`
   Dumps memory contents in the specified range (`0x90001000 ≤ addr ≤ 0x90001020`) after simulation. Data is printed in 4-byte lines to help verify correctness.
 
