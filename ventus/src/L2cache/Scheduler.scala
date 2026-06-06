@@ -243,13 +243,25 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val dir_result_buffer=Module(new Queue(new DirectoryResult_lite_victim(params),1))
 
-  dir_result_buffer.io.enq.valid:= directory.io.result.valid && (directory.io.result.bits.hit || directory.io.result.bits.dirty || directory.io.result.bits.last_flush) //hit or miss dirty, sourceD don't care if dirty when hit
+  val dir_result_needs_buffer = directory.io.result.bits.hit || directory.io.result.bits.dirty || directory.io.result.bits.last_flush
+  val dir_result_needs_request = !directory.io.result.bits.hit && !directory.io.result.bits.flush
+
+  dir_result_buffer.io.enq.valid:= directory.io.result.valid && dir_result_needs_buffer //hit or miss dirty, sourceD don't care if dirty when hit
   dir_result_buffer.io.enq.bits:=directory.io.result.bits
 
   dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
 
 
-  directory.io.result.ready:= Mux(directory.io.result.bits.hit,dir_result_buffer.io.enq.ready,requests.io.push.ready)
+  directory.io.result.ready:= (!dir_result_needs_buffer || dir_result_buffer.io.enq.ready) &&
+    (!dir_result_needs_request || requests.io.push.ready)
+
+  val dir_result_requires_buffer = directory.io.result.valid &&
+    !directory.io.result.bits.hit &&
+    (directory.io.result.bits.dirty || directory.io.result.bits.last_flush)
+  assert(
+    !(dir_result_requires_buffer && directory.io.result.ready && !dir_result_buffer.io.enq.ready),
+    "L2 Scheduler dropped a dirty/last_flush directory result before dir_result_buffer accepted it"
+  )
 
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)

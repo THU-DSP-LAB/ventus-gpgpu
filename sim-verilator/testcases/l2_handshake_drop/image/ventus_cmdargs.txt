@@ -1,0 +1,3 @@
+# sim-verilator arguments for the l2_handshake_drop GPU software workload
+--kernel name=l2_handshake_drop,metafile=l2_handshake_drop.metadata,datafile=l2_handshake_drop.data
+--sim-time-max 10000000
