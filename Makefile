@@ -27,6 +27,7 @@ endef
 
 init:
 	git submodule update --init --recursive --progress
+	git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 bump:
 	git submodule foreach git stash
