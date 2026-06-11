@@ -35,11 +35,13 @@ class MSHRv2 extends Module{
   val inv_activeMask = VecInit(io.from_dcache.bits.activeMask.map(!_)).asUInt
   val used = RegInit(0.U(lsu_nMshrEntry.W))
   val complete = VecInit(currentMask.map{_===0.U}).asUInt & used
-  val output_entry = Mux(complete.orR, PriorityEncoder(complete), 0.U)
+  val complete_entry = Mux(complete.orR, PriorityEncoder(complete), 0.U)
   val valid_entry = Mux(used.andR, 0.U, PriorityEncoder(~used))
   val reg_req = RegInit(0.U.asTypeOf(new MshrTag))
   val read_entry = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
+  val read_resp_entry = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
   val rsp_valid = RegInit(false.B)
+  val rsp_entry = RegInit(0.U(log2Up(lsu_nMshrEntry).W))
   val rsp_tag = RegInit(0.U.asTypeOf(new MshrTag))
   val rsp_raw_data = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
 
@@ -47,9 +49,14 @@ class MSHRv2 extends Module{
   val state = RegInit(s_idle)
   val read_resp_valid = RegNext(state === s_read, false.B)
   val output_valid = read_resp_valid || rsp_valid
+  val output_resp_entry = Mux(rsp_valid, rsp_entry, read_resp_entry)
   val tag_write_valid = WireInit(false.B)
   val tag_write_entry = WireInit(0.U(log2Up(lsu_nMshrEntry).W))
   val tag_write_data = WireInit(0.U((io.from_addr.bits.tag.getWidth).W))
+  val dcache_entry_used = used(io.from_dcache.bits.instrId)
+  val dcache_entry_complete =
+    dcache_entry_used && (currentMask(io.from_dcache.bits.instrId) === io.from_dcache.bits.activeMask.asUInt)
+  val output_entry_used = used(output_resp_entry)
 
   io.from_dcache.ready := state===s_idle// && used.orR
   io.from_addr.ready := state===s_idle && !(used.andR)
@@ -59,25 +66,25 @@ class MSHRv2 extends Module{
     when(io.from_dcache.fire){
       when(io.from_addr.fire){
         state := s_add
-      }.elsewhen(currentMask(io.from_dcache.bits.instrId)===io.from_dcache.bits.activeMask.asUInt){
+      }.elsewhen(dcache_entry_complete){
         state := s_read
         read_entry := io.from_dcache.bits.instrId
       }.otherwise{state := s_idle}
     }.elsewhen(complete.orR){
       state := s_read
-      read_entry := output_entry
+      read_entry := complete_entry
     }.otherwise{
       state := s_idle
     }
   }.elsewhen(state===s_add){
     when(complete.orR){
       state := s_read
-      read_entry := output_entry
+      read_entry := complete_entry
     }.otherwise{state:=s_idle}
   }.elsewhen(state===s_read){
     state := s_out
   }.elsewhen(state===s_out){
-    val remaining_complete = complete.bitSet(read_entry, false.B)
+    val remaining_complete = complete.bitSet(output_resp_entry, false.B)
     when(io.to_pipe.fire && remaining_complete.orR){
       state:=s_read
       read_entry := PriorityEncoder(remaining_complete)
@@ -89,8 +96,11 @@ class MSHRv2 extends Module{
   switch(state){
     is(s_idle){
       when(io.from_dcache.fire){ // deal with update request immediately
-        data.write(io.from_dcache.bits.instrId, io.from_dcache.bits.data, io.from_dcache.bits.activeMask) // data update
-        currentMask(io.from_dcache.bits.instrId) := currentMask(io.from_dcache.bits.instrId) & inv_activeMask // mask update
+        assert(dcache_entry_used, "MSHR received dcache response for unused entry")
+        when(dcache_entry_used){
+          data.write(io.from_dcache.bits.instrId, io.from_dcache.bits.data, io.from_dcache.bits.activeMask) // data update
+          currentMask(io.from_dcache.bits.instrId) := currentMask(io.from_dcache.bits.instrId) & inv_activeMask // mask update
+        }
         when(io.from_addr.fire){reg_req := io.from_addr.bits.tag} // both input valid: save the add request, and deal with it in the next cycle
       }.elsewhen(io.from_addr.fire){// deal with add request immediately
         used := used.bitSet(valid_entry, true.B) // set MSHR entry used
@@ -111,17 +121,21 @@ class MSHRv2 extends Module{
       currentMask(valid_entry) := reg_req.mask.asUInt
     }
     is(s_out){ // release MSHR line
-      when(io.to_pipe.fire){used := used.bitSet(read_entry, false.B)}
+      when(io.to_pipe.fire){used := used.bitSet(output_resp_entry, false.B)}
     }
   }
   when(tag_write_valid){
     tag.write(tag_write_entry, tag_write_data)
+  }
+  when(state === s_read){
+    read_resp_entry := read_entry
   }
   val output_tag_sram = tag.read(read_entry, state === s_read).asTypeOf(new MshrTag)
   val raw_data_sram = data.read(read_entry, state === s_read)
   when(read_resp_valid){
     when(!io.to_pipe.ready){
       rsp_valid := true.B
+      rsp_entry := read_resp_entry
       rsp_tag := output_tag_sram
       rsp_raw_data := raw_data_sram
     }.otherwise{
@@ -145,7 +159,10 @@ class MSHRv2 extends Module{
       0.U(xLen.W)
     )
   }
-  io.to_pipe.valid := output_valid && state===s_out
+  when(state === s_out && output_valid){
+    assert(output_entry_used, "MSHR output response entry is not used")
+  }
+  io.to_pipe.valid := output_valid && output_entry_used && state===s_out
   io.to_pipe.bits.tag := output_tag.asTypeOf(new MshrTag)
   io.to_pipe.bits.data := output_data
 }
