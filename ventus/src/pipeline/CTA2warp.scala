@@ -77,10 +77,11 @@ class CTA2warp extends Module{
 
   // TODO: Fix warp_scheduler warpRsp IO logic, which always requires ready=1
   // WorkAround: warp_scheduler requires io.wrapRsp.ready=1, use a large enough FIFO to satisfy it temporarily
-  val CTArsp_fifo = Queue(io.warpRsp, 16)
+  val CTArsp_fifo = Module(new Queue(new CTArspData, 16))
+  CTArsp_fifo.io.enq.valid := io.warpRsp.valid
+  CTArsp_fifo.io.enq.bits.cu2dispatch_wf_tag_done := data(io.warpRsp.bits.wid)
+  io.warpRsp.ready := CTArsp_fifo.io.enq.ready
   assert(io.warpRsp.ready, "warpRsp port requires ready=1, this FIFO is used to satisfy it, but not enough")
 
-  CTArsp_fifo.ready := io.CTArsp.ready
-  io.CTArsp.bits.cu2dispatch_wf_tag_done := data(CTArsp_fifo.bits.wid)
-  io.CTArsp.valid := CTArsp_fifo.valid
+  io.CTArsp <> CTArsp_fifo.io.deq
 }
