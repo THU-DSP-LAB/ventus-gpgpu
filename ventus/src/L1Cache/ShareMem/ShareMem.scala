@@ -80,7 +80,10 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
         VecInit(Seq.fill(BytesOfWord)(false.B)))))))*/
 
   // ******     queues     ******
-  val DepthCoreRsp_Q: Int = num_thread
+  // Backpressure is propagated from coreRsp_Q.enq.ready through rspPipe_st2/st1
+  // to BankConfArb.grantReady and finally coreReq.ready, so this queue only
+  // needs to decouple the registered response from the LSU response arbiter.
+  val DepthCoreRsp_Q: Int = 1
   val coreRsp_Q = Module(new Queue(new ShareMemCoreRsp,entries = DepthCoreRsp_Q,flow=false,pipe=true))
   //this queue also work as a pipeline reg, so cannot flow
 
