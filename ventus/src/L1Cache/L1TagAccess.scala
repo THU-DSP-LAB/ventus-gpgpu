@@ -352,6 +352,10 @@ if(MMU_ENABLED) {
   // → bfs4096-007 byte mismatch. 改用 hit_st1_raw (cachehit_hold 出来的 ST1-held hit).
   // L335 setIdx/waymask 在 valid=0 时永不写 SRAM, 不需联动改 (root cause 在 valid 源).
   // 详见 bugs/bfs4096-007/checkpoint_15_valid_gate.md。
+  // [hotspot3d512-001 记录, 未修, 与本 fix 无关] dirtyMask 的 OR-base(下方 data=dirtyMaskPerCL, 其 L330 读
+  //   dirtyMaskAccess.io.r.resp 是 live)在多拍 stall 期会被"不同 set 的 fill"(in(0)=allocateWrite.fire, L299 抢共享读口)
+  //   覆盖 → 漏掉本行已脏字节 → 写回 L2 丢 store。这是 pre-existing 通用洞(baseline 同, 非本 fix 引入), 且 hotspot3d
+  //   目标 store 被件2 转 miss 根本不写 dirtyMask, 故收口时不动 dirtyMask, 单列待修: bugs/hotspot3d512-001/dirtyMask_orbase_latent.md。
   dirtyMaskWriteArb.io.in(1).valid :=
     io.coreReq_st1_valid && hit_st1_raw && io.probeIsWrite_st1.get
   dirtyMaskWriteArb.io.in(1).bits.apply(data = dirtyMaskPerCL.asUInt, setIdx = RegNext(io.probeRead.bits.setIdx), waymask = iTagChecker.io.waymask)
@@ -374,9 +378,65 @@ if(MMU_ENABLED) {
   cachehit_hold.io.deq.ready := probeReadBuf.ready
   //val cachehit_hold = RegNext(iTagChecker.io.cache_hit && probeReadBuf.valid && !probeReadBuf.ready)
   val holdValid_st1 = cachehit_hold.io.deq.valid
-  // bfs4096-007 v15: hit_st1_raw 已在 L130 前置 Wire 声明, 此处 := 赋值给 in(1).valid 用
-  hit_st1_raw := Mux(holdValid_st1, cachehit_hold.io.deq.bits.hit, iTagChecker.io.cache_hit)
-  val waymask_st1_raw = Mux(holdValid_st1, cachehit_hold.io.deq.bits.waymask, iTagChecker.io.waymask)
+  // ===== hotspot3d512-001 root-fix v2 / 件2: write-hit vs fill-evict 原子化 (rootfix_design_v2.md) =====
+  // 根因: cachehit_hold 在 st1 stall 期(probeReadBuf.ready=0)冻结 hit/waymask, 当 held 命中的 way 在 stall 期间被并发
+  //   fill 选作 victim 替换(anti-LRU 保证 victim=刚命中的 MRU way)时, 冻结 hit 不失效 → 出队时 stalled write 承接 stale
+  //   hit: 数据落错 way 又不发 L2(被当 write-HIT)。本 fix(件2)把这种 stale-held write 转 write-miss → write-through
+  //   把数据送 L2(write no-allocate, 不需 RTAB replay)。配套件1(置脏加 commit 门, 见下方 way_dirty 写)堵 stale 写回。
+  // codex Phase3.5 v1-reject 修正: ①detection 覆盖 first-stall —— holdValid 还没起的那拍用 live iTagChecker 值
+  //   (st1HitEff_raw/st1WaymaskEff_raw 的 Mux 在 holdValid=0 时取 live), 不再漏掉 fill 与首拍进 stall 同拍的情形;
+  //   ②sticky latch 改 clear 优先(见下方), 出队即清永不 stuck → 关 v1 的 set/clear 同拍 stuck-latch dup-tag 隐患;
+  //   st1 in-order 单入口 ⇒ latch 天然 request-scoped。(原 v2 用 !ready 互斥, 引入组合环 → 改 probeReadBuf.valid+clear优先。)
+  // 只动 write(probeIsWrite): read-hit 撞 fill 有 bfs4096-006/009 fillConflict→replay; cachehit_hold 内部不动 → 不回归
+  //   bfs4096-007。AMO/SC/LR 不在 probeIsWrite 内, 本 fix 不覆盖(与 WG-flush 同属另案 D1 暴露面)。
+  val st1HitEff_raw     = Mux(holdValid_st1, cachehit_hold.io.deq.bits.hit,     iTagChecker.io.cache_hit)
+  val st1WaymaskEff_raw = Mux(holdValid_st1, cachehit_hold.io.deq.bits.waymask, iTagChecker.io.waymask)
+  val st1IsWrite_gated  = io.probeIsWrite_st1.getOrElse(false.B)
+  // 冲突诞生: write-hit 在 st1(probeReadBuf.valid)且其命中 way == 本拍 fill 替换的 victim (set,way)。
+  //   ★用 probeReadBuf.valid 而非 !probeReadBuf.ready 是关键两点★:
+  //   ① 断组合环: 原 st1Stalling 含 !probeReadBuf.ready(=!st1_ready), 而 st1_ready 组合依赖 io.tA_Hit_st1.hit
+  //      =hit_st1_raw → hit_st1_raw→...→st1_ready→!ready→_set→hit_st1_raw 成环(firtool detected combinational cycle)。
+  //      probeReadBuf.valid 是 Queue 寄存输出, 不依赖 ready/hit → 无环。
+  //   ② 覆盖 first-stall: probeReadBuf.valid 当拍即真, 含 "store 入 st1 与 fill 决策(allocateLatchEn)同拍" 这种
+  //      首拍即 stall 的情形(此时 wasStalling/holdValid 等寄存信号都漏 → 会退回 stale-hit 回归面)。
+  //   不需 !ready 限定: write-hit 撞 fill 驱逐它命中的 way, 无论 stall 与否都是冲突(写口 fill 优先 DCachev2:127 →
+  //   store 数据落不下 → 本就该当 miss), gate 成 write-miss 恒正确, 不会误伤合法 write-hit(_set 含 allocateLatchEn+同way)。
+  // 件2-§5 (codex final-reject §5 修正): fill 选定 victim(allocateLatchEn 脉冲)到真正提交(改 victim tag)之间有一段
+  //   pending 窗口 —— 干净 victim(needReplace=0 不拉 blockCoreReq)时 fill 会停在 MemRspPipe 等 memRsp_coreRsp.ready。
+  //   这窗口里 victim way 的 tag 还是旧 line, 一条写旧 line 的 store 此时才进 st1 会探成 HIT(allocateLatchEn 已过 → 漏检)
+  //   → fill 提交后 held write 落到新 line(污染新 line + 旧 line 写丢失)。读路径有持久保护(fillConflictSt1 用持久
+  //   refillWrite_valid, CoreReqPipe:390); 写路径原缺。补 fillVictimPending: victim 选定持久到 fill tag 提交
+  //   (io.allocateWriteTagSRAMWValid_st1)→ 覆盖整个冲突窗口。allocateWrite_st1.setIdx/lockedWayMask 窗口内本就冻结
+  //   (RegEnable, L125/133-138), 直接复用。全寄存/输入信号 → 不引入组合环。
+  val fillVictimPending = RegInit(false.B)
+  // ★clear 优先★ (codex §5-review §1/§4 修正): clean victim 且 fill 不停顿时 allocateLatchEn 与 allocateWriteTagSRAMWValid_st1
+  //   可同拍(clean→needReplace=0→不拉 blockCoreReq→选定拍直接提交)。set 优先会让 pending 在提交后下一拍才 true,
+  //   那拍 way 已装新 line B → 写 B 的合法 write-hit 被错降成 miss → L1 留 B clean 而 write-through 发 L2 → L1/L2 分叉(正确性 bug)。
+  //   改 clear 优先: 提交后不留尾窗。select 拍本身的 gate 由 _set 里的组合 (allocateLatchEn && lockedSetIsFull) 兜住(不靠
+  //   latch next-state), 故 clear 优先不丢 select 拍覆盖。多 fill 不重叠(codex §3 证: MemRspPipe 单 entry 串行, fill1-clear
+  //   与 fill2-set 不同拍)→ clear 优先不会误清别的 fill 窗口。
+  when(io.allocateWriteTagSRAMWValid_st1) {                                   // clear 优先: fill 提交(victim tag 改写, 旧 line 不再 hit)
+    fillVictimPending := false.B
+  }.elsewhen(allocateLatchEn && lockedSetIsFull) {                           // set: 新 victim 选定那拍
+    fillVictimPending := true.B
+  }
+  val writeHitFillConflict_set =
+    probeReadBuf.valid && st1HitEff_raw && st1IsWrite_gated &&
+    ((allocateLatchEn && lockedSetIsFull) || fillVictimPending) &&            // victim 选定那拍 + 整个 pending 窗口
+    (probeReadBuf.bits.setIdx === allocateWrite_st1.setIdx) &&               // 同 set
+    (st1WaymaskEff_raw === lockedWayMask)                                     // 同 way ← 命门: 命中的 way 正被驱逐
+  val writeHitFillConflictHeld = RegInit(false.B)                            // sticky: 跨多拍 stall 锁住冲突到出队
+  // ★clear 优先★: 用 probeReadBuf.valid(非 !ready)后 set 与 clear 可同拍(store 出队 ready=1 时正撞 fill 驱逐它的 way)。
+  //   clear 优先使 latch 出队即清、永不 stuck → 关 codex(e) 的 dup-tag 隐患(stuck latch 误 gate 下一条无关请求)。
+  //   出队那拍若仍冲突, 由组合 _set 兜住当拍 gate(hit_st1_raw 用 ...||_set), 故 clear 优先不漏当拍 → 安全。
+  when(probeReadBuf.valid && probeReadBuf.ready) {                           // clear(优先): held req 出队
+    writeHitFillConflictHeld := false.B
+  }.elsewhen(writeHitFillConflict_set) {                                     // set: stall 中(含首拍)冲突
+    writeHitFillConflictHeld := true.B
+  }
+  // bfs4096-007 v15: hit_st1_raw 已在前置 Wire 声明, 此处 := 赋值
+  hit_st1_raw := st1HitEff_raw && !(writeHitFillConflictHeld || writeHitFillConflict_set)  // ★gate: 冲突→hit 强制 0→write-miss
+  val waymask_st1_raw = st1WaymaskEff_raw
   io.hit_st1 := hit_st1_raw && probeReadBuf.valid//RegNext(io.probeRead.fire) //todo remove
   io.hitStatus_st1.hit := hit_st1_raw && probeReadBuf.valid
   io.hitStatus_st1.waymask := waymask_st1_raw
@@ -385,8 +445,15 @@ if(MMU_ENABLED) {
   io.waymaskHit_st1 := waymask_st1_raw
   if(!readOnly){//tag_array::write_hit_mark_dirty
     //assert(!(iTagChecker.io.cache_hit && io.probeIsWrite_st1.get && io.flushChoosen.get),"way_dirty write-in conflict!")
-    when(io.hitStatus_st1.hit && io.probeIsWrite_st1.get){////meta_entry_t::write_dirty
-      way_dirty(RegNext(io.probeRead.bits.setIdx))(OHToUInt(io.hitStatus_st1.waymask)) := true.B
+    // 件1 (hotspot3d512-001 root-fix v2): 置脏加 commit 门 probeReadBuf.ready(=st1_ready), 与数据落盘 coreWriteHitFire
+    //   (=st1_valid && st1_ready && WriteHit, DCachev2:104) 同拍 → dirty 与 data 原子。堵根因: 原条件一命中就置脏(不管
+    //   数据落没落), stall 期 hit=1 & ready=0 → dirty 早置 1 拍、数据没落 → needReplace(L425, 组合读 way_dirty)在
+    //   allocateLatchEn 拍读到这个脏 victim → fill 驱逐写回 pre-store 旧值腐败 L2。必须"不让它置上"(清不掉: 同步写要下
+    //   一拍才 visible, 而 needReplace 当拍已读完)。正常 write-hit ready=1 同拍 → 行为不变。
+    when(io.hitStatus_st1.hit && io.probeIsWrite_st1.get && probeReadBuf.ready){////meta_entry_t::write_dirty
+      // 件1a (root-fix v3, codex v2-reject §1 修正): set index 用 held probeReadBuf.bits.setIdx(与 L409 脏位读对齐),
+      //   不用 RegNext(io.probeRead.bits.setIdx)(live 探针, 多拍 stall 漂到别 set → 数据落 setA、脏位写 setB → committed store 被丢)。
+      way_dirty(probeReadBuf.bits.setIdx)(OHToUInt(io.hitStatus_st1.waymask)) := true.B
     }.elsewhen(io.flushChoosen.get){//tag_array::flush_one
       way_dirty(choosenDirtySetIdx_st0)(OHToUInt(choosenDirtyWayMask_st0)) := false.B
     }.elsewhen(io.needReplace.get) {
