@@ -658,7 +658,15 @@ class minIdxTree(width: Int, numInput: Int) extends Module{
 
   val candVec = Wire(Vec(numInput,new candWithIdx))
   for(i <- 0 until numInput){
-    candVec(i).candidate := io.candidateIn(numInput-1-i)
+    // ===== true-LRU 替换策略 (hotspot3d512-001 D2 + nn64k-009 死锁修复配套启用) =====
+    // 原 anti-LRU: candidateIn(numInput-1-i) 镜像下标 + 消费端 UIntToOH(idxOfMin) 无补偿
+    //   ⇒ victim 恒取 time 较大方(MRU) = textbook-wrong 的 anti-LRU(网表 dut.v idxOfMin=
+    //   candidateIn_1>=candidateIn_0 实锤, 见 nn64k-009 manifest netlist_audit), 伤命中率。
+    // 改正序 candidateIn(i) ⇒ idxOfMin 与 way 索引同空间 ⇒ victim=最小 time=最久未用=true-LRU。
+    // ★前置依赖★: true-LRU 触发 L1 DCache st1⇄RTAB 循环资源死锁(nn_64k HANG, anti-LRU 一直掩盖),
+    //   必须与 nn64k-009 的 RTAB-reservation 修复(CoreReqPipe.Req_st1_RTAB_reserve + DCachev2.allowIn1)
+    //   一同启用; 单独翻 true-LRU 不修死锁会在 nn_64k seed 631470333 确定性 HANG@7862815。
+    candVec(i).candidate := io.candidateIn(i)
     candVec(i).index := i.asUInt
   }
 

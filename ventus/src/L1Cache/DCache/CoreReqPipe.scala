@@ -92,6 +92,12 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val read_Req_dA         = ValidIO(Vec(BlockWords,new SRAMBundleA(NSets*NWays)))
     val CacheHit_st1        = Output(Bool())
     val Req_st1_RTAB        = ValidIO(new RTABReq())
+    // nn64k-009 fix: st1 的 raw RTAB-slot 占用意图，不带 st1_ready gate。
+    // DCachev2.allowIn1 用它在 RTAB almost_full 时为当前 st1 请求预留最后一格。
+    // 不能用 Req_st1_RTAB.valid(=Req_RTAB_st1_valid && st1_ready)：st1_ready 在
+    // mshrReleasingSameBlock_st1 等 hold 拍被拉低(L660-662)，会把真实 park 意图掩盖成 0，
+    // 让外部 in(1) 的 st0-hitRTAB 路径占掉最后一格 → 闭合 st1⇄RTAB 死锁环。
+    val Req_st1_RTAB_reserve = Output(Bool())
     val CheckReq_WSHR       = Output(new WSHRreq)
     // {S}MSHRmissReq.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
     // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
@@ -458,6 +464,14 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
     ReplayType := ReadMissFillWait
   }
+  // nn64k-009 fix: 导出 st1 raw RTAB 预留意图(不经 st1_ready gate)。等价于 L599 "requesting RTAB"
+  // 分支谓词 (Req_RTAB_st1_valid || ReplayType===UCacheHitDirty)——凡这条 st1 请求最终必须进 RTAB
+  // 才能 drain 的情形都纳入预留，使 DCachev2 在 almost_full 时给它留住最后一格，防外部 st0-hitRTAB
+  // 抢槽把 RTAB 填满后 st1 被 L649 永久 hold(死锁环首跳)。UCacheHitDirty 在 evict 等待阶段
+  // Req_RTAB_st1_valid 可能尚为 0 但该请求已占 st1 且后续必进 RTAB，故一并纳入(对齐 L599 谓词)。
+  io.Req_st1_RTAB_reserve :=
+    Req_RTAB_st1_valid ||
+    (CoreReq_pipeReg_st0_st1.deq.valid && (ReplayType === UCacheHitDirty))
   // bfs4096-006 fix: gate 掉 dA read 避免被 bypass 污染。replay 出来后 tag 已 update，
   // 同 way 的 tag 已经是 fill 后新 tag (例: visited 0x90002)，原 hit-read 的 tag (cost 0x90034) 不再 match → miss
   // → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way (visited 此时是 MRU 不会被选中)。
