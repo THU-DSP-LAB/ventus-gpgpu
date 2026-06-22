@@ -246,6 +246,10 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   ReplayTable.io.RTABReq_st0     <> coreReqPipe.io.Req_st0_RTAB
   TagAccess.io.invalidateAll     := coreReqPipe.io.invalidate_tA
   TagAccess.io.flushChoosen.get  := coreReqPipe.io.flushDirty_tA
+  // lud-001 v6 Path A (改动 3b): flush PutPart fire + clear identity 连线 CoreReqPipe → L1TagAccess
+  TagAccess.io.flushPutFire.get    := coreReqPipe.io.flushPutFire.get
+  TagAccess.io.flushClrSetIdx.get  := coreReqPipe.io.flushClrSetIdx.get
+  TagAccess.io.flushClrWayMask.get := coreReqPipe.io.flushClrWayMask.get
   // st1
   TagAccess.io.tagFromCore_st1        := coreReqPipe.io.tagFromCore_tA_st1
   TagAccess.io.probeIsWrite_st1.get       := coreReqPipe.io.coreReq_Control_st1.isWrite

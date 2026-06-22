@@ -66,6 +66,10 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
     val dirtyASID_st1 = if(MMU_ENABLED) {Some(Output(UInt(AsidBits.W)))} else None
     //For InvOrFlu and LRSC
     val flushChoosen = if (!readOnly) {Some(Input(Bool()))} else None
+    // lud-001 v6 Path A (改动 3c): flush PutPart 真出站 fire + 清 way_dirty/dirtyMask 的 identity (CoreReqPipe 传入, 与 a_addr 同源)
+    val flushPutFire = if (!readOnly) {Some(Input(Bool()))} else None
+    val flushClrSetIdx = if (!readOnly) {Some(Input(UInt(log2Up(set).W)))} else None
+    val flushClrWayMask = if (!readOnly) {Some(Input(UInt(way.W)))} else None
     //For Inv
     val invalidateAll = Input(Bool())
     val tagready_st1 = Input(Bool())
@@ -362,8 +366,12 @@ if(MMU_ENABLED) {
   // 只有当 flushChoosen 拉高时，读出来 dirty mask 才会被用到，需要被写0
   // 这里的 valid 需要用 RegNext 延迟一周期是因为在dcache的顶层模块将 InvOrFluMemReqValid_st1 里也延了一个clk
   // 不使用dcache中的 InvOrFluMemReqValid_st1 是因为与tag的发出对齐
-  dirtyMaskWriteArb.io.in(2).valid := RegNext(io.flushChoosen.get, false.B)
-  dirtyMaskWriteArb.io.in(2).bits.apply(data = 0.U, setIdx = RegNext(choosenDirtySetIdx_st0), waymask = choosenDirtyWayMask_st1)
+  // lud-001 v6 Path A (改动 3e): dirtyMask 清 0 与 way_dirty 清(改动 3d)用同一 gate flushPutFire + 同 identity。
+  //   in(2) 最低优先(被 needReplace in0 / write-hit in1 抢则 dirtyMask 这拍不清, 残留旧 mask), 但 way_dirty(3d)已清=0
+  //   → 该 (set,way) 永不再被 flush/needReplace 选中 → 残留成 dead state, 在 single-writer/no-external-partial-write 前提下
+  //   dead-safe(checkpoint_8 §2.5; 跨 SM partial-write+tag-reuse 移交 dirtyMask facet 3)。P4=M2 实测 lud preempt 应 ==0。
+  dirtyMaskWriteArb.io.in(2).valid := io.flushPutFire.get
+  dirtyMaskWriteArb.io.in(2).bits.apply(data = 0.U, setIdx = io.flushClrSetIdx.get, waymask = io.flushClrWayMask.get)
 
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   //iTagChecker.io.ASID_of_set := ASIDAccess.io.r.resp.data
@@ -454,13 +462,26 @@ if(MMU_ENABLED) {
       // 件1a (root-fix v3, codex v2-reject §1 修正): set index 用 held probeReadBuf.bits.setIdx(与 L409 脏位读对齐),
       //   不用 RegNext(io.probeRead.bits.setIdx)(live 探针, 多拍 stall 漂到别 set → 数据落 setA、脏位写 setB → committed store 被丢)。
       way_dirty(probeReadBuf.bits.setIdx)(OHToUInt(io.hitStatus_st1.waymask)) := true.B
-    }.elsewhen(io.flushChoosen.get){//tag_array::flush_one
-      way_dirty(choosenDirtySetIdx_st0)(OHToUInt(choosenDirtyWayMask_st0)) := false.B
+    }.elsewhen(io.flushPutFire.get){//tag_array::flush_one (lud-001 v6 Path A 改动 3d: 清脏移到 PutPart fire + 传入 identity)
+      // ★治本(batch-loss): 反压没 fire → flushPutFire=0 → way_dirty 不清 → 该脏行不丢; fire 才清且清的恒是这笔 Put 自己。
+      //   gate 从 live flushChoosen(st0 cursor 选中拍, 不等出站) 改 flushPutFire; set/way 从 live choosenDirty*_st0 改传入
+      //   flushClrSetIdx/WayMask(snap/live Mux 与 a_addr 同源 → 无 clear-index drift)。不经 in(2) 仲裁(Reg 直接赋)→ 根除 retry。
+      way_dirty(io.flushClrSetIdx.get)(OHToUInt(io.flushClrWayMask.get)) := false.B
     }.elsewhen(io.needReplace.get) {
       way_dirty(allocateWrite_st1.setIdx)(OHToUInt(lockedWayMask)) := false.B//要素①
     }.elsewhen(iTagChecker.io.cache_hit && io.probeIsUncache_st1 && probeReadBuf.ready){
       way_dirty(RegNext(io.probeRead.bits.setIdx))(OHToUInt(iTagChecker.io.waymask)) := false.B
     }
+    // lud-001 v6 Path A (改动 4) assert/monitor (L1TagAccess 侧, if(!readOnly) 内):
+    // A1: way_dirty 清的 waymask 必 one-hot (codex (e) clear identity)
+    assert(!io.flushPutFire.get || PopCount(io.flushClrWayMask.get) === 1.U,
+           "lud-001: flush dirty-clear waymask not one-hot")
+    // M2: dirtyMask clear in(2) 被 in(0)needReplace/in(1)write-hit 抢频率 (P4 数据源, 关 facet 3; ==0 → residual 不产生 → moot)
+    val dirtyClearPreemptCount = RegInit(0.U(32.W))
+    when(io.flushPutFire.get && !dirtyMaskWriteArb.io.in(2).fire){
+      dirtyClearPreemptCount := dirtyClearPreemptCount + 1.U
+    }
+    dontTouch(dirtyClearPreemptCount)
   }
 
 

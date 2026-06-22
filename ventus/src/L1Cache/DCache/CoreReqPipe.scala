@@ -67,6 +67,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val Probe_tA_ready = Input(Bool())
     val Req_st0_RTAB   = Valid(new RTABReq())
     val flushDirty_tA  = Output(Bool())
+    // lud-001 v6 Path A (改动 3a): flush PutPart 真出站 fire + 清 way_dirty/dirtyMask 的 identity(与 a_addr 同源)
+    val flushPutFire    = Some(Output(Bool()))
+    val flushClrSetIdx  = Some(Output(UInt(dcache_SetIdxBits.W)))
+    val flushClrWayMask = Some(Output(UInt(dcache_NWays.W)))
 
     val st0_ready      = Output(Bool())
     val st0_valid      = Output(Bool())
@@ -210,6 +214,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val FluInv_st1 = CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush || CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isInvalidate
   val FluInvReq_st1_valid = CoreReq_pipeReg_st0_st1.deq.valid && FluInv_st1
   val FluInvIsPut_st1 = CoreReq_pipeReg_st0_st1.deq.valid && (FlushInvstateReg === idle) && FluInv_st1
+  // lud-001 v6 Path A (改动 1): flush PutPart 真出站 fire (MissReq_Mem.fire && FluInvMemReq_valid && FluInvIsPut_st1)。
+  //   = 清 way_dirty/dirtyMask 的唯一 gate(改动 3d/3e, 经 io 传 L1TagAccess) + 挡同拍 duplicate enq(下方 st0_valid)。
+  //   FluInvMemReq_valid 是 Wire(L153 声明, L553 赋值), Chisel 前向引用合法。
+  val flushPutFire = io.MissReq_Mem.fire && FluInvMemReq_valid && FluInvIsPut_st1
   val FluInvIsFluL2_st1 =  CoreReq_pipeReg_st0_st1.deq.valid && (FlushInvstateReg === flushing) && FluInv_st1
   val FluInvL2MemReqIssuedReg = RegInit(false.B)
   val FluInvRspPendingReg = RegInit(false.B)
@@ -244,7 +252,9 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
             st0_ready := false.B
           }.elsewhen(io.hasDirty){
             //write back dirty cacheline
-            st0_valid  := io.CoreReq.valid
+            // lud-001 v6 Path A (改动 1): && !flushPutFire 挡 flush PutPart fire 同拍 duplicate enq token
+            //   (CoreReq_pipeReg_st0_st1 是 pipe=true Queue, fire 拍同时 deq.fire+enq.fire 复制 pre-clear cursor → batch-loss 之源)
+            st0_valid  := io.CoreReq.valid && !flushPutFire
             st0_ready := false.B
           }.otherwise{
             st0_valid := io.CoreReq.valid
@@ -521,6 +531,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   FluInvMemReq_st1.a_opcode := Mux(FluInvIsPut_st1,TLAOp_PutPart,TLAOp_Flush)
   FluInvMemReq_st1.a_param := Mux(FluInvIsPut_st1, 0.U, Mux(CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush, TLAParam_Flush, TLAParam_Inv))
   val dirtySetIdx_st1 = RegNext(io.tA_dirtySetIdx_st0)
+  // lud-001 v6 Path A (改动 2): live flush way, 与 dirtySetIdx_st1 对称; A3 way identity + flushClrWayMask Mux 依赖
+  val dirtyWayMask_st1 = RegNext(io.tA_dirtyWayMask_st0)
   // === backprop1024-001 fix: FluInvMemReq identity snapshot ===
   // flush sweep 期间 io.dA_data / io.tA_dirtyTag_st1 / dirtySetIdx_st1 是 live 信号，
   // 当 memReq_Q 反压、FluInvMemReq 不能 fire 时，下一个 sub-flush 的迭代会让这些
@@ -532,11 +544,16 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val fluInvSnapAddr = Reg(UInt(WordLength.W))
   // bfs4096-001 partial-write clobber fix: snapshot dirty byte-mask alongside addr/data
   val fluInvSnapMask = Reg(UInt((BlockWords * BytesOfWord).W))
+  // lud-001 v6 Path A (改动 2): snapshot 扩存 setIdx/wayMask, 与 a_addr 同捕获拍锁存 → clear identity 同源
+  val fluInvSnapSetIdx  = Reg(UInt(dcache_SetIdxBits.W))
+  val fluInvSnapWayMask = Reg(UInt(dcache_NWays.W))
   val fluInvSnapValid = RegInit(false.B)
   when(FluInvMemReq_valid && FluInvIsPut_st1 && !fluInvSnapValid){
     fluInvSnapData := io.dA_data
     fluInvSnapAddr := fluInvLiveAddr
     fluInvSnapMask := io.tA_dirtyMask_st1
+    fluInvSnapSetIdx  := dirtySetIdx_st1   // lud-001 v6 Path A (改动 2): 与 addr/data/mask 同拍捕获 → identity 同源
+    fluInvSnapWayMask := dirtyWayMask_st1
     fluInvSnapValid := true.B
   }
   when(io.MissReq_Mem.fire && FluInvMemReq_valid){
@@ -554,6 +571,32 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     (FluInvIsPut_st1 || (FluInvIsFluL2_st1 && !FluInvL2MemReqIssuedReg)) &&
       CoreReq_pipeReg_st0_st1.deq.valid
   FluInvMemReq_st1.spike_info.foreach(_ := DontCare )
+  // lud-001 v6 Path A (改动 2): 清 way_dirty/dirtyMask 的 identity 连出 L1TagAccess (snap/live Mux 同 fluInvSnapValid 选, 与 a_addr 同源)
+  io.flushClrSetIdx.get  := Mux(fluInvSnapValid, fluInvSnapSetIdx,  dirtySetIdx_st1)
+  io.flushClrWayMask.get := Mux(fluInvSnapValid, fluInvSnapWayMask, dirtyWayMask_st1)
+  io.flushPutFire.get    := flushPutFire
+  // lud-001 v6 Path A (改动 4) assert/monitor (CoreReqPipe 侧):
+  // A4: flush PutPart fire 时 a_mask 必非零 (抓 all-zero mask PutPartial)
+  assert(!flushPutFire || FluInvMemReq_st1.a_mask.asUInt =/= 0.U,
+         "lud-001: flush PutPart fired with all-zero a_mask")
+  // A2/A2-snap: 清的 set === live dirtySetIdx (非 snapshot 路径) / snapshot 锁的 set (与 a_addr 同捕获)
+  assert(!flushPutFire || fluInvSnapValid || io.flushClrSetIdx.get === dirtySetIdx_st1,
+         "lud-001: flush clear setIdx != live dirtySetIdx (non-snapshot path)")
+  assert(!(flushPutFire && fluInvSnapValid) || io.flushClrSetIdx.get === fluInvSnapSetIdx,
+         "lud-001: flush clear setIdx != snapshot setIdx")
+  // A3/A3-snap: 清的 way === live dirtyWayMask / snapshot 锁的 way (codex (e) 点名 v5 漏 way)
+  assert(!flushPutFire || fluInvSnapValid || io.flushClrWayMask.get === dirtyWayMask_st1,
+         "lud-001: flush clear wayMask != live dirtyWayMask (non-snapshot path)")
+  assert(!(flushPutFire && fluInvSnapValid) || io.flushClrWayMask.get === fluInvSnapWayMask,
+         "lud-001: flush clear wayMask != snapshot wayMask")
+  // M1: 同 (set,way) 连续两拍 flushPutFire (duplicate token 回归探测; v5 Path A 无 retry 应为 0)
+  val flushFirePrevSet = RegNext(Mux(flushPutFire, io.flushClrSetIdx.get, ~(0.U(dcache_SetIdxBits.W))))
+  val flushFirePrevWay = RegNext(Mux(flushPutFire, io.flushClrWayMask.get, 0.U(dcache_NWays.W)))
+  val dupFireCount = RegInit(0.U(32.W))
+  when(flushPutFire && (io.flushClrSetIdx.get === flushFirePrevSet) && (io.flushClrWayMask.get === flushFirePrevWay)){
+    dupFireCount := dupFireCount + 1.U
+  }
+  dontTouch(dupFireCount)
   // evictMemReq_st1: uncached 请求如果命中 dirty cacheline，需要先把当前 cacheline 写回，
   // 再通过 RTAB / replay 机制重放原始 uncached 请求。
   // uncache hit dirty cacheline evict request
