@@ -90,14 +90,19 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val mshrs = Seq.fill(params.mshrs) { Module(new MSHR(params)) }
 
+  // lud-002/srad Bug C 修(B-2 + codex 3.5 修): flush 写回抢占 sourceD 的优先信号(前置 Wire, 实赋值在 dir_result_buffer 定义后)。
+  // 抢占那拍须一并 gate mshr_request 的 sourceD 项 + m.io.schedule.d.ready + pop.valid, 否则被选 MSHR 看到
+  // spurious schedule.d.fire(以为自己 D 已发, 实则 sourceD 在发 flush) → refill D 永久丢。
+  val flush_wb_priority = Wire(Bool())
+
 
 
 
 
   val mshr_request = Cat(mshrs.map {  m =>
     ((sourceA.io.req.ready  &&m.io.schedule.a.valid) ||
-      (sourceD.io.req.ready &&m.io.schedule.d.valid) ||
-      (m.io.schedule.dir.valid&&directory.io.write.ready)) 
+      (sourceD.io.req.ready &&m.io.schedule.d.valid && !flush_wb_priority) ||  // B-2(codex 3.5 修): flush 抢占 sourceD 时不经 D 路选该 MSHR
+      (m.io.schedule.dir.valid&&directory.io.write.ready))
   }.reverse)
 
   val robin_filter = RegInit(0.U(params.mshrs.W))  
@@ -127,7 +132,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt)&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
     m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) && !write_buffer.io.deq.valid
-    m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i)
+    m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i) && !flush_wb_priority  // B-2(codex 3.5 修): flush 抢占 sourceD 时该 MSHR D 不算被消费(避免 spurious fire 丢 refill D)
     m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt)
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
@@ -260,12 +265,22 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   // 允许在同一拍同时出队+入队时保持 1/cycle 吞吐（pipe=true）。
   // 这样在 invalidate/flush 扫描出现连续 dirty victim、且 directory.result 只拉高一拍的情况下，
   // 不会因为 1-depth 且 pipe=false 的 Queue 满队列阻塞而导致后一个结果握手失败/丢失。
-  val dir_result_buffer = Module(new Queue(new DirectoryResult_lite_victim(params), 1, pipe = true))
+  // lud-002/srad Bug C 修(B-2): depth 1→4 吸收 invalidate/flush-sweep 的 dirty-victim burst
+  //   (drain dive 实证最长 burst=2, depth-1 撞 2-burst 即丢; depth-4 留余量)。配下方 flush-优先 drain + fire-gated clear。
+  val dir_result_buffer = Module(new Queue(new DirectoryResult_lite_victim(params), 4, pipe = true))
 
   dir_result_buffer.io.enq.valid:= directory.io.result.valid && (directory.io.result.bits.hit || directory.io.result.bits.dirty || directory.io.result.bits.last_flush) //hit or miss dirty, sourceD don't care if dirty when hit
   dir_result_buffer.io.enq.bits:=directory.io.result.bits
 
-  dir_result_buffer.io.deq.ready:= !schedule.d.valid && sourceD.io.req.ready
+  // lud-002/srad Bug C 修(B-2): flush 写回优先于 refill(schedule.d) 占 sourceD。
+  //   drain dive 实证: 原 refill 结构性优先(deq.ready 仅 !schedule.d.valid 时拉高)让脏 victim 撞 refill 占 buf 那拍即丢
+  //   (3 drops 全 = refill 占 buf + sourceD 反压同拍), 且是 approach-P kmeans livelock(refill 饿死 flush drain)的根。
+  //   flush 队头时强占 sourceD; 同拍 gate 掉 schedule.d 的消费(requests.io.pop.valid 下方 last-connect 覆盖 L251 原值)避免误 pop MSHR。
+  flush_wb_priority := dir_result_buffer.io.deq.valid && dir_result_buffer.io.deq.bits.flush
+  val take_dir = flush_wb_priority || !schedule.d.valid
+  requests.io.pop.valid := requests.io.valid(mshr_select) && schedule.d.valid && sourceD.io.req.ready && !flush_wb_priority
+
+  dir_result_buffer.io.deq.ready:= take_dir && sourceD.io.req.ready
 
 
   // bfs4096-002 iter5 fix #1: directory.result fork 点反压补齐（Mux 改 needPush/needEnq AND）。
@@ -285,24 +300,26 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)
   val merge_data = (requests.io.data.data & full_mask) | (schedule.d.bits.data & (~full_mask).asUInt)
-  sourceD.io.req.bits.way:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
-  sourceD.io.req.bits.data:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.data,Mux((requests.io.data.opcode===PutPartialData)||(requests.io.data.opcode===PutFullData),merge_data,schedule.d.bits.data))
-  sourceD.io.req.bits.from_mem:=Mux(!schedule.d.valid ,false.B,true.B)
-  sourceD.io.req.bits.hit:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.hit,schedule.d.bits.hit)
-  sourceD.io.req.bits.set:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.set,schedule.d.bits.set)
-  sourceD.io.req.bits.tag:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,dir_result_buffer.io.deq.bits.victim_tag,dir_result_buffer.io.deq.bits.tag),schedule.d.bits.tag)
-  sourceD.io.req.bits.mask:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.mask,requests.io.data.mask)
-  sourceD.io.req.bits.offset:=Mux(!schedule.d.valid ,Mux(!dir_result_buffer.io.deq.bits.hit,0.U,dir_result_buffer.io.deq.bits.offset),schedule.d.bits.offset)
-  sourceD.io.req.bits.opcode:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.opcode,requests.io.data.opcode)
-  sourceD.io.req.bits.put:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.put,requests.io.data.put)
-  sourceD.io.req.bits.size:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.size,schedule.d.bits.size)
-  sourceD.io.req.valid:=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.valid,schedule.d.valid)
-  sourceD.io.req.bits.source:=Mux(!schedule.d.valid,dir_result_buffer.io.deq.bits.source,requests.io.data.source) //pop the source of subentry
-  sourceD.io.req.bits.last_flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.last_flush,schedule.d.bits.last_flush)
-  sourceD.io.req.bits.flush:= Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.flush,schedule.d.bits.flush)
-  sourceD.io.req.bits.dirty :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.dirty,schedule.d.bits.dirty)
-  sourceD.io.req.bits.param :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
-  sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
+  // lud-002/srad Bug C 修(B-2): 下列 sourceD fork 的选择键 !schedule.d.valid 全改 take_dir
+  //   (= flush 队头优先 || !schedule.d.valid), 使 flush 写回优先占 sourceD; 非 flush 时退化为原 refill 优先语义。
+  sourceD.io.req.bits.way:=Mux(take_dir ,dir_result_buffer.io.deq.bits.way,schedule.d.bits.way)
+  sourceD.io.req.bits.data:=Mux(take_dir ,dir_result_buffer.io.deq.bits.data,Mux((requests.io.data.opcode===PutPartialData)||(requests.io.data.opcode===PutFullData),merge_data,schedule.d.bits.data))
+  sourceD.io.req.bits.from_mem:=Mux(take_dir ,false.B,true.B)
+  sourceD.io.req.bits.hit:=Mux(take_dir ,dir_result_buffer.io.deq.bits.hit,schedule.d.bits.hit)
+  sourceD.io.req.bits.set:=Mux(take_dir ,dir_result_buffer.io.deq.bits.set,schedule.d.bits.set)
+  sourceD.io.req.bits.tag:=Mux(take_dir ,Mux(!dir_result_buffer.io.deq.bits.hit,dir_result_buffer.io.deq.bits.victim_tag,dir_result_buffer.io.deq.bits.tag),schedule.d.bits.tag)
+  sourceD.io.req.bits.mask:=Mux(take_dir ,dir_result_buffer.io.deq.bits.mask,requests.io.data.mask)
+  sourceD.io.req.bits.offset:=Mux(take_dir ,Mux(!dir_result_buffer.io.deq.bits.hit,0.U,dir_result_buffer.io.deq.bits.offset),schedule.d.bits.offset)
+  sourceD.io.req.bits.opcode:=Mux(take_dir ,dir_result_buffer.io.deq.bits.opcode,requests.io.data.opcode)
+  sourceD.io.req.bits.put:=Mux(take_dir ,dir_result_buffer.io.deq.bits.put,requests.io.data.put)
+  sourceD.io.req.bits.size:=Mux(take_dir ,dir_result_buffer.io.deq.bits.size,schedule.d.bits.size)
+  sourceD.io.req.valid:=Mux(take_dir ,dir_result_buffer.io.deq.valid,schedule.d.valid)
+  sourceD.io.req.bits.source:=Mux(take_dir,dir_result_buffer.io.deq.bits.source,requests.io.data.source) //pop the source of subentry
+  sourceD.io.req.bits.last_flush:= Mux(take_dir ,dir_result_buffer.io.deq.bits.last_flush,schedule.d.bits.last_flush)
+  sourceD.io.req.bits.flush:= Mux(take_dir ,dir_result_buffer.io.deq.bits.flush,schedule.d.bits.flush)
+  sourceD.io.req.bits.dirty :=Mux(take_dir ,dir_result_buffer.io.deq.bits.dirty,schedule.d.bits.dirty)
+  sourceD.io.req.bits.param :=Mux(take_dir ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
+  sourceD.io.req.bits.l2cidx :=Mux(take_dir ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   sourceD.io.req.bits.spike_info.foreach( _ := DontCare )
   bankedStore.io.sinkD_adr.valid := schedule.dir.valid     //now managed by MSHR
   bankedStore.io.sinkD_adr.bits.set := schedule.dir.bits.set

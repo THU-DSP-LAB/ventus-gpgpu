@@ -189,7 +189,14 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
       when(!wipeDone) {
         status_reg(i).valid(j) := false.B
         status_reg(i).dirty(j) := false.B
-      }.elsewhen(flush_issue && ((i*params.cache.ways+j).asUInt === flushCount)){
+      }.elsewhen(flush_issue && ((i*params.cache.ways+j).asUInt === flushCount) && !status_reg(i).dirty(j)){
+        // B-2(lud-002/srad Bug C): clean entry 立即清(无脏, 无写回, 无需等 io.result.fire)。
+        when(is_invalidate){
+          status_reg(i).valid(j) :=false.B
+        }
+      }.elsewhen(io.result.fire && io.result.bits.flush && io.result.bits.set===i.asUInt && io.result.bits.way===j.asUInt){
+        // B-2(lud-002/srad Bug C): dirty flush entry 仅在写回 fire 那拍清(用 result 身份 set/way, fire-gated)。
+        // 替原无条件清(撞 dir_result_buffer 满未 fire 仍清 → 脏写回永久 DROP → DRAM stale)。emission 全保持 baseline RegNext 不动。
         when(is_invalidate){
           status_reg(i).valid(j) :=false.B
         }
