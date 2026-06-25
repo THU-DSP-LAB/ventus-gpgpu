@@ -60,6 +60,8 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val mshr_wait = Output(Bool())
 
     val finish_issue = Output(Bool())
+    // srad-004 Phase 4.5 A''': hit-reservation one-shot clear（io.d.fire 时回传 (set,way)→Directory 递减 hitRefCount）。
+    val hit_done = Valid(new ResvClear_lite(params))
   })
 
 
@@ -281,4 +283,13 @@ val mshr_wait_reg =RegInit(false.B)
   io.a.bits.opcode:= PutFullData
 
   io.finish_issue := io.d.valid && s_final_req.last_flush
+
+  // srad-004 Phase 4.5 A''': hit-reservation clear（one-shot，统一到 io.d.fire）。
+  // io.d.fire 在 stage_4/stage_8 各自最多一次（SourceD entry 释放条件），保证 1:1 对应 will_resv_hit。
+  val hitClrOpcode = s_final_req.opcode === Get ||
+                     s_final_req.opcode === PutFullData ||
+                     s_final_req.opcode === PutPartialData
+  io.hit_done.valid     := io.d.fire && s_final_req.hit && hitClrOpcode
+  io.hit_done.bits.set  := s_final_req.set
+  io.hit_done.bits.way  := s_final_req.way
 }

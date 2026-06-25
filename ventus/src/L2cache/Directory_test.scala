@@ -102,6 +102,9 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     val flush_invalidate_src=Input(UInt(params.source_bits.W))
     // nn64k-007 Phase 4.5 迭代6: mixed 落空撤销线（Scheduler→Directory），见 ResvClear_lite。
     val resv_clear = Flipped(Valid(new ResvClear_lite(params)))
+    // srad-004 Phase 4.5 A''': hit-reservation clear 回传（SourceD→Scheduler→Directory）。
+    // SourceD io.d.fire 时，若该 entry 是 hit 且 opcode∈{Get,Put*}，回传 (set,way) 递减 hitRefCount。
+    val hit_resv_clear = Flipped(Valid(new ResvClear_lite(params)))
  //   val finish_issue =Output(Bool())
   })
 
@@ -260,6 +263,23 @@ for(i<- 0 until params.cache.sets){
   val reservation = RegInit(VecInit(Seq.fill(params.cache.sets)(0.U(params.cache.ways.W))))
   val will_alloc_victim = io.result.fire && !io.result.bits.hit && !io.result.bits.flush && !not_replace
 
+  // srad-004 Phase 4.5 A''': hit-way reservation (hitRefCount 32×16×4bit)。
+  // 机制: hit 命中 way 从 directory lookup 到 SourceD io.d.fire 的窗口内（最长 ~18cyc 受 refill starve），
+  // 该 way 可被同 set miss victim 选中 → fill 覆盖 hit 正引用的 BankedStore 格 → WAR。
+  // 修法: hit result.fire 时 increment hitRefCount(set)(way)；io.d.fire 一次 decrement（one-shot）。
+  // hitBusyVec 并入 resvVec → victim chooser（:286-288 一行不改）自动收窄。
+  // 详见 bugs/srad-004/checkpoint_3_rtl_dive.md 迭代2-4。
+  val W_HITREF = 4  // capacity: dir_result_buffer depth=4 + SourceD 在途 ≈ 1; W=4 余量足
+  val hitRefCount = RegInit(VecInit(Seq.fill(params.cache.sets)(
+                      VecInit(Seq.fill(params.cache.ways)(0.U(W_HITREF.W))))))
+  // 只在真正经 SourceD 读/写 hit way 的 opcode 上 set reservation（排除 flush→Hint 孤儿路径）
+  val hitUsesWay = io.result.bits.opcode === Get ||
+                   io.result.bits.opcode === PutFullData ||
+                   io.result.bits.opcode === PutPartialData
+  val will_resv_hit = io.result.fire && io.result.bits.hit && !io.result.bits.flush && hitUsesWay
+  // hitBusyVec: LSB=way0，与 reservation/hits 等全程约定一致
+  val hitBusyVec = VecInit((0 until params.cache.ways).map(w => hitRefCount(set)(w).orR)).asUInt
+
   // bfs4096-010 fix A（触发层）: victim 选择优先填 invalid way（invalid-first）。
   //   根因: 原 `victimWay = victim_LFSR(...)` 纯 LFSR 随机, 不查 status_reg(set).valid,
   //         即便 set 还有空闲(invalid) way 也可能盲选中 valid+dirty way 当 victim →
@@ -277,7 +297,8 @@ for(i<- 0 until params.cache.sets){
   //   (4) 全 reserved          : 占位 0.U(被 victim_stall 挡)
   val validVec      = status_reg(set).valid.asUInt
   val invalidVec    = (~validVec).asUInt
-  val resvVec       = reservation(set)
+  // srad-004 A''': resvVec 扩展含 hitBusyVec，victim 选择树(:286-288)一行不改
+  val resvVec       = reservation(set) | hitBusyVec
   val effInvalidVec = invalidVec & (~resvVec).asUInt
   val nonResvValid  = validVec   & (~resvVec).asUInt
   // mask-safe lfsr pick: lfsr∩mask 非空则选交集首位(伪随机), 否则 mask 首位; 输出恒 ∈ mask
@@ -349,11 +370,17 @@ for(i<- 0 until params.cache.sets){
   val flush_issue_regnext = RegNext(flush_issue, false.B)
   // nn64k-007 迭代6: victim_stall(codex#3 精确公式 + next-state)。occSetThisCyc 并入同拍刚预定的 way
   // (修 same-cycle hole); rdInvalidVec.orR 项修 mixed-state hole(有空 way 但全 reserved 时不踢 valid, 等填回)。
+  // srad-004 A''': occHitThisCyc 并入 occSetThisCyc；rdResvNext 并 hitBusyVecRd（确保同拍 will_resv_hit
+  // 后 victim_stall 立即看见占位，single-read-port 保证 hit/miss result 不同拍故 chooser 不需 occHit）。
   val rdSet         = io.read.bits.set
-  val occSetThisCyc = Mux(will_alloc_victim && (io.result.bits.set === rdSet),
-                          UIntToOH(io.result.bits.way, params.cache.ways), 0.U)
+  val occVictimThisCyc = Mux(will_alloc_victim && (io.result.bits.set === rdSet),
+                             UIntToOH(io.result.bits.way, params.cache.ways), 0.U)
+  val occHitThisCyc    = Mux(will_resv_hit    && (io.result.bits.set === rdSet),
+                             UIntToOH(io.result.bits.way, params.cache.ways), 0.U)
+  val occSetThisCyc    = occVictimThisCyc | occHitThisCyc
+  val hitBusyVecRd  = VecInit((0 until params.cache.ways).map(w => hitRefCount(rdSet)(w).orR)).asUInt
   val rdValidVec    = status_reg(rdSet).valid.asUInt
-  val rdResvNext    = reservation(rdSet) | occSetThisCyc
+  val rdResvNext    = reservation(rdSet) | hitBusyVecRd | occSetThisCyc
   val rdInvalidVec  = (~rdValidVec).asUInt
   val rdEffInvalid  = rdInvalidVec & (~rdResvNext).asUInt
   val rdNonResvVal  = rdValidVec   & (~rdResvNext).asUInt
@@ -445,5 +472,35 @@ for(i<- 0 until params.cache.sets){
   // placeholder 分支(2)(effInvalid=0 但 invalidVec≠0) → 把 reserved way 当 victim alloc。正确则永不打印。
   when(will_alloc_victim && !effInvalidVec.orR && invalidVec.orR) {
     printf(p"[RESV_PLACEHOLDER_ALLOC] set=${io.result.bits.set} way=${io.result.bits.way} (victim_stall leak)\n")
+  }
+
+  // srad-004 A''': hitRefCount inc/dec（同拍 set+clear 安全）。
+  // set = will_resv_hit（result.fire hit Get/Put* 非 flush）→ +1；
+  // clear = io.hit_resv_clear（SourceD io.d.fire 回传，one-shot）→ -1。
+  // setInc/clrDec 各 ∈ {0,1}，正常运行下 next = cur+inc-dec ∈ [0,15] 不溢出；W_HITREF=4 容量
+  // = dir_result_buffer depth(4) + SourceD 在途，余量足。overflow(cur=15 仍 inc) / underflow(cur=0
+  // 仍 dec = clear 身份不匹配) 是"绝不应发生"的不变式，用 fatal assert 兜底（实测回归 0 fire），
+  // 故 (cur +& setInc - clrDec)(W_HITREF-1,0) 截断在正常运行下永不被触及（非饱和，但不变式保证不越界）。
+  for (i <- 0 until params.cache.sets) {
+    for (w <- 0 until params.cache.ways) {
+      val setInc = Mux(will_resv_hit &&
+                    io.result.bits.set === i.asUInt &&
+                    io.result.bits.way === w.asUInt, 1.U(W_HITREF.W), 0.U(W_HITREF.W))
+      val clrDec = Mux(io.hit_resv_clear.valid &&
+                    io.hit_resv_clear.bits.set === i.asUInt &&
+                    io.hit_resv_clear.bits.way === w.asUInt, 1.U(W_HITREF.W), 0.U(W_HITREF.W))
+      when(!wipeDone) {
+        hitRefCount(i)(w) := 0.U
+      }.otherwise {
+        val cur = hitRefCount(i)(w)
+        hitRefCount(i)(w) := (cur +& setInc - clrDec)(W_HITREF-1, 0)
+        // overflow: cur 已达上限(15)仍 inc → W_HITREF 估小 → fatal（不能 wrap 后续静默跑）
+        assert(!(setInc.orR && cur === ((1 << W_HITREF) - 1).U),
+               s"HITREF_OVERFLOW set=$i way=$w (hitRefCount saturated, W_HITREF too small)")
+        // underflow: cur=0 仍 dec → clear 多于 set（身份不匹配）→ fatal
+        assert(!(clrDec.orR && cur === 0.U),
+               s"HITREF_UNDERFLOW set=$i way=$w (clear without matching set)")
+      }
+    }
   }
 }

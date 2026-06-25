@@ -230,6 +230,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   directory.io.resv_clear.valid    := mixedOH.orR
   directory.io.resv_clear.bits.set := Mux1H(mixedOH, mshrs.map(_.io.status.set))
   directory.io.resv_clear.bits.way := Mux1H(mixedOH, mshrs.map(_.io.status.way))
+  // srad-004 Phase 4.5 A''': SourceD hit-done → Directory hit_resv_clear（one-shot hitRefCount decrement）。
+  directory.io.hit_resv_clear := sourceD.io.hit_done
 
   // bfs4096-002 iter5 fix #3: push.valid 看 result.fire 而非 result.valid。
   // ListBuffer 流式 push（push.ready 不满就持续 1）+ result.valid hold（#1 反压触发后）
@@ -327,11 +329,10 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   bankedStore.io.sinkD_adr.bits.mask:= ~(0.U(params.mask_bits.W))
 
   bankedStore.io.sinkD_dat.data :=schedule.data
-  bankedStore.io.sourceD_radr <> sourceD.io.bs_radr   
+  bankedStore.io.sourceD_radr <> sourceD.io.bs_radr
   bankedStore.io.sourceD_wadr <> sourceD.io.bs_wadr
-  bankedStore.io.sourceD_wdat := sourceD.io.bs_wdat   
-  sourceD.io.bs_rdat := bankedStore.io.sourceD_rdat   
-
+  bankedStore.io.sourceD_wdat := sourceD.io.bs_wdat
+  sourceD.io.bs_rdat := bankedStore.io.sourceD_rdat
 
 }
 
