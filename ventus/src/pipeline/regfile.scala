@@ -1,13 +1,14 @@
 package pipeline
 
 import chisel3._
-import chisel3.util.{Cat, MuxLookup, is, switch}
+import chisel3.util.{Cat, MuxLookup, RegEnable, is, switch}
 import IDecode._
 import top.parameters._
 
 class RegFileBankIO extends Bundle  {
   val rs     = Output(UInt(xLen.W))
   val rsidx  = Input(UInt(depth_regBank.W))
+  val rsen   = Input(Bool())
   val rd     = Input(UInt(xLen.W))
   val rdidx  = Input(UInt(depth_regBank.W))
   val rdwen  = Input(Bool())
@@ -18,10 +19,10 @@ class RegFileBankIO extends Bundle  {
 class RegFileBank extends Module  {
   val io = IO(new RegFileBankIO())
   val bypassSignal = Wire(Bool())
-  bypassSignal := RegNext((io.rsidx===io.rdidx)&io.rdwen, false.B)
+  bypassSignal := RegNext(io.rsen && (io.rsidx === io.rdidx) && io.rdwen, false.B)
   if (!GVM_ENABLED) {
     val regs = SyncReadMem(NUMBER_SGPR_SLOTS/num_bank, UInt(xLen.W))
-    io.rs := Mux(bypassSignal, RegNext(io.rd, 0.U(xLen.W)), regs.read(io.rsidx))
+    io.rs := Mux(bypassSignal, RegNext(io.rd, 0.U(xLen.W)), regs.read(io.rsidx, io.rsen))
     //io.ready := true.B
     when (io.rdwen) {
       regs.write(io.rdidx, io.rd)
@@ -29,7 +30,8 @@ class RegFileBank extends Module  {
   }
   else {
     val regs_gvm = RegInit(VecInit(Seq.fill(NUMBER_SGPR_SLOTS / num_bank)(0.U(xLen.W)))) // gvm DUT
-    io.rs := Mux(bypassSignal, RegNext(io.rd, 0.U(xLen.W)), RegNext(regs_gvm(io.rsidx), 0.U(xLen.W)))
+    val readData = RegEnable(regs_gvm(io.rsidx), 0.U(xLen.W), io.rsen)
+    io.rs := Mux(bypassSignal, RegNext(io.rd, 0.U(xLen.W)), readData)
     when(io.rdwen) {
       regs_gvm(io.rdidx) := io.rd
     }
@@ -41,6 +43,7 @@ class FloatRegFileBankIO(val unified: Boolean) extends Bundle  {
   val v0     = Output(Vec(num_thread,UInt((xLen).W)))//mask v0
   val rs     = Output(Vec(num_thread,UInt((xLen).W)))
   val rsidx  = Input(UInt(depth_regBank.W))
+  val rsen   = Input(Bool())
   val rd     = Input(Vec(num_thread,UInt((xLen).W)))
   val rdidx  = Input(UInt(depth_regBank.W))
   val rdwen  = Input(Bool())
@@ -52,13 +55,13 @@ class FloatRegFileBank extends Module  {
   val io = IO(new FloatRegFileBankIO(false))
   val internalMask = Wire(Vec(num_thread, Bool()))
   val bypassSignal = Wire(Bool())
-  bypassSignal := RegNext((io.rsidx === io.rdidx) & io.rdwen, false.B)
+  bypassSignal := RegNext(io.rsen && (io.rsidx === io.rdidx) && io.rdwen, false.B)
   io.v0 := WireInit(VecInit.fill(num_thread)(~(0.U(xLen.W))))
   internalMask:=io.rdwmask
 
   if (!GVM_ENABLED) {
     val regs = SyncReadMem(NUMBER_VGPR_SLOTS/num_bank, Vec(num_thread,UInt(xLen.W)))  //Register files of all warps are divided to number of bank
-    io.rs := Mux(bypassSignal, RegNext(io.rd, VecInit(Seq.fill(num_thread)(0.U(xLen.W)))), regs.read(io.rsidx))
+    io.rs := Mux(bypassSignal, RegNext(io.rd, VecInit(Seq.fill(num_thread)(0.U(xLen.W)))), regs.read(io.rsidx, io.rsen))
     when (io.rdwen) {
       regs.write(io.rdidx, io.rd, internalMask)
     }
@@ -66,7 +69,8 @@ class FloatRegFileBank extends Module  {
   else {
     val regs_gvm = RegInit(VecInit(Seq.fill(NUMBER_VGPR_SLOTS / num_bank)(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))))
     val zeroVec = VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
-    io.rs := Mux(bypassSignal, RegNext(io.rd, zeroVec), RegNext(regs_gvm(io.rsidx), zeroVec))
+    val readData = RegEnable(regs_gvm(io.rsidx), zeroVec, io.rsen)
+    io.rs := Mux(bypassSignal, RegNext(io.rd, zeroVec), readData)
     when (io.rdwen) {
       for (laneIdx <- 0 until num_thread) {
         when (io.rdwmask(laneIdx)) {

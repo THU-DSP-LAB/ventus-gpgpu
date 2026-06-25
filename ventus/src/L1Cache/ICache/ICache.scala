@@ -12,7 +12,6 @@ package L1Cache.ICache
 
 import config.config.Parameters
 import L1Cache.{L1TagAccess, L1TagAccess_ICache, RVGParameters}
-import SRAMTemplate.{SRAMReadBus, SRAMWriteBus}
 import chisel3.DontCare.:=
 import chisel3._
 import chisel3.util._
@@ -172,18 +171,27 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
   // ******      data read, to handle pipe req st2     ******
   dataAccess.io.r.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
   dataAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
-  val dataAccess_data = dataAccess.io.r.resp.asTypeOf(Vec(NWays,UInt(BlockBits.W)))
-  val data_after_wayidx_st1 = dataAccess_data(wayidx_hit_st1)//dontTouch(dataAccess.io.r.resp.data(0.U(1.W)))
+  val refillSliceWords = ICacheDataArray.refillSliceWords(BlockWords)
+  val refillSliceBits = ICacheDataArray.refillSliceBits(BlockWords, WordLength)
+  val refillSliceOffsetBits = log2Ceil(refillSliceWords)
+  require(refillSliceWords >= num_fetch, "ICache data slice must contain one fetch group")
+  require(num_fetch % refillSliceWords == 0 || refillSliceWords % num_fetch == 0,
+    "ICache fetch group must not cross data slices")
+  dataAccess.io.r.req.bits.sliceIdx :=
+    get_blockOffset(io.coreReq.bits.addr)(BlockOffsetBits - 1, refillSliceOffsetBits)
+  val dataAccess_data = dataAccess.io.r.resp.data
+  val data_after_wayidx_st1 = dataAccess_data(wayidx_hit_st1)
   val blockOffset_sel_st1 = get_blockOffset(pipeReqAddr_st1)
+  val wordOffsetInSlice_st1 = blockOffset_sel_st1(refillSliceOffsetBits - 1, 0)
   if(num_fetch>1){
     assert(blockOffset_sel_st1(log2Ceil(num_fetch)-1,0).orR === false.B)
   }
   val data_to_blockOffset_st1 = data_after_wayidx_st1
   val data_after_blockOffset_st1 = Wire(UInt((num_fetch*xLen).W))//(data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))//(num_fetch*xLen,0)
-  if(num_fetch * xLen == BlockBits){
-    data_after_blockOffset_st1 := (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))
+  if(num_fetch * xLen == refillSliceBits){
+    data_after_blockOffset_st1 := (data_to_blockOffset_st1 >> (wordOffsetInSlice_st1 << 5))
   } else{
-    data_after_blockOffset_st1 := (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))(num_fetch*xLen,0)
+    data_after_blockOffset_st1 := (data_to_blockOffset_st1 >> (wordOffsetInSlice_st1 << 5))(num_fetch*xLen - 1,0)
   }
   //val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1 << 5))//(num_fetch*xLen,0)
   //val data_after_blockOffset_st1 = (data_to_blockOffset_st1 >> (blockOffset_sel_st1*32))(31,0)

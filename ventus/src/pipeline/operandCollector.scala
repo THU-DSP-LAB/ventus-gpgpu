@@ -572,7 +572,9 @@ class operandCollector extends Module{
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).outArbiterIO <> Arbiter.io.readArbiterIO(i)})
   (0 until num_bank).foreach(i=>{
     vectorBank(i).rsidx := Arbiter.io.readArbiterOutVector(i).bits.rsAddr
+    vectorBank(i).rsen := Arbiter.io.readArbiterOutVector(i).fire
     scalarBank(i).rsidx := Arbiter.io.readArbiterOutScalar(i).bits.rsAddr
+    scalarBank(i).rsen := Arbiter.io.readArbiterOutScalar(i).fire
     Arbiter.io.readArbiterOutVector(i).ready := true.B
     Arbiter.io.readArbiterOutScalar(i).ready := true.B
   })

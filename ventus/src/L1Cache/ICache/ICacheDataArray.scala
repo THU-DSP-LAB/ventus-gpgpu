@@ -10,24 +10,45 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache.ICache
 
-import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
+import SRAMTemplate.{SRAMTemplate, SRAMWriteBus}
 import chisel3._
+import chisel3.util._
 import config.config.Parameters
 
-private object ICacheDataArray {
+object ICacheDataArray {
   val RefillSliceCount = 8
+
+  def refillSliceWords(blockWords: Int): Int = blockWords / RefillSliceCount
+  def refillSliceBits(blockWords: Int, wordLength: Int): Int =
+    refillSliceWords(blockWords) * wordLength
+}
+
+class ICacheDataReadReq(implicit p: Parameters) extends ICacheBundle {
+  val setIdx = UInt(log2Up(NSets).W)
+  val sliceIdx = UInt(log2Ceil(ICacheDataArray.RefillSliceCount).W)
+}
+
+class ICacheDataReadResp(implicit p: Parameters) extends ICacheBundle {
+  val data = Output(Vec(NWays, UInt(ICacheDataArray.refillSliceBits(BlockWords, WordLength).W)))
+}
+
+class ICacheDataReadBus(implicit p: Parameters) extends ICacheBundle {
+  val req = Decoupled(new ICacheDataReadReq)
+  val resp = Flipped(new ICacheDataReadResp)
 }
 
 class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
   import ICacheDataArray._
 
   require(BlockWords % RefillSliceCount == 0, "ICache refill data slices must evenly divide a cache block")
+  require((RefillSliceCount & (RefillSliceCount - 1)) == 0, "ICache refill slice count must be power of two")
 
-  private val refillSliceWords = BlockWords / RefillSliceCount
-  private val refillSliceBits = refillSliceWords * WordLength
+  private val refillSliceWords = ICacheDataArray.refillSliceWords(BlockWords)
+  private val refillSliceBits = ICacheDataArray.refillSliceBits(BlockWords, WordLength)
+  require((refillSliceWords & (refillSliceWords - 1)) == 0, "ICache refill slice words must be power of two")
 
   val io = IO(new Bundle {
-    val r = Flipped(new SRAMReadBus(UInt(BlockBits.W), NSets, NWays))
+    val r = Flipped(new ICacheDataReadBus)
     val w = Flipped(new SRAMWriteBus(UInt(BlockBits.W), NSets, NWays))
   })
 
@@ -44,12 +65,12 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
     slice
   }
 
-  io.r.req.ready := slices.map(_.io.r.req.ready).reduce(_ && _)
+  io.r.req.ready := VecInit(slices.map(_.io.r.req.ready))(io.r.req.bits.sliceIdx)
   io.w.req.ready := slices.map(_.io.w.req.ready).reduce(_ && _)
 
   for (sliceIdx <- 0 until RefillSliceCount) {
     val slice = slices(sliceIdx)
-    slice.io.r.req.valid := io.r.req.valid
+    slice.io.r.req.valid := io.r.req.valid && io.r.req.bits.sliceIdx === sliceIdx.U
     slice.io.r.req.bits.setIdx := io.r.req.bits.setIdx
     slice.io.w.req.valid := io.w.req.valid
     slice.io.w.req.bits.setIdx := io.w.req.bits.setIdx
@@ -68,8 +89,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
     }
   }
 
-  private val readBlocksByWay = Seq.tabulate(NWays) { wayIdx =>
-    VecInit(slices.map(_.io.r.resp.data(wayIdx))).asUInt
-  }
-  io.r.resp.data := VecInit(readBlocksByWay)
+  private val readSliceIdx = RegEnable(io.r.req.bits.sliceIdx, 0.U(log2Ceil(RefillSliceCount).W), io.r.req.fire)
+  private val readDataBySlice = VecInit(slices.map(_.io.r.resp.data))
+  io.r.resp.data := readDataBySlice(readSliceIdx)
 }
