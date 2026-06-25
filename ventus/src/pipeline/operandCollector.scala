@@ -25,7 +25,6 @@ class crossbar2CU extends Bundle{
   //val CUId = UInt(log2Ceil(num_collectorUnit).W)
   val regOrder = UInt(2.W)
   val data = Vec(num_thread, UInt(xLen.W))
-  val v0 = Vec(num_thread, UInt(xLen.W))
 }
 class readArbiterInnerIO extends Bundle{
   val rsAddr = UInt(depth_regBank.W)
@@ -67,6 +66,7 @@ class collectorUnit extends Module{
   val rsType = Reg(Vec(4, UInt(2.W)))
   val ready = RegInit(VecInit.fill(4)(false.B))
   val valid = RegInit(VecInit.fill(4)(false.B))
+  val readIssued = RegInit(VecInit.fill(4)(false.B))
   val regIdx = Reg(Vec(4, UInt((regidx_width + regext_width).W)))
   val rsReg = RegInit(VecInit(Seq.fill(3)(VecInit(Seq.fill(num_thread)(0.U(xLen.W)))))) //op1, op2 and op3
   val mask = Reg(Vec(num_thread, Bool()))
@@ -129,10 +129,12 @@ class collectorUnit extends Module{
     io.bankIn(i).ready := (state === s_add  && (ready(i)===0.U)) || (io.control.fire && (readyWire(i)===0.U))
   })
   for (i <- 0 until 4) {
+    val currentRsType = Mux(io.control.fire && (state === s_idle), rsTypeWire(i), rsType(i))
+    val isRegisterRead = currentRsType === 1.U || currentRsType === 2.U
     io.outArbiterIO(i).valid :=
       MuxLookup(state, false.B)(
         Array(s_idle->(io.control.fire && (readyWire(i)===0.U)),
-          s_add->((valid(i) === true.B) && (ready(i)===false.B))
+          s_add->((valid(i) === true.B) && (ready(i)===false.B) && !(isRegisterRead && readIssued(i)))
         ))
   }
   //  io.issue.valid := (valid.asUInt === ready.asUInt) && ready.asUInt.andR
@@ -201,6 +203,7 @@ class collectorUnit extends Module{
         valid.foreach(_:= true.B)
         validWire.foreach(_:=true.B)
         ready.foreach(_:= false.B)
+        readIssued.foreach(_ := false.B)
         //using an iterable variable to indicate sel_alu signals
         rsTypeWire(0) := io.control.bits.sel_alu1
         rsTypeWire(1) := io.control.bits.sel_alu2
@@ -211,7 +214,7 @@ class collectorUnit extends Module{
             A3_SD -> Mux(io.control.bits.isvec, 2.U, 1.U),
             A3_FRS3 -> 1.U
           ))
-        rsTypeWire(3) := 0.U(2.W) //mask
+        rsTypeWire(3) := Mux(io.control.bits.mask, 2.U, 0.U) // vector mask uses VGPR0
         customCtrlWire := io.control.bits.custom_signal_0
         rsType(0) := rsTypeWire(0)
         rsType(1) := rsTypeWire(1)
@@ -259,6 +262,7 @@ class collectorUnit extends Module{
       valid.foreach(_ := false.B)
       validWire.foreach(_:=false.B)
       ready.foreach(_ := false.B)
+      readIssued.foreach(_ := false.B)
     }
   }
   rsRead.foreach(_ := 0.U)
@@ -284,6 +288,7 @@ class collectorUnit extends Module{
           rsReg(0) := rsRead
         }
         ready(0) := 1.U
+        readIssued(0) := false.B
       }.elsewhen(io.bankIn(i).bits.regOrder === 1.U) { //operand2
         rsReg(1) := MuxLookup(Mux(io.control.fire, rsTypeWire(1), rsType(1)), VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(
@@ -299,6 +304,7 @@ class collectorUnit extends Module{
             A2_VRS2 -> io.bankIn(i).bits.data)
         )
         ready(1) := 1.U
+        readIssued(1) := false.B
       }.elsewhen(io.bankIn(i).bits.regOrder === 2.U) { //operand3
         rsReg(2) := MuxLookup(controlReg.sel_alu3, VecInit.fill(num_thread)(0.U(xLen.W)))(
           Array(A3_PC -> VecInit.fill(num_thread)(imm.io.out + io.bankIn(i).bits.data(0)),
@@ -308,12 +314,19 @@ class collectorUnit extends Module{
           )
         )
         ready(2) := 1.U
+        readIssued(2) := false.B
       }.elsewhen(io.bankIn(i).bits.regOrder === 3.U) {
         (0 until num_thread).foreach(x => {
-          mask(x) := io.bankIn(i).bits.v0(0).apply(x) //this instruction is an Vector with mask, the mask is read from vector register bank
+          mask(x) := io.bankIn(i).bits.data(0).apply(x)
         })
         ready(3) := 1.U
+        readIssued(3) := false.B
       }
+    }
+  }
+  for (i <- 0 until 4) {
+    when(io.outArbiterIO(i).fire && (io.outArbiterIO(i).bits.rsType === 1.U || io.outArbiterIO(i).bits.rsType === 2.U)) {
+      readIssued(i) := true.B
     }
   }
   io.issue.bits.alu_src1 := rsReg(0)
@@ -363,8 +376,15 @@ class operandArbiter extends Module{
           (io.readArbiterIO(j)(k).bits.bankID === i.U) && (io.readArbiterIO(j)(k).bits.rsType === 1.U)
         bankArbiterVector(i).io.in(j*4+k).valid := io.readArbiterIO(j)(k).valid &&
           (io.readArbiterIO(j)(k).bits.bankID === i.U) && (io.readArbiterIO(j)(k).bits.rsType === 2.U)
-        io.readArbiterIO(j)(k).ready := bankArbiterScalar(i).io.in(j*4+k).ready
       }
+  }
+  for (j <- 0 until num_collectorUnit) {
+    for (k <- 0 until 4) {
+      val bankId = io.readArbiterIO(j)(k).bits.bankID
+      val scalarReady = VecInit(bankArbiterScalar.map(_.io.in(j * 4 + k).ready))(bankId)
+      val vectorReady = VecInit(bankArbiterVector.map(_.io.in(j * 4 + k).ready))(bankId)
+      io.readArbiterIO(j)(k).ready := Mux(io.readArbiterIO(j)(k).bits.rsType === 2.U, vectorReady, scalarReady)
+    }
   }
   (0 until num_bank).foreach(x =>{
     io.readArbiterOutScalar(x) <> bankArbiterScalar(x).io.out
@@ -388,7 +408,6 @@ class crossBar  extends Module{
     })
     val dataInVector = Input(new Bundle {
       val rs = Vec(num_bank, Vec(num_thread, UInt(xLen.W)))
-      val v0 = Vec(num_bank, Vec(num_thread, UInt((xLen).W)))
     })
     val out = Vec(num_collectorUnit, Vec(4, Decoupled(new crossbar2CU)))
   })
@@ -406,7 +425,6 @@ class crossBar  extends Module{
     regOrderVector(i) := io.chosenVector(i) % 4.U
   })
   io.out.foreach(_.foreach(_.bits.data := 0.U.asTypeOf(Vec(num_thread, UInt(xLen.W)))))
-  io.out.foreach(_.foreach(_.bits.v0 := 0.U.asTypeOf(Vec(num_thread, UInt(xLen.W)))))
   //  validDelay.foreach(_.foreach(_ := false.B))
   io.out.foreach(_.foreach(_.valid := (false.B)))
   io.out.foreach(_.foreach(_.bits.regOrder := 0.U))
@@ -422,7 +440,6 @@ class crossBar  extends Module{
         }
         when((CUIdVector(i) === j.U) && io.validArbiterVector(i) && (regOrderVector(i) === k.U)) {
           io.out(j)(k).bits.data := io.dataInVector.rs(i)
-          io.out(j)(k).bits.v0 := io.dataInVector.v0(i)
           //          validDelay(j)(k) := true.B
           //          io.out(j)(k).valid := validDelay
           io.out(j)(k).valid := true.B
@@ -549,6 +566,7 @@ class operandCollector extends Module{
     }
   }
   val crossBar = Module(new crossBar)
+  val readReturnStage = Module(new OperandReadReturnStage)
   val Demux = Module(new instDemux)
   // connecting Arbiters and banks
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).outArbiterIO <> Arbiter.io.readArbiterIO(i)})
@@ -558,16 +576,20 @@ class operandCollector extends Module{
     Arbiter.io.readArbiterOutVector(i).ready := true.B
     Arbiter.io.readArbiterOutScalar(i).ready := true.B
   })
-  // connecting crossbar and banks, as well as signal readchosen. Readchosen needs to delay one tick to match bank reading
-  crossBar.io.chosenScalar := RegNext(Arbiter.io.readchosenScalar)
-  crossBar.io.validArbiterScalar := RegNext(VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid)))
-  crossBar.io.chosenVector := RegNext(Arbiter.io.readchosenVector)
-  crossBar.io.validArbiterVector := RegNext(VecInit(Arbiter.io.readArbiterOutVector.map(_.valid)))
+  readReturnStage.io.chosenScalarIn := Arbiter.io.readchosenScalar
+  readReturnStage.io.validScalarIn := VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid))
+  readReturnStage.io.chosenVectorIn := Arbiter.io.readchosenVector
+  readReturnStage.io.validVectorIn := VecInit(Arbiter.io.readArbiterOutVector.map(_.valid))
   for( i <- 0 until num_bank){
-    crossBar.io.dataInScalar.rs(i) := scalarBank(i).rs
-    crossBar.io.dataInVector.rs(i) := vectorBank(i).rs
-    crossBar.io.dataInVector.v0(i) := vectorBank(i).v0
+    readReturnStage.io.dataScalarIn(i) := scalarBank(i).rs
+    readReturnStage.io.dataVectorIn(i) := vectorBank(i).rs
+    crossBar.io.dataInScalar.rs(i) := readReturnStage.io.dataScalarOut(i)
+    crossBar.io.dataInVector.rs(i) := readReturnStage.io.dataVectorOut(i)
   }
+  crossBar.io.chosenScalar := readReturnStage.io.chosenScalarOut
+  crossBar.io.validArbiterScalar := readReturnStage.io.validScalarOut
+  crossBar.io.chosenVector := readReturnStage.io.chosenVectorOut
+  crossBar.io.validArbiterVector := readReturnStage.io.validVectorOut
   // connecting crossbar and collector units
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).bankIn <> crossBar.io.out(i)})
 
@@ -683,4 +705,3 @@ class operandCollector extends Module{
   io.out(0) <> issueUnit.io.out_v
   io.out(1) <> issueUnit.io.out_x
 }
-

@@ -12,7 +12,7 @@ package L1Cache.ICache
 
 import config.config.Parameters
 import L1Cache.{L1TagAccess, L1TagAccess_ICache, RVGParameters}
-import SRAMTemplate.{SRAMReadBus, SRAMTemplate, SRAMWriteBus}
+import SRAMTemplate.{SRAMReadBus, SRAMWriteBus}
 import chisel3.DontCare.:=
 import chisel3._
 import chisel3.util._
@@ -81,14 +81,7 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
 
   // ****** submodules ******
   val tagAccess = Module(new L1TagAccess_ICache(set=NSets, way=NWays, tagBits=TagBits, AsidBits = asidLen))
-  val dataAccess = Module(new SRAMTemplate(
-    gen=UInt(BlockBits.W),
-    set=NSets,
-    way=NWays,
-    shouldReset = false,
-    holdRead = false,
-    singlePort = false
-  ))
+  val dataAccess = Module(new ICacheDataArray)
 
   // TODO: need to deal with MSHR. Clear it or wait for it?
   tagAccess.io.invalidate := io.invalidate
