@@ -4,6 +4,47 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 
+class OperandBankReadReturnStage extends Module {
+  private val readChoiceWidth = log2Ceil(4 * num_collectorUnit)
+
+  val io = IO(new Bundle {
+    val chosenScalarIn = Input(UInt(readChoiceWidth.W))
+    val chosenVectorIn = Input(UInt(readChoiceWidth.W))
+    val validScalarIn = Input(Bool())
+    val validVectorIn = Input(Bool())
+    val dataScalarIn = Input(UInt(xLen.W))
+    val dataVectorIn = Input(Vec(num_thread, UInt(xLen.W)))
+
+    val chosenScalarOut = Output(UInt(readChoiceWidth.W))
+    val chosenVectorOut = Output(UInt(readChoiceWidth.W))
+    val validScalarOut = Output(Bool())
+    val validVectorOut = Output(Bool())
+    val dataScalarOut = Output(UInt(xLen.W))
+    val dataVectorOut = Output(Vec(num_thread, UInt(xLen.W)))
+  })
+
+  private val validScalarSt1 = RegNext(io.validScalarIn, false.B)
+  private val validVectorSt1 = RegNext(io.validVectorIn, false.B)
+  io.validScalarOut := RegNext(validScalarSt1, false.B)
+  io.validVectorOut := RegNext(validVectorSt1, false.B)
+
+  io.chosenScalarOut := RegNext(RegNext(io.chosenScalarIn, 0.U), 0.U)
+  io.chosenVectorOut := RegNext(RegNext(io.chosenVectorIn, 0.U), 0.U)
+
+  private val scalarDataSt2 = RegInit(0.U(xLen.W))
+  private val vectorDataSt2 = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+
+  when(validScalarSt1) {
+    scalarDataSt2 := io.dataScalarIn
+  }
+  when(validVectorSt1) {
+    vectorDataSt2 := io.dataVectorIn
+  }
+
+  io.dataScalarOut := scalarDataSt2
+  io.dataVectorOut := vectorDataSt2
+}
+
 class OperandReadReturnStage extends Module {
   private val readChoiceWidth = log2Ceil(4 * num_collectorUnit)
 
@@ -23,26 +64,20 @@ class OperandReadReturnStage extends Module {
     val dataVectorOut = Output(Vec(num_bank, Vec(num_thread, UInt(xLen.W))))
   })
 
-  private val validScalarSt1 = RegNext(io.validScalarIn, VecInit.fill(num_bank)(false.B))
-  private val validVectorSt1 = RegNext(io.validVectorIn, VecInit.fill(num_bank)(false.B))
-  io.validScalarOut := RegNext(validScalarSt1, VecInit.fill(num_bank)(false.B))
-  io.validVectorOut := RegNext(validVectorSt1, VecInit.fill(num_bank)(false.B))
-
-  io.chosenScalarOut := RegNext(RegNext(io.chosenScalarIn))
-  io.chosenVectorOut := RegNext(RegNext(io.chosenVectorIn))
-
-  private val scalarDataSt2 = Reg(Vec(num_bank, UInt(xLen.W)))
-  private val vectorDataSt2 = Reg(Vec(num_bank, Vec(num_thread, UInt(xLen.W))))
-
   for (bankIdx <- 0 until num_bank) {
-    when(validScalarSt1(bankIdx)) {
-      scalarDataSt2(bankIdx) := io.dataScalarIn(bankIdx)
-    }
-    when(validVectorSt1(bankIdx)) {
-      vectorDataSt2(bankIdx) := io.dataVectorIn(bankIdx)
-    }
+    val bankStage = Module(new OperandBankReadReturnStage)
+    bankStage.suggestName(s"bankReadReturnStage_$bankIdx")
+    bankStage.io.chosenScalarIn := io.chosenScalarIn(bankIdx)
+    bankStage.io.chosenVectorIn := io.chosenVectorIn(bankIdx)
+    bankStage.io.validScalarIn := io.validScalarIn(bankIdx)
+    bankStage.io.validVectorIn := io.validVectorIn(bankIdx)
+    bankStage.io.dataScalarIn := io.dataScalarIn(bankIdx)
+    bankStage.io.dataVectorIn := io.dataVectorIn(bankIdx)
+    io.chosenScalarOut(bankIdx) := bankStage.io.chosenScalarOut
+    io.chosenVectorOut(bankIdx) := bankStage.io.chosenVectorOut
+    io.validScalarOut(bankIdx) := bankStage.io.validScalarOut
+    io.validVectorOut(bankIdx) := bankStage.io.validVectorOut
+    io.dataScalarOut(bankIdx) := bankStage.io.dataScalarOut
+    io.dataVectorOut(bankIdx) := bankStage.io.dataVectorOut
   }
-
-  io.dataScalarOut := scalarDataSt2
-  io.dataVectorOut := vectorDataSt2
 }

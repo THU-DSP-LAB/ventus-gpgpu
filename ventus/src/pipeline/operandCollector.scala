@@ -566,7 +566,11 @@ class operandCollector extends Module{
     }
   }
   val crossBar = Module(new crossBar)
-  val readReturnStage = Module(new OperandReadReturnStage)
+  val readReturnStage = Seq.tabulate(num_bank) { bankIdx =>
+    val stage = Module(new OperandBankReadReturnStage)
+    stage.suggestName(s"bankReadReturnStage_$bankIdx")
+    stage
+  }
   val Demux = Module(new instDemux)
   // connecting Arbiters and banks
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).outArbiterIO <> Arbiter.io.readArbiterIO(i)})
@@ -578,20 +582,20 @@ class operandCollector extends Module{
     Arbiter.io.readArbiterOutVector(i).ready := true.B
     Arbiter.io.readArbiterOutScalar(i).ready := true.B
   })
-  readReturnStage.io.chosenScalarIn := Arbiter.io.readchosenScalar
-  readReturnStage.io.validScalarIn := VecInit(Arbiter.io.readArbiterOutScalar.map(_.valid))
-  readReturnStage.io.chosenVectorIn := Arbiter.io.readchosenVector
-  readReturnStage.io.validVectorIn := VecInit(Arbiter.io.readArbiterOutVector.map(_.valid))
   for( i <- 0 until num_bank){
-    readReturnStage.io.dataScalarIn(i) := scalarBank(i).rs
-    readReturnStage.io.dataVectorIn(i) := vectorBank(i).rs
-    crossBar.io.dataInScalar.rs(i) := readReturnStage.io.dataScalarOut(i)
-    crossBar.io.dataInVector.rs(i) := readReturnStage.io.dataVectorOut(i)
+    readReturnStage(i).io.chosenScalarIn := Arbiter.io.readchosenScalar(i)
+    readReturnStage(i).io.validScalarIn := Arbiter.io.readArbiterOutScalar(i).valid
+    readReturnStage(i).io.chosenVectorIn := Arbiter.io.readchosenVector(i)
+    readReturnStage(i).io.validVectorIn := Arbiter.io.readArbiterOutVector(i).valid
+    readReturnStage(i).io.dataScalarIn := scalarBank(i).rs
+    readReturnStage(i).io.dataVectorIn := vectorBank(i).rs
+    crossBar.io.dataInScalar.rs(i) := readReturnStage(i).io.dataScalarOut
+    crossBar.io.dataInVector.rs(i) := readReturnStage(i).io.dataVectorOut
   }
-  crossBar.io.chosenScalar := readReturnStage.io.chosenScalarOut
-  crossBar.io.validArbiterScalar := readReturnStage.io.validScalarOut
-  crossBar.io.chosenVector := readReturnStage.io.chosenVectorOut
-  crossBar.io.validArbiterVector := readReturnStage.io.validVectorOut
+  crossBar.io.chosenScalar := VecInit(readReturnStage.map(_.io.chosenScalarOut))
+  crossBar.io.validArbiterScalar := VecInit(readReturnStage.map(_.io.validScalarOut))
+  crossBar.io.chosenVector := VecInit(readReturnStage.map(_.io.chosenVectorOut))
+  crossBar.io.validArbiterVector := VecInit(readReturnStage.map(_.io.validVectorOut))
   // connecting crossbar and collector units
   (0 until num_collectorUnit).foreach(i => {collectorUnits(i).bankIn <> crossBar.io.out(i)})
 
