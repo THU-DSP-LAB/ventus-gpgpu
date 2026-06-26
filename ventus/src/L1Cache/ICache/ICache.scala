@@ -147,8 +147,21 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
 
   // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp
-  val memRsp_QData = Wire(UInt((WordLength*BlockWords).W))
-  memRsp_QData := memRsp_Q.io.deq.bits.d_data.asUInt
+  val refillSliceWords = ICacheDataArray.refillSliceWords(BlockWords)
+  val refillSliceBits = ICacheDataArray.refillSliceBits(BlockWords, WordLength)
+  val refillSliceOffsetBits = log2Ceil(refillSliceWords)
+  require(refillSliceWords >= num_fetch, "ICache data slice must contain one fetch group")
+  require(num_fetch % refillSliceWords == 0 || refillSliceWords % num_fetch == 0,
+    "ICache fetch group must not cross data slices")
+
+  val memRsp_QDataBySlice = Wire(Vec(ICacheDataArray.RefillSliceCount, UInt(refillSliceBits.W)))
+  for (sliceIdx <- 0 until ICacheDataArray.RefillSliceCount) {
+    val firstWord = sliceIdx * refillSliceWords
+    val sliceWords = VecInit(Seq.tabulate(refillSliceWords) { wordIdx =>
+      memRsp_Q.io.deq.bits.d_data(firstWord + wordIdx)
+    })
+    memRsp_QDataBySlice(sliceIdx) := sliceWords.asUInt
+  }
   //deq coupled with mshr missRsp
   // ******     mshrAccess      ******
   mshrAccess.io.missReq.valid := cacheMiss_st1
@@ -166,17 +179,13 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
 
   // ******      data write, to handle mem rsp st2      ******
   dataAccess.io.w.req.valid := memRsp_Q.io.deq.fire
-  dataAccess.io.w.req.bits.apply(data=memRsp_QData, setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask=waymask_replace_st0)
+  dataAccess.io.w.req.bits.data := memRsp_QDataBySlice
+  dataAccess.io.w.req.bits.setIdx := get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr)
+  dataAccess.io.w.req.bits.waymask.foreach(_ := waymask_replace_st0)
 
   // ******      data read, to handle pipe req st2     ******
   dataAccess.io.r.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
   dataAccess.io.r.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
-  val refillSliceWords = ICacheDataArray.refillSliceWords(BlockWords)
-  val refillSliceBits = ICacheDataArray.refillSliceBits(BlockWords, WordLength)
-  val refillSliceOffsetBits = log2Ceil(refillSliceWords)
-  require(refillSliceWords >= num_fetch, "ICache data slice must contain one fetch group")
-  require(num_fetch % refillSliceWords == 0 || refillSliceWords % num_fetch == 0,
-    "ICache fetch group must not cross data slices")
   dataAccess.io.r.req.bits.sliceIdx :=
     get_blockOffset(io.coreReq.bits.addr)(BlockOffsetBits - 1, refillSliceOffsetBits)
   val dataAccess_data = dataAccess.io.r.resp.data

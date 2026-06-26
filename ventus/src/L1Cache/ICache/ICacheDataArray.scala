@@ -10,7 +10,7 @@
  * See the Mulan PSL v2 for more details. */
 package L1Cache.ICache
 
-import SRAMTemplate.{SRAMTemplate, SRAMWriteBus}
+import SRAMTemplate.SRAMTemplate
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
@@ -37,6 +37,17 @@ class ICacheDataReadBus(implicit p: Parameters) extends ICacheBundle {
   val resp = Flipped(new ICacheDataReadResp)
 }
 
+class ICacheDataWriteReq(implicit p: Parameters) extends ICacheBundle {
+  val setIdx = UInt(log2Up(NSets).W)
+  val data = Vec(ICacheDataArray.RefillSliceCount,
+    UInt(ICacheDataArray.refillSliceBits(BlockWords, WordLength).W))
+  val waymask = if (NWays > 1) Some(UInt(NWays.W)) else None
+}
+
+class ICacheDataWriteBus(implicit p: Parameters) extends ICacheBundle {
+  val req = Decoupled(new ICacheDataWriteReq)
+}
+
 class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
   import ICacheDataArray._
 
@@ -49,7 +60,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
 
   val io = IO(new Bundle {
     val r = Flipped(new ICacheDataReadBus)
-    val w = Flipped(new SRAMWriteBus(UInt(BlockBits.W), NSets, NWays))
+    val w = Flipped(new ICacheDataWriteBus)
   })
 
   private val slices = Seq.tabulate(RefillSliceCount) { sliceIdx =>
@@ -78,15 +89,7 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
       case (Some(dst), Some(src)) => dst := src
       case _ =>
     }
-
-    for (wayIdx <- 0 until NWays) {
-      val blockWords = io.w.req.bits.data(wayIdx).asTypeOf(Vec(BlockWords, UInt(WordLength.W)))
-      val firstWord = sliceIdx * refillSliceWords
-      val sliceWords = Seq.tabulate(refillSliceWords) { wordIdx =>
-        blockWords(firstWord + wordIdx)
-      }
-      slice.io.w.req.bits.data(wayIdx) := VecInit(sliceWords).asUInt
-    }
+    slice.io.w.req.bits.data := VecInit(Seq.fill(NWays)(io.w.req.bits.data(sliceIdx)))
   }
 
   private val readSliceIdx = RegEnable(io.r.req.bits.sliceIdx, 0.U(log2Ceil(RefillSliceCount).W), io.r.req.fire)
