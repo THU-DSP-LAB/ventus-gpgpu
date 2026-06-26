@@ -286,6 +286,14 @@ val mshr_wait_reg =RegInit(false.B)
 
   io.a.bits.data  := Mux((s_final_req.opcode===PutFullData ||s_final_req.opcode=== PutPartialData),s_final_req.data,io.bs_rdat.data) // should be victim data 写miss的数据也经过这个地方转给sourceA
   io.a.bits.opcode:= PutFullData
+  // srad-006 root-fix: dirty-victim writeback 强制 opcode=PutFullData(上行)却**没 override mask** →
+  // 沿用触发它的 refill-Get 的 don't-care mask（0x1111=每 word 仅 byte0）→ 写回 WG49 脏 sign-mask
+  // (payload 在 byte3) 退化成只写 byte0=0x00 = 语义 no-op → DRAM 保持 pre-write stale → refill 读 stale(srad output=1)。
+  // 镜像上面 L287 的 data Mux：write-through(PutFull/Part) 留真 partial byte-enables（其 data 只在 masked lane 有效）；
+  // dirty-victim writeback / flush（Get/Hint 触发，data 取 bs_rdat 全行）用 all-1s 全字节写回。
+  // 实现：Fill(N, !is_put_op) 取代 ~(0.U(N.W))；后者在 Verilog 生成 128'hFFFF... 大常量，触发
+  // Verilator v5.034 V3FuncOpt.cpp:162 内部断言（语义等价：OR全1 = all-1s mask）。
+  io.a.bits.mask  := s_final_req.mask | Fill(params.mask_bits, !(s_final_req.opcode===PutFullData || s_final_req.opcode===PutPartialData))
 
   io.finish_issue := io.d.valid && s_final_req.last_flush
 
