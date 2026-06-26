@@ -90,6 +90,11 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val mshrs = Seq.fill(params.mshrs) { Module(new MSHR(params)) }
 
+  // srad-007 Bug3 root-fix(B): L2 BankedStore evict-vs-fill WAR — per-MSHR 标志。dirty-victim 分配时置位，
+  // SourceD 发出 victim writeback(=evict 读已完成)时清。置位期间 block 该 MSHR 的 fill commit
+  // (schedule.d/dir + pop + bankedStore sinkD 写)，保证 evict 读早于 fill 写同 (set,way) → 消除 WAR。
+  val evictReadPending = RegInit(VecInit(Seq.fill(params.mshrs)(false.B)))
+
   // lud-002/srad Bug C 修(B-2 + codex 3.5 修): flush 写回抢占 sourceD 的优先信号(前置 Wire, 实赋值在 dir_result_buffer 定义后)。
   // 抢占那拍须一并 gate mshr_request 的 sourceD 项 + m.io.schedule.d.ready + pop.valid, 否则被选 MSHR 看到
   // spurious schedule.d.fire(以为自己 D 已发, 实则 sourceD 在发 flush) → refill D 永久丢。
@@ -99,10 +104,10 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  val mshr_request = Cat(mshrs.map {  m =>
+  val mshr_request = Cat(mshrs.zipWithIndex.map {  case (m, i) =>
     ((sourceA.io.req.ready  &&m.io.schedule.a.valid) ||
-      (sourceD.io.req.ready &&m.io.schedule.d.valid && !flush_wb_priority) ||  // B-2(codex 3.5 修): flush 抢占 sourceD 时不经 D 路选该 MSHR
-      (m.io.schedule.dir.valid&&directory.io.write.ready))
+      (sourceD.io.req.ready &&m.io.schedule.d.valid && !flush_wb_priority && !evictReadPending(i)) ||  // B-2 + srad-007 Bug3 fix(B): evict 读未完成不放 fill 完成路
+      (m.io.schedule.dir.valid&&directory.io.write.ready && !evictReadPending(i)))  // srad-007 Bug3 fix(B)
   }.reverse)
 
   val robin_filter = RegInit(0.U(params.mshrs.W))  
@@ -110,6 +115,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val mshr_selectOH2 = (~(leftOR(robin_request) << 1)).asUInt & robin_request
   val mshr_selectOH = mshr_selectOH2(2*params.mshrs-1, params.mshrs) | mshr_selectOH2(params.mshrs-1, 0)
   val mshr_select = OHToUInt(mshr_selectOH)
+  // srad-007 Bug3 fix(B): 被选中 MSHR 是否在 evict-read-pending — 用于 gate fill commit(dir write/pop/sinkD 写)。
+  val selectedEvictReadPending = (mshr_selectOH & evictReadPending.asUInt).orR
 
  
   val schedule    = Mux1H (mshr_selectOH, mshrs.map(_.io.schedule))
@@ -132,8 +139,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt)&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
     m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) && !write_buffer.io.deq.valid
-    m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i) && !flush_wb_priority  // B-2(codex 3.5 修): flush 抢占 sourceD 时该 MSHR D 不算被消费(避免 spurious fire 丢 refill D)
-    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt)
+    m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i) && !flush_wb_priority && !evictReadPending(i)  // B-2 + srad-007 Bug3 fix(B): evict 读未完成不 pop(否则丢 refill D)
+    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt) && !evictReadPending(i)  // srad-007 Bug3 fix(B)
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
     m.io.merge.valid:= m.io.schedule.d.valid && ((requests.io.data.opcode===PutFullData) ||(requests.io.data.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
@@ -218,6 +225,19 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     }}
   }
 
+  // srad-007 Bug3 fix(B): dirty-victim 分配置 evictReadPending；SourceD 发出 victim writeback(=evict 读已完成)时清。
+  mshrs.zipWithIndex.foreach { case (m, i) =>
+    val dirtyVictimAlloc = directory.io.result.fire && alloc && mshr_insertOH.asBools(i) &&
+      !directory.io.result.bits.hit && directory.io.result.bits.dirty && !directory.io.result.bits.flush
+    when(dirtyVictimAlloc) {
+      evictReadPending(i) := true.B
+    }.elsewhen(sourceD.io.evict_read_done.valid &&
+               (m.io.status.set === sourceD.io.evict_read_done.bits.set) &&
+               (m.io.status.way === sourceD.io.evict_read_done.bits.way)) {
+      evictReadPending(i) := false.B
+    }
+  }
+
   // nn64k-007 Phase 4.5 迭代6: 算 mixed 的同时收集 mixedVec, 用于驱动 directory.io.resv_clear(撤销孤儿)。
   val mixedVec = Wire(Vec(params.mshrs, Bool()))
   mshrs.zipWithIndex.foreach { case (m, i) =>
@@ -247,7 +267,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && mshr_free && requests.io.push.ready && directory.io.ready && !(issue_flush_invalidate)
   directory.io.read.bits := request.bits
-  directory.io.write.valid := schedule.dir.valid //&& !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
+  directory.io.write.valid := schedule.dir.valid && !selectedEvictReadPending // srad-007 Bug3 fix(B): fill 写 dir 等 evict 读完 //&& !schedule.dir.bits.is_writemiss
   directory.io.tag_match :=tagMatches.orR
   directory.io.write.bits.way := schedule.dir.bits.way
   directory.io.write.bits.set := schedule.dir.bits.set
@@ -255,7 +275,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   directory.io.invalidate := request.fire && (request.bits.opcode === Hint) && (request.bits.param === 1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
   directory.io.flush := request.fire && (request.bits.opcode === Hint) && (request.bits.param === 0.U)
   directory.io.flush_invalidate_src:= request.bits.source
-  requests.io.pop.valid := requests.io.valid(mshr_select)&&schedule.d.valid&&sourceD.io.req.ready
+  requests.io.pop.valid := requests.io.valid(mshr_select)&&schedule.d.valid&&sourceD.io.req.ready && !selectedEvictReadPending  // srad-007 Bug3 fix(B): evict 读未完成不 pop
   requests.io.pop.bits  := mshr_select
 
 
@@ -280,7 +300,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   //   flush 队头时强占 sourceD; 同拍 gate 掉 schedule.d 的消费(requests.io.pop.valid 下方 last-connect 覆盖 L251 原值)避免误 pop MSHR。
   flush_wb_priority := dir_result_buffer.io.deq.valid && dir_result_buffer.io.deq.bits.flush
   val take_dir = flush_wb_priority || !schedule.d.valid
-  requests.io.pop.valid := requests.io.valid(mshr_select) && schedule.d.valid && sourceD.io.req.ready && !flush_wb_priority
+  requests.io.pop.valid := requests.io.valid(mshr_select) && schedule.d.valid && sourceD.io.req.ready && !flush_wb_priority && !selectedEvictReadPending  // srad-007 Bug3 fix(B): evict 读未完成不 pop(last-connect 有效赋值, 必须带 gate)
 
   dir_result_buffer.io.deq.ready:= take_dir && sourceD.io.req.ready
 
@@ -323,7 +343,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceD.io.req.bits.param :=Mux(take_dir ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
   sourceD.io.req.bits.l2cidx :=Mux(take_dir ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   sourceD.io.req.bits.spike_info.foreach( _ := DontCare )
-  bankedStore.io.sinkD_adr.valid := schedule.dir.valid     //now managed by MSHR
+  bankedStore.io.sinkD_adr.valid := schedule.dir.valid && !selectedEvictReadPending     // srad-007 Bug3 fix(B): fill 写 BankedStore 等 evict 读完成同格(消 WAR)
   bankedStore.io.sinkD_adr.bits.set := schedule.dir.bits.set
   bankedStore.io.sinkD_adr.bits.way := schedule.dir.bits.way
   bankedStore.io.sinkD_adr.bits.mask:= ~(0.U(params.mask_bits.W))
