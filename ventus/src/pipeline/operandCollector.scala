@@ -644,18 +644,29 @@ class operandCollector extends Module{
   val wbScaBankAddrtest = Wire(UInt(depth_regBank.W))
   wbScaBankAddrtest := sgprW + regW
 
-  vectorBank.foreach(x=>{
-    x.rdidx := wbVecBankAddr
-    x.rd := io.writeVecCtrl.bits.wb_wvd_rd
-    x.rdwen := false.B
-    x.rdwmask := io.writeVecCtrl.bits.wvd_mask
-  })
+  val writeVecBankFire = io.writeVecCtrl.fire && io.writeVecCtrl.bits.wvd
+  val writeVecBankValid = RegInit(VecInit.fill(num_bank)(false.B))
+  val writeVecBankAddr = RegInit(VecInit(Seq.fill(num_bank)(0.U(depth_regBank.W))))
+  val writeVecBankData = RegInit(VecInit(Seq.fill(num_bank)(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))))
+  val writeVecBankMask = RegInit(VecInit(Seq.fill(num_bank)(VecInit(Seq.fill(num_thread)(false.B)))))
+  for (bankIdx <- 0 until num_bank) {
+    val writeThisBank = writeVecBankFire && wbVecBankId === bankIdx.U
+    writeVecBankValid(bankIdx) := writeThisBank
+    when(writeThisBank) {
+      writeVecBankAddr(bankIdx) := wbVecBankAddr
+      writeVecBankData(bankIdx) := io.writeVecCtrl.bits.wb_wvd_rd
+      writeVecBankMask(bankIdx) := io.writeVecCtrl.bits.wvd_mask
+    }
+    vectorBank(bankIdx).rdidx := writeVecBankAddr(bankIdx)
+    vectorBank(bankIdx).rd := writeVecBankData(bankIdx)
+    vectorBank(bankIdx).rdwmask := writeVecBankMask(bankIdx)
+    vectorBank(bankIdx).rdwen := writeVecBankValid(bankIdx)
+  }
   scalarBank.foreach(x=>{
     x.rdidx := wbScaBankAddr
     x.rd := io.writeScalarCtrl.bits.wb_wxd_rd
     x.rdwen := false.B
   })
-  vectorBank(wbVecBankId).rdwen := io.writeVecCtrl.bits.wvd & io.writeVecCtrl.valid
   scalarBank(wbScaBankId).rdwen := io.writeScalarCtrl.bits.wxd & io.writeScalarCtrl.valid & io.writeScalarCtrl.bits.reg_idxw.orR
   io.writeScalarCtrl.ready := true.B
   io.writeVecCtrl.ready := true.B

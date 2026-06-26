@@ -235,6 +235,8 @@ class pipe() extends Module{
 
   //val ibuffer_ready=Wire(Vec(num_warp,Bool()))
   warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
+  val wbVecScoreboardFire = RegNext(wb.io.out_v.fire, false.B)
+  val wbVecScoreboardCtrl = RegEnable(wb.io.out_v.bits, 0.U.asTypeOf(new WriteVecCtrl), wb.io.out_v.fire)
 
   for (i <- 0 until num_warp) {
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
@@ -254,7 +256,7 @@ class pipe() extends Module{
     //when(!ibuffer.io.out(i).valid){ibuffer_ready(i):=false.B}
     scoreb(i).ibuffer_if_ctrl:=ibuffer.io.out(i).bits
     scoreb(i).if_ctrl:= Mux((i.asUInt === ibuffer2issue.io.out_x.bits.wid) && ibuffer2issue.io.out_x.fire, ibuffer2issue.io.out_x.bits,ibuffer2issue.io.out_v.bits)
-    scoreb(i).wb_v_ctrl:=wb.io.out_v.bits
+    scoreb(i).wb_v_ctrl:=wbVecScoreboardCtrl
     scoreb(i).wb_x_ctrl:=wb.io.out_x.bits
     scoreb(i).fence_end:=lsu.io.fence_end(i)
     scoreb(i).if_fire:=Mux(((i.asUInt===ibuffer2issue.io.out_x.bits.wid)&&ibuffer2issue.io.out_x.fire) ||
@@ -287,7 +289,7 @@ class pipe() extends Module{
 
 
   scoreb(wb.io.out_x.bits.warp_id).wb_x_fire:=wb.io.out_x.fire
-  scoreb(wb.io.out_v.bits.warp_id).wb_v_fire:=wb.io.out_v.fire
+  scoreb(wbVecScoreboardCtrl.warp_id).wb_v_fire:=wbVecScoreboardFire
 
   // ibuffer2issue模块的IO都是实际发射但尚未执行的指令，在这检查undefined instruction
   when(ibuffer2issue.io.out_x.fire){
