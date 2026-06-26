@@ -144,7 +144,12 @@ val mshr_wait_reg =RegInit(false.B)
             stateReg := stage_4
             busy := true.B
             tobedone := false.B
-            when(s1_req.opcode === PutFullData && s1_req.opcode === PutPartialData) { //wait write miss no allocate
+            // srad-005 root-fix: 原为 `&&` 恒假（同一 opcode 不可能同时 ==PutFullData(0) 且 ==PutPartialData(1)）→
+            // write-miss-no-allocate(write-through) 路径 mshr_wait_reg 永不置位 → io.mshr_wait≡0 → MSHR.scala:97 闸常开 →
+            // 同块后续 Get refill 抢在 in-flight write-through Put 落 DRAM 前发往 DRAM → 读 pre-Put stale(0xa0000000) →
+            // 腐败 soft-float sign-mask spill/restore → vor Inf/NaN → __truncdfsf2 错 → INT_MIN col39/40。
+            // 改 `||` 恢复设计意图（注释即"wait write miss no allocate"；对照 line 142 dirty-victim 用单条件置 mshr_wait 同序化机制）。
+            when(s1_req.opcode === PutFullData || s1_req.opcode === PutPartialData) { //wait write miss no allocate
               mshr_wait_reg := true.B
             }
           }
