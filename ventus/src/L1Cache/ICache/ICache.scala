@@ -122,8 +122,6 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
     tagAccess.io.r_asid.get.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
     tagAccess.io.r_asid.get.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
     tagAccess.io.asidFromCore_st1.get := pipeReqAsid_st1
-    tagAccess.io.w_asid.get.req.valid := memRsp_Q.io.deq.fire
-    tagAccess.io.w_asid.get.req.bits(data=mshrAccess.io.missRspOut.bits.ASID.get, setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
     mshrAccess.io.missReq.bits.ASID.get := pipeReqAsid_st1
   }
 
@@ -141,10 +139,6 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
   tagAccess.io.tagFromCore_st1 := get_tag(pipeReqAddr_st1)
 
   tagAccess.io.coreReqReady := io.coreReq.ready
-  // ******      tag write, to handle mem rsp st1 & st2      ******
-  tagAccess.io.w.req.valid := memRsp_Q.io.deq.fire
-  tagAccess.io.w.req.bits(data=get_tag(mshrAccess.io.missRspOut.bits.blockAddr), setIdx=get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr), waymask = 0.U)
-
   // ******     missReq Queue enqueue     ******
   memRsp_Q.io.enq <> io.memRsp
   val refillSliceWords = ICacheDataArray.refillSliceWords(BlockWords)
@@ -162,26 +156,88 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
     })
     memRsp_QDataBySlice(sliceIdx) := sliceWords.asUInt
   }
+
+  val refillActive = RegInit(false.B)
+  val refillSliceIdx = RegInit(0.U(log2Ceil(ICacheDataArray.RefillSliceCount).W))
+  val refillDataBySlice = Reg(Vec(ICacheDataArray.RefillSliceCount, UInt(refillSliceBits.W)))
+  val refillBlockAddr = Reg(UInt(bABits.W))
+  val refillWaymask = Reg(UInt(NWays.W))
+  val refillLastSlice = refillSliceIdx === (ICacheDataArray.RefillSliceCount - 1).U
+  val refillAsidWriteReady = if(MMU_ENABLED) tagAccess.io.w_asid.get.req.ready else true.B
+  val refillTagWriteReady = tagAccess.io.w.req.ready && refillAsidWriteReady
+  val refillCommitReady = !refillLastSlice || refillTagWriteReady
+  val invalidateDrain = RegInit(false.B)
+  val invalidateActive = io.invalidate || invalidateDrain
+  val refillBlocksCoreReq = refillActive || memRsp_Q.io.deq.valid || invalidateActive
+
   //deq coupled with mshr missRsp
   // ******     mshrAccess      ******
-  mshrAccess.io.missReq.valid := cacheMiss_st1
+  mshrAccess.io.missReq.valid := cacheMiss_st1 && !invalidateActive
   mshrAccess.io.missReq.bits.blockAddr := get_blockAddr(pipeReqAddr_st1)
 
   mshrAccess.io.missReq.bits.targetInfo := Cat(warpid_st1,get_offsets(pipeReqAddr_st1))
   //mshrAccess.io.missReq <> mshrMissReq_Q.io.deq
 
-  memRsp_Q.io.deq.ready := mshrAccess.io.missRspIn.ready
-  mshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid
+  when(io.invalidate) {
+    invalidateDrain := true.B
+  }.elsewhen(invalidateDrain && mshrAccess.io.empty && !memRsp_Q.io.deq.valid && !refillActive) {
+    invalidateDrain := false.B
+  }
+
+  memRsp_Q.io.deq.ready := !refillActive && mshrAccess.io.missRspIn.ready
+  mshrAccess.io.missRspIn.valid := memRsp_Q.io.deq.valid && !refillActive
   mshrAccess.io.missRspIn.bits.EntryIdx := memRsp_Q.io.deq.bits.d_source
 
   mshrAccess.io.missRspOut.ready := true.B
   //coreRsp_Q.io.enq.ready TODO 将来版本可能重新启用信号，如果core前端需要MSHR返回信息的话
 
-  // ******      data write, to handle mem rsp st2      ******
-  dataAccess.io.w.req.valid := memRsp_Q.io.deq.fire
-  dataAccess.io.w.req.bits.data := memRsp_QDataBySlice
-  dataAccess.io.w.req.bits.setIdx := get_setIdx(mshrAccess.io.missRspOut.bits.blockAddr)
-  dataAccess.io.w.req.bits.waymask.foreach(_ := waymask_replace_st0)
+  val refillAccept = memRsp_Q.io.deq.fire && !invalidateDrain && !io.invalidate
+  val refillWriteFire = dataAccess.io.w.req.fire
+  when(io.invalidate) {
+    refillActive := false.B
+    refillSliceIdx := 0.U
+  }.elsewhen(refillAccept) {
+    refillActive := true.B
+    refillSliceIdx := 0.U
+    refillDataBySlice := memRsp_QDataBySlice
+    refillBlockAddr := mshrAccess.io.missRspOut.bits.blockAddr
+    refillWaymask := waymask_replace_st0
+  }.elsewhen(refillWriteFire) {
+    when(refillLastSlice) {
+      refillActive := false.B
+      refillSliceIdx := 0.U
+    }.otherwise {
+      refillSliceIdx := refillSliceIdx + 1.U
+    }
+  }
+
+  val refillWriteBlockAddr = Mux(refillActive, refillBlockAddr, mshrAccess.io.missRspOut.bits.blockAddr)
+  tagAccess.io.w.req.valid := refillActive && !io.invalidate && refillLastSlice &&
+    dataAccess.io.w.req.ready && refillAsidWriteReady
+  tagAccess.io.w.req.bits(
+    data = get_tag(refillWriteBlockAddr),
+    setIdx = get_setIdx(refillWriteBlockAddr),
+    waymask = refillWaymask)
+
+  if(MMU_ENABLED) {
+    val refillAsid = Reg(UInt(asidLen.W))
+    when(refillAccept) {
+      refillAsid := mshrAccess.io.missRspOut.bits.ASID.get
+    }
+    tagAccess.io.w_asid.get.req.valid := refillActive && !io.invalidate && refillLastSlice &&
+      dataAccess.io.w.req.ready && tagAccess.io.w.req.ready
+    tagAccess.io.w_asid.get.req.bits(
+      data = refillAsid,
+      setIdx = get_setIdx(refillBlockAddr),
+      waymask = refillWaymask)
+  }
+
+  // ******      data write, to handle mem rsp refill slices      ******
+  dataAccess.io.w.req.valid := refillActive && !io.invalidate && refillCommitReady
+  dataAccess.io.w.req.bits.data := refillDataBySlice(refillSliceIdx)
+  dataAccess.io.w.req.bits.setIdx := get_setIdx(refillBlockAddr)
+  dataAccess.io.w.req.bits.sliceIdx := refillSliceIdx
+  dataAccess.io.w.req.bits.waymask.foreach(_ := refillWaymask)
 
   // ******      data read, to handle pipe req st2     ******
   dataAccess.io.r.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
@@ -270,7 +326,7 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
 
   // ******      core req ready
   //val coreRsp_QAlmstFull = coreRsp_Q.io.count === 2.U
-  io.coreReq.ready := true.B//!memRsp_Q.io.deq.valid && !mshrAccess.io.missRspOut.valid//mshrAccess.io.missReq.ready //&& !coreRsp_QAlmstFull
+  io.coreReq.ready := !refillBlocksCoreReq//!memRsp_Q.io.deq.valid && !mshrAccess.io.missRspOut.valid//mshrAccess.io.missReq.ready //&& !coreRsp_QAlmstFull
 
   // ******    self generate flushPipeline
   //保存两个周期的warp id，与当前输入id对比。

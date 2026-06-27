@@ -79,6 +79,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
     val missRspIn = Flipped(Decoupled(new MSHRmissRspIn(bABits)))
     val missRspOut = Decoupled(new MSHRmissRspOut(bABits,tIWidth,asidLen))
     val miss2mem = Decoupled(new MSHRmiss2mem(bABits,WIdBits,asidLen,NMshrEntry))
+    val empty = Output(Bool())
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
@@ -110,6 +111,7 @@ class MSHR[T <: Data](val tIgen: T)(implicit val p: Parameters) extends L1CacheM
 
   //  ******     decide MSHR is full or not     ******
   val entry_valid = Reverse(Cat(subentry_valid.map(Cat(_).orR)))
+  io.empty := !entry_valid.orR
   val entryStatus = Module(new getEntryStatus(NMshrEntry))
   entryStatus.io.valid_list := entry_valid
 

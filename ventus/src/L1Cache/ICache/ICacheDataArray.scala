@@ -39,8 +39,8 @@ class ICacheDataReadBus(implicit p: Parameters) extends ICacheBundle {
 
 class ICacheDataWriteReq(implicit p: Parameters) extends ICacheBundle {
   val setIdx = UInt(log2Up(NSets).W)
-  val data = Vec(ICacheDataArray.RefillSliceCount,
-    UInt(ICacheDataArray.refillSliceBits(BlockWords, WordLength).W))
+  val sliceIdx = UInt(log2Ceil(ICacheDataArray.RefillSliceCount).W)
+  val data = UInt(ICacheDataArray.refillSliceBits(BlockWords, WordLength).W)
   val waymask = if (NWays > 1) Some(UInt(NWays.W)) else None
 }
 
@@ -77,19 +77,22 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
   }
 
   io.r.req.ready := VecInit(slices.map(_.io.r.req.ready))(io.r.req.bits.sliceIdx)
-  io.w.req.ready := slices.map(_.io.w.req.ready).reduce(_ && _)
+  io.w.req.ready := VecInit(slices.map(_.io.w.req.ready))(io.w.req.bits.sliceIdx)
 
   for (sliceIdx <- 0 until RefillSliceCount) {
     val slice = slices(sliceIdx)
+    val writeThisSlice = io.w.req.valid && io.w.req.bits.sliceIdx === sliceIdx.U
+
     slice.io.r.req.valid := io.r.req.valid && io.r.req.bits.sliceIdx === sliceIdx.U
     slice.io.r.req.bits.setIdx := io.r.req.bits.setIdx
-    slice.io.w.req.valid := io.w.req.valid
-    slice.io.w.req.bits.setIdx := io.w.req.bits.setIdx
+    slice.io.w.req.valid := writeThisSlice
+    slice.io.w.req.bits.setIdx := Mux(writeThisSlice, io.w.req.bits.setIdx, 0.U)
     (slice.io.w.req.bits.waymask, io.w.req.bits.waymask) match {
-      case (Some(dst), Some(src)) => dst := src
+      case (Some(dst), Some(src)) => dst := Mux(writeThisSlice, src, 0.U)
       case _ =>
     }
-    slice.io.w.req.bits.data := VecInit(Seq.fill(NWays)(io.w.req.bits.data(sliceIdx)))
+    val writeData = Mux(writeThisSlice, io.w.req.bits.data, 0.U(refillSliceBits.W))
+    slice.io.w.req.bits.data := VecInit(Seq.fill(NWays)(writeData))
   }
 
   private val readSliceIdx = RegEnable(io.r.req.bits.sliceIdx, 0.U(log2Ceil(RefillSliceCount).W), io.r.req.fire)

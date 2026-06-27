@@ -722,7 +722,10 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends
     iTagChecker.io.ASID_from_pipe.get := io.asidFromCore_st1.get
     asidAccess.io.w.req.valid := io.w_asid.get.req.valid && !io.invalidate
     io.w_asid.get.req.ready := asidAccess.io.w.req.ready && !io.invalidate
-    asidAccess.io.w.req.bits.apply(data = io.w_asid.get.req.bits.data, setIdx = io.w_asid.get.req.bits.setIdx, waymask = Replacement.io.waymask)
+    asidAccess.io.w.req.bits.apply(
+      data = io.w_asid.get.req.bits.data,
+      setIdx = io.w_asid.get.req.bits.setIdx,
+      waymask = io.w_asid.get.req.bits.waymask.getOrElse(Replacement.io.waymask))
   }
   iTagChecker.io.way_valid := way_valid(RegEnable(io.r.req.bits.setIdx, io.coreReqReady)) //st1
   io.waymaskHit_st1 := iTagChecker.io.waymask //st1
@@ -733,12 +736,13 @@ class L1TagAccess_ICache(set: Int, way: Int, tagBits: Int, AsidBits: Int)extends
   tagBodyAccess.io.w.req.valid := io.w.req.valid && !io.invalidate
 
   io.w.req.ready := tagBodyAccess.io.w.req.ready && !io.invalidate
-  tagBodyAccess.io.w.req.bits.apply(data = io.w.req.bits.data, setIdx = io.w.req.bits.setIdx, waymask = Replacement.io.waymask)
+  val writeWaymask = io.w.req.bits.waymask.getOrElse(Replacement.io.waymask)
+  tagBodyAccess.io.w.req.bits.apply(data = io.w.req.bits.data, setIdx = io.w.req.bits.setIdx, waymask = writeWaymask)
 
   when(io.invalidate) {
     way_valid := 0.U.asTypeOf(way_valid)
-  } .elsewhen(io.w.req.valid && !Replacement.io.Set_is_full) {
-    way_valid(io.w.req.bits.setIdx)(OHToUInt(Replacement.io.waymask)) := true.B
+  } .elsewhen(io.w.req.fire) {
+    way_valid(io.w.req.bits.setIdx)(OHToUInt(writeWaymask)) := true.B
   }
 
 }
