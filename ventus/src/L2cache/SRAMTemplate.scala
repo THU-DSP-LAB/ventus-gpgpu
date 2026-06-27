@@ -29,7 +29,6 @@ package L2cache
 
 import chisel3._
 import chisel3.util._
-import freechips.rocketchip.tilelink.LFSR64
 
 class SRAMBundleA(val set: Int) extends Bundle {
   val setIdx = Output(UInt(log2Up(set).W))
@@ -126,14 +125,21 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
     val bypass = Fill(way, need_check && waddr_reg === raddr_reg) & RegNext(wmask)
     bypass.asTypeOf(UInt(way.W))
   }
-  val bypass_wdata = if (bypassWrite) VecInit(RegNext(io.w.req.bits.data).map(_.asTypeOf(wordType)))
-    else VecInit((0 until way).map(_ => LFSR64().asTypeOf(wordType)))
-  val bypass_mask = need_bypass(io.w.req.valid, io.w.req.bits.setIdx, io.w.req.bits.waymask.getOrElse("b1".U), io.r.req.valid, io.r.req.bits.setIdx)
   val mem_rdata = {
-    if (singlePort) raw_rdata
-    else VecInit(bypass_mask.asBools.zip(raw_rdata).zip(bypass_wdata).map {
-      case ((m, r), w) => Mux(m, w, r)
-    })
+    if (singlePort || !bypassWrite) {
+      raw_rdata
+    } else {
+      val bypass_wdata = VecInit(RegNext(io.w.req.bits.data).map(_.asTypeOf(wordType)))
+      val bypass_mask = need_bypass(
+        io.w.req.valid,
+        io.w.req.bits.setIdx,
+        io.w.req.bits.waymask.getOrElse("b1".U),
+        io.r.req.valid,
+        io.r.req.bits.setIdx)
+      VecInit(bypass_mask.asBools.zip(raw_rdata).zip(bypass_wdata).map {
+        case ((m, r), w) => Mux(m, w, r)
+      })
+    }
   }
 
   // hold read data for SRAMs

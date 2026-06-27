@@ -63,39 +63,43 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule {
     val w = Flipped(new ICacheDataWriteBus)
   })
 
-  private val slices = Seq.tabulate(RefillSliceCount) { sliceIdx =>
-    val slice = Module(new SRAMTemplate(
+  private val dataRows = NSets * RefillSliceCount
+
+  private def dataRowAddr(setIdx: UInt, sliceIdx: UInt): UInt =
+    Cat(setIdx, sliceIdx)
+
+  private val wayMems = Seq.tabulate(NWays) { wayIdx =>
+    val wayMem = Module(new SRAMTemplate(
       gen = UInt(refillSliceBits.W),
-      set = NSets,
-      way = NWays,
+      set = dataRows,
+      way = 1,
       shouldReset = false,
       holdRead = false,
       singlePort = false
     ))
-    slice.suggestName(s"refillDataSlice_$sliceIdx")
-    slice
+    wayMem.suggestName(s"dataWay_$wayIdx")
+    wayMem
   }
 
-  io.r.req.ready := VecInit(slices.map(_.io.r.req.ready))(io.r.req.bits.sliceIdx)
-  io.w.req.ready := VecInit(slices.map(_.io.w.req.ready))(io.w.req.bits.sliceIdx)
+  private val readRow = dataRowAddr(io.r.req.bits.setIdx, io.r.req.bits.sliceIdx)
+  private val writeRow = dataRowAddr(io.w.req.bits.setIdx, io.w.req.bits.sliceIdx)
+  private val writeWaymask = io.w.req.bits.waymask.getOrElse(1.U(NWays.W))
 
-  for (sliceIdx <- 0 until RefillSliceCount) {
-    val slice = slices(sliceIdx)
-    val writeThisSlice = io.w.req.valid && io.w.req.bits.sliceIdx === sliceIdx.U
+  io.r.req.ready := wayMems.map(_.io.r.req.ready).reduce(_ && _)
+  io.w.req.ready := (0 until NWays).map { wayIdx =>
+    !writeWaymask(wayIdx) || wayMems(wayIdx).io.w.req.ready
+  }.reduce(_ && _)
 
-    slice.io.r.req.valid := io.r.req.valid && io.r.req.bits.sliceIdx === sliceIdx.U
-    slice.io.r.req.bits.setIdx := io.r.req.bits.setIdx
-    slice.io.w.req.valid := writeThisSlice
-    slice.io.w.req.bits.setIdx := Mux(writeThisSlice, io.w.req.bits.setIdx, 0.U)
-    (slice.io.w.req.bits.waymask, io.w.req.bits.waymask) match {
-      case (Some(dst), Some(src)) => dst := Mux(writeThisSlice, src, 0.U)
-      case _ =>
-    }
-    val writeData = Mux(writeThisSlice, io.w.req.bits.data, 0.U(refillSliceBits.W))
-    slice.io.w.req.bits.data := VecInit(Seq.fill(NWays)(writeData))
+  for (wayIdx <- 0 until NWays) {
+    val wayMem = wayMems(wayIdx)
+
+    wayMem.io.r.req.valid := io.r.req.valid
+    wayMem.io.r.req.bits.setIdx := readRow
+
+    wayMem.io.w.req.valid := io.w.req.fire && writeWaymask(wayIdx)
+    wayMem.io.w.req.bits.setIdx := writeRow
+    wayMem.io.w.req.bits.data := VecInit(Seq(io.w.req.bits.data))
   }
 
-  private val readSliceIdx = RegEnable(io.r.req.bits.sliceIdx, 0.U(log2Ceil(RefillSliceCount).W), io.r.req.fire)
-  private val readDataBySlice = VecInit(slices.map(_.io.r.resp.data))
-  io.r.resp.data := readDataBySlice(readSliceIdx)
+  io.r.resp.data := VecInit(wayMems.map(_.io.r.resp.data(0)))
 }
