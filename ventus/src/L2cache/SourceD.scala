@@ -64,6 +64,13 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val hit_done = Valid(new ResvClear_lite(params))
     // srad-007 Bug3 fix(B): dirty-victim writeback A 请求发出那拍回传 (set,way)，给 Scheduler 清 evictReadPending。
     val evict_read_done = Valid(new ResvClear_lite(params))
+    // btree-002 fix: L2 hit Put 的 BankedStore 写已完成且 D ack 已 fire。
+    // Scheduler 用该事件 retire L2 write-through scoreboard 的一个 pending count；
+    // miss/no-allocate Put 的 DRAM commit 点不走这里，而由 wt_miss_a 随 write_buffer entry 到 out_a.fire retire。
+    val wt_hit_commit = Valid(UInt(params.addressBits.W))
+    // btree-002 fix v3.2: 当前 io.a beat 是否为真正的 write-through miss/no-allocate Put。
+    // dirty-victim writeback 虽然 io.a.bits.opcode 也会被改成 PutFullData，但该标志保持 false。
+    val wt_miss_a = Output(Bool())
   })
 
 
@@ -297,6 +304,11 @@ val mshr_wait_reg =RegInit(false.B)
   // Verilator v5.034 V3FuncOpt.cpp:162 内部断言（语义等价：OR全1 = all-1s mask）。
   io.a.bits.mask  := s_final_req.mask | Fill(params.mask_bits, !(s_final_req.opcode===PutFullData || s_final_req.opcode===PutPartialData))
 
+  // btree-002 fix v3.2: SourceD 保留原始 s_final_req.opcode，可在这里区分 write-through miss Put
+  // 与 dirty-victim writeback。Scheduler 把该位随 write_buffer 保存，直到真实 out_a.fire 才 retire count。
+  io.wt_miss_a := (stateReg === stage_4 || stateReg === stage_7) && !s_final_req.hit &&
+    (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)
+
   io.finish_issue := io.d.valid && s_final_req.last_flush
 
   // srad-004 Phase 4.5 A''': hit-reservation clear（one-shot，统一到 io.d.fire）。
@@ -318,4 +330,12 @@ val mshr_wait_reg =RegInit(false.B)
   io.evict_read_done.valid    := dirtyVictimWbFire
   io.evict_read_done.bits.set := s_final_req.set
   io.evict_read_done.bits.way := s_final_req.way
+
+  // btree-002 fix: hit Put 的真正 L2 commit 点。
+  // SourceD 只有在 BankedStore 写端口已经被接受后才会进入 stage_4 并发 D ack；
+  // 因此 io.d.fire && hit && Put 表示该 Put 的 bytes 已经在 L2 BankedStore 可见。
+  val wtHitCommitFire = io.d.fire && s_final_req.hit &&
+    (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)
+  io.wt_hit_commit.valid := wtHitCommitFire
+  io.wt_hit_commit.bits  := params.expandAddress(s_final_req.tag, s_final_req.l2cidx, s_final_req.set, s_final_req.offset)
 }

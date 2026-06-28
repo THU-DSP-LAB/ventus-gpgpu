@@ -24,6 +24,12 @@ class TLBundle_AD (params: InclusiveCacheParameters_lite)extends Bundle{
 
 }
 
+class WriteBufferEntry_lite(params: InclusiveCacheParameters_lite) extends Bundle
+{
+  val req = new FullRequest(params)
+  val wt_miss = Bool()
+}
+
 class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 {
   val io = IO(new Bundle {
@@ -73,9 +79,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   io.in_a.ready:=sinkA.io.a.ready
 
-  io.in_d.valid := sourceD.io.d.valid 
-  io.in_d.bits  := sourceD.io.d.bits
-  sourceD.io.d.ready:=io.in_d.ready
+  // btree-002 fix: sourceD.io.d 在下方 write-through scoreboard 定义后连接。
+  // AccessAckData 发回 L1 前必须做 L2-side byte merge，避免 stale refill 被 L1 install。
 
 
 
@@ -134,7 +139,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   
   schedule.a.bits.source := mshr_select
-  val write_buffer =Module(new Queue(new FullRequest(params),8,false,true))
+  val writeBufferEntries = 8
+  val write_buffer =Module(new Queue(new WriteBufferEntry_lite(params),writeBufferEntries,false,true))
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt)&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
@@ -150,12 +156,146 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
  
 
   write_buffer.io.enq.valid:=sourceD.io.a.valid
-  write_buffer.io.enq.bits:=sourceD.io.a.bits
+  write_buffer.io.enq.bits.req:=sourceD.io.a.bits
+  write_buffer.io.enq.bits.wt_miss:=sourceD.io.wt_miss_a
   write_buffer.io.deq.ready:= sourceA.io.req.ready
-  sourceA.io.req.bits:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.bits,schedule.a.bits)
+  sourceA.io.req.bits:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.bits.req,schedule.a.bits)
 
   sourceA.io.req.valid:=Mux(write_buffer.io.deq.valid,write_buffer.io.deq.valid,schedule.a.valid)
   sourceD.io.a.ready:= write_buffer.io.enq.ready
+
+  // btree-002 fix: L2-side pending write-through data scoreboard.
+  // 目的：PutPartial/PutFull 进入共享 L2 后，记录同 cacheline 的 pending bytes；
+  // 后续 stale read refill / GrantData 离开 L2 前按 byte mask 覆盖，覆盖 cross-SM 与 WSHR-pop-early。
+  //
+  // 设计约束：
+  // - scoreboard lookup 只改 data，不参与 mshr_request/sourceD.req 仲裁；
+  // - 只有 scoreboard 满且 incoming Put 是新 line 时才背压 SinkA；
+  // - 同 line 多个 Put 用 pending count 计数，避免 committed bit 在多 Put 合并时提前清。
+  // btree-002 fix v3.2: scoreboard 容量从 putLists+mshrs+8 增到 putLists+mshrs+8+1。
+  //   性能回归根因(hotspot3D_512x2 timeout): lingering entry = 在途 Put(count>0,≤putLists)
+  //   + count==0 但同 line read-miss MSHR 活跃(≤mshrs);旧 mshrs+8 在重 stencil 下被填满 →
+  //   wtScoreboardCanAccept 背压 request.ready → throttle 整个 L2 → 2x 慢 → timeout。
+  //   v3.2 额外 +1 覆盖 SourceD 单入口驻留项：SinkA putbuffer list 已 pop、但 hit-D/out-A 尚未
+  //   完成的 Put，或 MSHR 已 pop、但 AccessAckData 被 D-channel 反压滞留的 read D。
+  //   因 SourceD.io.req.ready := !busy，二者不可能同时占两个 SourceD 槽；容量上界为
+  //   putLists + writeBufferEntries + 1 + mshrs，scoreboard 不应满。
+  val wtScoreboardEntries = params.putLists + params.mshrs + writeBufferEntries + 1
+  val wtScoreboardCountBits = log2Ceil(params.putLists + params.secondary + params.mshrs + 16) + 1
+
+  val wtValid = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(false.B)))
+  val wtTag = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(0.U(params.tagBits.W))))
+  val wtL2cidx = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(0.U(params.l2cBits.W))))
+  val wtSet = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(0.U(params.setBits.W))))
+  val wtData = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(0.U(params.data_bits.W))))
+  val wtMask = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(0.U(params.mask_bits.W))))
+  val wtCount = RegInit(VecInit(Seq.fill(wtScoreboardEntries)(0.U(wtScoreboardCountBits.W))))
+
+  def wtIsPut(opcode: UInt): Bool = {
+    (opcode === PutFullData) || (opcode === PutPartialData)
+  }
+
+  def wtMergeBytes(base: UInt, patch: UInt, mask: UInt): UInt = {
+    val fullMask = FillInterleaved(params.micro.writeBytes * 8, mask)
+    (patch & fullMask) | (base & (~fullMask).asUInt)
+  }
+
+  def wtRegLineMatch(tag: UInt, l2cidx: UInt, set: UInt): UInt = {
+    VecInit((0 until wtScoreboardEntries).map { i =>
+      wtValid(i) && (wtTag(i) === tag) && (wtL2cidx(i) === l2cidx) && (wtSet(i) === set)
+    }).asUInt
+  }
+
+  val wtPutReq = wtIsPut(request.bits.opcode)
+  val wtPutMatchOH = wtRegLineMatch(request.bits.tag, request.bits.l2cidx, request.bits.set)
+  val wtFreeVec = (~(wtValid.asUInt)).asUInt
+  val wtFreeOH = (~(leftOR(wtFreeVec) << 1)).asUInt & wtFreeVec
+  val wtScoreboardCanAccept = !wtPutReq || wtPutMatchOH.orR || wtFreeOH.orR
+  val wtPutFire = request.fire && wtPutReq
+  val wtPutAllocOH = Mux(wtPutMatchOH.orR, 0.U(wtScoreboardEntries.W), wtFreeOH)
+  val wtPutTargetOH = Mux(wtPutMatchOH.orR, wtPutMatchOH, wtPutAllocOH)
+
+  def wtMergeLine(tag: UInt, l2cidx: UInt, set: UInt, base: UInt): UInt = {
+    val hitOH = wtRegLineMatch(tag, l2cidx, set)
+    val hit = hitOH.orR
+    val regData = Mux1H((0 until wtScoreboardEntries).map(i => hitOH(i) -> wtData(i)))
+    val regMask = Mux1H((0 until wtScoreboardEntries).map(i => hitOH(i) -> wtMask(i)))
+    // btree-002 fix: Reg-based lookup only. Same-cycle bypass removed to avoid combinational
+    // cycle through AtomicUnit: io_in_d_bits_data -> ATU L22ATUmemRsp -> ATU2L2memReq ->
+    // io_in_a_bits_data -> request.bits.data -> wtMergeLine -> io_in_d_bits_data.
+    // For btree-002: Put fires at #574285, fill at #574425 (140 cycles later);
+    // same-cycle case is unreachable for this bug, Reg-based coverage is sufficient.
+    Mux(hit, wtMergeBytes(base, regData, regMask), base)
+  }
+
+  val (wtHitCommitTag, wtHitCommitL2cidx, wtHitCommitSet, _) =
+    params.parseAddress(sourceD.io.wt_hit_commit.bits)
+  // btree-002 fix v3.2: 只 retire 真正的 write-through miss/no-allocate Put。
+  // SourceD 把 dirty-victim writeback 的 A opcode 也强制成 PutFullData；因此不能再用
+  // io.out_a.fire && opcode=Put 粗判。wt_miss 标记随 write_buffer 保存，到真实 out_a fire 再减 count。
+  val wtMissCommitFire = write_buffer.io.deq.fire && write_buffer.io.deq.bits.wt_miss
+  val wtMissCommitTag = write_buffer.io.deq.bits.req.tag
+  val wtMissCommitL2cidx = write_buffer.io.deq.bits.req.l2cidx
+  val wtMissCommitSet = write_buffer.io.deq.bits.req.set
+  val (wtSourceDTag, wtSourceDL2cidx, wtSourceDSet, _) = params.parseAddress(sourceD.io.d.bits.address)
+  val wtSourceDHeldReadD = sourceD.io.d.valid && (sourceD.io.d.bits.opcode === AccessAckData)
+
+  for (i <- 0 until wtScoreboardEntries) {
+    val putThis = wtPutFire && wtPutTargetOH(i)
+    val hitCommitThis = sourceD.io.wt_hit_commit.valid && wtValid(i) &&
+      (wtTag(i) === wtHitCommitTag) && (wtL2cidx(i) === wtHitCommitL2cidx) && (wtSet(i) === wtHitCommitSet)
+    val missCommitThis = wtMissCommitFire && wtValid(i) &&
+      (wtTag(i) === wtMissCommitTag) && (wtL2cidx(i) === wtMissCommitL2cidx) && (wtSet(i) === wtMissCommitSet)
+
+    val commitDecRaw = PopCount(Seq(hitCommitThis, missCommitThis))
+    val commitDecExt = Wire(UInt(wtScoreboardCountBits.W))
+    commitDecExt := commitDecRaw
+    val commitDec = Mux(wtCount(i) < commitDecExt, wtCount(i), commitDecExt)
+    val putInc = Mux(putThis, 1.U(wtScoreboardCountBits.W), 0.U(wtScoreboardCountBits.W))
+    val nextCount = (wtCount(i) +& putInc - commitDec)(wtScoreboardCountBits-1, 0)
+
+    val sameLineMshrActive = VecInit(mshrs.zipWithIndex.map { case (m, j) =>
+      (requests.io.valid(j) || m.io.schedule.dir.valid) &&
+        (m.io.status.tag === wtTag(i)) &&
+        (m.io.status.l2cidx === wtL2cidx(i)) &&
+        (m.io.status.set === wtSet(i))
+    }).asUInt.orR
+    val sameLineSourceDHeldReadD = wtSourceDHeldReadD &&
+      (wtSourceDTag === wtTag(i)) && (wtSourceDL2cidx === wtL2cidx(i)) && (wtSourceDSet === wtSet(i))
+    // btree-002 fix v3.2: stale AccessAckData 只要还驻留 SourceD，就继续保留 scoreboard entry。
+    // 即使对应 MSHR/dir schedule 已经 pop，最终 D-channel merge 仍需要这份 pending byte mask。
+    // sourceD.io.d.valid 只进入寄存器 clear 条件，不反馈 D valid/ready，避免组合环。
+    val clearThis = wtValid(i) && (wtCount(i) === 0.U) && !sameLineMshrActive && !sameLineSourceDHeldReadD
+
+    when(putThis || commitDec.orR) {
+      when(putThis) {
+        wtValid(i) := true.B
+        wtTag(i) := request.bits.tag
+        wtL2cidx(i) := request.bits.l2cidx
+        wtSet(i) := request.bits.set
+        wtData(i) := Mux(wtValid(i), wtMergeBytes(wtData(i), request.bits.data, request.bits.mask), request.bits.data)
+        wtMask(i) := Mux(wtValid(i), wtMask(i) | request.bits.mask, request.bits.mask)
+      }
+      wtCount(i) := nextCount
+    }.elsewhen(clearThis) {
+      wtValid(i) := false.B
+      wtData(i) := 0.U
+      wtMask(i) := 0.U
+      wtCount(i) := 0.U
+    }
+
+    assert(!(putThis && !(commitDec.orR) && (wtCount(i) === ((BigInt(1) << wtScoreboardCountBits) - 1).U)),
+      "btree-002 write-through scoreboard pending count overflow")
+  }
+
+  // btree-002 fix: final SourceD->L1 D-channel merge.
+  // 这是最晚的 GrantData 修正点：即使 stale DRAM response 已进入 SourceD pipeline，
+  // 只要还没 fire 给 L1，pending write-through bytes 仍会覆盖出去。
+  val wtGrantMergedData = wtMergeLine(wtSourceDTag, wtSourceDL2cidx, wtSourceDSet, sourceD.io.d.bits.data)
+  io.in_d.valid := sourceD.io.d.valid
+  io.in_d.bits := sourceD.io.d.bits
+  io.in_d.bits.data := Mux(sourceD.io.d.bits.opcode === AccessAckData, wtGrantMergedData, sourceD.io.d.bits.data)
+  sourceD.io.d.ready := io.in_d.ready
 
   val mshr_validOH = requests.io.valid
 
@@ -265,7 +405,11 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.push.bits.data.source:= directory.io.result.bits.source
   requests.io.push.bits.index := OHToUInt(Mux(alloc,mshr_insertOH,tagMatches))
 
-  directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && mshr_free && requests.io.push.ready && directory.io.ready && !(issue_flush_invalidate)
+  // btree-002 fix v3.2: request.ready 与 directory read 使用同一个 scoreboard accept gate。
+  // 即使未来 scoreboard 满，新-line Put 也不会出现 Directory 消费而 SinkA 未出队的不一致。
+  val requestCanIssue = mshr_free && requests.io.push.ready && directory.io.ready &&
+    wtScoreboardCanAccept && !(issue_flush_invalidate)
+  directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && requestCanIssue
   directory.io.read.bits := request.bits
   directory.io.write.valid := schedule.dir.valid && !selectedEvictReadPending // srad-007 Bug3 fix(B): fill 写 dir 等 evict 读完 //&& !schedule.dir.bits.is_writemiss
   directory.io.tag_match :=tagMatches.orR
@@ -279,7 +423,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.pop.bits  := mshr_select
 
 
-  request.ready :=mshr_free && requests.io.push.ready && directory.io.read.ready && directory.io.ready && !(issue_flush_invalidate)
+  // btree-002 fix: scoreboard 满时只挡会新占 entry 的 Put；Get/Hint 和同-line Put 仍可前进。
+  request.ready := requestCanIssue && directory.io.read.ready
 
 
 
@@ -348,7 +493,10 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   bankedStore.io.sinkD_adr.bits.way := schedule.dir.bits.way
   bankedStore.io.sinkD_adr.bits.mask:= ~(0.U(params.mask_bits.W))
 
-  bankedStore.io.sinkD_dat.data :=schedule.data
+  // btree-002 fix: refill install 到 L2 BankedStore 前同步 merge pending write-through bytes。
+  // schedule.dir.bits 只有 set/way/tag，l2cidx 从同一个 selected MSHR 的 schedule.d.bits 取。
+  val wtBankedStoreFillData = wtMergeLine(schedule.d.bits.tag, schedule.d.bits.l2cidx, schedule.d.bits.set, schedule.data)
+  bankedStore.io.sinkD_dat.data := wtBankedStoreFillData
   bankedStore.io.sourceD_radr <> sourceD.io.bs_radr
   bankedStore.io.sourceD_wadr <> sourceD.io.bs_wadr
   bankedStore.io.sourceD_wdat := sourceD.io.bs_wdat
