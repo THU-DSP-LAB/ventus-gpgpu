@@ -423,6 +423,28 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val readMissFillWait_st1 = CoreReq_pipeReg_st0_st1.deq.valid && ReadMiss_st1 &&
     ( mshrReleasingSameBlock_st1 ||
       (straddledRelease_st1 && (straddleBlockAddr_st1 === BlockAddr_st1)) )
+  // btree-003 fix: 写侧对称 ReadMissFillWait —— write-miss 撞同 block fill-release 窗口的 straddle latch。
+  //   独立 latch (不复用 read-side straddledRelease_st1，语义/生命周期清晰; codex_fix_design_v3 §4 命名建议)。
+  //   SET 谓词 widened (belt-and-suspenders, round11 §11.4): mshrReleasing(窄 Case1, store 在 release 拍
+  //   已驻 st1) || 同 block fillCommit pulse(覆盖 store 晚到、过 mshrReleasing 但仍 fill-commit 在途变体)。
+  //   clear (!deq.valid||deq.fire) 优先 → 排除 st1 空时 stale deq.bits 误触发(同 read 侧 L417)。
+  val straddledReleaseW_st1  = RegInit(false.B)
+  val straddleBlockAddrW_st1 = Reg(UInt(bABits.W))
+  when(!CoreReq_pipeReg_st0_st1.deq.valid || CoreReq_pipeReg_st0_st1.deq.fire){
+    straddledReleaseW_st1 := false.B
+  }.elsewhen(WriteMiss_st1 &&
+             (mshrReleasingSameBlock_st1 ||
+              (io.fillCommit_valid && (io.fillCommit_blockAddr === BlockAddr_st1)))){
+    straddledReleaseW_st1  := true.B
+    straddleBlockAddrW_st1 := BlockAddr_st1
+  }
+  // writeMissFillWait_st1 谓词: mshrReleasing 当拍 || straddle latch 续命。
+  //   ★不直接用 io.fillCommit_valid（会经 Req_RTAB_st1_valid→st1_ready→io_memRsp_coreRsp_ready
+  //   →memRspPipe.dAmemRsp_wReq_valid 形成组合环, FIRRTL 拒绝）。straddle latch SET 条件已捕 fillCommit
+  //   入寄存器，predicate 只读 Reg → loop-free（与 readMissFillWait_st1 对称）。
+  val writeMissFillWait_st1 = CoreReq_pipeReg_st0_st1.deq.valid && WriteMiss_st1 &&
+    ( mshrReleasingSameBlock_st1 ||
+      (straddledReleaseW_st1 && (straddleBlockAddrW_st1 === BlockAddr_st1)) )
   // bfs4096-009 fix: commit-seen —— 当前 st1 req 驻留期间见过本 block 真实 fill commit。clear 同上优先。
   // 随 RTABReq.fillAlreadyCommitted 带入(同拍 commit 用组合 OR 补)，覆盖 commit 与 enq 同拍 / commit 在 enq 前两种 edge。
   val fillCommitSeen_st1 = RegInit(false.B)
@@ -473,6 +495,17 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // 与 fillConflictSt1(要求 ReadHit)天然互斥; 抑制第二条 memReq(L364 !Req_st1_RTAB.valid)+ MSHR alloc(L533 !Req_RTAB_st1_valid)。
     Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
     ReplayType := ReadMissFillWait
+  }.elsewhen(writeMissFillWait_st1){
+    // btree-003 fix: write-miss 撞同 block fill-release 窗口 (MSHR 释放/fill commit、tag 未 re-probe hit)
+    //   → 挂 RTAB 等 fill commit, replay re-probe 转 write-HIT 写 L1; 不发 write-through no-allocate
+    //   (否则 stale fill 占 L1 way → read-back 命中 stale 0)。写侧对称 ReadMissFillWait(bfs4096-009)。
+    // 互斥/优先级 (放链末最低优先): WriteMiss 撞 fill-release 窗口时 MshrStatus 已非 Secondary*
+    //   → writeMissHitMSHR(453) 不 fire (它要求 Secondary*); WSHR.Hit / SMSHR.hitblock 若同拍成立, 它们
+    //   (更高优先) 先 park (亦不逃逸), 本条仅在它们全落空 + fill-release 窗 fire → 不重不漏。
+    //   与 fillConflictSt1(要求 ReadHit)/readMissFillWait(ReadMiss) 天然互斥 (本条 WriteMiss)。
+    // 抑制第二条 memReq (L392 !Req_st1_RTAB.valid); write-miss 本不 alloc MSHR (L632 ReadMiss only)。
+    Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
+    ReplayType := WriteMissFillWait
   }
   // nn64k-009 fix: 导出 st1 raw RTAB 预留意图(不经 st1_ready gate)。等价于 L599 "requesting RTAB"
   // 分支谓词 (Req_RTAB_st1_valid || ReplayType===UCacheHitDirty)——凡这条 st1 请求最终必须进 RTAB

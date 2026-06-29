@@ -66,6 +66,11 @@ trait HasDCacheParameter extends HasL1CacheParameters {
   // entry_valid 过滤降级 primary）→ 挂 RTAB 等本 block fill commit 再 replay，re-probe tag hit，
   // 全程零第二条 memReq → 无 dup-tag。见 bugs/bfs4096-009/phase_3_analysis_v7_replay_design.md。
   def ReadMissFillWait: UInt = 11.U(4.W)
+  // btree-003 fix: write-miss 撞同 block fill-release 窗口 (MSHR 已释放/fill 已 commit、tag 尚未对
+  // 本 req re-probe 成 hit) → 挂 RTAB 等 fill commit, replay re-probe 转 write-HIT 写 L1，不发
+  // write-through no-allocate (否则 stale fill 占 L1 way → read-back 命中 stale 0)。写侧对称
+  // ReadMissFillWait。见 bugs/btree-003/a2prime_design.md / checkpoint_wave_bid16_round11.md。
+  def WriteMissFillWait: UInt = 12.U(4.W)
   //TL params
   def TLAOp_Get       : UInt = 4.U(3.W)
   def TLAOp_PutFull   : UInt = 0.U(3.W)
