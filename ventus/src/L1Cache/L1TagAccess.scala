@@ -331,7 +331,10 @@ if(MMU_ENABLED) {
     })
     dirtyMaskPerCL_init(j) := perWordContrib.reduce(_ | _)
   }
-  dirtyMaskPerCL := (dirtyMaskPerCL_init.asUInt | dirtyMaskAccess.io.r.resp.data(OHToUInt(iTagChecker.io.waymask))).asTypeOf(dirtyMaskPerCL)
+  // btree-004 P1′/P1″: dirtyMaskPerCL 的 OR-base 计算重排至 waymask_st1_raw 声明之后(L447+, 见下方 "btree-004 P1′" block),
+  //   改用 held ST1 identity 做 valid-gate, 消除 live iTagChecker.io.waymask 在 stall 期漂移(codex Phase3.5 维度(3)打回)。
+  //   ★build-friendly: dirtyMaskPerCL 是 Wire(L323 WireInit 默认 0), 下方 in(1).bits.apply() 前向引用它(Chisel last-connect 解析),
+  //    不 reorder .apply() 本身(approach-b 那样挪 .apply() 触发 Verilator 5.034 V3TSP crash)。
 
   // 一旦用到 dirtyMaskAccess 读出的值，就应该在下个周期将这个位置的 dirty mask 写0，所以写也需要一个仲裁器
   val dirtyMaskWriteArb = Module(new Arbiter(new SRAMBundleAW(UInt((dcache_BlockWords * BytesOfWord).W), set, way), 3))
@@ -445,6 +448,22 @@ if(MMU_ENABLED) {
   // bfs4096-007 v15: hit_st1_raw 已在前置 Wire 声明, 此处 := 赋值
   hit_st1_raw := st1HitEff_raw && !(writeHitFillConflictHeld || writeHitFillConflict_set)  // ★gate: 冲突→hit 强制 0→write-miss
   val waymask_st1_raw = st1WaymaskEff_raw
+  // ===== btree-004 P1′ (read 侧 dirtyMask OR-base held-identity valid-gate) =====
+  // btree-004 fix: 用 way_dirty 做 dirtyMask OR-base 的 valid-gate(落实 L283 设计本意: way_dirty=阵列 valid)。
+  //   clean way(way_dirty=0)的 dirtyMask SRAM 残留视为无效, 不 OR 进首写 mask; 已脏 way(way_dirty=1)仍正常累积。
+  // ★索引用 held ST1 identity(probeReadBuf.bits.setIdx + waymask_st1_raw, 与 L451 isDirty 同源),
+  //   不用 RegEnable(set)+live way 混合索引(codex Phase3.5 维度(3)打回: stall 期 live way / dirtyMaskAccess holdRead 读口漂移)。
+  val orBaseHeldWay        = OHToUInt(waymask_st1_raw)                          // held way (= L451 isDirty 同源)
+  val orBaseHeldSet        = probeReadBuf.bits.setIdx                           // held set (= L451 isDirty 同源)
+  val hitWayCurrentlyDirty = way_dirty(orBaseHeldSet)(orBaseHeldWay).asBool
+  val dirtyMaskOrBase      = Mux(hitWayCurrentlyDirty,
+                                 dirtyMaskAccess.io.r.resp.data(orBaseHeldWay), // OR-base 用同一 held way 选
+                                 0.U)
+  dirtyMaskPerCL := (dirtyMaskPerCL_init.asUInt | dirtyMaskOrBase).asTypeOf(dirtyMaskPerCL)
+  // ★btree-004 P1″ (写回端口 in(1) 也改 held identity) 已实测引入回归(command-j 路径 bid=-1 + btree-003 reclength=0 复发,
+  //   isolated-serial 铁实, codex 设计审被 build-trial 推翻), 故 P1′ 只保留上方读侧 OR-base held valid-gate,
+  //   in(1) 写回沿用原 live 信号(empirically 正确)。写回端口 identity latent = codex 标记的理论概念(无 failing seed),
+  //   held-write-back 闭合法错误, 残留待人类用不同 approach 或接受 live。
   io.hit_st1 := hit_st1_raw && probeReadBuf.valid//RegNext(io.probeRead.fire) //todo remove
   io.hitStatus_st1.hit := hit_st1_raw && probeReadBuf.valid
   io.hitStatus_st1.waymask := waymask_st1_raw
