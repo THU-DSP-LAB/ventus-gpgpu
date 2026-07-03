@@ -50,6 +50,7 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 MOLD = $(shell which mold)
+VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
 #=====================================================================
 # Source file list and build directories
@@ -94,7 +95,6 @@ VLIB_OBJ_EXPORT = $(VLIB_SRC_CXX_EXPORT:%.cpp=$(VLIB_DIR_BUILDOBJ)/%.o)
 VLIB_NPROC_CPU = $(shell nproc)
 VLIB_NPROC_DUT = 8 # Depends on RTL circuit size, just try and find a verilator-allowed largest number
 VLIB_NPROC_SIM = $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
-VLIB_NPROC_TRACE_FST = $(call MIN_FUNC, $(VLIB_NPROC_SIM), 2)
 
 # Generate C++ in executable form
 VLIB_VERILATOR_FLAGS += -cc --build
@@ -112,7 +112,6 @@ VLIB_VERILATOR_FLAGS += -Wno-WIDTHEXPAND
 VLIB_VERILATOR_FLAGS += -Wno-WIDTHTRUNC
 # Define macros for Verilog
 # random init
-VLIB_VERILATOR_FLAGS += -DPRINTF_COND=1
 VLIB_VERILATOR_FLAGS += $(VLIB_RANDOMIZE_FLAGS)
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE_MEM_INIT
@@ -120,7 +119,6 @@ VLIB_VERILATOR_FLAGS += -DRANDOMIZE_REG_INIT
 # Make waveforms
 ifneq ($(filter 1 yes true on,$(GVM_TRACE)),)
 	VLIB_VERILATOR_FLAGS += --trace-fst
-	VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
 endif
 # Check SystemVerilog assertions
 VLIB_VERILATOR_FLAGS += --assert
@@ -147,16 +145,20 @@ VLIB_CXXFLAGS += -DENABLE_GVM=1
 VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
 #VLIB_CXXFLAGS += -fsanitize=address,undefined
 VLIB_LDFLAGS += -lc
+ifeq ($(VLIB_HAS_SYSTEM_LZ4),1)
+VLIB_LDLIBS += -llz4
+else
+$(error System liblz4-dev is required for Verilator FST tracing)
+endif
 ifeq ($(MOLD),1)
 VLIB_LDFLAGS += -fuse-ld=mold
 endif
 
 VLIB_VERILATOR_FLAGS += --threads $(VLIB_NPROC_SIM)
 VLIB_VERILATOR_FLAGS += --threads-dpi none
-VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
 VLIB_VERILATOR_FLAGS += -j $(VLIB_NPROC_CPU)
 VLIB_VERILATOR_FLAGS += -CFLAGS "$(VLIB_CXXFLAGS)"
-VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS)"
+VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS) $(VLIB_LDLIBS)"
 VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 #=====================================================================
@@ -196,7 +198,7 @@ $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic \
+	  -lspdlog -lfmt -pthread -lpthread -lz -latomic $(VLIB_LDLIBS) \
 	  -lgvmref -L$(GVM_REF_DIR) -Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/libVentusGVM.so
 
