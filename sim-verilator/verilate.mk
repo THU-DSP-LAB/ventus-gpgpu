@@ -45,6 +45,7 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 MOLD = $(shell which mold)
+VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
 #=====================================================================
 # Source file list and build directories
@@ -88,7 +89,6 @@ VLIB_OBJ_EXPORT = $(VLIB_SRC_CXX_EXPORT:%.cpp=$(VLIB_DIR_BUILDOBJ)/%.o)
 VLIB_NPROC_CPU = $(shell nproc)
 VLIB_NPROC_DUT = 8 # Depends on RTL circuit size, just try and find a verilator-allowed largest number
 VLIB_NPROC_SIM = $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
-VLIB_NPROC_TRACE_FST = $(call MIN_FUNC, $(VLIB_NPROC_SIM), 2)
 
 # Generate C++ in executable form
 VLIB_VERILATOR_FLAGS += -cc --build
@@ -132,15 +132,19 @@ VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
 VLIB_LDFLAGS += -lc
+ifeq ($(VLIB_HAS_SYSTEM_LZ4),1)
+VLIB_LDLIBS += -llz4
+else
+$(error System liblz4-dev is required for Verilator FST tracing)
+endif
 ifeq ($(MOLD),1)
 VLIB_LDFLAGS += -fuse-ld=mold
 endif
 
 VLIB_VERILATOR_FLAGS += --threads $(VLIB_NPROC_SIM)
-VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
 VLIB_VERILATOR_FLAGS += -j $(VLIB_NPROC_CPU)
 VLIB_VERILATOR_FLAGS += -CFLAGS "$(VLIB_CXXFLAGS)"
-VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS)"
+VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS) $(VLIB_LDLIBS)"
 VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 #=====================================================================
@@ -177,7 +181,7 @@ $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic  
+	  -lspdlog -lfmt -pthread -lpthread -lz -latomic $(VLIB_LDLIBS)
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/lib$(VLIB_TARGET_NAME).so
 
 lib: $(VLIB_TARGET)
