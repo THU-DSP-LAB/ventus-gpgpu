@@ -35,6 +35,10 @@ trait HasL1CacheParameters extends HasRVGParameters{
   //def BlockWords: Int = 32// replace
   def BlockBytes = BlockWords * 4
   def BlockBits = BlockBytes * 8
+  def SectorCount = dcache_SectorCount
+  def SectorWords = dcache_SectorWords
+  def SectorBytes = dcache_SectorBytes
+  def SectorIdxBits = dcache_SectorIdxBits
 
   def CacheSizeBytes = NSets * NWays * BlockBytes
 
@@ -61,6 +65,22 @@ trait HasL1CacheParameters extends HasRVGParameters{
   }
 
   def get_blockOffset(addr: UInt)= addr(BlockOffsetBits + WordOffsetBits-1,WordOffsetBits)
+  def wordOffsetToSectorIdx(wordOffset: UInt): UInt =
+    wordOffset(BlockOffsetBits - 1, log2Ceil(SectorWords))
+
+  def activeSectorMask(perLaneAddr: Vec[DCachePerLaneAddr]): UInt = {
+    perLaneAddr
+      .map(lane => Mux(lane.activeMask, UIntToOH(wordOffsetToSectorIdx(lane.blockOffset), SectorCount), 0.U(SectorCount.W)))
+      .reduce(_ | _)
+  }
+
+  def sectorWordMask(sectorIdx: UInt): UInt = {
+    val wordMask = Wire(Vec(BlockWords, Bool()))
+    for (word <- 0 until BlockWords) {
+      wordMask(word) := wordOffsetToSectorIdx(word.U(BlockOffsetBits.W)) === sectorIdx
+    }
+    wordMask.asUInt
+  }
 
   def get_offsets(addr: UInt)= addr(BlockOffsetBits + WordOffsetBits-1,0)//blockOffset + workOffset
   def get_blockAddr(addr: UInt) = (addr >> (WordLength-(TagBits+SetIdxBits))).asUInt//tag + setIdx

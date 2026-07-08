@@ -70,6 +70,19 @@ extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim)
 }
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
+extern "C" void ventus_rtlsim_dcache_host_invalidate(ventus_rtlsim_t* sim) {
+    sim->need_dcache_host_invalidate = true;
+    // vt_copy_to_dev is issued before vt_start/add_kernel. Advance the idle RTL
+    // long enough for the host-side data-cache invalidate to be accepted and for
+    // the L2 directory sweep to finish before the next kernel can fetch through
+    // source 0. Otherwise the internal HintAck can race the first ICache miss.
+    for (int i = 0; i < 4096; ++i) {
+        const auto* result = sim->step();
+        if (result->error || result->time_exceed || result->hang) {
+            break;
+        }
+    }
+}
 extern "C" uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim) { return sim->contextp->time(); }
 extern "C" bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim) { return sim->cta->is_idle(); }
 

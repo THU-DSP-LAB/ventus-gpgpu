@@ -594,6 +594,33 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     io.Probe_SMSHR.bits.Type := 2.U
   }
 
+  // For a read hit, dA_data is the response to the data SRAM read issued in
+  // the previous cycle. Carry a matched snapshot with the core response instead
+  // of letting st2 sample the live data port after another access has taken it.
+  val st1ReadHitSetWay = Cat(CoreReq_pipeReg_st0_st1.deq.bits.Req.setIdx, OHToUInt(io.tA_Hit_st1.waymask))
+  val dAReadHitReqFromCore_d1 = RegNext(io.read_Req_dA.valid && ReadHit_st1, false.B)
+  val dAReadHitReqTag_d1 = RegNext(CoreReq_pipeReg_st0_st1.deq.bits.Req.tag)
+  val dAReadHitReqSet_d1 = RegNext(CoreReq_pipeReg_st0_st1.deq.bits.Req.setIdx)
+  val dAReadHitReqSetWay_d1 = RegNext(st1ReadHitSetWay)
+  val dAReadHitRespMatches_st1 =
+    dAReadHitReqFromCore_d1 &&
+      (dAReadHitReqTag_d1 === CoreReq_pipeReg_st0_st1.deq.bits.Req.tag) &&
+      (dAReadHitReqSet_d1 === CoreReq_pipeReg_st0_st1.deq.bits.Req.setIdx) &&
+      (dAReadHitReqSetWay_d1 === st1ReadHitSetWay)
+
+  val st1ReadHitSnapshot = Reg(Vec(dcache_BlockWords, UInt(WordLength.W)))
+  val st1ReadHitSnapshotValid = RegInit(false.B)
+  val st1ReadHitSnapshotCaptureNow =
+    CoreReq_pipeReg_st0_st1.deq.valid && ReadHit_st1 && dAReadHitRespMatches_st1
+  when(CoreReq_pipeReg_st0_st1.deq.fire || !CoreReq_pipeReg_st0_st1.deq.valid){
+    st1ReadHitSnapshotValid := false.B
+  }.elsewhen(st1ReadHitSnapshotCaptureNow && !st1ReadHitSnapshotValid){
+    st1ReadHitSnapshot := io.dA_data
+    st1ReadHitSnapshotValid := true.B
+  }
+  val st1ReadHitSnapshotAvail = st1ReadHitSnapshotValid || st1ReadHitSnapshotCaptureNow
+  val st1ReadHitSnapshotData = Mux(st1ReadHitSnapshotValid, st1ReadHitSnapshot, io.dA_data)
+
   //st1 ready
   st1_ready := false.B
   when(!(Req_RTAB_st1_valid || ReplayType === UCacheHitDirty)) { // when not request RTAB
@@ -603,9 +630,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
           // 当前 io.Mshr_st1_ready 由 MSHR.missReq.ready 驱动，只反映 miss 分配能力，不代表 hit 处理能力。
           when(CoreRsp_pipeReg_st1_st2.enq.ready) { //todo check ready condition
             when(UCReqHitDirty){ // uncached read hit dirty will write back to mem and rsp to core
-              st1_ready := !io.memRsp_coreRsp.valid && io.MissReq_Mem.ready && (evictstateReg === evictrsp)
+              st1_ready := !io.memRsp_coreRsp.valid && io.MissReq_Mem.ready &&
+                (evictstateReg === evictrsp) && (!ReadHit_st1 || st1ReadHitSnapshotAvail)
             }.otherwise{
-              st1_ready := !io.memRsp_coreRsp.valid //true.B
+              st1_ready := !io.memRsp_coreRsp.valid && (!ReadHit_st1 || st1ReadHitSnapshotAvail)
             }
           }.otherwise{
             st1_ready := false.B
@@ -705,31 +733,6 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
 
   //==========
   // st2 pipe reg
-  // 对 read-hit 来说，dA_data 对应“上一拍发出的 data SRAM 读请求”。
-  // 如果 st1 被 memRsp_coreRsp 等 backpressure 卡住，当前 hit 请求虽然还停在 st1，
-  // 但后续周期 DataAccess 可能已经被 refill 改写；因此需要把“stall 期间第一次可见的旧数据”
-  // 和这条 coreReq 一起带到 st2，而不是等到 st2 再去读 live 的 io.dA_data。
-  
-  val st1ReadHitSnapshot = Reg(Vec(dcache_BlockWords, UInt(WordLength.W)))
-  val st1ReadHitSnapshotValid = RegInit(false.B)
-  val st1ReadHitSnapshotPending = RegInit(false.B)
-  val readHitStall_st1 = CoreReq_pipeReg_st0_st1.deq.valid && ReadHit_st1 && !st1_ready
-  val readHitFire_st1 = CoreReq_pipeReg_st0_st1.deq.fire && ReadHit_st1
-  when(readHitStall_st1 && !st1ReadHitSnapshotValid && !st1ReadHitSnapshotPending){
-    st1ReadHitSnapshotPending := true.B
-  }
-  when(st1ReadHitSnapshotPending && !readHitFire_st1){
-    st1ReadHitSnapshot := io.dA_data
-    st1ReadHitSnapshotValid := true.B
-    st1ReadHitSnapshotPending := false.B
-  }
-  when(readHitFire_st1 || !CoreReq_pipeReg_st0_st1.deq.valid){
-    st1ReadHitSnapshotValid := false.B
-    st1ReadHitSnapshotPending := false.B
-  }
-  val st1ReadHitSnapshotAvail = st1ReadHitSnapshotValid || st1ReadHitSnapshotPending
-  val st1ReadHitSnapshotData = Mux(st1ReadHitSnapshotPending, io.dA_data, st1ReadHitSnapshot)
-
   // coreRsp 第 1 类：可由当前 core request 直接生成响应
   // 情况：cache hit 的应答，数据会在 st2 从 data access 路径中选出
   // write miss 不在这里返回，而是走 memReq_coreRsp 旁路，表示写请求已被下游接收

@@ -40,6 +40,11 @@ class warp_scheduler extends Module{
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
     val flushDCache = Decoupled(Bool())
+    val debug_warp_active = Output(UInt(num_warp.W))
+    val debug_warp_ready = Output(UInt(num_warp.W))
+    val debug_pc_ready = Output(UInt(num_warp.W))
+    val debug_current_warp = Output(UInt(depth_warp.W))
+    val debug_next_warp = Output(UInt(depth_warp.W))
     // val inquire_csr_wid = Output(UInt(depth_warp.W))
     // val inquire_csr_addr = Output(UInt(12.W))
     // val inquire_csr_data = Input(UInt(xLen.W))
@@ -188,6 +193,12 @@ class warp_scheduler extends Module{
     when(pc_ready(i)){next_warp:=i.asUInt}
   }
   io.pc_req.valid:=pc_ready(next_warp)
+  io.debug_warp_active := warp_active
+  io.debug_warp_ready := warp_ready
+  io.debug_pc_ready := pc_ready.asUInt
+  io.debug_current_warp := current_warp
+  io.debug_next_warp := next_warp
+
   //lock one warp to execute
   //next_warp:=0.U
   if(SINGLE_INST) next_warp:=0.U

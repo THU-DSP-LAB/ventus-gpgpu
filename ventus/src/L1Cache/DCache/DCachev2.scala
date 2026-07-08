@@ -63,6 +63,8 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
     val TLBReq = if(MMU_ENABLED) Some(DecoupledIO(new mmu.L1TlbReq(SV.getOrElse(mmu.SV32)))) else None
     val perfEnable = Input(Bool())
     val perfReset = Input(Bool())
+    val hostInvalidate = Input(Bool())
+    val idle = Output(Bool())
     val perf = Output(new DCachePerfCounters)
   })
   // submodules
@@ -158,7 +160,13 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   perfBankEn.io.perLaneValid := coreReqPipe.io.perLaneAddr_st1.map(_.activeMask)
   // core request arbiter
   // source: RTAB top request / core request from io
-  val blockCoreReq = memRspPipe.io.blockCoreReq
+  // DataAccess has one write port per word. A refill commit writes through the
+  // same port as a core write-hit, and the mux below gives refill priority. If
+  // coreReqPipe is allowed to fire a write-hit during a refill, the store is
+  // acknowledged and dirty metadata can be updated while the data write itself
+  // is dropped. Stall core requests for the whole refill-write intent window,
+  // not only dirty replacement.
+  val blockCoreReq = memRspPipe.io.blockCoreReq || memRspPipe.io.dAmemRsp_wReq_intent
   CoreReqArb.io.in(0).valid := ReplayTable.io.coreReq_replay.valid && !blockCoreReq
   CoreReqArb.io.in(0).bits  := ReplayTable.io.coreReq_replay.bits
   ReplayTable.io.coreReq_replay.ready := CoreReqArb.io.in(0).ready && !blockCoreReq
@@ -235,7 +243,7 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   TagAccess.io.probeRead.bits         := coreReqPipe.io.Probe_tA
   TagAccess.io.probeRead.valid        := st0_fire
   ReplayTable.io.RTABReq_st0     <> coreReqPipe.io.Req_st0_RTAB
-  TagAccess.io.invalidateAll     := coreReqPipe.io.invalidate_tA
+  TagAccess.io.invalidateAll     := coreReqPipe.io.invalidate_tA || io.hostInvalidate
   TagAccess.io.flushChoosen.get  := coreReqPipe.io.flushDirty_tA
   // st1
   TagAccess.io.tagFromCore_st1        := coreReqPipe.io.tagFromCore_tA_st1
@@ -306,7 +314,9 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   // memReq_ready
 
   TagAccess.io.allocateWriteTagSRAMWValid_st1 := memRspPipe.io.dAmemRsp_wReq_valid
- TagAccess.io.allocateWriteData_st1 := get_tag(memRspPipe.io.dAmemRsp_wReq_blockAddr)
+  TagAccess.io.allocateWriteData_st1 := get_tag(memRspPipe.io.dAmemRsp_wReq_blockAddr)
+  TagAccess.io.allocateSectorMask_st1 := memRspPipe.io.allocateSectorMask_st1
+  memRspPipe.io.refillDataSectorMask_st1 := TagAccess.io.allocateDataSectorMask_st1
   // tag access
   //mshr
   MshrAccess.io.stage2_ready  := MemReqArb.io.in(1).ready
@@ -609,14 +619,13 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   coreReqPipe.io.memReq_coreRsp.valid := coreRsp_st2_valid_from_memReq
   coreRspFromMemReq.data := DontCare
   coreRspFromMemReq.isWrite := true.B
-  //st指令的regIdx对SM流水线提交级无意义，且memReq_Q没有传输该数据的通道
+  // st指令的regIdx对SM流水线提交级无意义，且memReq_Q没有传输该数据的通道
   coreRspFromMemReq.instrId := memReq_Q.io.deq.bits.coreRspInstrId
   coreRspFromMemReq.activeMask := memReq_Q.io.deq.bits.activeMask
   // memReq(st3)
   io.memReq.get.bits := memReq_st3
   io.memReq.get.bits.a_addr.get := memReq_st3_addr.get
   io.memReq.get.bits.a_source := memReq_st3_source
-
   // memReq_valid 表示 st3 launch buffer 当前是否持有一条尚未从 io.memReq 发走的请求。
   // memReq_Q.io.deq.fire 和 io.memReq.get.fire 可能错拍，因此不能直接把 deq.valid 透传到 io.memReq.get.valid。
   val memReq_valid = RegInit(false.B)
@@ -624,6 +633,22 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
     memReq_valid := memReq_Q.io.deq.fire
   }
   io.memReq.get.valid := memReq_valid
+  io.idle :=
+    MshrAccess.io.empty &&
+      SMshrAccess.io.empty &&
+      WshrAccess.io.empty &&
+      ReplayTable.io.empty &&
+      memRspPipe.io.fillPipeDrained &&
+      !coreReqPipe.io.st0_valid &&
+      !coreReqPipe.io.st1_valid &&
+      !ReplayTable.io.coreReq_replay.valid &&
+      !RTAB_pushedIdx_st2.io.deq.valid &&
+      !io.coreReq.valid &&
+      !io.coreRsp.valid &&
+      !coreRsp_st2_valid_from_memReq &&
+      !memReq_Q.io.deq.valid &&
+      !memReq_valid &&
+      !memRsp_Q.io.deq.valid
   io.perf.totalReq := totalReqCnt
   io.perf.readReq := readReqCnt
   io.perf.writeReq := writeReqCnt

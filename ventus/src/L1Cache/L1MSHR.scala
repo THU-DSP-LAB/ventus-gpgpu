@@ -21,6 +21,7 @@ import top.parameters._
 
 class MSHRprobe(val bABits: Int, val AsidBits: Int) extends Bundle {
   val blockAddr = UInt(bABits.W)
+  val sectorMask = UInt(dcache_SectorCount.W)
   //val ASID = UInt(AsidBits.W)
 }
 class MSHRprobeOut(val NEntry:Int, val NSub:Int) extends Bundle {
@@ -29,6 +30,7 @@ class MSHRprobeOut(val NEntry:Int, val NSub:Int) extends Bundle {
 }
 class MSHRmissReq(val bABits: Int, val tIWdith: Int, val InstrIdBits: Int, val AsidBits: Int) extends Bundle {// Use this bundle when handle miss issued from pipeline
   val blockAddr = UInt(bABits.W)
+  val sectorMask = UInt(dcache_SectorCount.W)
   val instrId = UInt(InstrIdBits.W)
   val targetInfo = UInt(tIWdith.W)
   //val ASID = UInt(AsidBits.W)
@@ -53,6 +55,7 @@ class MSHRmissRspOut[T <: Data](val bABits: Int, val tIWdith: Int, val InstrIdBi
   val targetInfo = UInt(tIWdith.W)
   val blockAddr = UInt(bABits.W)
   val instrId = UInt(InstrIdBits.W)
+  val mergedSectorMask = UInt(dcache_SectorCount.W)
   val UncacheRsp = Bool()
   //val ASID = UInt(AsidBits.W)
   //val burst = Bool()//This bit indicate the Rsp transaction comes from subentry
@@ -85,9 +88,12 @@ class getEntryStatusRsp(nEntry: Int) extends Module{
 
 }
 
-class MSHRpipe1Reg(WidthMatchProbe: Int, SubEntryNext: Int) extends Bundle{
+class MSHRpipe1Reg(WidthMatchProbe: Int, SubEntryNext: Int, BlockAddrWidth: Int, AsidBits: Int) extends Bundle{
   val entryMatchProbe = UInt(WidthMatchProbe.W)
   val subEntryIdx = UInt(SubEntryNext.W)
+  val blockAddr = UInt(BlockAddrWidth.W)
+  val sectorMask = UInt(dcache_SectorCount.W)
+  val asid = UInt(AsidBits.W)
   val full = Bool()
 }
 
@@ -129,14 +135,16 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   })
   // head of entry, for comparison
   val blockAddr_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(bABits.W))))
+  val sectorMask_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(dcache_SectorCount.W))))
   val instrId_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(InstrIdBits.W)))) //TODO remove this
   val targetInfo_Accesss = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(tIWidth.W))))))
+  val sectorMask_SubEntries = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(0.U(dcache_SectorCount.W))))))
   val cacheStatus_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(false.B)))
 
   val subentry_valid = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(NMshrSubEntry)(false.B)))))
   val entry_valid = Reverse(Cat(subentry_valid.map(Cat(_).orR)))
   val probestatus = RegInit(false.B)
-  val MSHR_st1 = Module(new Queue(new MSHRpipe1Reg(NMshrEntry,log2Up(NMshrSubEntry)+1),1,true,false))
+  val MSHR_st1 = Module(new Queue(new MSHRpipe1Reg(NMshrEntry,log2Up(NMshrSubEntry)+1,bABits,AsidBits),1,true,false))
   val releasing_stall = RegInit(VecInit(Seq.fill(NMshrEntry)(false.B)))
 
   io.releasing_stall := releasing_stall.asUInt.orR
@@ -171,6 +179,8 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   val entryMatchProbe = Wire(UInt(NMshrEntry.W))
   val entryMatchProbeid_reg = Wire(UInt(NMshrEntry.W))
   val probeMatchMissReq = Wire(Bool())
+  val sectorConflict_st0 = Wire(Bool())
+  val sectorConflict_st1 = Wire(Bool())
   val allfalse_subentryvalidtype = Wire(Vec(NMshrSubEntry,Bool()))
   val entryMatchProbe_st1_raw = MSHR_st1.io.deq.bits.entryMatchProbe // st0 probe 结果
   // st1 可能因 stall 跨过 missRsp 释放窗口：需要用当前 entry_valid 过滤掉已释放 entry 的陈旧 one-hot
@@ -213,12 +223,33 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
     val ASID_Access = RegInit(VecInit(Seq.fill(NMshrEntry)(0.U(AsidBits.W))))
     val missRspASID_st0 = ASID_Access(entryMatchMissRsp)
     io.releasing_asid.get := ASID_Access(io.missRspIn.bits.instrId)
+    val probeBlockMatch =
+      Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) &
+        entry_valid &
+        Reverse(Cat(ASID_Access.map(_ === io.probeAsid.get)))
+    val probeSectorCovered =
+      Reverse(Cat(sectorMask_Access.map(mask => ((mask & io.probe.bits.sectorMask) === io.probe.bits.sectorMask))))
+    val missReqBlockMatch =
+      Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) &
+        entry_valid &
+        Reverse(Cat(ASID_Access.map(_ === io.missReqAsid.get)))
+    val missReqSectorCovered =
+      Reverse(Cat(sectorMask_Access.map(mask => ((mask & io.missReq.bits.sectorMask) === io.missReq.bits.sectorMask))))
+    val st1BlockMatch =
+      Reverse(Cat(blockAddr_Access.map(_ === MSHR_st1.io.deq.bits.blockAddr))) &
+        entry_valid &
+        Reverse(Cat(ASID_Access.map(_ === MSHR_st1.io.deq.bits.asid)))
+    val st1SectorCovered =
+      Reverse(Cat(sectorMask_Access.map(mask => ((mask & MSHR_st1.io.deq.bits.sectorMask) === MSHR_st1.io.deq.bits.sectorMask))))
+    sectorConflict_st0 := io.probe.valid && (probeBlockMatch & ~probeSectorCovered).orR
+    sectorConflict_st1 := MSHR_st1.io.deq.valid && (st1BlockMatch & ~st1SectorCovered).orR
     probeMatchMissReq := (io.probe.bits.blockAddr === io.missReq.bits.blockAddr) && (io.probeAsid.get === io.missReqAsid.get) && io.probe.valid && missReqValid
     entryMatchProbe := Mux(probeMatchMissReq,UIntToOH(entryStatus.io.next),
-    Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid & Reverse(Cat(ASID_Access.map(_ === io.probeAsid.get))))
-        entryMatchProbeid_reg := OHToUInt(Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) & entry_valid & Reverse(Cat(ASID_Access.map(_ === io.missReqAsid.get))))
+      probeBlockMatch & probeSectorCovered)
+    entryMatchProbeid_reg := OHToUInt(missReqBlockMatch & missReqSectorCovered)
     when(io.missReq.fire && MSHR_st1.io.deq.ready && mshrStatus_st1_w === 0.U) { //PRIMARY_AVAIL
       blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
+      sectorMask_Access(entryStatus.io.next) := io.missReq.bits.sectorMask
       instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
       ASID_Access(entryStatus.io.next) := io.missReqAsid.get
     }
@@ -229,14 +260,26 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
     io.missRspOutAsid.foreach(_ := missRspOutAsid_st1.io.deq.bits)
     missRspprobeReqSameBlock := (io.probe.bits.blockAddr === io.missRspOut.bits.blockAddr) && (io.probeAsid.get === io.missRspOutAsid.get)
   } else {
+    val probeBlockMatch = Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid
+    val probeSectorCovered =
+      Reverse(Cat(sectorMask_Access.map(mask => ((mask & io.probe.bits.sectorMask) === io.probe.bits.sectorMask))))
+    val missReqBlockMatch = Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) & entry_valid
+    val missReqSectorCovered =
+      Reverse(Cat(sectorMask_Access.map(mask => ((mask & io.missReq.bits.sectorMask) === io.missReq.bits.sectorMask))))
+    val st1BlockMatch = Reverse(Cat(blockAddr_Access.map(_ === MSHR_st1.io.deq.bits.blockAddr))) & entry_valid
+    val st1SectorCovered =
+      Reverse(Cat(sectorMask_Access.map(mask => ((mask & MSHR_st1.io.deq.bits.sectorMask) === MSHR_st1.io.deq.bits.sectorMask))))
+    sectorConflict_st0 := io.probe.valid && (probeBlockMatch & ~probeSectorCovered).orR
+    sectorConflict_st1 := MSHR_st1.io.deq.valid && (st1BlockMatch & ~st1SectorCovered).orR
     entryMatchProbe :=  Mux(probeMatchMissReq,UIntToOH(entryStatus.io.next),
-      Reverse(Cat(blockAddr_Access.map(_ === io.probe.bits.blockAddr))) & entry_valid)
+      probeBlockMatch & probeSectorCovered)
     probeMatchMissReq := (io.probe.bits.blockAddr === io.missReq.bits.blockAddr) && io.probe.valid && missReqValid
     when(io.missReq.fire && MSHR_st1.io.deq.ready && mshrStatus_st1_w === 0.U) { //PRIMARY_AVAIL
       blockAddr_Access(entryStatus.io.next) := io.missReq.bits.blockAddr
+      sectorMask_Access(entryStatus.io.next) := io.missReq.bits.sectorMask
       instrId_Access(entryStatus.io.next) := io.missReq.bits.instrId
     }
-    entryMatchProbeid_reg := OHToUInt(Reverse(Cat(blockAddr_Access.map(_ === io.missReq.bits.blockAddr))) & entry_valid)
+    entryMatchProbeid_reg := OHToUInt(missReqBlockMatch & missReqSectorCovered)
     missRspprobeReqSameBlock := (io.probe.bits.blockAddr === io.missRspOut.bits.blockAddr)
   }
 
@@ -254,6 +297,9 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   MSHR_st1.io.enq.valid := io.probe.valid
   MSHR_st1.io.enq.bits.entryMatchProbe := entryMatchProbe
   MSHR_st1.io.enq.bits.subEntryIdx := subentryStatus.io.next // todo delect this
+  MSHR_st1.io.enq.bits.blockAddr := io.probe.bits.blockAddr
+  MSHR_st1.io.enq.bits.sectorMask := io.probe.bits.sectorMask
+  MSHR_st1.io.enq.bits.asid := (if(MMU_ENABLED) io.probeAsid.get else 0.U(AsidBits.W))
   MSHR_st1.io.enq.bits.full  := mainEntryFull && subEntryFull
   MSHR_st1.io.deq.ready := io.stage1_ready
 
@@ -264,7 +310,9 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
       mshrStatus_st1_r := 3.U //SECONDARY_FULL
     }
   }.elsewhen(io.probe.valid) {
-    when(primaryMiss_st0) {
+    when(sectorConflict_st0) {
+      mshrStatus_st1_r := 1.U //PRIMARY_FULL: same block has an in-flight different sector
+    }.elsewhen(primaryMiss_st0) {
       when(mainEntryFull || (mainEntryAlmFull && io.missReq.fire)) {
         mshrStatus_st1_r := 1.U //PRIMARY_FULL
         //}.elsewhen(mainEntryAlmFull) {
@@ -292,7 +340,9 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
     }
   }
 
-  when(primaryMiss_st0) {
+  when(sectorConflict_st0) {
+    mshrStatus_st0 := 1.U //PRIMARY_FULL: same block has an in-flight different sector
+  }.elsewhen(primaryMiss_st0) {
     when(mainEntryFull || missReqValid && mainEntryAlmFull) {
       mshrStatus_st0 := 1.U //PRIMARY_FULL
       //}.elsewhen(mainEntryAlmFull) {
@@ -319,7 +369,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   //mshrStatus依赖primaryMiss和SecondaryMiss，它们依赖entryValid。
   //mshrStatus必须是寄存器，需要在probe valid的下个周期正确显示。entryValid更新的下一个周期已经来不及。
   //所以用组合逻辑加工一次mshrStatus。
-  when(mainEntryFull){
+  when(sectorConflict_st1 || mainEntryFull){
     mshrStatus_st1_w := MSHRStatus.PrimaryFull
   }.elsewhen(subentryFull_sel && secondaryMiss){
     mshrStatus_st1_w := MSHRStatus.SecondaryFull
@@ -347,7 +397,11 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   val real_SRAMAddrDown = Mux(secondaryMiss,subEntryIdx_st1, 0.U)
   when(io.missReq.fire && MSHR_st1.io.deq.ready) {
     targetInfo_Accesss(real_SRAMAddrUp)(real_SRAMAddrDown) := io.missReq.bits.targetInfo
+    sectorMask_SubEntries(real_SRAMAddrUp)(real_SRAMAddrDown) := io.missReq.bits.sectorMask
     cacheStatus_Access(real_SRAMAddrUp) := io.missCached_st1
+    when(secondaryMiss) {
+      sectorMask_Access(real_SRAMAddrUp) := sectorMask_Access(real_SRAMAddrUp) | io.missReq.bits.sectorMask
+    }
   }
 
  /* when(io.missReq.fire && MSHR_st1.io.deq.ready && mshrStatus_st1_w === 0.U) { //PRIMARY_AVAIL
@@ -376,6 +430,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   subentry_next2cancel := subentryStatusForRsp.io.next2cancel
 
   val missRspTargetInfo_st0 = targetInfo_Accesss(entryMatchMissRsp)(subentry_next2cancel)
+  val missRspSectorMask_st0 = sectorMask_SubEntries(entryMatchMissRsp)(subentry_next2cancel)
   val missRspBlockAddr_st0 = blockAddr_Access(entryMatchMissRsp)
   //val missRspASID_st0 = ASID_Access(entryMatchMissRsp)
   val missRspOut_st1 = Module(new Queue(new MSHRmissRspOut(bABits, tIWidth, InstrIdBits, AsidBits),1,true,false))
@@ -383,6 +438,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   missRspOut_st1.io.enq.bits.targetInfo := missRspTargetInfo_st0
   missRspOut_st1.io.enq.bits.blockAddr := missRspBlockAddr_st0
   missRspOut_st1.io.enq.bits.instrId := io.missRspIn.bits.instrId
+  missRspOut_st1.io.enq.bits.mergedSectorMask := missRspSectorMask_st0
   missRspOut_st1.io.enq.bits.UncacheRsp := cacheStatus_Access(entryMatchMissRsp)
 
   //missRspOut_st1.io.enq.bits.ASID := missRspASID_st0
@@ -401,16 +457,14 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
   /*0:PRIMARY_AVAIL 1:PRIMARY_FULL 2:SECONDARY_AVAIL 3:SECONDARY_FULL*/
   for (iofEn <- 0 until NMshrEntry) {
     for (iofSubEn <- 0 until NMshrSubEntry) {
-      when(iofEn.asUInt === entryStatus.io.next &&
-        iofSubEn.asUInt === 0.U && io.missReq.fire  && MSHR_st1.io.deq.fire && primaryMiss) {
+      when(iofEn.asUInt === real_SRAMAddrUp && iofSubEn.asUInt === real_SRAMAddrDown &&
+        io.missReq.fire && MSHR_st1.io.deq.fire) {
         subentry_valid(iofEn)(iofSubEn) := true.B
       }.elsewhen(iofEn.asUInt === entryMatchMissRsp && iofSubEn.asUInt === subentry_next2cancel &&
         io.missRspIn.valid && missRspOut_st1.io.enq.ready) {
         subentry_valid(iofEn)(iofSubEn) := false.B
+        sectorMask_SubEntries(iofEn)(iofSubEn) := 0.U
       }
-    }.elsewhen(iofSubEn.asUInt === subEntryIdx_st1 &&
-      io.missReq.fire && secondaryMiss && MSHR_st1.io.deq.fire && iofEn.asUInt === entryMatchProbeid_reg) {
-      subentry_valid(iofEn)(iofSubEn) := true.B
     } //order of when & elsewhen matters, as elsewhen cover some cases of when, but no op to them
   }
 
@@ -422,6 +476,7 @@ class MSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val NMshrEnt
     }
   }
 
+  val mshrNoProgressCycles = RegInit(0.U(32.W))
   // Debug counter: peak MSHR (read-miss tracking) occupancy. Surfaced via
   // dontTouch so verilator emits it to the FST trace. Used together with
   // wshrMaxUsed (DCacheWSHR.scala) to validate the
@@ -485,6 +540,7 @@ class SpecialMSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val N
   missRspOut_st1.io.enq.bits.targetInfo := missRspTargetInfo_st0
   missRspOut_st1.io.enq.bits.blockAddr := missRspBlockAddr_st0
   missRspOut_st1.io.enq.bits.instrId := io.missRspIn.bits.instrId
+  missRspOut_st1.io.enq.bits.mergedSectorMask := 0.U(dcache_SectorCount.W)
   missRspOut_st1.io.enq.bits.UncacheRsp := true.B
   val conditionVec = Wire(Vec(NMshrEntry, Bool()))
 
@@ -518,4 +574,3 @@ class SpecialMSHR(val bABits: Int, val tIWidth: Int, val InstrIdBits: Int, val N
   when(mshrUsedCnt > mshrMaxUsed){ mshrMaxUsed := mshrUsedCnt }
   dontTouch(mshrMaxUsed)
 }
-

@@ -50,6 +50,7 @@ extern "C" struct ventus_rtlsim_t {
     gvm_t gvm;
 #endif // ENABLE_GVM
     bool need_icache_invalidate = false;
+    bool need_dcache_host_invalidate = false;
     bool need_perf_dump_summary = false;
 
     void constructor(const ventus_rtlsim_config_t* config);

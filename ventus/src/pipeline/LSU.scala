@@ -125,6 +125,12 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     val flush_dcache = Flipped(DecoupledIO(Bool()))
     val to_dcache = DecoupledIO(new DCacheCoreReq_np)
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
+    val debug_state = Output(UInt(3.W))
+    val debug_saved_wid = Output(UInt(depth_warp.W))
+    val debug_saved_pc = Output(UInt(32.W))
+    val debug_saved_inst = Output(UInt(32.W))
+    val debug_saved_mem_cmd = Output(UInt(2.W))
+    val debug_saved_mask = Output(UInt(num_thread.W))
   })
   val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2:: Nil = Enum(6)
   val cnt = new Counter(n = num_thread)
@@ -132,6 +138,13 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 
   val reg_save = RegInit(0.U.asTypeOf(new vExeData))
   val is_flush = RegInit(false.B)
+  val flush_param = RegInit(0.U(4.W))
+  io.debug_state := state
+  io.debug_saved_wid := reg_save.ctrl.wid
+  io.debug_saved_pc := reg_save.ctrl.pc
+  io.debug_saved_inst := reg_save.ctrl.inst
+  io.debug_saved_mem_cmd := reg_save.ctrl.mem_cmd
+  io.debug_saved_mask := reg_save.mask.asUInt
   io.csr_wid:=reg_save.ctrl.wid
   //val rdy_fromFIFO = Reg(Bool())
   io.from_fifo.ready := state===s_idle && !io.flush_dcache.valid
@@ -270,7 +283,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     param_wire :=0.U
   }.elsewhen(is_flush) { // is_flush: indicate kernel ends! will invalidate L1D instead of flush
     opcode_wire := 3.U
-    param_wire := 0.U
+    param_wire := flush_param
   }.otherwise{
     opcode_wire :=reg_save.ctrl.mem_cmd(1)
     param_wire :=0.U
@@ -380,6 +393,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
       when(io.flush_dcache.fire){
         reg_save := RegInit(0.U.asTypeOf(new vExeData))
         reg_save.ctrl.mem_cmd := 1.U
+        flush_param := Mux(io.flush_dcache.bits, 0.U, 4.U)
       }.elsewhen(io.from_fifo.fire){ // Next: s_save
         reg_save := io.from_fifo.bits   // save data
         when(io.from_fifo.bits.ctrl.atomic){

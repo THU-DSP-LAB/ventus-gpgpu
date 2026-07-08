@@ -26,6 +26,7 @@ class QueuedRequest(params: InclusiveCacheParameters_lite) extends Bundle
   val put    = UInt(params.putBits.W)
   val data   = UInt(params.data_bits.W)
   val mask   = UInt(params.mask_bits.W)
+  val sectorMask = UInt(params.sectorMaskWidth.W)
   val param  =UInt(3.W)
   val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
@@ -61,5 +62,6 @@ class SubentryRequest(params:InclusiveCacheParameters_lite)extends Bundle
   val source =UInt(params.source_bits.W)
   val data =UInt(params.data_bits.W)
   val mask =UInt(params.mask_bits.W)
+  val sectorMask = UInt(params.sectorMaskWidth.W)
   val opcode =UInt(params.op_bits.W)
 }

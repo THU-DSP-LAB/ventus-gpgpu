@@ -55,6 +55,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     val fillCommit_blockAddr= Input(UInt(bABits.W))
     val RTABpushedIdx       = Output(UInt(log2Up(NRTABs).W))
     val pushedWSHRIdxUpdate = Flipped(ValidIO(new WSHRIdxUpdate))
+    val empty               = Output(Bool())
   })
   val Req_access = Reg(Vec(NRTABs, new DCacheCoreReq))
   val Replay_type = RegInit(VecInit(Seq.fill(NRTABs)(0.U(4.W))))
@@ -70,6 +71,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   //val seq_Q = Module(new Queue(UInt(log2Up(NRTABs).W),NRTABs,false,false)) // hold the new ptr idx for pop req
   io.RTAB_full := (EntryValid.reduce(_ & _))
   io.RTAB_almost_full := PopCount(EntryValid) === (NRTABs-1).U
+  io.empty := !EntryValid.asUInt.orR
   val ptr_w = Wire(UInt(log2Up(NRTABs).W))
   ptr_w := ptr//PriorityEncoder(Reverse(Cat(EntryValid.map(!_))))
   io.RTABpushedIdx := ptr_w

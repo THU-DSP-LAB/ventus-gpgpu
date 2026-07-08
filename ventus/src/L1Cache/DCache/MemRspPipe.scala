@@ -51,6 +51,8 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
 
          val dAmemRsp_wReq         = Output(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets * NWays, BytesOfWord)))
          val dAmemRsp_wReq_valid   = Output(Bool())
+         val allocateSectorMask_st1 = Output(UInt(SectorCount.W))
+         val refillDataSectorMask_st1 = Input(UInt(SectorCount.W))
          // dAmemRsp_wReq_valid 拉高时，对应的写回 cacheline blockAddr（tag+set），用于 coreReqPipe 做同拍冲突规避
          val dAmemRsp_wReq_blockAddr = Output(UInt(bABits.W))
          // bfs4096-006 fix: 暴露 fill 写入的精确 dA row = Cat(set, victim_way)。
@@ -100,6 +102,7 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     val memRsp_st1_isSpecial = MemRsp_pipeReg_st0_st1.deq.bits.isSpecial && MemRsp_pipeReg_st0_st1.deq.valid
     val dAReq_valid = Wire(Bool())
     val st1_ready = Wire(Bool())
+    val st1_meta_can_release = Wire(Bool())
     val tAAllocateWriteReq_valid = WireInit(false.B)
 
     // -----st0-----
@@ -110,7 +113,6 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     io.MSHRMissRsp.bits.instrId := idx_st0
     io.SMSHRMissRsp.valid := io.memRsp.valid && memRspisSpecial
     io.SMSHRMissRsp.bits.instrId := idx_st0
-
     io.RTABUpdateReq.bits.mshrIdx := idx_st0
     io.RTABUpdateReq.bits.wshrIdx := idx_st0
     io.RTABUpdateReq.bits.blockAddr := get_blockAddr(io.memRsp.bits.d_addr)
@@ -201,13 +203,15 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
         io.SMSHRMissRspOut.valid,
         io.MSHRMissRspOut.valid)
     missRspEntryIdx_st1 := io.MSHRMissRspOut.bits.instrId(log2Up(NMshrEntry)-1,0)
+    val missRspBlockAddr_st1 = io.MSHRMissRspOut.bits.blockAddr
     // 第一拍 missRspOut 有效时，当前 memRsp 的 d_data 可能正好就是这笔 miss 需要返回的 line。
     // 命中时直接旁路 live data；否则退回到按 instrId 暂存的数据，确保 metadata/data 属于同一笔事务。
     val liveMissRspDataMatch_st1 =
-      io.memRsp.valid && memRspisRead && !memRspisSpecial && (idx_st0 === missRspEntryIdx_st1)
+      io.memRsp.valid && memRspisRead && !memRspisSpecial &&
+        (idx_st0 === missRspEntryIdx_st1) &&
+        (get_blockAddr(io.memRsp.bits.d_addr) === missRspBlockAddr_st1)
     val missRspData_st1 = Mux(liveMissRspDataMatch_st1, io.memRsp.bits.d_data, missRspDataByInstrId(missRspEntryIdx_st1))
     // coreRsp
-    io.memRsp_coreRsp.valid := memRspMetaValid_st1
     io.memRsp_coreRsp.bits.Rsp.data := Mux(memRsp_st1_isSpecial, MemRsp_pipeReg_st0_st1.deq.bits.Rsp.d_data, missRspData_st1)
     io.memRsp_coreRsp.bits.Rsp.isWrite := false.B
     io.memRsp_coreRsp.bits.Rsp.instrId := missRspTI_st1.instrId
@@ -216,11 +220,48 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     io.memRsp_coreRsp.bits.validFromCoreReq := false.B
     io.memRsp_coreRsp.bits.readHitSnapshotValid := false.B
     io.memRsp_coreRsp.bits.readHitSnapshotData := DontCare
+    val mergedSec = io.MSHRMissRspOut.bits.mergedSectorMask
+    val refillSectorMask_st1 = Mux(
+      memRsp_st1_isSpecial,
+      Fill(SectorCount, 1.U),
+      Mux(mergedSec.orR, mergedSec, Fill(SectorCount, 1.U))
+    )
+    val refillSectorMaskCapture_st1 =
+      MemRsp_pipeReg_st0_st1.deq.valid &&
+        MemRsp_pipeReg_st0_st1.deq.bits.isRead &&
+        MemRsp_pipeReg_st0_st1.deq.bits.isCached &&
+        memRspMetaValid_st1
+    val refillSectorMaskHold_st1 = RegInit(0.U(SectorCount.W))
+    val refillSectorMaskHoldValid_st1 = RegInit(false.B)
+    val refillBlockAddrHold_st1 = Reg(UInt(bABits.W))
+    val refillDataHold_st1 = Reg(Vec(BlockWords, UInt(WordLength.W)))
+    val refillWayMaskHold_st1 = RegInit(0.U(NWays.W))
+    val refillSectorMaskForWrite_st1 =
+      Mux(refillSectorMaskHoldValid_st1, refillSectorMaskHold_st1, refillSectorMask_st1)
+    val refillBlockAddrForWrite_st1 =
+      Mux(refillSectorMaskHoldValid_st1, refillBlockAddrHold_st1, missRspBlockAddr_st1)
+    val refillDataForWrite_st1 =
+      Mux(refillSectorMaskHoldValid_st1, refillDataHold_st1, missRspData_st1)
+    val refillWayMaskForWrite_st1 =
+      Mux(refillSectorMaskHoldValid_st1, refillWayMaskHold_st1, io.tAWayMask)
+    when(refillSectorMaskCapture_st1 && !refillSectorMaskHoldValid_st1) {
+      refillSectorMaskHold_st1 := refillSectorMask_st1
+      refillBlockAddrHold_st1 := missRspBlockAddr_st1
+      refillDataHold_st1 := missRspData_st1
+      refillWayMaskHold_st1 := io.tAWayMask
+    }
+    when(dAReq_valid) {
+      refillSectorMaskHoldValid_st1 := false.B
+    }.elsewhen(refillSectorMaskCapture_st1 && !refillSectorMaskHoldValid_st1) {
+      refillSectorMaskHoldValid_st1 := true.B
+    }
+    io.allocateSectorMask_st1 := refillSectorMaskForWrite_st1
     // write to dA sram
-    io.dAmemRsp_wReq.foreach(_.waymask.get := Fill(BytesOfWord, true.B))
-    io.dAmemRsp_wReq.foreach(_.setIdx := Cat(MemRsp_pipeReg_st0_st1.deq.bits.Rsp.d_source(SetIdxBits-1,0),OHToUInt(io.tAWayMask)))
+    io.dAmemRsp_wReq.foreach(_.setIdx := Cat(get_setIdx(refillBlockAddrForWrite_st1),OHToUInt(refillWayMaskForWrite_st1)))
     for (i <- 0 until BlockWords) {
-      io.dAmemRsp_wReq(i).data := MemRsp_pipeReg_st0_st1.deq.bits.Rsp.d_data(i).asTypeOf(Vec(BytesOfWord, UInt(8.W)))
+      val refillWordValid = io.refillDataSectorMask_st1(i / SectorWords)
+      io.dAmemRsp_wReq(i).waymask.get := Fill(BytesOfWord, refillWordValid)
+      io.dAmemRsp_wReq(i).data := refillDataForWrite_st1(i).asTypeOf(Vec(BytesOfWord, UInt(8.W)))
     }
     val idle :: dAread :: memReq :: Nil = Enum(3)
     val tagRequestStatus = RegInit(idle)
@@ -251,9 +292,9 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     val replaceWayMask = RegInit(0.U(NWays.W))
     val replaceSetIdx_eff = Mux(needReplace_pending, replaceSetIdx, allocateSetIdx_st1)
     val replaceWayMask_eff = Mux(needReplace_pending, replaceWayMask, io.tAWayMask)
-    st1_ready := io.memRsp_coreRsp.ready
     tagRequestStatus := tagRequestStatus_next
     tagRequestStatus_next := tagRequestStatus
+    st1_meta_can_release := false.B
     switch(tagRequestStatus){
         is(idle){
             when(needReplace_eff && st1_valid){
@@ -261,30 +302,28 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
             }.elsewhen(st1_valid && !needReplace_eff){
                 tagRequestStatus_next := tagRequestStatus
             }
-            when(needReplace_eff){
-                st1_ready := false.B
-            }.otherwise{
-                st1_ready := io.memRsp_coreRsp.ready
-            }
+            st1_meta_can_release := !needReplace_eff
         }
         is(dAread){
                 tagRequestStatus_next := memReq
-                st1_ready := false.B
+                st1_meta_can_release := false.B
         }
         is(memReq){
             when(needReplace_eff && st1_valid && io.memReq_ready){
                 tagRequestStatus_next := dAread
-                st1_ready := false.B
+                st1_meta_can_release := false.B
             }.elsewhen(io.memReq_ready){
                 tagRequestStatus_next := idle
-                st1_ready := io.memRsp_coreRsp.ready
+                st1_meta_can_release := true.B
             }.otherwise{
-                st1_ready := false.B
+                st1_meta_can_release := false.B
             }
         }
     }
-    io.MSHRMissRspOut.ready := io.memRsp_coreRsp.ready
-    io.SMSHRMissRspOut.ready := io.memRsp_coreRsp.ready
+    io.memRsp_coreRsp.valid := memRspMetaValid_st1 && st1_meta_can_release && !refillSectorMaskHoldValid_st1
+    st1_ready := st1_meta_can_release && io.memRsp_coreRsp.ready && !refillSectorMaskHoldValid_st1
+    io.MSHRMissRspOut.ready := st1_ready
+    io.SMSHRMissRspOut.ready := st1_ready
     when(tagRequestStatus_next === dAread && st1_valid){
         needReplace_pending := false.B
     }.elsewhen(needReplace_pulse){
@@ -296,7 +335,7 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     }
     MemRsp_pipeReg_st0_st1.deq.ready := st1_ready
     io.dAmemRsp_wReq_valid := dAReq_valid
-    io.dAmemRsp_wReq_blockAddr := get_blockAddr(MemRsp_pipeReg_st0_st1.deq.bits.Rsp.d_addr)
+    io.dAmemRsp_wReq_blockAddr := refillBlockAddrForWrite_st1
     // bfs4096-006 fix: 所有 BlockWords 共享同一 setIdx (= Cat(d_source.setIdx, OHToUInt(tAWayMask)))，
     // 取第 0 个 word 的 setIdx 即可代表本次 fill 的目标 dA row。
     io.dAmemRsp_wReq_setIdx := io.dAmemRsp_wReq(0).setIdx
@@ -306,7 +345,7 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
       io.dAmemRsp_wReq_asid.get := missRspAsid_st1.get
     }
     io.dAReplace_rReq.foreach(_.setIdx := Cat(replaceSetIdx_eff, OHToUInt(replaceWayMask_eff)))
-    dAReq_valid := st1_valid && st1_ready
+    dAReq_valid := refillSectorMaskHoldValid_st1 || (st1_valid && st1_ready)
     io.dAReplace_rReq_valid := tagRequestStatus_next === dAread && st1_valid
     io.memReq_valid := tagRequestStatus === memReq && st1_valid
 }

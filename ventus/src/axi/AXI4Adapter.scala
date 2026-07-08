@@ -62,7 +62,8 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   val buffer_write_ready=RegInit(true.B)
   //transfer total_times
 
-  io.AXI_master_bundle.aw.valid := (io.l2cache_outa.bits.opcode === PutFullData) && io.l2cache_outa.valid
+  val l2cacheWrite = io.l2cache_outa.bits.opcode === PutFullData || io.l2cache_outa.bits.opcode === PutPartialData
+  io.AXI_master_bundle.aw.valid := l2cacheWrite && io.l2cache_outa.valid
 
   io.AXI_master_bundle.ar.valid:=(io.l2cache_outa.bits.opcode === Get) && io.l2cache_outa.valid
 
@@ -142,7 +143,7 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
       counter_write := counter_write + 1.U
     }
   }
-  when(io.l2cache_outa.fire && (io.l2cache_outa.bits.opcode===PutFullData || io.l2cache_outa.bits.opcode===PutPartialData)){
+  when(io.l2cache_outa.fire && l2cacheWrite){
     buffer_write.zipWithIndex.foreach{ case(buf,i) =>
 
       buf.data:= (io.l2cache_outa.bits.data)((i+1)*(params.AXI_params.dataBits)-1,i*(params.AXI_params.dataBits))
@@ -161,13 +162,14 @@ class AXI4Adapter (params:  InclusiveCacheParameters_lite_withAXI) extends Modul
   //read channel ready
   io.AXI_master_bundle.r.ready:= Mux(buffer_read_valid,io.l2cache_outd.ready,true.B)
 
-  //response channel ready
+  // Write responses are consumed here. L2 write-through/writeback requests do
+  // not allocate MSHRs, so forwarding AXI B as a cache D response can falsely
+  // complete an unrelated miss with zero data when source IDs alias.
   io.AXI_master_bundle.b.ready:=true.B
-  //sinkD ignore response
-  io.l2cache_outd.valid:= io.AXI_master_bundle.b.valid || buffer_read_valid
-  io.l2cache_outd.bits.source:= Mux(io.AXI_master_bundle.b.valid,io.AXI_master_bundle.b.bits.id,buffer_read(0).asTypeOf(new BufferBundle_read(params)).id)
-  io.l2cache_outd.bits.opcode:=Mux(io.AXI_master_bundle.b.valid,AccessAck,AccessAckData)
-  io.l2cache_outd.bits.data:=Mux(io.AXI_master_bundle.b.valid,0.U,buffer_read.map(_.asTypeOf(new BufferBundle_read(params)).data).asUInt)
+  io.l2cache_outd.valid:= buffer_read_valid
+  io.l2cache_outd.bits.source:= buffer_read(0).asTypeOf(new BufferBundle_read(params)).id
+  io.l2cache_outd.bits.opcode:=AccessAckData
+  io.l2cache_outd.bits.data:=buffer_read.map(_.asTypeOf(new BufferBundle_read(params)).data).asUInt
   io.l2cache_outd.bits.size:= 0.U //todo undefined unused
   io.l2cache_outd.bits.param:= DontCare  //sourceA
   io.l2cache_outa.ready:= !buffer_write_busy && io.AXI_master_bundle.aw.ready && !buffer_read_busy &&io.AXI_master_bundle.ar.ready//Mux(io.l2cache_outa.bits.opcode===PutFullData,!buffer_write_busy && io.AXI_master_bundle.aw.ready, !buffer_read_busy &&io.AXI_master_bundle.ar.ready)

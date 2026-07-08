@@ -62,6 +62,6 @@ class SourceA(params: InclusiveCacheParameters_lite) extends Module
   io.a.bits.mask    :=io.req.bits.mask
   io.a.bits.data    := io.req.bits.data
   io.a.bits.size    :=io.req.bits.size
-  io.a.bits.param :=0.U
+  io.a.bits.param := io.req.bits.param
   io.a.bits.spike_info.foreach{ _ := io.req.bits.spike_info.getOrElse(0.U) }
 }
