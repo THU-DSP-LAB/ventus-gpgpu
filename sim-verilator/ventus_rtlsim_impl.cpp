@@ -326,8 +326,6 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
         }
         dut->io_icache_invalidate = need_icache_invalidate;
         need_icache_invalidate = false;
-        dut->io_dcache_host_invalidate = need_dcache_host_invalidate;
-        need_dcache_host_invalidate = false;
     }
 
     //
@@ -628,8 +626,6 @@ void ventus_rtlsim_t::dut_reset() const {
     dut->io_host_rsp_ready = 0;
     dut->io_perfDump = 0;
     dut->io_perfDumpSummary = 0;
-    dut->io_icache_invalidate = 0;
-    dut->io_dcache_host_invalidate = 0;
     dut->reset = 1;
     dut->clock = 0;
     dut->eval();

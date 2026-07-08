@@ -38,7 +38,6 @@ class pipe() extends Module{
     val externalFlushPipe = ValidIO(UInt(depth_warp.W))
     val dcache_req = DecoupledIO(new DCacheCoreReq_np)
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
-    val dcache_idle = Input(Bool())
     val shared_req = DecoupledIO(new ShareMemCoreReq_np)
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val pc_reset = Input(Bool())
@@ -169,37 +168,7 @@ class pipe() extends Module{
   warp_sche.io.pc_rsp.bits.status:=Mux(ibuffer.io.in.ready,io.icache_rsp.bits.status,1.U(2.W))
 
   warp_sche.io.pc_req<>io.icache_req
-  val warpControlWithMemDrain = Wire(Decoupled(new warpSchedulerExeData))
-  val warpControlNeedsDrain = issueX.io.out_warpscheduler.bits.ctrl.barrier &&
-    !issueX.io.out_warpscheduler.bits.ctrl.simt_stack_op
-  val warpControlLsuIdle = lsu.io.fence_end.andR && io.dcache_idle
-  val barrierDCacheFlush = Wire(Decoupled(Bool()))
-  val barrierFlushActive = RegInit(false.B)
-  val barrierFlushWaitOne = RegInit(false.B)
-  val warpControlLsuIdleReg = RegNext(warpControlLsuIdle, false.B)
-  val barrierFlushDone = barrierFlushActive && !barrierFlushWaitOne && warpControlLsuIdle
-  val barrierCanStartFlush =
-    issueX.io.out_warpscheduler.valid && warpControlNeedsDrain && warpControlLsuIdleReg && !barrierFlushActive
-
-  barrierDCacheFlush.valid := barrierCanStartFlush
-  barrierDCacheFlush.bits := false.B
-
-  when(barrierDCacheFlush.fire){
-    barrierFlushActive := true.B
-    barrierFlushWaitOne := true.B
-  }.elsewhen(warpControlWithMemDrain.fire && warpControlNeedsDrain){
-    barrierFlushActive := false.B
-    barrierFlushWaitOne := false.B
-  }.elsewhen(barrierFlushActive){
-    barrierFlushWaitOne := false.B
-  }
-
-  warpControlWithMemDrain.bits := issueX.io.out_warpscheduler.bits
-  warpControlWithMemDrain.valid := issueX.io.out_warpscheduler.valid &&
-    (!warpControlNeedsDrain || barrierFlushDone)
-  issueX.io.out_warpscheduler.ready := warpControlWithMemDrain.ready &&
-    (!warpControlNeedsDrain || barrierFlushDone)
-  warp_sche.io.warp_control<>warpControlWithMemDrain
+  warp_sche.io.warp_control<>issueX.io.out_warpscheduler
   warp_sche.io.issued_warp.bits:=exe_dataX.io.enq.bits.ctrl.wid // not used
   warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
   val scoreboardBusy = (VecInit(scoreb.map(_.delay))).asUInt
@@ -210,18 +179,14 @@ class pipe() extends Module{
   simt_stack.io.initMask.valid := warp_sche.io.CTA2csr.valid
   simt_stack.io.initMask.bits.warp_id := warp_sche.io.CTA2csr.bits.wid
   simt_stack.io.initMask.bits.thread_mask := init_thread_mask
+  when(warp_sche.io.CTA2csr.fire){
+    printf(p"sm ${sm_id} warp ${Decimal(warp_sche.io.CTA2csr.bits.wid)} init thread mask 0x${Hexadecimal(init_thread_mask)}\n")
+  }
   operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
   operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
-  val dcacheFlushArb = Module(new Arbiter(Bool(), 2))
-  val warpEndDCacheFlush = Wire(Decoupled(Bool()))
-  warpEndDCacheFlush.valid := warp_sche.io.flushDCache.valid && io.dcache_idle
-  warpEndDCacheFlush.bits := warp_sche.io.flushDCache.bits
-  warp_sche.io.flushDCache.ready := warpEndDCacheFlush.ready && io.dcache_idle
-  dcacheFlushArb.io.in(0) <> warpEndDCacheFlush
-  dcacheFlushArb.io.in(1) <> barrierDCacheFlush
-  lsu.io.flush_dcache <> dcacheFlushArb.io.out
+  warp_sche.io.flushDCache <> lsu.io.flush_dcache
 
   //flush:=(warp_sche.io.branch.fire&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
@@ -450,6 +415,7 @@ class pipe() extends Module{
   issueX.io.out_TC.ready := false.B
   issueV.io.out_vFPU<>fpu.io.in
   issueX.io.out_vFPU.ready := false.B
+  issueX.io.out_warpscheduler <> warp_sche.io.warp_control
   issueV.io.out_warpscheduler.ready := false.B
 
   fpu.io.rm := Mux(fpu.io.in.bits.ctrl.force_rm_rtz, RoundingMode.RTZ, csrfile.io.rm(0))
@@ -511,13 +477,6 @@ class pipe() extends Module{
   val frontendStall = noIssueFire && noIssueInput && !dataDepStall && !barrierStall
 
   val flushEvent = warp_sche.io.flush.valid && !RegNext(warp_sche.io.flush.valid, false.B)
-  val noIssueCycles = RegInit(0.U(32.W))
-  val anyIssueFire = issueX.io.in.fire || issueV.io.in.fire
-  when(anyIssueFire || !io.perfEnable || io.perfReset) {
-    noIssueCycles := 0.U
-  }.otherwise {
-    noIssueCycles := noIssueCycles + 1.U
-  }
 
   when(io.perfReset){
     activeCycles := 0.U

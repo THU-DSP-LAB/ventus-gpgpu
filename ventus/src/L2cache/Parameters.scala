@@ -161,12 +161,6 @@ case class InclusiveCacheParameters_lite(
   val source_bits_custom=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1 +log2Ceil(micro.NInfWriteEntry) + 2
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
-  val sectorCount = top.parameters.dcache_SectorCount
-  val sectorBytes = cache.blockBytes / sectorCount
-  val sectorMaskWidth = sectorCount
-  val sectorMaskBitsPerSector = mask_bits / sectorCount
-  require(cache.blockBytes % sectorCount == 0)
-  require(mask_bits % sectorCount == 0)
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
   // Provision enough resources to achieve full throughput with missing single-beat accesses
   val mshrs = InclusiveCacheParameters.all_mshrs(cache, micro)
@@ -185,20 +179,6 @@ case class InclusiveCacheParameters_lite(
     if (x == 0) tail.reverse else bitOffsets(x >> 1, offset + 1, if ((x & 1) == 1) offset :: tail else tail)
 //  val addressMapping = bitOffsets(pickMask)
   val addressBits = if(mmu) 34 else 32
-
-  def byteMaskToSectorMask(mask: UInt): UInt = {
-    VecInit((0 until sectorCount).map { sector =>
-      mask((sector + 1) * sectorMaskBitsPerSector - 1, sector * sectorMaskBitsPerSector).orR
-    }).asUInt
-  }
-
-  def sectorMaskToByteMask(sectorMask: UInt): UInt = {
-    VecInit((0 until sectorCount).flatMap { sector =>
-      Seq.fill(sectorMaskBitsPerSector)(sectorMask(sector))
-    }).asUInt
-  }
-
-  def fullSectorMask: UInt = Fill(sectorMaskWidth, 1.U(1.W))
 
   // println(s"addresses: ${flatAddresses} => ${pickMask} => ${addressBits}")
 

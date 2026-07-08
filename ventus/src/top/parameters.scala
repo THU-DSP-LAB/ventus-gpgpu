@@ -10,7 +10,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var num_warp = 8
   var num_thread = 32
   val SINGLE_INST: Boolean = false
-  val SPIKE_OUTPUT: Boolean = sys.env.getOrElse("RTL_SPIKE_OUTPUT", "false").toBoolean
+  val SPIKE_OUTPUT: Boolean = true
   val INST_CNT: Boolean = true
   val INST_CNT_2: Boolean = false
   val PMU_PIPELINE: Boolean = true
@@ -80,10 +80,6 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def dcache_NWays: Int = 2
 
   def dcache_BlockWords: Int = 32  // number of words per cacheline(block)
-  def dcache_SectorCount: Int = 4
-  def dcache_SectorWords: Int = dcache_BlockWords / dcache_SectorCount
-  def dcache_SectorBytes: Int = dcache_SectorWords * BytesOfWord
-  def dcache_SectorIdxBits: Int = log2Ceil(dcache_SectorCount)
   // WSHR tracks outstanding dirty writeback transactions awaiting AccessAck
   // from L2. Too few entries cause a three-way livelock between L1
   // WSHR / memReq_Q / memRspPipe.st1 under burst dirty evictions

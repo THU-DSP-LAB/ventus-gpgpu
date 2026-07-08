@@ -184,10 +184,6 @@ DLL_PUBLIC const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t
 // This will take effect in the next simulation step()
 DLL_PUBLIC void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim);
 
-// Host wrote device memory directly; invalidate GPU-side data cache state before
-// a later kernel can observe stale cache lines.
-DLL_PUBLIC void ventus_rtlsim_dcache_host_invalidate(ventus_rtlsim_t* sim);
-
 //
 // Push new kernels to gpu for execution.
 //

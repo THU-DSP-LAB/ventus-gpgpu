@@ -52,8 +52,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
 
   val lists_set = WireInit(0.U(params.putLists.W))
   val lists_clr = WireInit(0.U(params.putLists.W))
-  val lists_next = (lists | lists_set) & (~lists_clr).asUInt
-  lists := lists_next
+  lists := (lists | lists_set) & (~lists_clr).asUInt
 
   val free = !lists.andR
   val freeOH = Wire(UInt(params.putLists.W))
@@ -74,7 +73,7 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   a.ready := Mux(a.bits.opcode===5.U,!req_block && !buf_block && !set_block && io.empty,!req_block && !buf_block && !set_block)
   io.req.valid := Mux(a.bits.opcode===5.U,a.valid && !buf_block && !set_block&&io.empty,a.valid && !buf_block && !set_block)
   putbuffer.io.push.valid := a.valid && hasData && !req_block && !set_block
-  when (putbuffer.io.push.fire) { lists_set := freeOH }
+  when (a.valid && hasData && !req_block && !buf_block) { lists_set := freeOH }
 
   val (tag, l2cidx, set, offset) = params.parseAddress(a.bits.address)
   val put = freeIdx
@@ -88,7 +87,6 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.req.bits.l2cidx := l2cidx
   io.req.bits.put    := put
   io.req.bits.mask   := a.bits.mask
-  io.req.bits.sectorMask := params.byteMaskToSectorMask(a.bits.mask)
   io.req.bits.data   :=a.bits.data
   io.req.bits.param :=a.bits.param
   io.req.bits.spike_info.foreach( _ := a.bits.spike_info.getOrElse(0.U) )
@@ -106,9 +104,8 @@ class SinkA(params: InclusiveCacheParameters_lite) extends Module
   io.pb_beat := putbuffer.io.data
 //  io.pb_beat2:=putbuffer.io.data2.get
 //  putbuffer.io.index.get := io.index
-  io.empty := !(lists_next.orR)
+  io.empty := !((lists | lists_set) & (~lists_clr).asUInt)
   when (io.pb_pop.fire) {
         lists_clr := UIntToOH(io.pb_pop.bits.index, params.putLists)
   }
-
 }

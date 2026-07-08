@@ -166,7 +166,6 @@ class GPGPU_axi_top extends Module{
   gpgpu_top.io.perfDump:=false.B
   gpgpu_top.io.perfDumpSummary:=false.B
   gpgpu_top.io.icache_invalidate:=false.B
-  gpgpu_top.io.dcache_host_invalidate:=false.B
 }
 class GPGPU_axi_adapter_top extends Module{
   val l2cache_axi_params=AXI4BundleParameters(32,64,log2Up(l2cache_micro.num_sm)+log2Up(l2cache_micro.num_warp)+1)
@@ -196,7 +195,6 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val asid_fill = if(MMU_ENABLED) Some(Input(Flipped(ValidIO(new mmu.AsidLookupEntry(SV.get))))) else None
     val icache_invalidate = Input(Bool())
-    val dcache_host_invalidate = Input(Bool())
   })
   val cta = Module(new CTAinterface)
   val sm_wrapper_inst = Seq.tabulate(NSms) { i => Instantiate(new SM_wrapper(FakeCache, SV)) }
@@ -222,7 +220,6 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
       sm_wrapper(i * NSmInCluster + j).memRsp.valid := sm2clusterArb(i).memRspVecOut(j).valid
        sm2clusterArb(i).memRspVecOut(j).ready := sm_wrapper(i * NSmInCluster + j).memRsp.ready
       sm_wrapper(i * NSmInCluster + j).icache_invalidate := io.icache_invalidate
-      sm_wrapper(i * NSmInCluster + j).dcache_host_invalidate := io.dcache_host_invalidate
     }
     l2distribute(i).memReqIn.valid := sm2clusterArb(i).memReqOut.valid
     l2distribute(i).memReqIn.bits := sm2clusterArb(i).memReqOut.bits
@@ -530,7 +527,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   val summaryTotalIssued = summaryScalarIssued + summaryVectorIssued
   val summaryTotalClassIssued = summaryComputeIssued + summaryMemIssued + summaryCtrlIssued
 
-  when(false.B && perfDumpPulse){
+  when(perfDumpPulse){
     printf(p"\n[PROGRAM ${programId}] [PMU] first-kernel-start -> last-kernel-end summary\n")
 
     if (PMU_PIPELINE) {
@@ -569,7 +566,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     printf(p"[PROGRAM ${programId}] [L1D PERF] coreReqPipe pipelined cyc : ${l1dCoreReqPipePipelined}\n")
     printf(p"[PROGRAM ${programId}] [L1D PERF] memRspPipe decoupled cyc  : ${l1dMemRspPipeDecoupled}\n")
   }
-  when(io.perfDumpSummary && summaryProgramWindows =/= 0.U){
+  when((perfDumpPulse || io.perfDumpSummary) && summaryProgramWindows =/= 0.U){
     printf(p"\n[TESTCASE TOTAL] [PMU] accumulated summary across ${summaryProgramWindows} program windows\n")
 
     if (PMU_PIPELINE) {
@@ -609,18 +606,16 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     printf(p"[TESTCASE TOTAL] [L1D PERF] memRspPipe decoupled cyc  : ${summaryL1dMemRspPipeDecoupled}\n")
   }
 
-  if (SPIKE_OUTPUT) {
-    for(i <- 0 until NL2Cache){
-      val port = l2cache(i).in_a
-      val cache_id: UInt = port.bits.source(l1cache_sourceBits)
-      val sm_id: UInt = if (NSmInCluster == 1) {
-        0.U
-      } else {
-        port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
-      }
-      when(port.fire){
-        printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
-      }
+  for(i <- 0 until NL2Cache){
+    val port = l2cache(i).in_a
+    val cache_id: UInt = port.bits.source(l1cache_sourceBits)
+    val sm_id: UInt = if (NSmInCluster == 1) {
+      0.U
+    } else {
+      port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
+    }
+    when(port.fire){
+      printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
     }
   }
 }
@@ -651,7 +646,6 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
       val flags = UInt(8.W)
     })))) else None
     val icache_invalidate = Input(Bool())
-    val dcache_host_invalidate = Input(Bool())
     //val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else None
     val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
   })
@@ -724,7 +718,6 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   icache.io.externalFlushPipe.valid :=pipe.io.externalFlushPipe.valid
 
   val dcache = Module(new DataCachev2(SV)(param))
-  dcache.io.hostInvalidate := io.dcache_host_invalidate
   // **** dcache memRsp ****
   dcache.io.memRsp.valid := l1Cache2L2Arb.io.memRspVecOut(1).valid
   dcache.io.memRsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_source
@@ -738,7 +731,6 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   l1Cache2L2Arb.io.memReqVecIn.get(1) <> dcache.io.memReq.get
   // **** dcache coreReq ****
   dcache.io.coreReq <> pipe.io.dcache_req
-  pipe.io.dcache_idle := dcache.io.idle
   // **** dcache coreRsp ****
   pipe.io.dcache_rsp.valid:=dcache.io.coreRsp.valid
   pipe.io.dcache_rsp.bits.instrId:=dcache.io.coreRsp.bits.instrId
