@@ -66,6 +66,10 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
     val dirtyASID_st1 = if(MMU_ENABLED) {Some(Output(UInt(AsidBits.W)))} else None
     //For InvOrFlu and LRSC
     val flushChoosen = if (!readOnly) {Some(Input(Bool()))} else None
+    // lud-001 v6 Path A (改动 3c): flush PutPart 真出站 fire + 清 way_dirty/dirtyMask 的 identity (CoreReqPipe 传入, 与 a_addr 同源)
+    val flushPutFire = if (!readOnly) {Some(Input(Bool()))} else None
+    val flushClrSetIdx = if (!readOnly) {Some(Input(UInt(log2Up(set).W)))} else None
+    val flushClrWayMask = if (!readOnly) {Some(Input(UInt(way.W)))} else None
     //For Inv
     val invalidateAll = Input(Bool())
     val tagready_st1 = Input(Bool())
@@ -327,7 +331,10 @@ if(MMU_ENABLED) {
     })
     dirtyMaskPerCL_init(j) := perWordContrib.reduce(_ | _)
   }
-  dirtyMaskPerCL := (dirtyMaskPerCL_init.asUInt | dirtyMaskAccess.io.r.resp.data(OHToUInt(iTagChecker.io.waymask))).asTypeOf(dirtyMaskPerCL)
+  // btree-004 P1′/P1″: dirtyMaskPerCL 的 OR-base 计算重排至 waymask_st1_raw 声明之后(L447+, 见下方 "btree-004 P1′" block),
+  //   改用 held ST1 identity 做 valid-gate, 消除 live iTagChecker.io.waymask 在 stall 期漂移(codex Phase3.5 维度(3)打回)。
+  //   ★build-friendly: dirtyMaskPerCL 是 Wire(L323 WireInit 默认 0), 下方 in(1).bits.apply() 前向引用它(Chisel last-connect 解析),
+  //    不 reorder .apply() 本身(approach-b 那样挪 .apply() 触发 Verilator 5.034 V3TSP crash)。
 
   // 一旦用到 dirtyMaskAccess 读出的值，就应该在下个周期将这个位置的 dirty mask 写0，所以写也需要一个仲裁器
   val dirtyMaskWriteArb = Module(new Arbiter(new SRAMBundleAW(UInt((dcache_BlockWords * BytesOfWord).W), set, way), 3))
@@ -362,8 +369,12 @@ if(MMU_ENABLED) {
   // 只有当 flushChoosen 拉高时，读出来 dirty mask 才会被用到，需要被写0
   // 这里的 valid 需要用 RegNext 延迟一周期是因为在dcache的顶层模块将 InvOrFluMemReqValid_st1 里也延了一个clk
   // 不使用dcache中的 InvOrFluMemReqValid_st1 是因为与tag的发出对齐
-  dirtyMaskWriteArb.io.in(2).valid := RegNext(io.flushChoosen.get, false.B)
-  dirtyMaskWriteArb.io.in(2).bits.apply(data = 0.U, setIdx = RegNext(choosenDirtySetIdx_st0), waymask = choosenDirtyWayMask_st1)
+  // lud-001 v6 Path A (改动 3e): dirtyMask 清 0 与 way_dirty 清(改动 3d)用同一 gate flushPutFire + 同 identity。
+  //   in(2) 最低优先(被 needReplace in0 / write-hit in1 抢则 dirtyMask 这拍不清, 残留旧 mask), 但 way_dirty(3d)已清=0
+  //   → 该 (set,way) 永不再被 flush/needReplace 选中 → 残留成 dead state, 在 single-writer/no-external-partial-write 前提下
+  //   dead-safe(checkpoint_8 §2.5; 跨 SM partial-write+tag-reuse 移交 dirtyMask facet 3)。P4=M2 实测 lud preempt 应 ==0。
+  dirtyMaskWriteArb.io.in(2).valid := io.flushPutFire.get
+  dirtyMaskWriteArb.io.in(2).bits.apply(data = 0.U, setIdx = io.flushClrSetIdx.get, waymask = io.flushClrWayMask.get)
 
   iTagChecker.io.tag_of_set := tagBodyAccess.io.r.resp.data//st1
   //iTagChecker.io.ASID_of_set := ASIDAccess.io.r.resp.data
@@ -437,6 +448,22 @@ if(MMU_ENABLED) {
   // bfs4096-007 v15: hit_st1_raw 已在前置 Wire 声明, 此处 := 赋值
   hit_st1_raw := st1HitEff_raw && !(writeHitFillConflictHeld || writeHitFillConflict_set)  // ★gate: 冲突→hit 强制 0→write-miss
   val waymask_st1_raw = st1WaymaskEff_raw
+  // ===== btree-004 P1′ (read 侧 dirtyMask OR-base held-identity valid-gate) =====
+  // btree-004 fix: 用 way_dirty 做 dirtyMask OR-base 的 valid-gate(落实 L283 设计本意: way_dirty=阵列 valid)。
+  //   clean way(way_dirty=0)的 dirtyMask SRAM 残留视为无效, 不 OR 进首写 mask; 已脏 way(way_dirty=1)仍正常累积。
+  // ★索引用 held ST1 identity(probeReadBuf.bits.setIdx + waymask_st1_raw, 与 L451 isDirty 同源),
+  //   不用 RegEnable(set)+live way 混合索引(codex Phase3.5 维度(3)打回: stall 期 live way / dirtyMaskAccess holdRead 读口漂移)。
+  val orBaseHeldWay        = OHToUInt(waymask_st1_raw)                          // held way (= L451 isDirty 同源)
+  val orBaseHeldSet        = probeReadBuf.bits.setIdx                           // held set (= L451 isDirty 同源)
+  val hitWayCurrentlyDirty = way_dirty(orBaseHeldSet)(orBaseHeldWay).asBool
+  val dirtyMaskOrBase      = Mux(hitWayCurrentlyDirty,
+                                 dirtyMaskAccess.io.r.resp.data(orBaseHeldWay), // OR-base 用同一 held way 选
+                                 0.U)
+  dirtyMaskPerCL := (dirtyMaskPerCL_init.asUInt | dirtyMaskOrBase).asTypeOf(dirtyMaskPerCL)
+  // ★btree-004 P1″ (写回端口 in(1) 也改 held identity) 已实测引入回归(command-j 路径 bid=-1 + btree-003 reclength=0 复发,
+  //   isolated-serial 铁实, codex 设计审被 build-trial 推翻), 故 P1′ 只保留上方读侧 OR-base held valid-gate,
+  //   in(1) 写回沿用原 live 信号(empirically 正确)。写回端口 identity latent = codex 标记的理论概念(无 failing seed),
+  //   held-write-back 闭合法错误, 残留待人类用不同 approach 或接受 live。
   io.hit_st1 := hit_st1_raw && probeReadBuf.valid//RegNext(io.probeRead.fire) //todo remove
   io.hitStatus_st1.hit := hit_st1_raw && probeReadBuf.valid
   io.hitStatus_st1.waymask := waymask_st1_raw
@@ -454,13 +481,26 @@ if(MMU_ENABLED) {
       // 件1a (root-fix v3, codex v2-reject §1 修正): set index 用 held probeReadBuf.bits.setIdx(与 L409 脏位读对齐),
       //   不用 RegNext(io.probeRead.bits.setIdx)(live 探针, 多拍 stall 漂到别 set → 数据落 setA、脏位写 setB → committed store 被丢)。
       way_dirty(probeReadBuf.bits.setIdx)(OHToUInt(io.hitStatus_st1.waymask)) := true.B
-    }.elsewhen(io.flushChoosen.get){//tag_array::flush_one
-      way_dirty(choosenDirtySetIdx_st0)(OHToUInt(choosenDirtyWayMask_st0)) := false.B
+    }.elsewhen(io.flushPutFire.get){//tag_array::flush_one (lud-001 v6 Path A 改动 3d: 清脏移到 PutPart fire + 传入 identity)
+      // ★治本(batch-loss): 反压没 fire → flushPutFire=0 → way_dirty 不清 → 该脏行不丢; fire 才清且清的恒是这笔 Put 自己。
+      //   gate 从 live flushChoosen(st0 cursor 选中拍, 不等出站) 改 flushPutFire; set/way 从 live choosenDirty*_st0 改传入
+      //   flushClrSetIdx/WayMask(snap/live Mux 与 a_addr 同源 → 无 clear-index drift)。不经 in(2) 仲裁(Reg 直接赋)→ 根除 retry。
+      way_dirty(io.flushClrSetIdx.get)(OHToUInt(io.flushClrWayMask.get)) := false.B
     }.elsewhen(io.needReplace.get) {
       way_dirty(allocateWrite_st1.setIdx)(OHToUInt(lockedWayMask)) := false.B//要素①
     }.elsewhen(iTagChecker.io.cache_hit && io.probeIsUncache_st1 && probeReadBuf.ready){
       way_dirty(RegNext(io.probeRead.bits.setIdx))(OHToUInt(iTagChecker.io.waymask)) := false.B
     }
+    // lud-001 v6 Path A (改动 4) assert/monitor (L1TagAccess 侧, if(!readOnly) 内):
+    // A1: way_dirty 清的 waymask 必 one-hot (codex (e) clear identity)
+    assert(!io.flushPutFire.get || PopCount(io.flushClrWayMask.get) === 1.U,
+           "lud-001: flush dirty-clear waymask not one-hot")
+    // M2: dirtyMask clear in(2) 被 in(0)needReplace/in(1)write-hit 抢频率 (P4 数据源, 关 facet 3; ==0 → residual 不产生 → moot)
+    val dirtyClearPreemptCount = RegInit(0.U(32.W))
+    when(io.flushPutFire.get && !dirtyMaskWriteArb.io.in(2).fire){
+      dirtyClearPreemptCount := dirtyClearPreemptCount + 1.U
+    }
+    dontTouch(dirtyClearPreemptCount)
   }
 
 
@@ -658,7 +698,15 @@ class minIdxTree(width: Int, numInput: Int) extends Module{
 
   val candVec = Wire(Vec(numInput,new candWithIdx))
   for(i <- 0 until numInput){
-    candVec(i).candidate := io.candidateIn(numInput-1-i)
+    // ===== true-LRU 替换策略 (hotspot3d512-001 D2 + nn64k-009 死锁修复配套启用) =====
+    // 原 anti-LRU: candidateIn(numInput-1-i) 镜像下标 + 消费端 UIntToOH(idxOfMin) 无补偿
+    //   ⇒ victim 恒取 time 较大方(MRU) = textbook-wrong 的 anti-LRU(网表 dut.v idxOfMin=
+    //   candidateIn_1>=candidateIn_0 实锤, 见 nn64k-009 manifest netlist_audit), 伤命中率。
+    // 改正序 candidateIn(i) ⇒ idxOfMin 与 way 索引同空间 ⇒ victim=最小 time=最久未用=true-LRU。
+    // ★前置依赖★: true-LRU 触发 L1 DCache st1⇄RTAB 循环资源死锁(nn_64k HANG, anti-LRU 一直掩盖),
+    //   必须与 nn64k-009 的 RTAB-reservation 修复(CoreReqPipe.Req_st1_RTAB_reserve + DCachev2.allowIn1)
+    //   一同启用; 单独翻 true-LRU 不修死锁会在 nn_64k seed 631470333 确定性 HANG@7862815。
+    candVec(i).candidate := io.candidateIn(i)
     candVec(i).index := i.asUInt
   }
 

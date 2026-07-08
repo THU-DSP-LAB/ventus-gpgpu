@@ -60,6 +60,17 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val mshr_wait = Output(Bool())
 
     val finish_issue = Output(Bool())
+    // srad-004 Phase 4.5 A''': hit-reservation one-shot clear（io.d.fire 时回传 (set,way)→Directory 递减 hitRefCount）。
+    val hit_done = Valid(new ResvClear_lite(params))
+    // srad-007 Bug3 fix(B): dirty-victim writeback A 请求发出那拍回传 (set,way)，给 Scheduler 清 evictReadPending。
+    val evict_read_done = Valid(new ResvClear_lite(params))
+    // btree-002 fix: L2 hit Put 的 BankedStore 写已完成且 D ack 已 fire。
+    // Scheduler 用该事件 retire L2 write-through scoreboard 的一个 pending count；
+    // miss/no-allocate Put 的 DRAM commit 点不走这里，而由 wt_miss_a 随 write_buffer entry 到 out_a.fire retire。
+    val wt_hit_commit = Valid(UInt(params.addressBits.W))
+    // btree-002 fix v3.2: 当前 io.a beat 是否为真正的 write-through miss/no-allocate Put。
+    // dirty-victim writeback 虽然 io.a.bits.opcode 也会被改成 PutFullData，但该标志保持 false。
+    val wt_miss_a = Output(Bool())
   })
 
 
@@ -142,7 +153,12 @@ val mshr_wait_reg =RegInit(false.B)
             stateReg := stage_4
             busy := true.B
             tobedone := false.B
-            when(s1_req.opcode === PutFullData && s1_req.opcode === PutPartialData) { //wait write miss no allocate
+            // srad-005 root-fix: 原为 `&&` 恒假（同一 opcode 不可能同时 ==PutFullData(0) 且 ==PutPartialData(1)）→
+            // write-miss-no-allocate(write-through) 路径 mshr_wait_reg 永不置位 → io.mshr_wait≡0 → MSHR.scala:97 闸常开 →
+            // 同块后续 Get refill 抢在 in-flight write-through Put 落 DRAM 前发往 DRAM → 读 pre-Put stale(0xa0000000) →
+            // 腐败 soft-float sign-mask spill/restore → vor Inf/NaN → __truncdfsf2 错 → INT_MIN col39/40。
+            // 改 `||` 恢复设计意图（注释即"wait write miss no allocate"；对照 line 142 dirty-victim 用单条件置 mshr_wait 同序化机制）。
+            when(s1_req.opcode === PutFullData || s1_req.opcode === PutPartialData) { //wait write miss no allocate
               mshr_wait_reg := true.B
             }
           }
@@ -279,6 +295,47 @@ val mshr_wait_reg =RegInit(false.B)
 
   io.a.bits.data  := Mux((s_final_req.opcode===PutFullData ||s_final_req.opcode=== PutPartialData),s_final_req.data,io.bs_rdat.data) // should be victim data 写miss的数据也经过这个地方转给sourceA
   io.a.bits.opcode:= PutFullData
+  // srad-006 root-fix: dirty-victim writeback 强制 opcode=PutFullData(上行)却**没 override mask** →
+  // 沿用触发它的 refill-Get 的 don't-care mask（0x1111=每 word 仅 byte0）→ 写回 WG49 脏 sign-mask
+  // (payload 在 byte3) 退化成只写 byte0=0x00 = 语义 no-op → DRAM 保持 pre-write stale → refill 读 stale(srad output=1)。
+  // 镜像上面 L287 的 data Mux：write-through(PutFull/Part) 留真 partial byte-enables（其 data 只在 masked lane 有效）；
+  // dirty-victim writeback / flush（Get/Hint 触发，data 取 bs_rdat 全行）用 all-1s 全字节写回。
+  // 实现：Fill(N, !is_put_op) 取代 ~(0.U(N.W))；后者在 Verilog 生成 128'hFFFF... 大常量，触发
+  // Verilator v5.034 V3FuncOpt.cpp:162 内部断言（语义等价：OR全1 = all-1s mask）。
+  io.a.bits.mask  := s_final_req.mask | Fill(params.mask_bits, !(s_final_req.opcode===PutFullData || s_final_req.opcode===PutPartialData))
+
+  // btree-002 fix v3.2: SourceD 保留原始 s_final_req.opcode，可在这里区分 write-through miss Put
+  // 与 dirty-victim writeback。Scheduler 把该位随 write_buffer 保存，直到真实 out_a.fire 才 retire count。
+  io.wt_miss_a := (stateReg === stage_4 || stateReg === stage_7) && !s_final_req.hit &&
+    (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)
 
   io.finish_issue := io.d.valid && s_final_req.last_flush
+
+  // srad-004 Phase 4.5 A''': hit-reservation clear（one-shot，统一到 io.d.fire）。
+  // io.d.fire 在 stage_4/stage_8 各自最多一次（SourceD entry 释放条件），保证 1:1 对应 will_resv_hit。
+  val hitClrOpcode = s_final_req.opcode === Get ||
+                     s_final_req.opcode === PutFullData ||
+                     s_final_req.opcode === PutPartialData
+  io.hit_done.valid     := io.d.fire && s_final_req.hit && hitClrOpcode
+  io.hit_done.bits.set  := s_final_req.set
+  io.hit_done.bits.way  := s_final_req.way
+
+  // srad-007 Bug3 root-fix(B): L2 BankedStore evict-vs-fill WAR — dirty-victim eviction 的 BankedStore 读
+  // (SourceD stage_3 bs_radr) 必须早于 refill 经 sinkD 写同 (set,way)。dirtyVictimWbFire = 该 victim writeback
+  // A 请求发出那拍(io.a.fire 且 s_final_req 是 dirty miss 的读路径 Get/Hint-evict，非 write-through Put)，
+  // 此拍 evict 读已完成(stage_3 先读后发)，回传 (set,way) 给 Scheduler 清 evictReadPending → 放行 fill 写。
+  // codex 4.5.5: 收窄到 opcode===Get（refill-eviction 才置 pending）；flush-dirty writeback(Hint)也读 bs_rdat 写回
+  // 但非 refill-eviction，不该按 (set,way) 误清 pending（flush 可与 MSHR 重叠）。
+  val dirtyVictimWbFire = io.a.fire && s_final_req.dirty && !s_final_req.hit && (s_final_req.opcode === Get)
+  io.evict_read_done.valid    := dirtyVictimWbFire
+  io.evict_read_done.bits.set := s_final_req.set
+  io.evict_read_done.bits.way := s_final_req.way
+
+  // btree-002 fix: hit Put 的真正 L2 commit 点。
+  // SourceD 只有在 BankedStore 写端口已经被接受后才会进入 stage_4 并发 D ack；
+  // 因此 io.d.fire && hit && Put 表示该 Put 的 bytes 已经在 L2 BankedStore 可见。
+  val wtHitCommitFire = io.d.fire && s_final_req.hit &&
+    (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)
+  io.wt_hit_commit.valid := wtHitCommitFire
+  io.wt_hit_commit.bits  := params.expandAddress(s_final_req.tag, s_final_req.l2cidx, s_final_req.set, s_final_req.offset)
 }

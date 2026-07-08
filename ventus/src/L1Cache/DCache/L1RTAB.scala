@@ -98,7 +98,11 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   ptrEnqValid := false.B
   // bfs4096-009 fix: st1 enq 写 ptr_w 那条 entry 的 fillCommitted 初值 ——
   // ReadMissFillWait 用入表时的 fillAlreadyCommitted(覆盖同拍/pre-enq commit)，其它 type 清 0。
-  val enqFillCommitted_init = Mux(io.RTABReq_st1.valid && io.RTABReq_st1.bits.ReqType === ReadMissFillWait,
+  // btree-003 fix: WriteMissFillWait 与 ReadMissFillWait 并列 —— 同样用入表时 fillAlreadyCommitted 初始化
+  //   (覆盖同拍/pre-enq commit edge)，其它 type 清 0。
+  val enqFillCommitted_init = Mux(io.RTABReq_st1.valid &&
+                                  (io.RTABReq_st1.bits.ReqType === ReadMissFillWait ||
+                                   io.RTABReq_st1.bits.ReqType === WriteMissFillWait),
                                   io.RTABReq_st1.bits.fillAlreadyCommitted, false.B)
   // RTAB push req st1
   when(io.RTABReq_st1.valid && !io.RTABReq_st0.valid){ //st1 request but no st0 hit
@@ -205,7 +209,8 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   // guard !(本拍 enq 到该 entry)：本拍 enq 的 entry 由 enqFillCommitted_init 负责，避免对同一 fillCommitted(i)
   // last-connect 双写歧义(codex round6 §B 要求 guard 必须 per-entry，不能全局屏蔽本拍所有 watch)。
   for(i <- 0 until NRTABs){
-    when(io.fillCommit_valid && EntryValid(i) && (Replay_type(i) === ReadMissFillWait) &&
+    when(io.fillCommit_valid && EntryValid(i) &&
+         ((Replay_type(i) === ReadMissFillWait) || (Replay_type(i) === WriteMissFillWait)) &&  // btree-003: 写侧并列
          (io.fillCommit_blockAddr === Cat(Req_access(i).tag, Req_access(i).setIdx)) &&
          !(io.RTABReq_st1.valid && (ptr_w === i.U))){
       fillCommitted(i) := true.B
@@ -225,6 +230,10 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   }.elsewhen(Replay_type(popPtr) === ReadMissFillWait && EntryValid(popPtr) && fillCommitted(popPtr)){
     // bfs4096-009 fix: 本 block fill 已 commit(fillCommitted Reg)→ 放出去 re-probe 必 tag hit。
     // 只看 Reg 旧值，不把 io.fillCommit_valid 组合并入 injectCoreReq_valid → loop-free(codex round6 §B)。
+    injectCoreReq_valid := true.B
+  }.elsewhen(Replay_type(popPtr) === WriteMissFillWait && EntryValid(popPtr) && fillCommitted(popPtr)){
+    // btree-003 fix: 本 block fill 已 commit → replay re-probe 必 tag hit → write-HIT 写 L1 (write-back)。
+    //   只看 fillCommitted Reg 旧值 (loop-free, 同 ReadMissFillWait)。
     injectCoreReq_valid := true.B
   }.otherwise{
     injectCoreReq_valid := false.B
