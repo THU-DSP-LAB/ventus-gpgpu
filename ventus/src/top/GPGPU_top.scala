@@ -698,6 +698,9 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   icache.io.coreReq.valid:=pipe.io.icache_req.valid
   icache.io.coreReq.bits.addr:=pipe.io.icache_req.bits.addr
   icache.io.coreReq.bits.warpid:=pipe.io.icache_req.bits.warpid
+  icache.io.coreReq.bits.source:=pipe.io.icache_req.bits.source
+  icache.io.coreReq.bits.wf_tag:=pipe.io.icache_req.bits.wf_tag
+  icache.io.coreReq.bits.frontend_gen:=pipe.io.icache_req.bits.frontend_gen
   icache.io.coreReq.bits.mask:=pipe.io.icache_req.bits.mask
   if(MMU_ENABLED){
     icache.io.coreReq.bits.asid.get := pipe.io.icache_req.bits.asid.get
@@ -708,6 +711,9 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   // **** icache coreRsp ****
   pipe.io.icache_rsp.valid:=icache.io.coreRsp.valid
   pipe.io.icache_rsp.bits.warpid:=icache.io.coreRsp.bits.warpid
+  pipe.io.icache_rsp.bits.source:=icache.io.coreRsp.bits.source
+  pipe.io.icache_rsp.bits.wf_tag:=icache.io.coreRsp.bits.wf_tag
+  pipe.io.icache_rsp.bits.frontend_gen:=icache.io.coreRsp.bits.frontend_gen
   pipe.io.icache_rsp.bits.data:=icache.io.coreRsp.bits.data
   pipe.io.icache_rsp.bits.addr:=icache.io.coreRsp.bits.addr
   pipe.io.icache_rsp.bits.status:=icache.io.coreRsp.bits.status

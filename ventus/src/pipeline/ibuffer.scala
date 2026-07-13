@@ -39,9 +39,10 @@ class instbuffer extends Module{
   })
   //val arbiter=Module(new arbiter_m2o(3))
 }
-class ibuffer2issue extends Module{
+class ibuffer2issue(val nWarps: Int = num_warp) extends Module{
+  require(nWarps >= 1)
   val io = IO(new Bundle{
-    val in=Flipped(Vec(num_warp,Decoupled(new CtrlSigs)))
+    val in=Flipped(Vec(nWarps,Decoupled(new CtrlSigs)))
     //val out=Decoupled(new CtrlSigs)
     val out_x = Decoupled(new CtrlSigs)
     val out_v = Decoupled(new CtrlSigs)
@@ -61,8 +62,8 @@ class ibuffer2issue extends Module{
     io.cnt.foreach(_ := cnt)
   }
   //
-  val rrarbit_x=Module(new RRArbiter(new CtrlSigs(),num_warp))
-  val rrarbit_v=Module(new RRArbiter(new CtrlSigs(),num_warp))
+  val rrarbit_x=Module(new RRArbiter(new CtrlSigs(),nWarps))
+  val rrarbit_v=Module(new RRArbiter(new CtrlSigs(),nWarps))
   def inst_is_vec(in: CtrlSigs): Bool = {
     val out = Wire(new Bool)
     // sALU | CSR | warpscheduler
@@ -78,7 +79,7 @@ class ibuffer2issue extends Module{
     }
     out
   }
-  (0 until num_warp).foreach{ i =>
+  (0 until nWarps).foreach{ i =>
     rrarbit_x.io.in(i).valid := io.in(i).valid && !inst_is_vec(io.in(i).bits)
     rrarbit_x.io.in(i).bits := io.in(i).bits
     rrarbit_v.io.in(i).valid := io.in(i).valid && inst_is_vec(io.in(i).bits)
@@ -102,36 +103,44 @@ class ibuffer2issue extends Module{
 
 // "num_fetch -> 1" slow down
 //
-class InstrBufferV2 extends Module{
+class InstrBufferV2(val nWarps: Int = num_warp, val subcoreId: Int = -1) extends Module{
+  require(nWarps >= 1)
+  require(subcoreId < num_subcore)
   val io = IO(new Bundle{
     val in = Flipped(DecoupledIO(new Bundle{
       val control = Vec(num_fetch, new CtrlSigs)
       val control_mask = Vec(num_fetch, Bool())
     }))
-    val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
-    val ibuffer_ready = Output(Vec(num_warp, Bool()))
-    val out = Vec(num_warp, DecoupledIO(Output(new CtrlSigs)))
+    val flush_wid = Input(UInt(nWarps.W))
+    val ibuffer_ready = Output(Vec(nWarps, Bool()))
+    val out = Vec(nWarps, DecoupledIO(Output(new CtrlSigs)))
   })
-  val buffers = VecInit(Seq.fill(num_warp)(Module(new Queue(Vec(num_fetch, new CtrlSigs), size_ibuffer, hasFlush = true)).io))
-  val buffers_mask = VecInit(Seq.fill(num_warp)(Module(new Queue(Vec(num_fetch, Bool()), size_ibuffer, hasFlush = true)).io))
-  (0 until num_warp).foreach{ i =>
-    buffers(i).enq.valid := io.in.bits.control(0).wid === i.U && io.in.valid
+  private val localWidWidth = if (nWarps <= 1) 1 else log2Ceil(nWarps)
+  val inputWid = if (nWarps <= 1) 0.U(1.W) else io.in.bits.control(0).wid(localWidWidth - 1, 0)
+  val buffers = VecInit(Seq.fill(nWarps)(Module(new Queue(Vec(num_fetch, new CtrlSigs), size_ibuffer, hasFlush = true)).io))
+  val buffers_mask = VecInit(Seq.fill(nWarps)(Module(new Queue(Vec(num_fetch, Bool()), size_ibuffer, hasFlush = true)).io))
+  (0 until nWarps).foreach{ i =>
+    buffers(i).enq.valid := inputWid === i.U && io.in.valid
     buffers(i).enq.bits := io.in.bits.control
-    buffers(i).flush.foreach{ _ := io.flush_wid.valid && io.flush_wid.bits === i.U }
-    buffers_mask(i).enq.valid := io.in.bits.control(0).wid === i.U && io.in.valid
+    buffers(i).flush.foreach{ _ := io.flush_wid(i) }
+    buffers_mask(i).enq.valid := inputWid === i.U && io.in.valid
     buffers_mask(i).enq.bits := io.in.bits.control_mask
-    buffers_mask(i).flush.foreach{ _ := io.flush_wid.valid && io.flush_wid.bits === i.U }
-    io.in.ready := buffers(io.in.bits.control(0).wid).enq.ready
+    buffers_mask(i).flush.foreach{ _ := io.flush_wid(i) }
+    io.in.ready := buffers(inputWid).enq.ready
     io.ibuffer_ready(i) := buffers(i).enq.ready
   }
 
-  io.in.ready := buffers(io.in.bits.control(0).wid).enq.ready
+  io.in.ready := buffers(inputWid).enq.ready
   when(io.in.fire){
-    buffers(io.in.bits.control(0).wid).enq.bits := io.in.bits.control
-    buffers_mask(io.in.bits.control(0).wid).enq.bits := io.in.bits.control_mask
-    when(io.flush_wid.valid){
-      buffers(io.flush_wid.bits).enq.bits := 0.U.asTypeOf(Vec(num_fetch, new CtrlSigs))
-      buffers_mask(io.flush_wid.bits).enq.bits := 0.U.asTypeOf(Vec(num_fetch, Bool()))
+    buffers(inputWid).enq.bits := io.in.bits.control
+    buffers_mask(inputWid).enq.bits := io.in.bits.control_mask
+    when(io.flush_wid.orR && !io.flush_wid(inputWid)){
+      (0 until nWarps).foreach { i =>
+        when(io.flush_wid(i) && inputWid =/= i.U) {
+          buffers(i).enq.bits := 0.U.asTypeOf(Vec(num_fetch, new CtrlSigs))
+          buffers_mask(i).enq.bits := 0.U.asTypeOf(Vec(num_fetch, Bool()))
+        }
+      }
     }
   }
   class SlowDown extends Module{
@@ -175,9 +184,9 @@ class InstrBufferV2 extends Module{
       // the first instruction's id is 1 instead of 0
     }
   }
-  val slowDownArray = Seq.fill(num_warp)(Module(new SlowDown))
-  (0 until num_warp).foreach{ i =>
-    slowDownArray(i).io.flush := io.flush_wid.bits === i.U && io.flush_wid.valid
+  val slowDownArray = Seq.fill(nWarps)(Module(new SlowDown))
+  (0 until nWarps).foreach{ i =>
+    slowDownArray(i).io.flush := io.flush_wid(i)
     slowDownArray(i).io.in.bits.control := buffers(i).deq.bits
     slowDownArray(i).io.in.bits.control_mask := buffers_mask(i).deq.bits
     slowDownArray(i).io.in.valid := buffers(i).deq.valid
@@ -189,16 +198,41 @@ class InstrBufferV2 extends Module{
   
   if (GVM_ENABLED) {
     val gvm_dispatch = Module(new GvmDutInsnDispatch)
-    // 共有 num_warp 个 dispatch 通道
+    // One dispatch observation channel per warp in this buffer bank.
+    def localChannel(globalWid: Int): Option[Int] = {
+      if (subcoreId >= 0) {
+        val owner = globalWid & (num_subcore - 1)
+        val localWid = globalWid >> subcore_sel_bits
+        if (owner == subcoreId && localWid < nWarps) Some(localWid) else None
+      } else if (globalWid < nWarps) {
+        Some(globalWid)
+      } else {
+        None
+      }
+    }
     gvm_dispatch.io.clock := clock
     gvm_dispatch.io.reset := reset.asBool
-    gvm_dispatch.io.dispatch_fire := VecInit(io.out.map(_.fire.asUInt)).asUInt
-    gvm_dispatch.io.sm_id := VecInit(io.out.map(_.bits.spike_info.get.sm_id.pad(32))).asUInt
-    gvm_dispatch.io.hardware_warp_id := VecInit.tabulate(num_warp)(i => i.U(32.W)).asUInt
-    gvm_dispatch.io.pc := VecInit(io.out.map(_.bits.spike_info.get.pc.asUInt)).asUInt
-    gvm_dispatch.io.instr := VecInit(io.out.map(_.bits.spike_info.get.inst.asUInt)).asUInt
-    gvm_dispatch.io.dispatch_id := VecInit(io.out.map(_.bits.spike_info.get.dispatch_id.get.asUInt)).asUInt
-    gvm_dispatch.io.is_extended := VecInit(io.out.map(_.bits.spike_info.get.is_extended.get)).asUInt
+    gvm_dispatch.io.dispatch_fire := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(io.out(_).fire).getOrElse(false.B)
+    }.asUInt
+    gvm_dispatch.io.sm_id := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(io.out(_).bits.spike_info.get.sm_id.pad(32)).getOrElse(0.U(32.W))
+    }.asUInt
+    gvm_dispatch.io.hardware_warp_id := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(_ => globalWid.U(32.W)).getOrElse(0.U(32.W))
+    }.asUInt
+    gvm_dispatch.io.pc := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(io.out(_).bits.spike_info.get.pc.asUInt).getOrElse(0.U(32.W))
+    }.asUInt
+    gvm_dispatch.io.instr := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(io.out(_).bits.spike_info.get.inst.asUInt).getOrElse(0.U(32.W))
+    }.asUInt
+    gvm_dispatch.io.dispatch_id := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(io.out(_).bits.spike_info.get.dispatch_id.get.asUInt).getOrElse(0.U(32.W))
+    }.asUInt
+    gvm_dispatch.io.is_extended := VecInit.tabulate(num_warp) { globalWid =>
+      localChannel(globalWid).map(io.out(_).bits.spike_info.get.is_extended.get).getOrElse(false.B)
+    }.asUInt
   }
   
 }

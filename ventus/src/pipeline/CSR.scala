@@ -11,6 +11,7 @@
 package pipeline
 //source from https://github.com/lingscale/cc01/blob/master/src/main/scala/core/CSR.scala
 import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import top.parameters._
 
@@ -362,16 +363,22 @@ class CSRFile extends Module {
   io.lsu_numt := wf_size_dispatch
 }
 
-class CSRexe extends Module {
-  val io = IO(new Bundle {
+@instantiable
+class CSRexe(val nWarps: Int = num_warp) extends Module {
+  private val localWarpIdxWidth = if (nWarps == 1) 1 else log2Ceil(nWarps)
+  private def localWarpIdx(wid: UInt): UInt = {
+    if (nWarps == 1) 0.U(1.W) else wid(localWarpIdxWidth - 1, 0)
+  }
+
+  @public val io = IO(new Bundle {
     val in = Flipped(Decoupled(new csrExeData))
     val out = Decoupled(new WriteScalarCtrl())
     val out_v =Decoupled(new WriteVecCtrl())
     val rm_wid = Input(Vec(3,UInt(depth_warp.W)))
     val rm = Output(Vec(3,UInt(3.W)))
     val CTA2csr = Flipped(ValidIO(new warpReqData))
-    val sgpr_base = Output(Vec(num_warp,UInt((SGPR_ID_WIDTH+1).W)))
-    val vgpr_base = Output(Vec(num_warp,UInt((VGPR_ID_WIDTH+1).W)))
+    val sgpr_base = Output(Vec(nWarps,UInt((SGPR_ID_WIDTH+1).W)))
+    val vgpr_base = Output(Vec(nWarps,UInt((VGPR_ID_WIDTH+1).W)))
     //val warpsetting = Input()
     val lsu_wid = Input(UInt(depth_warp.W))
     val simt_wid = Input(UInt(depth_warp.W))
@@ -381,7 +388,7 @@ class CSRexe extends Module {
     val lsu_numt= Output(UInt(xLen.W))
     val simt_rpc = Output(UInt(xLen.W))
   })
-  val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
+  val vCSR=VecInit(Seq.fill(nWarps)(Module(new CSRFile).io))
   vCSR.foreach(x=>{
     x.ctrl:=io.in.bits.ctrl
     x.write:=false.B
@@ -389,45 +396,45 @@ class CSRexe extends Module {
     x.CTA2csr.valid:=false.B
     x.CTA2csr.bits:=io.CTA2csr.bits
   })
-  for(i<-0 until num_warp){
+  for(i<-0 until nWarps){
     io.sgpr_base(i):=vCSR(i).sgpr_base
     io.vgpr_base(i):=vCSR(i).vgpr_base
   }
-  io.lsu_tid:=vCSR(io.lsu_wid).lsu_tid
-  io.lsu_pds:=vCSR(io.lsu_wid).lsu_pds
-  io.lsu_numw:=vCSR(io.lsu_wid).lsu_numw
-  io.lsu_numt:=vCSR(io.lsu_wid).lsu_numt
-  io.simt_rpc:=vCSR(io.simt_wid).simt_rpc
+  io.lsu_tid:=vCSR(localWarpIdx(io.lsu_wid)).lsu_tid
+  io.lsu_pds:=vCSR(localWarpIdx(io.lsu_wid)).lsu_pds
+  io.lsu_numw:=vCSR(localWarpIdx(io.lsu_wid)).lsu_numw
+  io.lsu_numt:=vCSR(localWarpIdx(io.lsu_wid)).lsu_numt
+  io.simt_rpc:=vCSR(localWarpIdx(io.simt_wid)).simt_rpc
 
-  vCSR(io.in.bits.ctrl.wid).write:=io.in.fire
-  vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
+  vCSR(localWarpIdx(io.in.bits.ctrl.wid)).write:=io.in.fire
+  vCSR(localWarpIdx(io.CTA2csr.bits.wid)).CTA2csr.valid:=io.CTA2csr.valid
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   result.io.deq<>io.out
 
   io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid & result_v.io.enq.ready
 
-  result.io.enq.valid:=io.in.fire & !vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result.io.enq.valid:=io.in.fire & !vCSR(localWarpIdx(io.in.bits.ctrl.wid)).wb_isvec
   result.io.enq.bits:=0.U.asTypeOf(new WriteScalarCtrl)
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  result.io.enq.bits.wxd:= !vCSR(io.in.bits.ctrl.wid).wb_isvec
-  result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
+  result.io.enq.bits.wxd:= !vCSR(localWarpIdx(io.in.bits.ctrl.wid)).wb_isvec
+  result.io.enq.bits.wb_wxd_rd:=vCSR(localWarpIdx(io.in.bits.ctrl.wid)).wb_wxd_rd
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
 
   result_v.io.deq <> io.out_v
 
-  result_v.io.enq.valid := io.in.fire & vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result_v.io.enq.valid := io.in.fire & vCSR(localWarpIdx(io.in.bits.ctrl.wid)).wb_isvec
   result_v.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
   result_v.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
-  result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
-  result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
+  result_v.io.enq.bits.wvd := vCSR(localWarpIdx(io.in.bits.ctrl.wid)).wb_isvec
+  result_v.io.enq.bits.wb_wvd_rd := vCSR(localWarpIdx(io.in.bits.ctrl.wid)).wb_wvd_rd
   result_v.io.enq.bits.warp_id := io.in.bits.ctrl.wid
   result_v.io.enq.bits.wvd_mask:= VecInit.fill(num_thread)(true.B)
 
   if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   if(SPIKE_OUTPUT) result_v.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   (0 until 3).foreach(x=>{
-    io.rm(x):=vCSR(io.rm_wid(x)).frm
+    io.rm(x):=vCSR(localWarpIdx(io.rm_wid(x))).frm
   })
 
 }

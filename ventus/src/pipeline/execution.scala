@@ -13,6 +13,7 @@ package pipeline
 import FPUv2.TensorCoreFP32
 import FPUv2.utils.{EmptyFPUCtrl, TestFPUCtrl}
 import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import top.parameters._
 import IDecode._
@@ -23,8 +24,9 @@ class BranchCtrl extends Bundle{
   val new_pc=UInt(32.W)
   val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
+@instantiable
 class ALUexe extends Module{
-  val io = IO(new Bundle() {
+  @public val io = IO(new Bundle() {
     val in = Flipped(DecoupledIO(new sExeData()))
     val out = DecoupledIO(new WriteScalarCtrl())
     val out2br = DecoupledIO(new BranchCtrl())
@@ -112,8 +114,9 @@ class vMULexe extends Module{
 class TCCtrlv2(xLen: Int, depth_warp: Int) extends FPUv2.TCCtrl(xLen, depth_warp){
   val spike_info=if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
 }
+@instantiable
 class vTCexe extends Module{
-  val io = IO(new Bundle {
+  @public val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val rm = Input(UInt(3.W))
     //val out_x = DecoupledIO(new WriteScalarCtrl())
@@ -161,6 +164,7 @@ class vTCexe extends Module{
 
 }
 
+@instantiable
 class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
   assert(softThread % hardThread == 0)
   class vExeData2(num_thread: Int = softThread) extends vExeData {
@@ -180,7 +184,7 @@ class vMULv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
 //    })
 //  }
 
-  val io = IO(new Bundle{
+  @public val io = IO(new Bundle{
     val in = Flipped(DecoupledIO(new vExeData2))
     val out_x = DecoupledIO(new WriteScalarCtrl)
     val out_v = DecoupledIO(new WriteVecCtrl2)
@@ -473,6 +477,7 @@ class vALUexe extends Module{
   io.out2simt_stack<>result2simt.io.deq
 }
 
+@instantiable
 class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
   assert(softThread % hardThread == 0)
   //assert(softThread > 2 && hardThread > 1)
@@ -493,7 +498,7 @@ class vALUv2(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     override val if_mask = UInt(num_thread.W)
   }
 
-  val io = IO(new Bundle {
+  @public val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData2()))
     val out = DecoupledIO(new WriteVecCtrl2())
     val out2simt_stack = DecoupledIO(new vec_alu_bus2())
@@ -743,9 +748,10 @@ class ctrl_fpu extends Bundle{
 val ctrl=new CtrlSigs
 val mask=Vec(num_thread,Bool())
 }
+@instantiable
 class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
     assert(softThread % hardThread == 0)
-  val io = IO(new Bundle {
+  @public val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val rm = Input(UInt(3.W))
     val out_x = DecoupledIO(new WriteScalarCtrl())
@@ -804,8 +810,9 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
   fpu.io.out.ready := Mux(fpu.io.out.bits.ctrl.wvd, io.out_v.ready, io.out_x.ready)
 }
 
+@instantiable
 class SFUexe extends Module{
-  val io = IO(new Bundle {
+  @public val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val rm = Input(UInt(3.W))
     val out_x = DecoupledIO(new WriteScalarCtrl())
@@ -943,4 +950,3 @@ class SFUexe extends Module{
   io.out_v<>result_v.io.deq
   io.out_x<>result_x.io.deq
 }
-

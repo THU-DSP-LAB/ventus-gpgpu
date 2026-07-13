@@ -186,7 +186,7 @@ object IDecodeLUT_IMF{
     CSRRWI-> List(N,N,N,B_N,N,N,CSR.W,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     CSRRSI-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     CSRRCI-> List(N,N,N,B_N,N,N,CSR.C,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
-    CSRRSV-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
+    CSRRSV-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
 
     FENCE->  List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_X,IMM_I,MEM_X,FN_ADD,N,M_X,N,Y,N,N,N,N,Y,N,N,N,N),
     LW->     List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,N,N,N,Y,N,N,N,N),
@@ -503,7 +503,7 @@ class InstrDecodeV2 extends Module {
     val pc = Input(UInt(addrLen.W))
     val wid = Input(UInt(depth_warp.W))
     val sm_id = Input(UInt(8.W))
-    val flush_wid = Flipped(ValidIO(UInt(depth_warp.W)))
+    val flush_wid = Input(UInt(num_warp.W))
     val control = Output(Vec(num_fetch, new CtrlSigs))
     val control_mask = Output(Vec(num_fetch, Bool()))
     val ibuffer_ready = Input(Vec(num_warp, Bool()))
@@ -539,9 +539,14 @@ class InstrDecodeV2 extends Module {
   // maskAfterExt       0    0    1    1                    |    1    0    1    0                       |   0    1    1    0
   // result             0    0   EA    B                    |   EA    0   EB    0                       |   0    A    B    0
   val scratchPads = RegInit(VecInit(Seq.fill(num_warp)(0.U.asTypeOf(new regext))))
-  when(io.flush_wid.valid){
-    scratchPads(io.flush_wid.bits) := 0.U.asTypeOf(new regext)
-    when(io.flush_wid.bits =/= io.wid && io.inst_mask.last && io.ibuffer_ready(io.wid)){
+  val currentFlushHit = io.flush_wid(io.wid)
+  when(io.flush_wid.orR){
+    (0 until num_warp).foreach { i =>
+      when(io.flush_wid(i)) {
+        scratchPads(i) := 0.U.asTypeOf(new regext)
+      }
+    }
+    when(!currentFlushHit && io.inst_mask.last && io.ibuffer_ready(io.wid)){
       scratchPads(io.wid) := regextInfo_pre.last
     }
   }.otherwise{

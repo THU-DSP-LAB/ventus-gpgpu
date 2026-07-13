@@ -12,6 +12,7 @@ package pipeline
 
 import top.parameters._
 import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import IDecode._
 import mmu.SV32.asidLen
@@ -35,7 +36,7 @@ class DCachePerLaneAddr extends Bundle{
 }
 
 class DCacheCoreReq_np extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
 //  val isWrite = Bool()
   val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(dcache_SetIdxBits.W)
@@ -48,7 +49,7 @@ class DCacheCoreReq_np extends Bundle{
 }
 
 class DCacheCoreRsp_np extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val data = Vec(num_thread, UInt(xLen.W))
 //  val ctrl = new Bundle{
 //    val mem_cmd = UInt(2.W)
@@ -65,7 +66,7 @@ class ShareMemPerLaneAddr_np extends Bundle{
 }
 class ShareMemCoreReq_np extends Bundle{
   //val ctrlAddr = new Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val isWrite = Bool()//Vec(NLanes, Bool())
   //val tag = UInt(dcache_TagBits.W)
   val setIdx = UInt(log2Ceil(sharedmem_depth).W)
@@ -74,7 +75,7 @@ class ShareMemCoreReq_np extends Bundle{
 }
 
 class ShareMemCoreRsp_np extends Bundle{
-  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val data = Vec(num_thread, UInt(xLen.W))
   val activeMask = Vec(num_thread, Bool())//UInt(NLanes.W)
 }
@@ -111,6 +112,7 @@ object ByteExtract{
 }
 
 class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Module{
+  private val subcoreIdWidth = if (num_subcore <= 1) 1 else log2Ceil(num_subcore)
   val io = IO(new Bundle{
     val from_fifo = Flipped(DecoupledIO(new vExeData))
     val csr_wid = Output(UInt(depth_warp.W))
@@ -118,6 +120,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     val csr_numw = Input(UInt(xLen.W))
     val csr_numt = Input(UInt(xLen.W))
     val csr_tid = Input(UInt(xLen.W))
+    val subcore_id = Input(UInt(subcoreIdWidth.W))
     val to_mshr = DecoupledIO(new Bundle{
       val tag = new MshrTag
     })
@@ -431,7 +434,8 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 
   if (SPIKE_OUTPUT) {
   when(state === s_save && io.to_mshr.fire && reg_save.ctrl.mem) {
-    val common_prefix = p"sm ${reg_save.ctrl.spike_info.get.sm_id} warp ${Decimal(reg_save.ctrl.wid)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.pc)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.inst)} "
+    val globalWid = PipeSubcoreHelpers.internalWid(io.subcore_id, reg_save.ctrl.wid)
+    val common_prefix = p"sm ${reg_save.ctrl.spike_info.get.sm_id} warp ${Decimal(globalWid)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.pc)} 0x${Hexadecimal(reg_save.ctrl.spike_info.get.inst)} "
     when(!reg_save.ctrl.isvec) {
       when(reg_save.ctrl.mem_cmd === IDecode.M_XRD) {
         printf(common_prefix + p"lsu.r x ${reg_save.ctrl.reg_idxw} op ${reg_save.ctrl.mop} @ ${Hexadecimal(reg_save.in1(0))}+${Hexadecimal(reg_save.in2(0))}\n")
@@ -542,9 +546,11 @@ class LSU2WB extends Module{
     }
   })
 }
-class LSUexe() extends Module{
+@instantiable
+class LSUexe(val nWarps: Int = num_warp) extends Module{
+  private val subcoreIdWidth = if (num_subcore <= 1) 1 else log2Ceil(num_subcore)
 // default size: 128 * (num_thread=8) * (xlen/8=4) = 4KByte
-  val io = IO(new Bundle{
+  @public val io = IO(new Bundle{
     val lsu_req = Flipped(DecoupledIO(new vExeData()))
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np()))
     //val lsu_rsp = DecoupledIO(new WriteBackControl())
@@ -552,7 +558,7 @@ class LSUexe() extends Module{
     val dcache_req = DecoupledIO(new DCacheCoreReq_np())
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
-    val fence_end = Output(UInt(num_warp.W))
+    val fence_end = Output(UInt(nWarps.W))
     val flush_dcache = Flipped(DecoupledIO(Bool()))
 
     val csr_wid = Output(UInt(depth_warp.W))
@@ -560,6 +566,7 @@ class LSUexe() extends Module{
     val csr_numw = Input(UInt(xLen.W))
     val csr_numt = Input(UInt(xLen.W))
     val csr_tid = Input(UInt(xLen.W))
+    val subcore_id = Input(UInt(subcoreIdWidth.W))
   })
   val sharedmemory_addr_max = sharemem_size.U(32.W)
   //val sharedmemory = Module(new SharedMemoryV2(nSharedMemoryEntry, num_thread, xLen, lsu_nMshrEntry)) // default: 128
@@ -568,6 +575,7 @@ class LSUexe() extends Module{
   InputFIFO.io.enq <> io.lsu_req
 
   val AddrCalc = Module(new AddrCalculate(sharedmemory_addr_max))
+  AddrCalc.io.subcore_id := io.subcore_id
   AddrCalc.io.from_fifo <> InputFIFO.io.deq
   io.dcache_req <> AddrCalc.io.to_dcache
   io.shared_req <> AddrCalc.io.to_shared
@@ -585,7 +593,7 @@ class LSUexe() extends Module{
   AddrCalc.io.idx_entry:=Coalscer.io.idx_entry
   io.lsu_rsp <> Coalscer.io.to_pipe
 
-  val shiftBoard=VecInit(Seq.fill(num_warp)(Module(new ShiftBoard(lsu_num_entry_each_warp)).io))
+  val shiftBoard=VecInit(Seq.fill(nWarps)(Module(new ShiftBoard(lsu_num_entry_each_warp)).io))
   shiftBoard.zipWithIndex.foreach{case(a,b)=> {
     a.left:=io.lsu_req.fire & io.lsu_req.bits.ctrl.wid===b.asUInt
     a.right:=io.lsu_rsp.fire & io.lsu_rsp.bits.tag.warp_id===b.asUInt

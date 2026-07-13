@@ -33,7 +33,7 @@ class DCachePerLaneAddr(implicit p: Parameters) extends DCacheBundle{
 }
 class DCacheCoreReq(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends DCacheBundle{
   //val ctrlAddr = new Bundle{
-  val instrId = UInt(WIdBits.W)//TODO length unsure
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
   val param = UInt(4.W)
   val tag = UInt(TagBits.W)
@@ -45,13 +45,13 @@ class DCacheCoreReq(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) exte
 }
 
 class DCacheCoreRsp(implicit p: Parameters) extends DCacheBundle{
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val isWrite = Bool()
   val data = Vec(NLanes, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
 }
 class DCacheCoreRsp_d(implicit p: Parameters) extends DCacheBundle{
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val isWrite = Bool()
   val data = Vec(NLanesd, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)

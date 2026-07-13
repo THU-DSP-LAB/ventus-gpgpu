@@ -21,6 +21,7 @@ import top.parameters.sharedmem_depth
 import top.parameters.num_thread
 import top.parameters.BytesOfWord
 import top.parameters.num_lane
+import top.parameters.lsu_mem_instr_id_bits
 
 /*Version Note
 * DCacheCoreReq spec changed, shift some work to LSU
@@ -37,7 +38,7 @@ class ShareMemPerLaneAddr(implicit p: Parameters) extends ShareMemBundle{
 }
 class ShareMemCoreReq(implicit p: Parameters) extends ShareMemBundle{
   //val ctrlAddr = new Bundle{
-  val instrId = UInt(WIdBits.W)//TODO length unsure
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val isWrite = Bool()//Vec(NLanes, Bool())
   //val tag = UInt(TagBits.W)
   val setIdx = UInt(SetIdxBits.W)
@@ -46,14 +47,14 @@ class ShareMemCoreReq(implicit p: Parameters) extends ShareMemBundle{
 }
 
 class ShareMemCoreRsp(implicit p: Parameters) extends ShareMemBundle{
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val isWrite = Bool()
   val data = Vec(NLanes, UInt(WordLength.W))
   val activeMask = Vec(NLanes, Bool())//UInt(NLanes.W)
 }
 
 class ShareMemGrantMeta(implicit p: Parameters) extends ShareMemBundle{
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   val isWrite = Bool()
   val setIdx = UInt(SetIdxBits.W)
   val activeMask = Vec(NLanes, Bool())

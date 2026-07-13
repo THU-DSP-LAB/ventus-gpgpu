@@ -41,12 +41,12 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
 
          //st1
          val memRsp_coreRsp     = DecoupledIO(new CoreRspPipe_st2)
-         // MSHRmissRspOut.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
-         // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
-         val MSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen)))
+         // MSHRmissRspOut.instrId carries the pipe-facing core instrId metadata.
+         // Keep it wide enough for subcore fabric ids while NMshrEntry remains local.
+         val MSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(lsu_mem_instr_id_bits, log2Up(NMshrEntry)), asidLen)))
          val MSHRMissRspOutAsid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
 
-         val SMSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen)))
+         val SMSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(lsu_mem_instr_id_bits, log2Up(NMshrEntry)), asidLen)))
          val SMSHRMissRspOutAsid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
 
          val dAmemRsp_wReq         = Output(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets * NWays, BytesOfWord)))

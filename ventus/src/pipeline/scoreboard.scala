@@ -140,4 +140,33 @@ class Scoreboard extends Module{
   dontTouch(readf)
   dontTouch(io)
   io.delay:=read1|read2|read3|readm|readw|readb|readf|read_op_colV|read_op_colX
+
+}
+
+class SubcoreScoreboardBankIO(val nWarps: Int) extends Bundle {
+  val warp = Vec(nWarps, new scoreboardIO)
+}
+
+class SubcoreScoreboardBank(val nWarps: Int) extends Module {
+  val io = IO(new SubcoreScoreboardBankIO(nWarps))
+  private val scoreboards = Seq.fill(nWarps)(Module(new Scoreboard))
+
+  for (wid <- 0 until nWarps) {
+    val external = io.warp(wid)
+    val scoreboard = scoreboards(wid).io
+    scoreboard.ibuffer_if_ctrl := external.ibuffer_if_ctrl
+    scoreboard.if_ctrl := external.if_ctrl
+    scoreboard.wb_v_ctrl := external.wb_v_ctrl
+    scoreboard.wb_x_ctrl := external.wb_x_ctrl
+    scoreboard.if_fire := external.if_fire
+    scoreboard.br_ctrl := external.br_ctrl
+    scoreboard.fence_end := external.fence_end
+    scoreboard.wb_v_fire := external.wb_v_fire
+    scoreboard.wb_x_fire := external.wb_x_fire
+    scoreboard.op_colV_in_fire := external.op_colV_in_fire
+    scoreboard.op_colV_out_fire := external.op_colV_out_fire
+    scoreboard.op_colX_in_fire := external.op_colX_in_fire
+    scoreboard.op_colX_out_fire := external.op_colX_out_fire
+    external.delay := scoreboard.delay
+  }
 }

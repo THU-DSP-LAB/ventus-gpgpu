@@ -22,9 +22,13 @@ import top.parameters._
 import top.cache_spike_info
 
 class ICachePipeReq(SV: mmu.SVParam)(implicit p: Parameters) extends ICacheBundle{
+  private val sourceWidth = if (num_subcore <= 1) 1 else log2Ceil(num_subcore)
   val addr = UInt(WordLength.W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
+  val source = UInt(sourceWidth.W)
+  val wf_tag = UInt(TAG_WIDTH.W)
+  val frontend_gen = UInt(frontend_gen_width.W)
   val asid = if(MMU_ENABLED) Some(UInt(asidLen.W)) else None
   val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(SV)) else None
 }
@@ -32,10 +36,14 @@ class ICachePipeFlush(implicit p: Parameters) extends ICacheBundle{
   val warpid = UInt(WIdBits.W)
 }
 class ICachePipeRsp(implicit p: Parameters) extends ICacheBundle{
+  private val sourceWidth = if (num_subcore <= 1) 1 else log2Ceil(num_subcore)
   val addr = UInt(WordLength.W)
   val data = UInt((num_fetch*WordLength).W)
   val mask = UInt(num_fetch.W)
   val warpid = UInt(WIdBits.W)
+  val source = UInt(sourceWidth.W)
+  val wf_tag = UInt(TAG_WIDTH.W)
+  val frontend_gen = UInt(frontend_gen_width.W)
   val status = UInt(2.W)//目前只有LSB投入使用，1表示MISS，0表示HIT
 }
 /*
@@ -120,8 +128,14 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
   val waymask_replace_st0 = tagAccess.io.waymaskReplacement
   val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.ready)
   val mask_st1 = RegEnable(io.coreReq.bits.mask, io.coreReq.ready)
+  val source_st1 = RegEnable(io.coreReq.bits.source, io.coreReq.ready)
+  val wf_tag_st1 = RegEnable(io.coreReq.bits.wf_tag, io.coreReq.ready)
+  val frontend_gen_st1 = RegEnable(io.coreReq.bits.frontend_gen, io.coreReq.ready)
   val warpid_st2 = RegNext(warpid_st1)
   val mask_st2 = RegNext(mask_st1)
+  val source_st2 = RegNext(source_st1)
+  val wf_tag_st2 = RegNext(wf_tag_st1)
+  val frontend_gen_st2 = RegNext(frontend_gen_st1)
   val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
   val addr_st2 = RegNext(addr_st1)
   if(MMU_ENABLED){
@@ -203,6 +217,9 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
   io.coreRsp.bits.data := data_after_blockOffset_st2
   io.coreRsp.bits.warpid := warpid_st2
   io.coreRsp.bits.mask := mask_st2
+  io.coreRsp.bits.source := source_st2
+  io.coreRsp.bits.wf_tag := wf_tag_st2
+  io.coreRsp.bits.frontend_gen := frontend_gen_st2
   /*Mux(missRsp_from_mshr,
     //miss Rsp
     mshrAccess.io.missRspOut.bits.targetInfo>>(BlockOffsetBits+WordOffsetBits),
@@ -260,7 +277,9 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
 
   // ******      core req ready
   //val coreRsp_QAlmstFull = coreRsp_Q.io.count === 2.U
-  io.coreReq.ready := true.B//!memRsp_Q.io.deq.valid && !mshrAccess.io.missRspOut.valid//mshrAccess.io.missReq.ready //&& !coreRsp_QAlmstFull
+  val sameBlockRefillConflict = io.coreReq.valid && memRsp_Q.io.deq.fire &&
+    get_blockAddr(io.coreReq.bits.addr) === mshrAccess.io.missRspOut.bits.blockAddr
+  io.coreReq.ready := !sameBlockRefillConflict
 
   // ******    self generate flushPipeline
   //保存两个周期的warp id，与当前输入id对比。

@@ -11,10 +11,12 @@
 package pipeline
 
 import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import top.parameters._
+@instantiable
 class PCcontrol() extends Module{
-  val io=IO(new Bundle{
+  @public val io=IO(new Bundle{
     val New_PC=Input(UInt(32.W))
     val PC_replay=Input(Bool())
     val PC_src=Input(UInt(2.W))

@@ -11,12 +11,19 @@
 package pipeline
 
 import chisel3._
+import chisel3.experimental.hierarchy.{Instantiate, instantiable, public}
 import chisel3.util._
 import top.parameters._
 import gvm._
 
-class warp_scheduler extends Module{
-  val io = IO(new Bundle{
+@instantiable
+class warp_scheduler(val nWarps: Int = num_warp) extends Module{
+  private val localWarpIdxWidth = if (nWarps == 1) 1 else log2Ceil(nWarps)
+  private def localWarpIdx(wid: UInt): UInt = {
+    if (nWarps == 1) 0.U(1.W) else wid(localWarpIdxWidth - 1, 0)
+  }
+
+  @public val io = IO(new Bundle{
     val pc_reset = Input(Bool())
     val warpReq=Flipped(Decoupled(new warpReqData)) //new warp
     val warpRsp=Decoupled(new warpRspData) //endprg
@@ -27,13 +34,13 @@ class warp_scheduler extends Module{
     val branch = Flipped(DecoupledIO(new BranchCtrl)) //branch, flush pipeline
     val warp_control=Flipped(DecoupledIO(new warpSchedulerExeData)) //engprg and barrier
     val issued_warp=Flipped(Valid(UInt(depth_warp.W))) //not use
-    val scoreboard_busy=Input(UInt(num_warp.W)) //scoreboard race
-    val exe_busy=Input(UInt(num_warp.W)) //exe race
+    val scoreboard_busy=Input(UInt(nWarps.W)) //scoreboard race
+    val exe_busy=Input(UInt(nWarps.W)) //exe race
     //val pc_icache_ready=Input(Vec(num_warp,Bool()))
-    val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W))) //ibuffer ready
+    val pc_ibuffer_ready=Input(Vec(nWarps,UInt(depth_ibuffer.W))) //ibuffer ready
     val asid =  if(MMU_ENABLED) Some(Output(UInt(KNL_ASID_WIDTH.W))) else None // 2ibuffer
-    val warp_ready=Output(UInt(num_warp.W)) //to issue
-    val barrier_busy = Output(UInt(num_warp.W))
+    val warp_ready=Output(UInt(nWarps.W)) //to issue
+    val barrier_busy = Output(UInt(nWarps.W))
     val flush=(ValidIO(UInt(depth_warp.W)))
     val flushCache=(ValidIO(UInt(depth_warp.W)))
     val CTA2csr=ValidIO(new warpReqData) //redirect warpreq
@@ -49,7 +56,8 @@ class warp_scheduler extends Module{
   val warp_end_id=io.warp_control.bits.ctrl.wid
   val current_warp=RegInit(0.U(depth_warp.W))
   val next_warp=WireInit(current_warp)
-  io.branch.ready:= !io.flushCache.valid
+  val flushCacheSameWid = io.flushCache.valid && io.flushCache.bits === io.branch.bits.wid
+  io.branch.ready:= !io.flushCache.valid || !flushCacheSameWid
   io.warp_control.ready:= !io.branch.fire & !io.flushCache.valid
 
   io.warpReq.ready:=true.B
@@ -59,15 +67,15 @@ class warp_scheduler extends Module{
   io.CTA2csr.bits:=io.warpReq.bits
   io.CTA2csr.valid:=io.warpReq.valid
 
-  val new_warpid = io.warpReq.bits.wid
+  val new_warpid = localWarpIdx(io.warpReq.bits.wid)
 
   if(MMU_ENABLED){
-    val asidReg = Reg(Vec(num_warp,UInt(KNL_ASID_WIDTH.W)))
+    val asidReg = Reg(Vec(nWarps,UInt(KNL_ASID_WIDTH.W)))
     when(io.warpReq.fire){
       asidReg(new_warpid) := io.warpReq.bits.CTAdata.dispatch2cu_knl_asid.getOrElse(0.U).asUInt
     }
-    io.asid.get := asidReg(io.pc_rsp.bits.warpid)
-    io.pc_req.bits.asid.get := asidReg(next_warp)
+    io.asid.get := asidReg(localWarpIdx(io.pc_rsp.bits.warpid))
+    io.pc_req.bits.asid.get := asidReg(localWarpIdx(next_warp))
   }
 
 
@@ -76,29 +84,34 @@ class warp_scheduler extends Module{
   io.flushCache.valid:=io.pc_rsp.valid&io.pc_rsp.bits.status(0)
   io.flushCache.bits:=io.pc_rsp.bits.warpid
 
-  val pcControl=VecInit(Seq.fill(num_warp)(Module(new PCcontrol()).io))
+  val pcControl = VecInit(Seq.fill(nWarps)(Instantiate(new PCcontrol()).io))
   //val pcReplay=VecInit(pcControl.map(x=>RegEnable(x.PC_next,(x.PC_src===2.U)&(!x.PC_replay))))
   //val warp_memory_idle=Reg(Vec(num_warp,Bool()))
   //val warp_barrier_array=RegInit(0.U(num_warp.W))
   //val block_warp_waiting=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W)))) // if meet barrier, switch and set 1. all 1 -> all 0.
-  val warp_init_addr=(VecInit(Seq.fill(num_warp)(0.U(32.W))))//,172.U,176.U) //初值怎么传进去，这是个问题？建议走CSR，并且是vec version的
-  pcControl.foreach{
-    x=>{
-      x.New_PC:=io.branch.bits.new_pc
-      x.PC_replay:=true.B
-      x.PC_src:=0.U
-      x.mask_i:=0.U
-    }
+  val warp_init_addr=(VecInit(Seq.fill(nWarps)(0.U(32.W))))//,172.U,176.U) //初值怎么传进去，这是个问题？建议走CSR，并且是vec version的
+  pcControl.foreach { x =>
+    x.New_PC := io.branch.bits.new_pc
+    x.PC_replay := true.B
+    x.PC_src := 0.U
+    x.mask_i := 0.U
   }
-  val pc_ready=Wire(Vec(num_warp,Bool()))
+  val pc_ready = WireInit(VecInit(Seq.fill(nWarps)(false.B)))
 
-
-  current_warp:=next_warp
-  pcControl(next_warp).PC_replay:= (!io.pc_req.ready)|(!pc_ready(next_warp))
-  pcControl(next_warp).PC_src:=2.U
-  io.pc_req.bits.addr := pcControl(next_warp).PC_next
+  val next_warp_local = localWarpIdx(next_warp)
+  io.pc_req.valid := false.B
+  io.pc_req.bits.addr := 0.U
+  io.pc_req.bits.warpid := 0.U
+  io.pc_req.bits.source := 0.U
+  io.pc_req.bits.wf_tag := 0.U
+  io.pc_req.bits.frontend_gen := 0.U
+  io.pc_req.bits.mask := 0.U
+  current_warp := next_warp
+  pcControl(next_warp_local).PC_replay := !io.pc_req.ready || !pc_ready(next_warp_local)
+  pcControl(next_warp_local).PC_src := 2.U
+  io.pc_req.bits.addr := pcControl(next_warp_local).PC_next
   io.pc_req.bits.warpid := next_warp
-  io.pc_req.bits.mask := pcControl(next_warp).mask_o
+  io.pc_req.bits.mask := pcControl(next_warp_local).mask_o
 
 
   io.wg_id_lookup:=Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
@@ -117,12 +130,10 @@ class warp_scheduler extends Module{
   val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
   val end_wg_id=io.wg_id_tag(TAG_WIDTH-1, WF_ID_WIDTH)
   val end_wf_id=io.wg_id_tag(WF_ID_WIDTH-1, 0)
-  val warp_bar_data=RegInit(0.U(num_warp.W))  // 0 means not locked by barrier
-  val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
-
-
+  val warp_bar_data=RegInit(0.U(nWarps.W))  // 0 means not locked by barrier
+  val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(nWarps.W))))
   when(io.warpReq.fire){
-    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt  //显示warp中有哪些属于wg
+    warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<new_warpid).asUInt  //显示warp中有哪些属于wg
 //    warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     when(!warp_bar_lock(new_wg_id)) {
       warp_bar_cur(new_wg_id) := 0.U
@@ -131,12 +142,12 @@ class warp_scheduler extends Module{
   }
   when(io.warpRsp.fire){
 //    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
-    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<localWarpIdx(io.warpRsp.bits.wid))).asUInt
   }
   warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
     warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
-    warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
+    warp_bar_data:=warp_bar_data | (1.U<<localWarpIdx(io.warp_control.bits.ctrl.wid)).asUInt
     when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id)){
       warp_bar_cur(end_wg_id):=0.U
       warp_bar_data:=warp_bar_data & (~warp_bar_belong(end_wg_id)).asUInt
@@ -175,51 +186,48 @@ class warp_scheduler extends Module{
   io.flushDCache.bits := need_flush
 
 
-  val warp_active=RegInit(0.U(num_warp.W))
+  val warp_active=RegInit(0.U(nWarps.W))
 
-
-
-  warp_active:=(warp_active | ((1.U<<io.warpReq.bits.wid).asUInt&Fill(num_warp,io.warpReq.fire))) & (~( Fill(num_warp,warp_end)&(1.U<<warp_end_id).asUInt )).asUInt
+  val warp_end_local = localWarpIdx(warp_end_id)
+  warp_active:=(warp_active | ((1.U<<new_warpid).asUInt&Fill(nWarps,io.warpReq.fire))) & (~( Fill(nWarps,warp_end)&(1.U<<warp_end_local).asUInt )).asUInt
   val warp_ready=(~(warp_bar_data | io.scoreboard_busy | io.exe_busy | (~warp_active).asUInt)).asUInt
   io.warp_ready:=warp_ready
   io.barrier_busy := warp_bar_data
-  for (i<- num_warp-1 to 0 by -1){
-    pc_ready(i):= io.pc_ibuffer_ready(i) & warp_active(i) 
-    when(pc_ready(i)){next_warp:=i.asUInt}
+  for (i <- nWarps - 1 to 0 by -1) {
+    pc_ready(i) := io.pc_ibuffer_ready(i).orR && warp_active(i)
+    when(pc_ready(i)) { next_warp := i.asUInt }
   }
-  io.pc_req.valid:=pc_ready(next_warp)
-  //lock one warp to execute
-  //next_warp:=0.U
-  if(SINGLE_INST) next_warp:=0.U
+  io.pc_req.valid := pc_ready(next_warp)
+  if (SINGLE_INST) next_warp := 0.U
 
-
-
-  when(io.pc_rsp.valid&io.pc_rsp.bits.status(0)){//miss acknowledgement
-    pcControl(io.pc_rsp.bits.warpid).PC_replay:=false.B
-    pcControl(io.pc_rsp.bits.warpid).PC_src:=3.U
-    pcControl(io.pc_rsp.bits.warpid).New_PC:=io.pc_rsp.bits.addr//pcReplay(io.pc_rsp.bits.warpid)
-    pcControl(io.pc_rsp.bits.warpid).mask_i:=io.pc_rsp.bits.mask
+  when(io.pc_rsp.valid && io.pc_rsp.bits.status(0)) {
+    val rsp_warp_local = localWarpIdx(io.pc_rsp.bits.warpid)
+    pcControl(rsp_warp_local).PC_replay := false.B
+    pcControl(rsp_warp_local).PC_src := 3.U
+    pcControl(rsp_warp_local).New_PC := io.pc_rsp.bits.addr
+    pcControl(rsp_warp_local).mask_i := io.pc_rsp.bits.mask
   }
 
-  when(io.branch.fire&io.branch.bits.jump){
-    pcControl(io.branch.bits.wid).PC_replay:=false.B
-    pcControl(io.branch.bits.wid).PC_src:=1.U
-    pcControl(io.branch.bits.wid).New_PC:=io.branch.bits.new_pc
-    //PC:=io.branch.bits.new_pc
-    when(io.branch.bits.wid===next_warp){
-    io.pc_req.valid:=false.B}
+  when(io.branch.fire && io.branch.bits.jump) {
+    val branch_warp_local = localWarpIdx(io.branch.bits.wid)
+    pcControl(branch_warp_local).PC_replay := false.B
+    pcControl(branch_warp_local).PC_src := 1.U
+    pcControl(branch_warp_local).New_PC := io.branch.bits.new_pc
+    when(io.branch.bits.wid === next_warp) { io.pc_req.valid := false.B }
   }
 
-
-  when(io.warpReq.fire){
-    pcControl(io.warpReq.bits.wid).PC_replay:=false.B
-    pcControl(io.warpReq.bits.wid).PC_src:=1.U
-    pcControl(io.warpReq.bits.wid).New_PC:=io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch
+  when(io.warpReq.fire) {
+    pcControl(new_warpid).PC_replay := false.B
+    pcControl(new_warpid).PC_src := 1.U
+    pcControl(new_warpid).New_PC := io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch
   }
 
-
-  when(io.pc_reset){
-    pcControl.zipWithIndex.foreach{case(x,b)=>{x.PC_src:=1.U;x.New_PC:=warp_init_addr(b);x.PC_replay:=false.B} }
-    io.pc_req.valid:=false.B
+  when(io.pc_reset) {
+    pcControl.zipWithIndex.foreach { case (x, b) =>
+      x.PC_src := 1.U
+      x.New_PC := warp_init_addr(b)
+      x.PC_replay := false.B
+    }
+    io.pc_req.valid := false.B
   }
 }
