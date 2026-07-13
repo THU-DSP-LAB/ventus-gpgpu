@@ -11,6 +11,7 @@
 package pipeline
 
 import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import top.parameters._
 
@@ -37,8 +38,9 @@ class csrExeData extends Bundle{
   val in1=UInt(xLen.W)
 }
 
+@instantiable
 class Issue extends Module{
-  val io = IO(new Bundle{
+  @public val io = IO(new Bundle{
     val in=Flipped(DecoupledIO(new vExeData))
     val out_sALU=DecoupledIO(new sExeData)
     val out_vALU=DecoupledIO(new vExeData)

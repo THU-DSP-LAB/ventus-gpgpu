@@ -60,27 +60,34 @@ class CTA2warp extends Module{
   })
   val idx_using = RegInit(0.U(num_warp.W))  // current active warps in sm
 
-  io.CTAreq.ready:=(~idx_using.andR)
   val data = RegInit(VecInit(Seq.fill(num_warp)(0.U(TAG_WIDTH.W)))) // every hw_warp record its wg&wf id
   io.wg_id_tag:=data(io.wg_id_lookup)
+  val has_free_slot = !idx_using.andR
   val idx_next_allocate = PriorityEncoder(~idx_using)
-  //idx_using:=Mux(io.warpRsp.fire&io.CTAreq.fire,idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt&(1.U<<idx_next_allocate).asUInt,
-  //  Mux(io.warpRsp.fire,idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt,
-  //  Mux(io.CTAreq.fire,idx_using&(1.U<<idx_next_allocate).asUInt,idx_using)))
-  idx_using:=(idx_using | ((1.U<<idx_next_allocate).asUInt & Fill(num_warp,io.CTAreq.fire))) & (~((Fill(num_warp,io.warpRsp.fire)).asUInt & ((1.U<<io.warpRsp.bits.wid)).asUInt)).asUInt
-  when(io.CTAreq.fire) {
+
+  io.warpReq.valid := io.CTAreq.valid && has_free_slot
+  io.warpReq.bits.CTAdata := io.CTAreq.bits
+  io.warpReq.bits.wid := idx_next_allocate
+  io.CTAreq.ready := has_free_slot && io.warpReq.ready
+
+  val launch_fire = io.warpReq.fire
+  val alloc_mask = (1.U << idx_next_allocate).asUInt & Fill(num_warp, launch_fire)
+  val free_mask = (1.U << io.warpRsp.bits.wid).asUInt & Fill(num_warp, io.warpRsp.fire)
+  idx_using := (idx_using | alloc_mask) & (~free_mask).asUInt
+  when(launch_fire) {
     data(idx_next_allocate):=io.CTAreq.bits.dispatch2cu_wf_tag_dispatch
   }
-  io.warpReq.valid:=io.CTAreq.fire
-  io.warpReq.bits.CTAdata:=io.CTAreq.bits
-  io.warpReq.bits.wid:=idx_next_allocate
 
   // TODO: Fix warp_scheduler warpRsp IO logic, which always requires ready=1
   // WorkAround: warp_scheduler requires io.wrapRsp.ready=1, use a large enough FIFO to satisfy it temporarily
-  val CTArsp_fifo = Queue(io.warpRsp, 16)
+  val CTArsp_fifo_enq = Wire(Decoupled(new CTArspData))
+  CTArsp_fifo_enq.valid := io.warpRsp.valid
+  CTArsp_fifo_enq.bits.cu2dispatch_wf_tag_done := data(io.warpRsp.bits.wid)
+  io.warpRsp.ready := CTArsp_fifo_enq.ready
+  val CTArsp_fifo = Queue(CTArsp_fifo_enq, 16)
   assert(io.warpRsp.ready, "warpRsp port requires ready=1, this FIFO is used to satisfy it, but not enough")
 
   CTArsp_fifo.ready := io.CTArsp.ready
-  io.CTArsp.bits.cu2dispatch_wf_tag_done := data(CTArsp_fifo.bits.wid)
+  io.CTArsp.bits := CTArsp_fifo.bits
   io.CTArsp.valid := CTArsp_fifo.valid
 }

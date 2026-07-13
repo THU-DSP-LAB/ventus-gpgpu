@@ -16,12 +16,12 @@ import SRAMTemplate._
 import chisel3._
 import chisel3.util._
 import config.config.Parameters
-import top.parameters.{MMU_ENABLED, NUMBER_CU, dcache_BlockOffsetBits, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, dcache_WordOffsetBits, num_block, num_thread}
+import top.parameters.{MMU_ENABLED, NUMBER_CU, dcache_BlockOffsetBits, dcache_BlockWords, dcache_MshrEntry, dcache_NSets, dcache_WordOffsetBits, lsu_mem_instr_id_bits, num_block, num_thread}
 import mmu.SV32.{asidLen, paLen, vaLen}
 //import pipeline.parameters._
 
 class VecMshrTargetInfo(implicit p: Parameters)extends DCacheBundle{
-  val instrId = UInt(WIdBits.W)
+  val instrId = UInt(lsu_mem_instr_id_bits.W)
   //val isWrite = Bool()
   val perLaneAddr = Vec(NLanes, new DCachePerLaneAddr)
 }
@@ -316,7 +316,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
   // bugs/bfs4096-003/phase_4_report.md. V1 path is not elaborated, but the
   // named arg must match L1MSHR.scala's renamed parameter to keep the file
   // compilable.
-  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(WIdBits, log2Up(NMshrEntry)), NMshrEntry, NMshrSubEntry, asidLen))
+  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(lsu_mem_instr_id_bits, log2Up(NMshrEntry)), NMshrEntry, NMshrSubEntry, asidLen))
   //val missRspFromMshr_st1 = Wire(Bool())
   val missRspTI_st1 = Wire(new VecMshrTargetInfo)
   val readmiss_st0_st1_match= Wire(Bool())

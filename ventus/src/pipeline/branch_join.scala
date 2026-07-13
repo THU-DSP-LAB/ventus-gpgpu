@@ -11,6 +11,7 @@
 package pipeline
 
 import chisel3._
+import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util._
 import top.parameters._
 import java.io._
@@ -64,8 +65,9 @@ class branch_join_stack(val depth:Int) extends Module{
   io.newMask := stack_mem(rd_ptr).newMask
 }
 
-class branch_join(val depth_stack: Int) extends Module{
-  val io = IO(new Bundle() {
+@instantiable
+class branch_join(val depth_stack: Int, val nWarps: Int = num_warp) extends Module{
+  @public val io = IO(new Bundle() {
     val branch_ctl = Flipped(Decoupled(new simtExeData()))
     val if_mask = Flipped(Decoupled(new vec_alu_bus()))
     val pc_reconv = Flipped(Decoupled(UInt(xLen.W)))
@@ -93,7 +95,7 @@ class branch_join(val depth_stack: Int) extends Module{
 
   val fetch_ctl_buf = Module(new Queue(new BranchCtrl, 1, flow = true))
 
-  val thread_masks = RegInit(VecInit(Seq.fill(num_warp)(~0.U(num_thread.W))))
+  val thread_masks = RegInit(VecInit(Seq.fill(nWarps)(~0.U(num_thread.W))))
   val if_mask = Wire(UInt(num_thread.W))
   // val if_mask = WireInit(~0.U(num_thread.W))
   val else_mask = WireInit(0.U(num_thread.W))
@@ -105,17 +107,17 @@ class branch_join(val depth_stack: Int) extends Module{
   val elseCnt = Wire(UInt(log2Ceil(num_thread+1).W))
   val takeif = Wire(Bool())
 
-  val push = WireInit(VecInit(Seq.fill(num_warp)(false.B))) //Wire(Vec(num_warp,Bool()))
-  val pop = WireInit(VecInit(Seq.fill(num_warp)(false.B))) //Wire(Vec(num_warp,Bool()))
-  val bjjump = WireInit(VecInit(Seq.fill(num_warp)(false.B)))
-  val bjPC = WireInit(VecInit(Seq.fill(num_warp)(0.U(32.W))))
-  val bjmask = WireInit(VecInit(Seq.fill(num_warp)(0.U(num_thread.W))))
+  val push = WireInit(VecInit(Seq.fill(nWarps)(false.B)))
+  val pop = WireInit(VecInit(Seq.fill(nWarps)(false.B)))
+  val bjjump = WireInit(VecInit(Seq.fill(nWarps)(false.B)))
+  val bjPC = WireInit(VecInit(Seq.fill(nWarps)(0.U(32.W))))
+  val bjmask = WireInit(VecInit(Seq.fill(nWarps)(0.U(num_thread.W))))
   val popjump = Wire(Bool())
   val popPC = Wire(UInt(32.W))
   val popMask = Wire(UInt(num_thread.W))
 
 
-  val bjstack  = VecInit(Seq.fill(num_warp)(Module(new branch_join_stack(depth_stack)).io))
+  val bjstack  = VecInit(Seq.fill(nWarps)(Module(new branch_join_stack(depth_stack)).io))
   var x = 0
   opcode := branch_ctl_buf.bits.opcode
   PC_branch := branch_ctl_buf.bits.PC_branch
@@ -161,7 +163,7 @@ class branch_join(val depth_stack: Int) extends Module{
     pushentry.jumpPC  :=  PC_execute + 4.U
   }
 
-  for(x <- 0 until num_warp){
+  for(x <- 0 until nWarps){
     push(x)  :=  (opcode === 0.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id ) && divOccur
     pop(x) := (opcode === 1.U) && (branch_ctl_buf.fire) && (x.asUInt === warp_id) //just indicating this is join, maybe not pop, depends on whether TOS rPC match current executing PC
     bjstack(x).push := push(x)
@@ -275,4 +277,3 @@ class branch_join(val depth_stack: Int) extends Module{
     assert(bjstack(io.initMask.bits.warp_id).empty, "SIMTstack should be empty when initMask is valid")
   }
 }
-

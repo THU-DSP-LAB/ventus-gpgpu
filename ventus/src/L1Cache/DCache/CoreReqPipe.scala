@@ -103,10 +103,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // 让外部 in(1) 的 st0-hitRTAB 路径占掉最后一格 → 闭合 st1⇄RTAB 死锁环。
     val Req_st1_RTAB_reserve = Output(Bool())
     val CheckReq_WSHR       = Output(new WSHRreq)
-    // {S}MSHRmissReq.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
-    // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
-    val Probe_SMSHR         = DecoupledIO(new SMSHRmissReq(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen))//TODO add special MSHR
-    val MissReq_MSHR        = DecoupledIO(new MSHRmissReq(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen))
+    // {S}MSHRmissReq.instrId carries the pipe-facing core instrId metadata.
+    // Keep it wide enough for subcore fabric ids while NMshrEntry remains local.
+    val Probe_SMSHR         = DecoupledIO(new SMSHRmissReq(bABits, tIBits, math.max(lsu_mem_instr_id_bits, log2Up(NMshrEntry)), asidLen))//TODO add special MSHR
+    val MissReq_MSHR        = DecoupledIO(new MSHRmissReq(bABits, tIBits, math.max(lsu_mem_instr_id_bits, log2Up(NMshrEntry)), asidLen))
     val MissCached_MSHR     = Output(Bool())
     val st1_valid           = Output(Bool())
     val st1_ready           = Output(Bool())

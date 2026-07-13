@@ -8,6 +8,11 @@ import mmu.SV32.{asidLen, paLen, vaLen}
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
   def num_sm = 2
   var num_warp = 8
+  val num_subcore = 4
+  require((num_warp % num_subcore) == 0, s"num_warp ($num_warp) must be divisible by num_subcore ($num_subcore)")
+  def num_warp_per_subcore = num_warp / num_subcore
+  def subcore_sel_bits = log2Ceil(num_subcore)
+  def frontend_gen_width = 16
   var num_thread = 32
   val SINGLE_INST: Boolean = false
   val SPIKE_OUTPUT: Boolean = true
@@ -74,6 +79,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def lsu_num_entry_each_warp = 4 //blocking for each warp
 
   def lsu_nMshrEntry = num_warp // less than num_warp
+  def lsu_local_instr_id_bits = log2Up(lsu_nMshrEntry)
+  def lsu_mem_instr_id_bits = subcore_sel_bits + lsu_local_instr_id_bits
 
   def dcache_NSets: Int = 32
 
