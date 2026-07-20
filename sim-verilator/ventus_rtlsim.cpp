@@ -1,6 +1,8 @@
 #include "ventus_rtlsim_impl.hpp"
 #include "persistent_state.hpp"
+#ifdef ENABLE_GVM
 #include "../../spike/gvmref/gvmref_interface.h"
+#endif
 #include <ctime>
 #include <cstdlib>  // bfs4096-008 Phase 0.2: getenv/strtol for VENTUS_VERILATOR_SEED
 #include <cstdio>   // bfs4096-008 Phase 0.2: printf actual seed

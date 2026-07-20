@@ -23,7 +23,9 @@
 #include <sys/wait.h>
 #include <utility>
 
+#ifdef ENABLE_GVM
 #include "gvm.hpp"
+#endif
 #include "pmu_snapshot_copy.inc"
 
 constexpr uint64_t HALF_CYCLE_TIME = 5;
