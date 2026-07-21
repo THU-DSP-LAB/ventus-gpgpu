@@ -385,7 +385,12 @@ for(i<- 0 until params.cache.sets){
   val rdEffInvalid  = rdInvalidVec & (~rdResvNext).asUInt
   val rdNonResvVal  = rdValidVec   & (~rdResvNext).asUInt
   val victim_stall  = (rdEffInvalid === 0.U) && (rdInvalidVec.orR || (rdNonResvVal === 0.U))
-  io.read.ready := (((wipeDone && !io.write.fire) && !victim_stall) || (setQuash_1 && tagMatch_1)) && !flush_issue_reg  && io.result.ready//also fire when bypass
+  val writeBypass   = setQuash_1 && tagMatch_1
+  // A bypassed read can become a miss one cycle later if another fill replaces
+  // that way. It therefore needs the same victim-capacity admission as a
+  // normal read; otherwise the miss path can consume victimWay's placeholder.
+  io.read.ready := (((wipeDone && !io.write.fire) || writeBypass) && !victim_stall) &&
+                   !flush_issue_reg && io.result.ready
   io.result.valid := Mux(flush_issue_regnext, io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue, false.B), valid_signal)
 
   // bfs4096-004 fix: 把 io.result.bits 的 {hit, way, dirty, victim_tag} 4 个字段从纯组合
@@ -468,11 +473,10 @@ for(i<- 0 until params.cache.sets){
     }
   }
 
-  // nn64k-007 迭代6 诊断(non-fatal, 留痕不中断): victim_stall 若漏挡, will_alloc_victim 会落到
-  // placeholder 分支(2)(effInvalid=0 但 invalidVec≠0) → 把 reserved way 当 victim alloc。正确则永不打印。
-  when(will_alloc_victim && !effInvalidVec.orR && invalidVec.orR) {
-    printf(p"[RESV_PLACEHOLDER_ALLOC] set=${io.result.bits.set} way=${io.result.bits.way} (victim_stall leak)\n")
-  }
+  // Consuming the placeholder means admission failed to reserve a real way;
+  // continuing would permit an in-flight line to be overwritten silently.
+  assert(!(will_alloc_victim && !effInvalidVec.orR && invalidVec.orR),
+         "RESV_PLACEHOLDER_ALLOC: victim_stall admission leak")
 
   // srad-004 A''': hitRefCount inc/dec（同拍 set+clear 安全）。
   // set = will_resv_hit（result.fire hit Get/Put* 非 flush）→ +1；
