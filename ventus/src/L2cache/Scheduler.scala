@@ -302,8 +302,9 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val mshr_free = (~mshr_validOH).asUInt.orR
   val mshr_empty = (~mshr_validOH).asUInt.andR.asBool
   val putbuffer_empty= sinkA.io.empty
-  val flush_ready = !issue_flush_invalidate &&  putbuffer_empty
-  val invalidate_ready  = !issue_flush_invalidate &&  mshr_empty &&  putbuffer_empty
+  // Assigned after all maintenance-visible pipelines are defined below.
+  val flush_ready = Wire(Bool())
+  val invalidate_ready = Wire(Bool())
 
   request.valid := sinkA.io.req.valid
   request.bits := sinkA.io.req.bits  
@@ -423,8 +424,14 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   requests.io.pop.bits  := mshr_select
 
 
-  // btree-002 fix: scoreboard 满时只挡会新占 entry 的 Put；Get/Hint 和同-line Put 仍可前进。
-  request.ready := requestCanIssue && directory.io.read.ready
+  // Maintenance requests sweep the complete directory, so they use the
+  // stronger drain condition assigned below. Normal requests keep the
+  // existing admission path.
+  val maintenanceRequest = request.bits.opcode === Hint
+  val maintenanceRequestReady = Mux(request.bits.param === 1.U,
+                                    invalidate_ready, flush_ready)
+  request.ready := Mux(maintenanceRequest, maintenanceRequestReady,
+                       requestCanIssue && directory.io.read.ready)
 
 
 
@@ -463,6 +470,34 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
                  directory.io.result.bits.last_flush
   directory.io.result.ready := (!needPush || requests.io.push.ready) &&
                                (!needEnq  || dir_result_buffer.io.enq.ready)
+
+  // A directory sweep must not overlap responses which still reference a
+  // BankedStore way. In particular, mshr_empty alone does not cover L2 hits:
+  // hit results can still reside in dir_result_buffer or SourceD after the
+  // request list has drained. Starting invalidate in that window can clear or
+  // reuse a way before its AccessAckData is returned to L1.
+  val mshrScheduleBusy = VecInit(mshrs.map { m =>
+    m.io.schedule.a.valid || m.io.schedule.d.valid || m.io.schedule.dir.valid
+  }).asUInt.orR
+  val maintenanceDrained = mshr_empty &&
+    !mshrScheduleBusy && !evictReadPending.asUInt.orR &&
+    directory.io.ready && !directory.io.result.valid &&
+    !dir_result_buffer.io.deq.valid &&
+    sourceD.io.req.ready && !sourceD.io.req.valid &&
+    !sourceD.io.d.valid && !sourceD.io.a.valid &&
+    !write_buffer.io.deq.valid && !sourceA.io.req.valid &&
+    !io.out_a.valid && !wtValid.asUInt.orR
+
+  flush_ready := !issue_flush_invalidate && maintenanceDrained
+  invalidate_ready := !issue_flush_invalidate && maintenanceDrained
+
+  when(request.fire && maintenanceRequest) {
+    // SinkA admits Hint only while its put buffer is empty. Keep that
+    // upstream contract as an assertion instead of feeding io.empty back
+    // into request.ready, which would form a combinational cycle.
+    assert(maintenanceDrained && putbuffer_empty,
+           "L2 maintenance request accepted before prior traffic drained")
+  }
 
 
   val full_mask = FillInterleaved(params.micro.writeBytes * 8, requests.io.data.mask)
@@ -503,5 +538,3 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceD.io.bs_rdat := bankedStore.io.sourceD_rdat
 
 }
-
-
