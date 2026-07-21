@@ -380,10 +380,15 @@ for(i<- 0 until params.cache.sets){
   val occSetThisCyc    = occVictimThisCyc | occHitThisCyc
   val hitBusyVecRd  = VecInit((0 until params.cache.ways).map(w => hitRefCount(rdSet)(w).orR)).asUInt
   val rdValidVec    = status_reg(rdSet).valid.asUInt
+  // A miss result invalidates its selected victim at this clock edge. Model
+  // that transition while admitting the next pipelined read; otherwise a
+  // currently full set looks evictable even though it becomes
+  // invalid-and-reserved before that read reaches the result stage.
+  val rdValidNext   = rdValidVec & (~occVictimThisCyc).asUInt
   val rdResvNext    = reservation(rdSet) | hitBusyVecRd | occSetThisCyc
-  val rdInvalidVec  = (~rdValidVec).asUInt
+  val rdInvalidVec  = (~rdValidNext).asUInt
   val rdEffInvalid  = rdInvalidVec & (~rdResvNext).asUInt
-  val rdNonResvVal  = rdValidVec   & (~rdResvNext).asUInt
+  val rdNonResvVal  = rdValidNext  & (~rdResvNext).asUInt
   val victim_stall  = (rdEffInvalid === 0.U) && (rdInvalidVec.orR || (rdNonResvVal === 0.U))
   val writeBypass   = setQuash_1 && tagMatch_1
   // A bypassed read can become a miss one cycle later if another fill replaces
@@ -475,7 +480,13 @@ for(i<- 0 until params.cache.sets){
 
   // Consuming the placeholder means admission failed to reserve a real way;
   // continuing would permit an in-flight line to be overwritten silently.
-  assert(!(will_alloc_victim && !effInvalidVec.orR && invalidVec.orR),
+  val placeholderAlloc = will_alloc_victim && !effInvalidVec.orR && invalidVec.orR
+  when(placeholderAlloc) {
+    printf(p"[RESV_PLACEHOLDER_ALLOC] set=${io.result.bits.set} way=${io.result.bits.way} " +
+           p"valid=0x${Hexadecimal(validVec)} reservation=0x${Hexadecimal(reservation(set))} " +
+           p"hit_busy=0x${Hexadecimal(hitBusyVec)}\n")
+  }
+  assert(!placeholderAlloc,
          "RESV_PLACEHOLDER_ALLOC: victim_stall admission leak")
 
   // srad-004 A''': hitRefCount inc/dec（同拍 set+clear 安全）。
