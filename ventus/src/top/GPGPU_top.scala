@@ -606,16 +606,18 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     printf(p"[TESTCASE TOTAL] [L1D PERF] memRspPipe decoupled cyc  : ${summaryL1dMemRspPipeDecoupled}\n")
   }
 
-  for(i <- 0 until NL2Cache){
-    val port = l2cache(i).in_a
-    val cache_id: UInt = port.bits.source(l1cache_sourceBits)
-    val sm_id: UInt = if (NSmInCluster == 1) {
-      0.U
-    } else {
-      port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
-    }
-    when(port.fire){
-      printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
+  if (SPIKE_OUTPUT) {
+    for(i <- 0 until NL2Cache){
+      val port = l2cache(i).in_a
+      val cache_id: UInt = port.bits.source(l1cache_sourceBits)
+      val sm_id: UInt = if (NSmInCluster == 1) {
+        0.U
+      } else {
+        port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
+      }
+      when(port.fire){
+        printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
+      }
     }
   }
 }

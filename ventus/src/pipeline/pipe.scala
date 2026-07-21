@@ -179,8 +179,10 @@ class pipe() extends Module{
   simt_stack.io.initMask.valid := warp_sche.io.CTA2csr.valid
   simt_stack.io.initMask.bits.warp_id := warp_sche.io.CTA2csr.bits.wid
   simt_stack.io.initMask.bits.thread_mask := init_thread_mask
-  when(warp_sche.io.CTA2csr.fire){
-    printf(p"sm ${sm_id} warp ${Decimal(warp_sche.io.CTA2csr.bits.wid)} init thread mask 0x${Hexadecimal(init_thread_mask)}\n")
+  if (SPIKE_OUTPUT) {
+    when(warp_sche.io.CTA2csr.fire){
+      printf(p"sm ${sm_id} warp ${Decimal(warp_sche.io.CTA2csr.bits.wid)} init thread mask 0x${Hexadecimal(init_thread_mask)}\n")
+    }
   }
   operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
   operand_collector.io.vgpr_base:=csrfile.io.vgpr_base

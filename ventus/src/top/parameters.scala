@@ -10,7 +10,10 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var num_warp = 8
   var num_thread = 32
   val SINGLE_INST: Boolean = false
-  val SPIKE_OUTPUT: Boolean = true
+  // Keep the historical trace-on default while allowing long RTL workloads
+  // to elaborate without per-instruction trace state and printf traffic.
+  val SPIKE_OUTPUT: Boolean =
+    sys.env.getOrElse("RTL_SPIKE_OUTPUT", "true").toBoolean
   val INST_CNT: Boolean = true
   val INST_CNT_2: Boolean = false
   val PMU_PIPELINE: Boolean = true
