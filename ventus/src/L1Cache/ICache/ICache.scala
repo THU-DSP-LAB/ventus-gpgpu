@@ -118,14 +118,17 @@ class InstructionCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) e
   val wayidx_hit_st1 = Wire(UInt(WayIdxBits.W))
   wayidx_hit_st1 := OHToUInt(tagAccess.io.waymaskHit_st1)
   val waymask_replace_st0 = tagAccess.io.waymaskReplacement
-  val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.ready)
-  val mask_st1 = RegEnable(io.coreReq.bits.mask, io.coreReq.ready)
+  // Keep response metadata aligned with coreReqFire_st1/st2. `ready` is
+  // currently always asserted, so using it as the enable samples invalid
+  // request bits during bubbles and can replay a miss at an unrelated PC.
+  val warpid_st1 = RegEnable(io.coreReq.bits.warpid, io.coreReq.fire)
+  val mask_st1 = RegEnable(io.coreReq.bits.mask, io.coreReq.fire)
   val warpid_st2 = RegNext(warpid_st1)
   val mask_st2 = RegNext(mask_st1)
-  val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.ready)
+  val addr_st1 = RegEnable(io.coreReq.bits.addr, io.coreReq.fire)
   val addr_st2 = RegNext(addr_st1)
   if(MMU_ENABLED){
-    val ASID_st2 = RegEnable(io.coreReq.bits.asid.get, io.coreReq.ready)
+    val ASID_st2 = RegEnable(io.coreReq.bits.asid.get, io.coreReq.fire)
     val pipeReqAsid_st1 = RegEnable(io.coreReq.bits.asid.get, 0.U(io.coreReq.bits.asid.get.getWidth.W), io.coreReq.fire)
     tagAccess.io.r_asid.get.req.valid := io.coreReq.fire && !ShouldFlushCoreRsp_st0
     tagAccess.io.r_asid.get.req.bits.setIdx := get_setIdx(io.coreReq.bits.addr)
