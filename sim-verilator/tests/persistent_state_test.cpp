@@ -1,5 +1,7 @@
 #include "ventus_rtlsim.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -17,6 +19,7 @@ const std::filesystem::path kSavedPmu = kRoot / "saved.pmu";
 const std::filesystem::path kExpectedPmu = kRoot / "expected.pmu";
 constexpr paddr_t kAddress = 0x90000000;
 constexpr uint64_t kValue = 0x1122334455667788;
+constexpr size_t kPageSize = 4096;
 constexpr uint64_t kSavedTime = 95;
 constexpr uint64_t kSuffixTime = 125;
 
@@ -87,6 +90,15 @@ void save_state() {
     require(sim != nullptr, "simulator initialization failed");
     require(ventus_rtlsim_pmemcpy_h2d(sim, kAddress, &kValue, sizeof(kValue)),
             "PMEM write failed");
+    std::array<std::uint8_t, kPageSize> page {};
+    require(
+        ventus_rtlsim_pmemcpy_d2h(sim, page.data(), kAddress, page.size()),
+        "PMEM page read failed");
+    require(
+        std::all_of(
+            page.begin() + sizeof(kValue), page.end(),
+            [](std::uint8_t byte) { return byte == 0; }),
+        "new PMEM page contains nonzero unwritten bytes");
     step_until(sim, kSavedTime);
     require(ventus_rtlsim_is_idle(sim), "save point is not idle");
     write_pmu(sim, kSavedPmu);

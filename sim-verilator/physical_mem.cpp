@@ -10,7 +10,7 @@ bool PhysicalMemory::page_alloc(paddr_t paddr) {
         logger->error("PMEM page at 0x{:x} duplicate allocation", paddr);
         return false;
     }
-    m_map[paddr] = new (std::align_val_t(4096)) uint8_t[m_pagesize];
+    m_map[paddr] = new (std::align_val_t(4096)) uint8_t[m_pagesize]();
     return true;
 }
 
