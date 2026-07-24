@@ -126,6 +126,13 @@ extern "C" ventus_rtlsim_t* ventus_rtlsim_restore_state(
     }
     return ventus_persistent_state_restore(config, directory);
 }
+extern "C" uint32_t ventus_rtlsim_persistent_state_version() {
+#ifdef VENTUS_RTL_SAVABLE
+    return 1;
+#else
+    return 0;
+#endif
+}
 extern "C" void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim) { sim->dump_testcase_pmu_summary(); }
 extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim) {
     if (sim == nullptr) {

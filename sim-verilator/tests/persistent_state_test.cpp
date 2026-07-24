@@ -77,6 +77,9 @@ void require_same_file(
 }
 
 void save_state() {
+    require(
+        ventus_rtlsim_persistent_state_version() == 1,
+        "savable library reports the wrong persistent-state ABI");
     std::filesystem::remove_all(kRoot);
     std::filesystem::create_directories(kRoot);
     auto config = test_config();
@@ -207,6 +210,9 @@ void corrupt_state() {
 }
 
 void unsupported_state() {
+    require(
+        ventus_rtlsim_persistent_state_version() == 0,
+        "default library reports persistent-state support");
     auto config = test_config();
     ventus_rtlsim_t* sim = ventus_rtlsim_init(&config);
     require(sim != nullptr, "default simulator initialization failed");

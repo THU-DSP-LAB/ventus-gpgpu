@@ -174,6 +174,8 @@ DLL_PUBLIC int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_
 DLL_PUBLIC int ventus_rtlsim_save_state(ventus_rtlsim_t* sim, const char* directory);
 DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_restore_state(
     const ventus_rtlsim_config_t* config, const char* directory);
+// Return the supported persistent-state ABI version, or zero when this build is not savable.
+DLL_PUBLIC uint32_t ventus_rtlsim_persistent_state_version(void);
 // Ask RTL to print the accumulated testcase PMU summary once.
 DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 // Return a read-only view of the latest PMU counters sampled after the most recent step().
