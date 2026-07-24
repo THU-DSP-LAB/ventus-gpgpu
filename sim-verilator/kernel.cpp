@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <spdlog/logger.h>
 #include <string>
 #include <vector>
@@ -148,44 +149,65 @@ void Kernel::initMetaData(const std::string& filename) {
 }
 
 void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& mtd) {
-    int index = 0;
+    size_t index = 0;
+    auto take = [&]() -> uint64_t {
+        if (index >= metadata.size()) {
+            throw std::runtime_error("truncated standalone kernel metadata");
+        }
+        return metadata[index++];
+    };
 
-    mtd.startaddr = metadata[index++];
-
-    mtd.kernel_id = metadata[index++];
-
+    metadata_t parsed {};
+    parsed.startaddr = take();
+    parsed.kernel_id = take();
     for (int i = 0; i < 3; i++) {
-        mtd.kernel_size[i] = metadata[index++];
+        parsed.kernel_size[i] = take();
     }
-    m_grid_dim.x = mtd.kernel_size[0];
-    m_grid_dim.y = mtd.kernel_size[1];
-    m_grid_dim.z = mtd.kernel_size[2];
+    parsed.wf_size = take();
+    parsed.wg_size = take();
+    parsed.metaDataBaseAddr = take();
+    parsed.ldsSize = take();
+    parsed.pdsSize = take();
+    parsed.sgprUsage = take();
+    parsed.vgprUsage = take();
+    parsed.pdsBaseAddr = take();
 
-    mtd.wf_size = metadata[index++];
-    mtd.wg_size = metadata[index++];
-    mtd.metaDataBaseAddr = metadata[index++];
-    mtd.ldsSize = metadata[index++];
-    mtd.pdsSize = metadata[index++];
-    mtd.sgprUsage = metadata[index++];
-    mtd.vgprUsage = metadata[index++];
-    mtd.pdsBaseAddr = metadata[index++];
-    mtd.num_buffer = metadata[index++];
-
-    mtd.buffer_base = new uint64_t[mtd.num_buffer];
-
-    for (int i = 0; i < mtd.num_buffer; i++) {
-        mtd.buffer_base[i] = metadata[index++];
+    // Standalone metadata includes work_dim even though the simulator API derives it from 3D fields.
+    const uint64_t work_dim = take();
+    if (work_dim == 0 || work_dim > 3) {
+        throw std::runtime_error("standalone kernel metadata has invalid work_dim");
+    }
+    for (int i = 0; i < 3; i++) {
+        parsed.num_thread_global[i] = take();
+    }
+    for (int i = 0; i < 3; i++) {
+        parsed.num_thread_local[i] = take();
+    }
+    for (int i = 0; i < 3; i++) {
+        parsed.threadIdxOffset[i] = take();
     }
 
-    mtd.buffer_size = new uint64_t[mtd.num_buffer];
-    for (int i = 0; i < mtd.num_buffer; i++) {
-        mtd.buffer_size[i] = metadata[index++];
+    parsed.num_buffer = take();
+    const uint64_t remaining = metadata.size() - index;
+    if (parsed.num_buffer > remaining / 3 || parsed.num_buffer * 3 != remaining) {
+        throw std::runtime_error("standalone kernel metadata buffer table length is invalid");
     }
+    const size_t num_buffer = static_cast<size_t>(parsed.num_buffer);
+    m_buffer_base.assign(metadata.begin() + index, metadata.begin() + index + num_buffer);
+    index += num_buffer;
+    m_buffer_size.assign(metadata.begin() + index, metadata.begin() + index + num_buffer);
+    index += num_buffer;
+    m_buffer_allocsize.assign(metadata.begin() + index, metadata.end());
 
-    mtd.buffer_allocsize = new uint64_t[mtd.num_buffer];
-    for (int i = 0; i < mtd.num_buffer; i++) {
-        mtd.buffer_allocsize[i] = metadata[index++];
-    }
+    parsed.buffer_base = m_buffer_base.data();
+    parsed.buffer_size = m_buffer_size.data();
+    parsed.buffer_allocsize = m_buffer_allocsize.data();
+    mtd = parsed;
+    m_grid_dim = {
+        static_cast<uint32_t>(mtd.kernel_size[0]),
+        static_cast<uint32_t>(mtd.kernel_size[1]),
+        static_cast<uint32_t>(mtd.kernel_size[2]),
+    };
 }
 
 void Kernel::activate(uint32_t kernel_id, uint32_t wgid_base) {

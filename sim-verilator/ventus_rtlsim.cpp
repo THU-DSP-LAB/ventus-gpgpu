@@ -3,6 +3,55 @@
 #include <ctime>
 #include <cstdlib>  // bfs4096-008 Phase 0.2: getenv/strtol for VENTUS_VERILATOR_SEED
 #include <cstdio>   // bfs4096-008 Phase 0.2: printf actual seed
+#include <cstring>
+
+namespace {
+bool validate_config(const ventus_rtlsim_config_t* config) {
+    if (config == nullptr) {
+        std::fprintf(stderr, "ventus_rtlsim_init: config is null\n");
+        return false;
+    }
+    if (config->waveform.enable
+        && (config->waveform.filename == nullptr || config->waveform.filename[0] == '\0')) {
+        std::fprintf(stderr, "ventus_rtlsim_init: waveform filename is empty\n");
+        return false;
+    }
+    if (!config->snapshot.enable) {
+        return true;
+    }
+    if (config->snapshot.time_interval == 0) {
+        std::fprintf(stderr, "ventus_rtlsim_init: snapshot interval must be greater than zero\n");
+        return false;
+    }
+    if (config->snapshot.num_max <= 0) {
+        std::fprintf(stderr, "ventus_rtlsim_init: snapshot count must be greater than zero\n");
+        return false;
+    }
+    if (config->snapshot.filename == nullptr || config->snapshot.filename[0] == '\0') {
+        std::fprintf(stderr, "ventus_rtlsim_init: snapshot waveform filename is empty\n");
+        return false;
+    }
+    if (config->waveform.enable
+        && std::strcmp(config->waveform.filename, config->snapshot.filename) == 0) {
+        std::fprintf(stderr, "ventus_rtlsim_init: waveform and snapshot filenames must differ\n");
+        return false;
+    }
+    return true;
+}
+
+int finish_impl(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
+    if (sim == nullptr) {
+        return -1;
+    }
+    const bool is_snapshot_child = sim->config.snapshot.enable && sim->snapshots.is_child;
+    const int result = sim->destructor(snapshot_rollback_forcing);
+    delete sim;
+    if (is_snapshot_child) {
+        std::_Exit(result == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+    return result;
+}
+} // namespace
 
 static char verilator_rand_seed_setting[128] = "+verilator+seed+10086";
 static char* verilator_runtime_args_default[] = { verilator_rand_seed_setting };
@@ -53,13 +102,18 @@ extern "C" void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config)
 }
 
 extern "C" ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config) {
+    if (!validate_config(config)) {
+        return nullptr;
+    }
     ventus_rtlsim_t* sim = new ventus_rtlsim_t();
     sim->constructor(config);
     return sim;
 }
 extern "C" void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
-    sim->destructor(snapshot_rollback_forcing);
-    delete sim;
+    (void)finish_impl(sim, snapshot_rollback_forcing);
+}
+extern "C" int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
+    return finish_impl(sim, snapshot_rollback_forcing);
 }
 extern "C" void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim) { sim->dump_testcase_pmu_summary(); }
 extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim) {

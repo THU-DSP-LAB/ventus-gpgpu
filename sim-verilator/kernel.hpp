@@ -86,6 +86,9 @@ private:
     uint32_t m_kernel_id;
     const std::string m_kernel_name;
     metadata_t m_metadata;
+    std::vector<uint64_t> m_buffer_base;
+    std::vector<uint64_t> m_buffer_size;
+    std::vector<uint64_t> m_buffer_allocsize;
     uint32_t m_wgid_base;
 
     // Helpers

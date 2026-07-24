@@ -168,6 +168,8 @@ DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* con
 //   it will rollback to the oldest snapshot to find out what happened.
 // You can force the rollback by passing `snapshot_rollback_forcing = true`
 DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+// Status-returning variant. Returns zero only when cleanup and any requested replay succeed.
+DLL_PUBLIC int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
 // Ask RTL to print the accumulated testcase PMU summary once.
 DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 // Return a read-only view of the latest PMU counters sampled after the most recent step().

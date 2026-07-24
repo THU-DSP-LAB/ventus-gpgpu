@@ -39,6 +39,8 @@ OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
 DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
 
 APP = $(DIR_BUILDOBJ)/sim-VentusRTL
+METADATA_PARSER_TEST = build/tests/metadata_parser_test
+FORK_SNAPSHOT_TEST = build/tests/fork_snapshot_test
 
 #=====================================================================
 # Include Ventus RTL library build rules
@@ -86,13 +88,32 @@ run: $(APP)
 	$(APP)
 	@echo
 
+$(METADATA_PARSER_TEST): tests/metadata_parser_test.cpp kernel.cpp kernel.hpp ventus_rtlsim.h
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
+	  -I. tests/metadata_parser_test.cpp kernel.cpp -lspdlog -lfmt -o $@
+
+test-metadata-parser: $(METADATA_PARSER_TEST)
+	ASAN_OPTIONS=detect_leaks=1 $(METADATA_PARSER_TEST)
+
+$(FORK_SNAPSHOT_TEST): tests/fork_snapshot_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/fork_snapshot_test.cpp \
+	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
+	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+
+test-fork-snapshot: $(FORK_SNAPSHOT_TEST)
+	$(FORK_SNAPSHOT_TEST) invalid
+	$(FORK_SNAPSHOT_TEST) success
+	$(FORK_SNAPSHOT_TEST) mismatch
+
 gdb: $(APP)
 	@echo
 	-rm -f logs/ventus_rtlsim.log
 	gdb --tui $(APP)
 	@echo
 
-.PHONY: lib run gdb
+.PHONY: lib run test-metadata-parser test-fork-snapshot gdb
 
 #=====================================================================
 # Other targets

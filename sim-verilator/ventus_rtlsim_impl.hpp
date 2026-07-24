@@ -18,10 +18,15 @@ extern const std::unordered_map<std::string, int> rtl_parameters;
 #endif // ENABLE_GVM
 
 #define SNAPSHOT_WAKEUP_SIGNAL SIGRTMIN
+struct snapshot_record_t {
+    pid_t pid;
+    uint64_t time;
+};
+
 typedef struct {
     bool is_child;
-    uint64_t main_exit_time;        // when does the main simulation process exit
-    std::deque<pid_t> children_pid; // front is newest, back is oldest
+    uint64_t main_exit_time;               // when does the main simulation process exit
+    std::deque<snapshot_record_t> children; // front is newest, back is oldest
 } snapshot_t;
 
 struct ventus_rtlsim_pmu_storage_t {
@@ -55,7 +60,7 @@ extern "C" struct ventus_rtlsim_t {
     void constructor(const ventus_rtlsim_config_t* config);
     void dut_reset() const;
     const ventus_rtlsim_step_result_t* step();
-    void destructor(bool snapshot_rollback_forcing);
+    int destructor(bool snapshot_rollback_forcing);
     void dump_testcase_pmu_summary();
     ventus_rtlsim_pmu_t pmu_view() const;
     void sample_pmu_snapshot();
@@ -64,7 +69,7 @@ extern "C" struct ventus_rtlsim_t {
 
     void waveform_dump() const;
     void snapshot_fork();
-    void snapshot_rollback(uint64_t time);
+    int snapshot_rollback(uint64_t time);
     void snapshot_kill_all();
 };
 

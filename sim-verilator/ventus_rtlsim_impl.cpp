@@ -3,9 +3,11 @@
 #include "ventus_rtlsim.h"
 #include "verilated.h"
 #include <algorithm>
+#include <cerrno>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fmt/core.h>
 #include <functional>
 #include <iostream>
@@ -185,7 +187,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     contextp->randReset(0);
     contextp->traceEverOn(true);
     snapshots.is_child = false;
-    snapshots.children_pid.clear();
+    snapshots.children.clear();
 
     // load Verilator runtime arguments
     const char* verilator_runtime_args_default[] = { "+verilator+seed+10086" };
@@ -380,7 +382,8 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     step_status.idle = cta->is_idle();
     sample_pmu_snapshot();
     update_pmu_watchdog();
-    if (!step_status.time_exceed && !step_status.error && contextp->time() % config.snapshot.time_interval == 0) {
+    if (config.snapshot.enable && !step_status.time_exceed && !step_status.error
+        && contextp->time() % config.snapshot.time_interval == 0) {
         snapshot_fork();
     }
 
@@ -439,10 +442,11 @@ void ventus_rtlsim_t::update_pmu_watchdog() {
     );
 }
 
-void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
+int ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     uint64_t sim_end_time = contextp->time();
     bool need_rollback
         = snapshot_rollback_forcing || step_status.error || contextp->gotError() || contextp->gotFinish();
+    int result = 0;
 
     // prints simulation result
     if (config.snapshot.enable && snapshots.is_child) { // This is the forked snapshot process
@@ -450,12 +454,14 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
             if (sim_end_time == snapshots.main_exit_time) {
                 logger->info("SNAPSHOT exited at time {}, OK", sim_end_time);
             } else {
+                result = -1;
                 logger->error(
                     "SNAPSHOT exited at time {}, which differs from the original process (time {})", sim_end_time,
                     snapshots.main_exit_time
                 );
             }
         } else {
+            result = -1;
             logger->error(
                 "SNAPSHOT finished NORMALLY at time {}, which differs from the original process", sim_end_time
             );
@@ -474,8 +480,13 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     contextp->statsPrintSummary(); // Final simulation summary
 
     // invoke snapshot if needed
-    if (config.snapshot.enable && !snapshots.is_child && snapshots.children_pid.size() != 0 && need_rollback) {
-        snapshot_rollback(sim_end_time); // Exec snapshot
+    if (config.snapshot.enable && !snapshots.is_child && !snapshots.children.empty() && need_rollback) {
+        result = snapshot_rollback(sim_end_time); // Exec snapshot
+    } else if (config.snapshot.enable && !snapshots.is_child && need_rollback) {
+        logger->error("SNAPSHOT rollback requested, but no snapshot is available");
+        result = -1;
+    } else if (!config.snapshot.enable && need_rollback) {
+        result = -1;
     }
     // clear snapshots
     if (config.snapshot.enable && snapshots.is_child) {
@@ -494,6 +505,7 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     delete contextp; // log system use this to get time
     contextp = nullptr;
     g_instances.erase(std::remove(g_instances.begin(), g_instances.end(), this), g_instances.end());
+    return result;
 }
 
 void ventus_rtlsim_t::dump_testcase_pmu_summary() {
@@ -513,11 +525,11 @@ void ventus_rtlsim_t::snapshot_fork() {
     assert(dut && contextp);
 
     // delete oldest snapshot if needed
-    if (snapshots.children_pid.size() >= config.snapshot.num_max) {
-        pid_t oldest = snapshots.children_pid.back();
-        kill(oldest, SIGKILL);
-        waitpid(oldest, NULL, 0);
-        snapshots.children_pid.pop_back();
+    if (snapshots.children.size() >= static_cast<size_t>(config.snapshot.num_max)) {
+        const snapshot_record_t oldest = snapshots.children.back();
+        kill(oldest.pid, SIGKILL);
+        waitpid(oldest.pid, NULL, 0);
+        snapshots.children.pop_back();
     }
     // fork a new snapshot process
     // see https://verilator.org/guide/latest/connecting.html#process-level-clone-apis
@@ -530,8 +542,8 @@ void ventus_rtlsim_t::snapshot_fork() {
         return;
     }
     if (child_pid != 0) { // for the original process
-        snapshots.children_pid.push_front(child_pid);
-        logger->info("SNAPSHOT created, pid={}", child_pid);
+        snapshots.children.push_front({child_pid, contextp->time()});
+        logger->info("SNAPSHOT created at time {}, pid={}", contextp->time(), child_pid);
     } else { // for the fork-child snapshot process
         snapshots.is_child = true;
         // child process should exit when parent process exits
@@ -572,36 +584,60 @@ void ventus_rtlsim_t::snapshot_fork() {
     }
 }
 
-void ventus_rtlsim_t::snapshot_rollback(uint64_t time) {
+int ventus_rtlsim_t::snapshot_rollback(uint64_t time) {
     if (!config.snapshot.enable || snapshots.is_child)
-        return;
-    if (snapshots.children_pid.empty()) {
+        return -1;
+    if (snapshots.children.empty()) {
         logger->error("No snapshot for rolling back. Where is the initial snapshot?");
-        return;
+        return -1;
     }
     assert(dut && contextp);
 
+    const snapshot_record_t snapshot = snapshots.children.back();
     logger->info(
-        "SNAPSHOT rollback to {} time-unit ago, pid={}",
-        time % config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * config.snapshot.time_interval,
-        snapshots.children_pid.front()
+        "SNAPSHOT rollback from time {} to time {} ({} time-units), pid={}", time, snapshot.time,
+        time >= snapshot.time ? time - snapshot.time : 0, snapshot.pid
     );
     assert(sizeof(sigval_t) >= sizeof(contextp->time()));
     sigval_t sigval;
     sigval.sival_ptr = (void*)(contextp->time());
 
-    pid_t child = snapshots.children_pid.back();     // Choose the oldest snapshot
-    sigqueue(child, SNAPSHOT_WAKEUP_SIGNAL, sigval); // Activate the snapshot
-    waitpid(child, NULL, 0);                         // Wait for snapshot finished
-    snapshots.children_pid.pop_back();
+    if (sigqueue(snapshot.pid, SNAPSHOT_WAKEUP_SIGNAL, sigval) != 0) {
+        logger->error("SNAPSHOT failed to wake pid={}: {}", snapshot.pid, std::strerror(errno));
+        snapshots.children.pop_back();
+        return -1;
+    }
+
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(snapshot.pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+    snapshots.children.pop_back();
+    if (waited != snapshot.pid) {
+        logger->error("SNAPSHOT waitpid failed for pid={}: {}", snapshot.pid, std::strerror(errno));
+        return -1;
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != EXIT_SUCCESS) {
+        if (WIFSIGNALED(status)) {
+            logger->error("SNAPSHOT replay pid={} terminated by signal {}", snapshot.pid, WTERMSIG(status));
+        } else if (WIFEXITED(status)) {
+            logger->error("SNAPSHOT replay pid={} exited with status {}", snapshot.pid, WEXITSTATUS(status));
+        } else {
+            logger->error("SNAPSHOT replay pid={} ended with wait status 0x{:x}", snapshot.pid, status);
+        }
+        return -1;
+    }
+    logger->info("SNAPSHOT replay pid={} completed successfully", snapshot.pid);
+    return 0;
 }
 
 void ventus_rtlsim_t::snapshot_kill_all() {
-    while (!snapshots.children_pid.empty()) {
-        pid_t child = snapshots.children_pid.back();
-        kill(child, SIGKILL);
-        waitpid(child, NULL, 0);
-        snapshots.children_pid.pop_back();
+    while (!snapshots.children.empty()) {
+        const snapshot_record_t snapshot = snapshots.children.back();
+        kill(snapshot.pid, SIGKILL);
+        waitpid(snapshot.pid, NULL, 0);
+        snapshots.children.pop_back();
     }
     logger->debug("All snapshot process are cleared, OK");
 }
