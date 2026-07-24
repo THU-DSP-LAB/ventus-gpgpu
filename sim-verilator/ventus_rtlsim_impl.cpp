@@ -183,6 +183,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
 
     // init Verilator simulation context
     contextp = new VerilatedContext;
+    contextp->threads(1);
     contextp->debug(0);
     contextp->randReset(0);
     contextp->traceEverOn(true);
@@ -199,7 +200,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
         contextp->commandArgs(config_->verilator.argc, config_->verilator.argv);
 
     // instantiate hardware
-    dut = new Vdut();
+    dut = new Vdut(contextp);
     cta = new Cta(logger);
     pmem = std::make_unique<PhysicalMemory>(config.pmem.auto_alloc, config.pmem.pagesize, logger);
     need_icache_invalidate = false;
