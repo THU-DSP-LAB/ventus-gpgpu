@@ -223,11 +223,31 @@ void unsupported_state() {
     require(ventus_rtlsim_restore_state(&config, kState.c_str()) == nullptr,
             "default library accepted persistent restore");
 }
+
+void no_trace_config() {
+    auto waveform_config = test_config();
+    waveform_config.waveform.enable = true;
+    waveform_config.waveform.filename = "/tmp/ventus-persistent-state-test.fst";
+    require(
+        ventus_rtlsim_init(&waveform_config) == nullptr,
+        "TRACE=0 library accepted waveform output");
+
+    auto snapshot_config = test_config();
+    snapshot_config.snapshot.enable = true;
+    snapshot_config.snapshot.time_interval = 100;
+    snapshot_config.snapshot.num_max = 1;
+    snapshot_config.snapshot.filename = "/tmp/ventus-persistent-state-snapshot.fst";
+    require(
+        ventus_rtlsim_init(&snapshot_config) == nullptr,
+        "TRACE=0 library accepted fork snapshots");
+}
 } // namespace
 
 int main(int argc, char** argv) {
     try {
-        require(argc == 2, "usage: persistent_state_test save|restore|corrupt|unsupported");
+        require(
+            argc == 2,
+            "usage: persistent_state_test save|restore|corrupt|unsupported|no-trace-config");
         const std::string mode = argv[1];
         if (mode == "save") {
             save_state();
@@ -237,6 +257,8 @@ int main(int argc, char** argv) {
             corrupt_state();
         } else if (mode == "unsupported") {
             unsupported_state();
+        } else if (mode == "no-trace-config") {
+            no_trace_config();
         } else {
             throw std::runtime_error("unknown test mode");
         }

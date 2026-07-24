@@ -118,6 +118,9 @@ test-persistent-state: $(PERSISTENT_STATE_TEST)
 	$(PERSISTENT_STATE_TEST) save
 	$(PERSISTENT_STATE_TEST) restore
 	$(PERSISTENT_STATE_TEST) corrupt
+ifneq ($(TRACE),1)
+	$(PERSISTENT_STATE_TEST) no-trace-config
+endif
 
 gdb: $(APP)
 	@echo

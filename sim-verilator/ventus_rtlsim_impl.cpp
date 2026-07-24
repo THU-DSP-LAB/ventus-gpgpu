@@ -49,8 +49,10 @@ static uint32_t rtl_parameter_u32(const char* name) {
 //  in this case, a .fst.hier file appears. 
 static void cleanup() {
     for (auto* sim : g_instances) {
+#if VM_TRACE
         if (sim->tfp)
             sim->tfp->close(); // save waveform to file
+#endif
         // No need to delete tfp, the process is exiting
         // delete sim->tfp; // This will cause segfault sometimes, why?
         sim->tfp = nullptr;
@@ -188,7 +190,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
     contextp->threads(1);
     contextp->debug(0);
     contextp->randReset(0);
-    contextp->traceEverOn(true);
+    contextp->traceEverOn(VM_TRACE);
     snapshots.is_child = false;
     snapshots.children.clear();
 
@@ -222,6 +224,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
     pmu_snapshot.dcache.resize(pmu_num_sm);
 
     // waveform traces (FST)
+#if VM_TRACE
     if (config.waveform.enable) {
         tfp = new VerilatedFstC;
         dut->trace(tfp, config.waveform.levels);
@@ -240,6 +243,9 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
     } else {
         tfp = nullptr;
     }
+#else
+    tfp = nullptr;
+#endif
 
     // push into global instances, prepare cleanup at exit
     g_instances.push_back(this);
@@ -482,8 +488,10 @@ int ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
         }
     }
 
+#if VM_TRACE
     if (tfp)
         tfp->close();
+#endif
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
 
@@ -577,6 +585,7 @@ void ventus_rtlsim_t::snapshot_fork() {
             "SNAPSHOT is activated, sim_time = {}, origin process exited at time {}", contextp->time(),
             snapshots.main_exit_time
         );
+#if VM_TRACE
         // create a new waveform dump file
         //  delete tfp;             // Cannot do this, or it will block the process
         //  (maybe because Vdut.fst was already closed in the parent process?)
@@ -589,6 +598,10 @@ void ventus_rtlsim_t::snapshot_fork() {
             config.snapshot.filename = "logs/ventus_rtlsim.snapshot.fst";
         }
         tfp->open(config.snapshot.filename);
+#else
+        logger->critical("snapshot replay requires a TRACE=1 library");
+        std::exit(EXIT_FAILURE);
+#endif
     }
 }
 
@@ -651,6 +664,7 @@ void ventus_rtlsim_t::snapshot_kill_all() {
 }
 
 void ventus_rtlsim_t::waveform_dump() const {
+#if VM_TRACE
     // snapshot child process always enables waveform dump
     bool is_snapshot = config.snapshot.enable && snapshots.is_child;
     if (!config.waveform.enable && !is_snapshot)
@@ -661,6 +675,7 @@ void ventus_rtlsim_t::waveform_dump() const {
     if (is_snapshot || time >= config.waveform.time_begin && time < config.waveform.time_end) {
         tfp->dump(time);
     }
+#endif
 }
 
 void ventus_rtlsim_t::dut_reset() const {

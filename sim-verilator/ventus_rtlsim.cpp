@@ -14,6 +14,15 @@ bool validate_config(const ventus_rtlsim_config_t* config) {
         std::fprintf(stderr, "ventus_rtlsim_init: config is null\n");
         return false;
     }
+#if !VM_TRACE
+    if (config->waveform.enable || config->snapshot.enable) {
+        std::fprintf(
+            stderr,
+            "ventus_rtlsim_init: waveform and fork snapshot require a TRACE=1 library\n"
+        );
+        return false;
+    }
+#endif
     if (config->waveform.enable
         && (config->waveform.filename == nullptr || config->waveform.filename[0] == '\0')) {
         std::fprintf(stderr, "ventus_rtlsim_init: waveform filename is empty\n");
