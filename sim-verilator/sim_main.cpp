@@ -6,6 +6,8 @@
 #include <fstream>
 #include <memory>
 #include <spdlog/spdlog.h>
+#include <utility>
+#include <vector>
 
 extern int parse_arg(
     std::vector<std::string> args, ventus_rtlsim_config_t* config,
@@ -61,10 +63,12 @@ int main(int argc, char* argv[]) {
     ventus_rtlsim_t* sim = ventus_rtlsim_init(&sim_config);
 
     // parse cmdline arguments, generate kernels, and add them to Ventus RTLSIM
-    std::function<void(std::shared_ptr<Kernel>)> f_new_kernel = [sim](std::shared_ptr<Kernel> kernel) {
+    std::vector<std::shared_ptr<Kernel>> kernels;
+    std::function<void(std::shared_ptr<Kernel>)> f_new_kernel = [sim, &kernels](std::shared_ptr<Kernel> kernel) {
         metadata_t metadata = *kernel->get_metadata();
         metadata.data = new kernel_load_data_callback_t { .datafile = kernel->m_datafile, .sim = sim };
         ventus_rtlsim_add_kernel__delay_data_loading(sim, &metadata, kernel_load_data_callback, nullptr);
+        kernels.push_back(std::move(kernel));
     };
     parse_arg(args, &sim_config_1, f_new_kernel, &dumpmem_ranges);
 
