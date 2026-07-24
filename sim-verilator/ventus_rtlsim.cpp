@@ -1,4 +1,5 @@
 #include "ventus_rtlsim_impl.hpp"
+#include "persistent_state.hpp"
 #include "../../spike/gvmref/gvmref_interface.h"
 #include <ctime>
 #include <cstdlib>  // bfs4096-008 Phase 0.2: getenv/strtol for VENTUS_VERILATOR_SEED
@@ -114,6 +115,16 @@ extern "C" void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollbac
 }
 extern "C" int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
     return finish_impl(sim, snapshot_rollback_forcing);
+}
+extern "C" int ventus_rtlsim_save_state(ventus_rtlsim_t* sim, const char* directory) {
+    return ventus_persistent_state_save(sim, directory);
+}
+extern "C" ventus_rtlsim_t* ventus_rtlsim_restore_state(
+    const ventus_rtlsim_config_t* config, const char* directory) {
+    if (!validate_config(config)) {
+        return nullptr;
+    }
+    return ventus_persistent_state_restore(config, directory);
 }
 extern "C" void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim) { sim->dump_testcase_pmu_summary(); }
 extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim) {

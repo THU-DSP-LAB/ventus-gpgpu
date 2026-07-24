@@ -125,7 +125,7 @@ private:
 // RTLSIM implementation
 //
 
-void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
+void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool initialize_dut) {
     // copy and check sim config
     config = *config_;
     if (config.log.file.enable && config.log.file.filename == nullptr) {
@@ -242,10 +242,15 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     g_instances.push_back(this);
 
     // get ready to run
-    snapshot_fork(); // initial snapshot at sim_time = 0
     last_pmu_progress_time = contextp->time();
     last_pmu_progress_value = 0;
-    dut_reset();
+    if (initialize_dut) {
+        snapshot_fork(); // initial snapshot at sim_time = 0
+        dut_reset();
+    } else {
+        step_status = {};
+        step_status.idle = true;
+    }
 }
 
 const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {

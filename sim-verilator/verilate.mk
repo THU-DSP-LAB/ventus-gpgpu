@@ -5,6 +5,7 @@ endif
 export MAKEFLAGS += +r
 
 RELEASE ?= 0
+SAVABLE ?= 0
 PREFIX ?= $(CURDIR)/install
 
 export RTL_GVM_ENABLED = false
@@ -57,8 +58,13 @@ VLIB_GEN_DIR = build/generated/rtl
 VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
 VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
 VLIB_PMU_SNAPSHOT_INC = $(VLIB_GEN_DIR)/pmu_snapshot_copy.inc
-VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug
-VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release
+ifeq ($(SAVABLE),1)
+VLIB_BUILD_SUFFIX = -savable
+else
+VLIB_BUILD_SUFFIX =
+endif
+VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug$(VLIB_BUILD_SUFFIX)
+VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release$(VLIB_BUILD_SUFFIX)
 ifeq ($(RELEASE),1)
 VLIB_DIR_BUILDOBJ = $(VLIB_DIR_BUILDOBJ_RELEASE)
 else
@@ -68,7 +74,7 @@ endif
 VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
 VLIB_SRC_V = $(VLIB_GEN_DIR)/dut.v
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp # API in these files will be exported to shared library
-VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) $(VLIB_SRC_CXX_EXPORT)
+VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp persistent_state.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) $(VLIB_SRC_CXX_EXPORT)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
 VLIB_VERILATOR_INPUT = $(VLIB_SRC_V) $(VLIB_SRC_CXX_ABSPATH)
 VLIB_VERILATOR_OUTPUT = $(VLIB_DIR_BUILDOBJ)/libVdut.a
@@ -114,6 +120,11 @@ VLIB_VERILATOR_FLAGS += -DRANDOMIZE_REG_INIT
 VLIB_VERILATOR_FLAGS += --trace-fst
 # Check SystemVerilog assertions
 VLIB_VERILATOR_FLAGS += --assert
+ifeq ($(SAVABLE),1)
+VLIB_VERILATOR_FLAGS += --savable
+VLIB_CXXFLAGS += -DVENTUS_RTL_SAVABLE=1
+VLIB_LDLIBS += -lcrypto
+endif
 # Generate coverage analysis
 #VLIB_VERILATOR_FLAGS += --coverage
 # Run Verilator in debug mode
@@ -205,6 +216,8 @@ install: $(VLIB_TARGET)
 clean-lib:
 	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.a $(VLIB_DIR_BUILDOBJ_DEBUG)/*.o $(VLIB_DIR_BUILDOBJ_DEBUG)/*.so
 	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.a $(VLIB_DIR_BUILDOBJ_RELEASE)/*.o $(VLIB_DIR_BUILDOBJ_RELEASE)/*.so
+	-rm -f $(VLIB_DIR_BUILD)/debug-savable/*.a $(VLIB_DIR_BUILD)/debug-savable/*.o $(VLIB_DIR_BUILD)/debug-savable/*.so
+	-rm -f $(VLIB_DIR_BUILD)/release-savable/*.a $(VLIB_DIR_BUILD)/release-savable/*.o $(VLIB_DIR_BUILD)/release-savable/*.so
 	-rm -f $(VLIB_DIR_BUILD)/*.so
 
 clean-lib-dep: clean-lib

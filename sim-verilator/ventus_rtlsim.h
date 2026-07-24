@@ -170,6 +170,10 @@ DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* con
 DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
 // Status-returning variant. Returns zero only when cleanup and any requested replay succeed.
 DLL_PUBLIC int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+// Persist or cold-restore a complete idle RTL simulator state. Only available in SAVABLE=1 builds.
+DLL_PUBLIC int ventus_rtlsim_save_state(ventus_rtlsim_t* sim, const char* directory);
+DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_restore_state(
+    const ventus_rtlsim_config_t* config, const char* directory);
 // Ask RTL to print the accumulated testcase PMU summary once.
 DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 // Return a read-only view of the latest PMU counters sampled after the most recent step().

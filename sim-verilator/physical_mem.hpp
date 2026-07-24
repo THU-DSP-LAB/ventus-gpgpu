@@ -5,6 +5,9 @@
 #include <memory>
 #include <spdlog/logger.h>
 
+class VerilatedDeserialize;
+class VerilatedSerialize;
+
 typedef uint64_t paddr_t;
 
 class PhysicalMemory {
@@ -22,6 +25,9 @@ public:
     bool write(paddr_t paddr, const void* data, uint64_t size);
     bool read(paddr_t paddr, void* data, uint64_t size) const ;
     inline paddr_t get_page_base(paddr_t paddr) const { return paddr - paddr % m_pagesize; }
+    inline uint64_t page_count() const { return m_map.size(); }
+    bool save(VerilatedSerialize& output) const;
+    bool restore(VerilatedDeserialize& input);
 
 private:
     const bool m_auto_alloc = false;

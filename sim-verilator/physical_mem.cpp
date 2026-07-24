@@ -1,4 +1,5 @@
 #include "physical_mem.hpp"
+#include "verilated_save.h"
 
 bool PhysicalMemory::page_alloc(paddr_t paddr) {
     if (paddr % m_pagesize != 0) {
@@ -95,6 +96,39 @@ bool PhysicalMemory::read(paddr_t paddr, void* data_, uint64_t size) const {
     uint8_t* buf = m_map.at(first_page_base) + paddr - first_page_base;
     std::memcpy(data, buf, size);
     return success;
+}
+
+bool PhysicalMemory::save(VerilatedSerialize& output) const {
+    output << m_pagesize << static_cast<uint64_t>(m_auto_alloc) << static_cast<uint64_t>(m_map.size());
+    for (const auto& [address, page] : m_map) {
+        output << address;
+        output.write(page, m_pagesize);
+    }
+    return true;
+}
+
+bool PhysicalMemory::restore(VerilatedDeserialize& input) {
+    constexpr uint64_t kMaxRestoredPages = 1ull << 20;
+    uint64_t page_size = 0;
+    uint64_t auto_alloc = 0;
+    uint64_t page_count = 0;
+    input >> page_size >> auto_alloc >> page_count;
+    if (page_size != m_pagesize || auto_alloc != static_cast<uint64_t>(m_auto_alloc)
+        || page_count > kMaxRestoredPages || !m_map.empty()) {
+        return false;
+    }
+    for (uint64_t index = 0; index < page_count; ++index) {
+        paddr_t address = 0;
+        input >> address;
+        if (address % m_pagesize != 0 || m_map.find(address) != m_map.end()) {
+            return false;
+        }
+        if (!page_alloc(address)) {
+            return false;
+        }
+        input.read(m_map.at(address), m_pagesize);
+    }
+    return true;
 }
 
 PhysicalMemory::~PhysicalMemory() {

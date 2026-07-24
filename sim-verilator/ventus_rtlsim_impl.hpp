@@ -57,7 +57,9 @@ extern "C" struct ventus_rtlsim_t {
     bool need_icache_invalidate = false;
     bool need_perf_dump_summary = false;
 
-    void constructor(const ventus_rtlsim_config_t* config);
+    void constructor(const ventus_rtlsim_config_t* config, bool initialize_dut = true);
+    bool save_state_binary(const std::string& filename);
+    bool restore_state_binary(const std::string& filename);
     void dut_reset() const;
     const ventus_rtlsim_step_result_t* step();
     int destructor(bool snapshot_rollback_forcing);

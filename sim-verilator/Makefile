@@ -41,6 +41,7 @@ DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
 APP = $(DIR_BUILDOBJ)/sim-VentusRTL
 METADATA_PARSER_TEST = build/tests/metadata_parser_test
 FORK_SNAPSHOT_TEST = build/tests/fork_snapshot_test
+PERSISTENT_STATE_TEST = build/tests/persistent_state_test
 
 #=====================================================================
 # Include Ventus RTL library build rules
@@ -107,13 +108,24 @@ test-fork-snapshot: $(FORK_SNAPSHOT_TEST)
 	$(FORK_SNAPSHOT_TEST) success
 	$(FORK_SNAPSHOT_TEST) mismatch
 
+$(PERSISTENT_STATE_TEST): tests/persistent_state_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/persistent_state_test.cpp \
+	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
+	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+
+test-persistent-state: $(PERSISTENT_STATE_TEST)
+	$(PERSISTENT_STATE_TEST) save
+	$(PERSISTENT_STATE_TEST) restore
+	$(PERSISTENT_STATE_TEST) corrupt
+
 gdb: $(APP)
 	@echo
 	-rm -f logs/ventus_rtlsim.log
 	gdb --tui $(APP)
 	@echo
 
-.PHONY: lib run test-metadata-parser test-fork-snapshot gdb
+.PHONY: lib run test-metadata-parser test-fork-snapshot test-persistent-state gdb
 
 #=====================================================================
 # Other targets
