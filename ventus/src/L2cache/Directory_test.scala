@@ -105,6 +105,9 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     // srad-004 Phase 4.5 A''': hit-reservation clear 回传（SourceD→Scheduler→Directory）。
     // SourceD io.d.fire 时，若该 entry 是 hit 且 opcode∈{Get,Put*}，回传 (set,way) 递减 hitRefCount。
     val hit_resv_clear = Flipped(Valid(new ResvClear_lite(params)))
+    // A refill targeting a way with an outstanding hit must wait until SourceD
+    // has consumed the hit data from BankedStore.
+    val write_hit_hazard = Output(Bool())
  //   val finish_issue =Output(Bool())
   })
 
@@ -277,6 +280,12 @@ for(i<- 0 until params.cache.sets){
                    io.result.bits.opcode === PutFullData ||
                    io.result.bits.opcode === PutPartialData
   val will_resv_hit = io.result.fire && io.result.bits.hit && !io.result.bits.flush && hitUsesWay
+  val writeHitsHeldWay = hitRefCount(io.write.bits.set)(io.write.bits.way).orR
+  // Interlock same-set fills for the result cycle. This lets a hit establish
+  // hitRefCount before a write can alter the tag/data used by that result and
+  // avoids feeding result.bits.hit back into io.write.valid.
+  val writeSharesResultSet = io.result.valid && (io.result.bits.set === io.write.bits.set)
+  io.write_hit_hazard := writeHitsHeldWay || writeSharesResultSet
   // hitBusyVec: LSB=way0，与 reservation/hits 等全程约定一致
   val hitBusyVec = VecInit((0 until params.cache.ways).map(w => hitRefCount(set)(w).orR)).asUInt
 

@@ -122,6 +122,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val mshr_select = OHToUInt(mshr_selectOH)
   // srad-007 Bug3 fix(B): 被选中 MSHR 是否在 evict-read-pending — 用于 gate fill commit(dir write/pop/sinkD 写)。
   val selectedEvictReadPending = (mshr_selectOH & evictReadPending.asUInt).orR
+  val fillCommitAllowed = !selectedEvictReadPending && !directory.io.write_hit_hazard
 
  
   val schedule    = Mux1H (mshr_selectOH, mshrs.map(_.io.schedule))
@@ -146,7 +147,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.sinkd.bits  := sinkD.io.resp.bits
     m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) && !write_buffer.io.deq.valid
     m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i) && !flush_wb_priority && !evictReadPending(i)  // B-2 + srad-007 Bug3 fix(B): evict 读未完成不 pop(否则丢 refill D)
-    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt) && !evictReadPending(i)  // srad-007 Bug3 fix(B)
+    m.io.schedule.dir.ready:= directory.io.write.ready && (mshr_select===i.asUInt) &&
+      !evictReadPending(i) && fillCommitAllowed
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
     m.io.merge.valid:= m.io.schedule.d.valid && ((requests.io.data.opcode===PutFullData) ||(requests.io.data.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
@@ -412,7 +414,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     wtScoreboardCanAccept && !(issue_flush_invalidate)
   directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && requestCanIssue
   directory.io.read.bits := request.bits
-  directory.io.write.valid := schedule.dir.valid && !selectedEvictReadPending // srad-007 Bug3 fix(B): fill 写 dir 等 evict 读完 //&& !schedule.dir.bits.is_writemiss
+  directory.io.write.valid := schedule.dir.valid && fillCommitAllowed
   directory.io.tag_match :=tagMatches.orR
   directory.io.write.bits.way := schedule.dir.bits.way
   directory.io.write.bits.set := schedule.dir.bits.set
@@ -523,7 +525,10 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceD.io.req.bits.param :=Mux(take_dir ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
   sourceD.io.req.bits.l2cidx :=Mux(take_dir ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   sourceD.io.req.bits.spike_info.foreach( _ := DontCare )
-  bankedStore.io.sinkD_adr.valid := schedule.dir.valid && !selectedEvictReadPending     // srad-007 Bug3 fix(B): fill 写 BankedStore 等 evict 读完成同格(消 WAR)
+  // Directory and BankedStore are one refill commit. In addition to waiting
+  // for a dirty-victim read, do not overwrite a way until every hit which
+  // references its current contents has returned through SourceD.
+  bankedStore.io.sinkD_adr.valid := directory.io.write.fire
   bankedStore.io.sinkD_adr.bits.set := schedule.dir.bits.set
   bankedStore.io.sinkD_adr.bits.way := schedule.dir.bits.way
   bankedStore.io.sinkD_adr.bits.mask:= ~(0.U(params.mask_bits.W))
