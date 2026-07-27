@@ -299,10 +299,20 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   io.in_d.bits.data := Mux(sourceD.io.d.bits.opcode === AccessAckData, wtGrantMergedData, sourceD.io.d.bits.data)
   sourceD.io.d.ready := io.in_d.ready
 
-  val mshr_validOH = requests.io.valid
+  // The request list may drain before a delayed refill installs its directory
+  // entry. Keep that MSHR owned until every operation carrying its status has
+  // retired, otherwise a new miss can overwrite the pending refill.
+  val mshr_ownedOH = VecInit(mshrs.zipWithIndex.map { case (m, i) =>
+    MSHROwnership(
+      requests.io.valid(i),
+      m.io.schedule.a.valid,
+      m.io.schedule.dir.valid,
+      evictReadPending(i)
+    )
+  }).asUInt
 
-  val mshr_free = (~mshr_validOH).asUInt.orR
-  val mshr_empty = (~mshr_validOH).asUInt.andR.asBool
+  val mshr_free = (~mshr_ownedOH).asUInt.orR
+  val mshr_empty = (~mshr_ownedOH).asUInt.andR.asBool
   val putbuffer_empty= sinkA.io.empty
   // Assigned after all maintenance-visible pipelines are defined below.
   val flush_ready = Wire(Bool())
@@ -326,7 +336,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
   
-  val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   requests.io.valid(i)&&(m.io.status.tag === directory.io.result.bits.tag)&&(m.io.status.set ===directory.io.result.bits.set)&&
+  val tagMatches = Cat(mshrs.zipWithIndex.map { case(m,i) =>   mshr_ownedOH(i)&&(m.io.status.tag === directory.io.result.bits.tag)&&(m.io.status.set ===directory.io.result.bits.set)&&
     (!directory.io.result.bits.hit) }.reverse)
 
 
@@ -337,15 +347,17 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val pending_index = OHToUInt(Mux(is_pending,tagMatches,0.U))
 
 
-  val mshr_insertOH_init=( (~(leftOR((~mshr_validOH).asUInt)<< 1)).asUInt & (~mshr_validOH ).asUInt)
+  val mshr_insertOH_init=( (~(leftOR((~mshr_ownedOH).asUInt)<< 1)).asUInt & (~mshr_ownedOH ).asUInt)
   val mshr_insertOH =mshr_insertOH_init
-  (mshr_insertOH.asBools zip mshrs) map { case (s, m) =>{
+  (mshr_insertOH.asBools zip mshrs).zipWithIndex map { case ((s, m), i) =>{
     m.io.allocate.valid:=false.B
     m.io.allocate.bits:=0.U.asTypeOf(new Status(params))
     // bfs4096-005 Phase 4.5 fix: directory.io.result.valid 改 .fire, 跟 line 221 requests.io.push 对称
     // 避免反压多周期内 mshr_insertOH 漂移导致 zombie MSHR (上游 Get 发出但 ListBuffer 没落账,
     // 旧响应数据按 source ID 广播污染换主后的 MSHR data_reg). 详见 phase_4_report.md.
     when (directory.io.result.fire && alloc && s && !directory.io.result.bits.hit && !directory.io.result.bits.flush){
+      assert(!mshr_ownedOH(i),
+             "MSHR allocation selected an entry that is still owned")
       m.io.allocate.valid := true.B
       m.io.allocate.bits.set := directory.io.result.bits.set
       m.io.allocate.bits.tag := directory.io.result.bits.tag
