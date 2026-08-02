@@ -12,6 +12,12 @@
 #include <verilated.h>
 #include <verilated_fst_c.h>
 
+#ifndef VENTUS_RTL_MODEL_THREADS
+#define VENTUS_RTL_MODEL_THREADS 1
+#endif
+static_assert(VENTUS_RTL_MODEL_THREADS > 0, "RTL model thread count must be positive");
+inline constexpr unsigned kVentusRtlModelThreads = VENTUS_RTL_MODEL_THREADS;
+
 extern const std::unordered_map<std::string, int> rtl_parameters;
 #ifdef ENABLE_GVM
 #include "gvm.hpp"

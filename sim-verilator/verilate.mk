@@ -99,6 +99,7 @@ VLIB_OBJ_EXPORT = $(VLIB_SRC_CXX_EXPORT:%.cpp=$(VLIB_DIR_BUILDOBJ)/%.o)
 VLIB_NPROC_CPU = $(shell nproc)
 VLIB_NPROC_DUT = 8 # Depends on RTL circuit size, just try and find a verilator-allowed largest number
 VLIB_NPROC_SIM = $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
+VLIB_CXXFLAGS += -DVENTUS_RTL_MODEL_THREADS=$(VLIB_NPROC_SIM)
 
 # Generate C++ in executable form
 VLIB_VERILATOR_FLAGS += -cc --build

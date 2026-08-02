@@ -112,6 +112,7 @@ nlohmann::json rtl_identity() {
             {"version", Verilated::productVersion()},
         }},
         {"rtl_parameters", std::move(parameters)},
+        {"model_threads", kVentusRtlModelThreads},
         {"state_version", kStateVersion},
     };
 }

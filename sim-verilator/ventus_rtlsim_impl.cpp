@@ -187,7 +187,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
 
     // init Verilator simulation context
     contextp = new VerilatedContext;
-    contextp->threads(1);
+    contextp->threads(kVentusRtlModelThreads);
     contextp->debug(0);
     contextp->randReset(0);
     contextp->traceEverOn(VM_TRACE);
