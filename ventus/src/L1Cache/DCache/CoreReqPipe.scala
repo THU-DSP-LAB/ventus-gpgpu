@@ -206,7 +206,16 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val FlushInvstateReg = RegInit(idle)
   val FlushInvstateReg_next = WireInit(FlushInvstateReg)
   val fluInvReq_st0 = io.CoreReq.valid && (CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate)
-  val fluInvStartOk_st0 = fluInvReq_st0 && io.MSHREmpty && io.SMSHREmpty && io.fillPipeDrained//bfs4096-008 §9: invalidate 启动须 cached-read fill pipe 已 drain (覆盖 MSHREmpty 漏的 W1/st1 窗口)
+  // A dirty flush and an older st1 hit otherwise select different rows on the
+  // single dA read port while only the older request generates a core response.
+  val st1DataReadInUse =
+    CoreReq_pipeReg_st0_st1.deq.valid &&
+      io.tA_Hit_st1.hit &&
+      (CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isRead ||
+        (CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isUncached && io.tA_Hit_st1.isDirty))
+  val flushStartResourcesReady_st0 =
+    io.MSHREmpty && io.SMSHREmpty && io.fillPipeDrained && !st1DataReadInUse
+  val fluInvStartOk_st0 = fluInvReq_st0 && flushStartResourcesReady_st0//bfs4096-008 §9: invalidate 启动须 cached-read fill pipe 已 drain (覆盖 MSHREmpty 漏的 W1/st1 窗口)
   val flushDirtyReq_st0 = fluInvStartOk_st0 && io.hasDirty && (FlushInvstateReg === idle)
   io.flushDirty_tA := flushDirtyReq_st0
   val FluInv_st1 = CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush || CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isInvalidate
@@ -245,7 +254,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
       st0_ready := CoreReq_pipeReg_st0_st1.enq.ready && io.MSHREmpty && io.SMSHREmpty
     }.elsewhen(CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate){
         when(FlushInvstateReg === idle){
-          when(!io.MSHREmpty || !io.SMSHREmpty || !io.fillPipeDrained){//bfs4096-008 §9: fill pipe 未 drain 时 invalidate 停 st0 (仅 idle 态 gate, FSM 离 idle 后不再 gate=死锁免疫)
+          when(!flushStartResourcesReady_st0){//bfs4096-008 §9: fill pipe 未 drain 时 invalidate 停 st0 (仅 idle 态 gate, FSM 离 idle 后不再 gate=死锁免疫)
             st0_valid := false.B
             st0_ready := false.B
           }.elsewhen(io.hasDirty){
@@ -516,6 +525,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   // → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way (visited 此时是 MRU 不会被选中)。
   val realReadHit_st1 = ReadHit_st1 && !fillConflictSt1
   io.read_Req_dA.valid := realReadHit_st1 || UCReqHitDirty || flushDirtyReq_st0
+  assert(!(flushDirtyReq_st0 && st1DataReadInUse),
+    "dirty flush must not steal the dA read port from an older st1 request")
 
   //missReq 2 mem, request type and data generator
   OpcodeGen.io.coreReqCtrl := Control_st1

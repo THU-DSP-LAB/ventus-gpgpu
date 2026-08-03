@@ -1,5 +1,9 @@
 #include "ventus_rtlsim_impl.hpp"
 #include "Vdut.h"
+#ifdef VENTUS_RTL_CPP_PROBE
+#include "Vdut_SM_wrapper.h"
+#include "Vdut_SRAMTemplate_5.h"
+#endif
 #include "ventus_rtlsim.h"
 #include "verilated.h"
 #include <algorithm>
@@ -42,6 +46,197 @@ static uint32_t rtl_parameter_u32(const char* name) {
     }
     return static_cast<uint32_t>(it->second);
 }
+
+#ifdef VENTUS_RTL_CPP_PROBE
+struct RtlCppProbeConfig {
+    bool enabled = false;
+    uint64_t begin = 0;
+    uint64_t end = 0;
+};
+
+static std::optional<uint64_t> parse_probe_time(const char* name) {
+    const char* value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return std::nullopt;
+    }
+
+    errno = 0;
+    char* end = nullptr;
+    const auto parsed = std::strtoull(value, &end, 0);
+    if (errno != 0 || end == value || *end != '\0') {
+        std::cerr << "Ignoring invalid " << name << "=\"" << value << "\"" << std::endl;
+        return std::nullopt;
+    }
+    return parsed;
+}
+
+static const RtlCppProbeConfig& rtl_cpp_probe_config() {
+    static const RtlCppProbeConfig config = [] {
+        RtlCppProbeConfig result;
+        const auto begin = parse_probe_time("VENTUS_RTL_CPP_PROBE_BEGIN");
+        const auto end = parse_probe_time("VENTUS_RTL_CPP_PROBE_END");
+        if (!begin.has_value() && !end.has_value()) {
+            return result;
+        }
+        if (!begin.has_value() || !end.has_value() || *end < *begin) {
+            std::cerr << "RTL C++ probe requires a valid inclusive begin/end time window" << std::endl;
+            return result;
+        }
+        result.enabled = true;
+        result.begin = *begin;
+        result.end = *end;
+        std::cerr << "RTL C++ probe enabled for [" << result.begin << ", " << result.end << "]" << std::endl;
+        return result;
+    }();
+    return config;
+}
+
+static void print_probe_words(const char* name, const uint32_t* words, size_t count) {
+    fmt::print(stderr, " {}=", name);
+    for (size_t i = 0; i < count; ++i) {
+        fmt::print(stderr, "{}{:08x}", i == 0 ? "" : ":", words[i]);
+    }
+}
+
+static void rtl_cpp_probe(const Vdut* dut, uint64_t time) {
+    const auto& config = rtl_cpp_probe_config();
+    if (!config.enabled || time < config.begin || time > config.end) {
+        return;
+    }
+
+    const auto* sm = dut->__PVT__GPGPU_SimTop__DOT__gpgpu__DOT__GPU__DOT__sm_wrapper_inst_0;
+    const auto* data_access0 = sm->__PVT__dcache__DOT__DataAccesses_0;
+    const auto& request = sm->__PVT__dcache__DOT__coreReqPipe__DOT__Queue1_CoreReqPipe_st1__DOT__ram;
+    const auto& response = sm->__PVT__dcache__DOT__coreReqPipe__DOT__Queue1_CoreRspPipe_st2__DOT__ram;
+    const auto& response_hold = sm->__PVT__dcache__DOT__coreReqPipe__DOT__coreRsp_st2_coreRsp_data_hold__DOT__ram;
+    const bool flush_dirty =
+        sm->__PVT__dcache__DOT__coreReqPipe__DOT__fluInvReq_st0
+        && sm->__PVT__dcache__DOT__MshrAccess__DOT___GEN == 0
+        && sm->__VdfgRegularize_h02d9c2ab_0_1309
+        && sm->__PVT__dcache__DOT___TagAccess_io_hasDirty_st0
+        && sm->__PVT__dcache__DOT__coreReqPipe__DOT__FlushInvstateReg == 0;
+#define DATA_ACCESS_RESPONSE(index) sm->__PVT__dcache__DOT__DataAccessReadSRAMRRsp_##index
+    const uint32_t data_access_response[] = {
+        DATA_ACCESS_RESPONSE(0), DATA_ACCESS_RESPONSE(1), DATA_ACCESS_RESPONSE(2), DATA_ACCESS_RESPONSE(3),
+        DATA_ACCESS_RESPONSE(4), DATA_ACCESS_RESPONSE(5), DATA_ACCESS_RESPONSE(6), DATA_ACCESS_RESPONSE(7),
+        DATA_ACCESS_RESPONSE(8), DATA_ACCESS_RESPONSE(9), DATA_ACCESS_RESPONSE(10), DATA_ACCESS_RESPONSE(11),
+        DATA_ACCESS_RESPONSE(12), DATA_ACCESS_RESPONSE(13), DATA_ACCESS_RESPONSE(14), DATA_ACCESS_RESPONSE(15),
+        DATA_ACCESS_RESPONSE(16), DATA_ACCESS_RESPONSE(17), DATA_ACCESS_RESPONSE(18), DATA_ACCESS_RESPONSE(19),
+        DATA_ACCESS_RESPONSE(20), DATA_ACCESS_RESPONSE(21), DATA_ACCESS_RESPONSE(22), DATA_ACCESS_RESPONSE(23),
+        DATA_ACCESS_RESPONSE(24), DATA_ACCESS_RESPONSE(25), DATA_ACCESS_RESPONSE(26), DATA_ACCESS_RESPONSE(27),
+        DATA_ACCESS_RESPONSE(28), DATA_ACCESS_RESPONSE(29), DATA_ACCESS_RESPONSE(30), DATA_ACCESS_RESPONSE(31),
+    };
+#undef DATA_ACCESS_RESPONSE
+#define READ_HIT_SNAPSHOT(index) sm->__PVT__dcache__DOT__coreReqPipe__DOT__st1ReadHitSnapshot_##index
+    const uint32_t read_hit_snapshot[] = {
+        READ_HIT_SNAPSHOT(0), READ_HIT_SNAPSHOT(1), READ_HIT_SNAPSHOT(2), READ_HIT_SNAPSHOT(3),
+        READ_HIT_SNAPSHOT(4), READ_HIT_SNAPSHOT(5), READ_HIT_SNAPSHOT(6), READ_HIT_SNAPSHOT(7),
+        READ_HIT_SNAPSHOT(8), READ_HIT_SNAPSHOT(9), READ_HIT_SNAPSHOT(10), READ_HIT_SNAPSHOT(11),
+        READ_HIT_SNAPSHOT(12), READ_HIT_SNAPSHOT(13), READ_HIT_SNAPSHOT(14), READ_HIT_SNAPSHOT(15),
+        READ_HIT_SNAPSHOT(16), READ_HIT_SNAPSHOT(17), READ_HIT_SNAPSHOT(18), READ_HIT_SNAPSHOT(19),
+        READ_HIT_SNAPSHOT(20), READ_HIT_SNAPSHOT(21), READ_HIT_SNAPSHOT(22), READ_HIT_SNAPSHOT(23),
+        READ_HIT_SNAPSHOT(24), READ_HIT_SNAPSHOT(25), READ_HIT_SNAPSHOT(26), READ_HIT_SNAPSHOT(27),
+        READ_HIT_SNAPSHOT(28), READ_HIT_SNAPSHOT(29), READ_HIT_SNAPSHOT(30), READ_HIT_SNAPSHOT(31),
+    };
+#undef READ_HIT_SNAPSHOT
+#define DATA_ACCESS_ROW(index, row) \
+    sm->__PVT__dcache__DOT__DataAccesses_##index->__PVT__array_ext__DOT__Memory[row]
+    const uint32_t data_access_row0[] = {
+        DATA_ACCESS_ROW(0, 0), DATA_ACCESS_ROW(1, 0), DATA_ACCESS_ROW(2, 0), DATA_ACCESS_ROW(3, 0),
+        DATA_ACCESS_ROW(4, 0), DATA_ACCESS_ROW(5, 0), DATA_ACCESS_ROW(6, 0), DATA_ACCESS_ROW(7, 0),
+        DATA_ACCESS_ROW(8, 0), DATA_ACCESS_ROW(9, 0), DATA_ACCESS_ROW(10, 0), DATA_ACCESS_ROW(11, 0),
+        DATA_ACCESS_ROW(12, 0), DATA_ACCESS_ROW(13, 0), DATA_ACCESS_ROW(14, 0), DATA_ACCESS_ROW(15, 0),
+        DATA_ACCESS_ROW(16, 0), DATA_ACCESS_ROW(17, 0), DATA_ACCESS_ROW(18, 0), DATA_ACCESS_ROW(19, 0),
+        DATA_ACCESS_ROW(20, 0), DATA_ACCESS_ROW(21, 0), DATA_ACCESS_ROW(22, 0), DATA_ACCESS_ROW(23, 0),
+        DATA_ACCESS_ROW(24, 0), DATA_ACCESS_ROW(25, 0), DATA_ACCESS_ROW(26, 0), DATA_ACCESS_ROW(27, 0),
+        DATA_ACCESS_ROW(28, 0), DATA_ACCESS_ROW(29, 0), DATA_ACCESS_ROW(30, 0), DATA_ACCESS_ROW(31, 0),
+    };
+    const uint32_t data_access_row1[] = {
+        DATA_ACCESS_ROW(0, 1), DATA_ACCESS_ROW(1, 1), DATA_ACCESS_ROW(2, 1), DATA_ACCESS_ROW(3, 1),
+        DATA_ACCESS_ROW(4, 1), DATA_ACCESS_ROW(5, 1), DATA_ACCESS_ROW(6, 1), DATA_ACCESS_ROW(7, 1),
+        DATA_ACCESS_ROW(8, 1), DATA_ACCESS_ROW(9, 1), DATA_ACCESS_ROW(10, 1), DATA_ACCESS_ROW(11, 1),
+        DATA_ACCESS_ROW(12, 1), DATA_ACCESS_ROW(13, 1), DATA_ACCESS_ROW(14, 1), DATA_ACCESS_ROW(15, 1),
+        DATA_ACCESS_ROW(16, 1), DATA_ACCESS_ROW(17, 1), DATA_ACCESS_ROW(18, 1), DATA_ACCESS_ROW(19, 1),
+        DATA_ACCESS_ROW(20, 1), DATA_ACCESS_ROW(21, 1), DATA_ACCESS_ROW(22, 1), DATA_ACCESS_ROW(23, 1),
+        DATA_ACCESS_ROW(24, 1), DATA_ACCESS_ROW(25, 1), DATA_ACCESS_ROW(26, 1), DATA_ACCESS_ROW(27, 1),
+        DATA_ACCESS_ROW(28, 1), DATA_ACCESS_ROW(29, 1), DATA_ACCESS_ROW(30, 1), DATA_ACCESS_ROW(31, 1),
+    };
+#undef DATA_ACCESS_ROW
+
+    fmt::print(
+        stderr,
+        "[RTL_CPP_PROBE] t={} clk={} qfull={} cache_hit={} read_hit={} read_miss={} "
+        "fill_conflict={} fill_wait={} snap_valid={} snap_pending={} rspq_full={} rsp_enq={} rsp3_enq={} "
+        "rsp_hold_full={} fill_valid={} fill_intent={} fill_set={} replace_read_valid={} "
+        "replace_pending={} replace_set={} allocate_set={} replace_way={:x} replacement_way={:x} "
+        "flush_dirty={} flush_req={} flush_state={} has_dirty={} dirty_set={} uc_dirty={} "
+        "sram_write_set={} core_write_set={} "
+        "tag_hit={} tag_way={:x} probe_buf_full={} sram_r_valid={} sram_r_set={} "
+        "sram0_req_valid={} sram0_req_set={} sram0_latched_valid={} sram0_latched_set={} "
+        "sram0_bypass_need={} sram0_bypass_rset={} sram0_bypass_wset={} sram0_bypass_mask={:x} "
+        "bank2_w_valid={} bank2_w_way={:x} bank2_w_data={:02x}{:02x}{:02x}{:02x}",
+        time,
+        static_cast<uint32_t>(dut->clock),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__Queue1_CoreReqPipe_st1__DOT__full),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___coreReqPipe_io_CacheHit_st1),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__ReadHit_st1),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__ReadMiss_st1),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__fillConflictSt1),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__readMissFillWait_st1),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__st1ReadHitSnapshotValid),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__st1ReadHitSnapshotPending),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__Queue1_CoreRspPipe_st2__DOT__full),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT___coreRspPipeEnqFromCoreReq_T_4),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__CoreRsp_st3__DOT__do_enq),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__coreRsp_st2_coreRsp_data_hold__DOT__full),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___memRspPipe_io_dAmemRsp_wReq_valid),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___memRspPipe_io_dAmemRsp_wReq_intent),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___memRspPipe_io_dAmemRsp_wReq_0_setIdx),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___memRspPipe_io_dAReplace_rReq_valid),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__memRspPipe__DOT__needReplace_pending),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__memRspPipe__DOT__replaceSetIdx),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__memRspPipe__DOT__allocateSetIdx_st1),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__memRspPipe__DOT__replaceWayMask),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___TagAccess_io_waymaskReplacement_st1),
+        static_cast<uint32_t>(flush_dirty),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__fluInvReq_st0),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__FlushInvstateReg),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___TagAccess_io_hasDirty_st0),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___TagAccess_io_dirtySetIdx_st0),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__coreReqPipe__DOT__UCReqHitDirty),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_0__io_w_req_bits_setIdx),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___coreReqPipe_io_WriteReq_dA_0_setIdx),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__TagAccess__DOT__hit_st1_raw),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___TagAccess_io_hitStatus_st1_waymask),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT__TagAccess__DOT__probeReadBuf_q__DOT__full),
+        static_cast<uint32_t>(sm->__PVT__dcache__DOT___DataAccesses_31_io_r_req_valid_T),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_0__io_r_req_bits_setIdx),
+        static_cast<uint32_t>(data_access0->__PVT__io_r_req_valid),
+        static_cast<uint32_t>(data_access0->__PVT__io_r_req_bits_setIdx),
+        static_cast<uint32_t>(data_access0->__PVT__array_ext__DOT___R0_en_d0),
+        static_cast<uint32_t>(data_access0->__PVT__array_ext__DOT___R0_addr_d0),
+        static_cast<uint32_t>(data_access0->__PVT__bypass_mask_need_check),
+        static_cast<uint32_t>(data_access0->__PVT__bypass_mask_raddr_reg),
+        static_cast<uint32_t>(data_access0->__PVT__bypass_mask_waddr_reg),
+        static_cast<uint32_t>(data_access0->__PVT__bypass_mask),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_2__io_w_req_valid),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_2__io_w_req_bits_waymask),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_2__io_w_req_bits_data_3),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_2__io_w_req_bits_data_2),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_2__io_w_req_bits_data_1),
+        static_cast<uint32_t>(sm->dcache__DOT____Vcellinp__DataAccesses_2__io_w_req_bits_data_0)
+    );
+    print_probe_words("sram_rsp", data_access_response, std::size(data_access_response));
+    print_probe_words("sram_row0", data_access_row0, std::size(data_access_row0));
+    print_probe_words("sram_row1", data_access_row1, std::size(data_access_row1));
+    print_probe_words("snapshot", read_hit_snapshot, std::size(read_hit_snapshot));
+    print_probe_words("selected_rsp", sm->__PVT__dcache__DOT__coreReqPipe__DOT___GEN_51.data(), 32);
+    print_probe_words("rsp_hold", response_hold.data(), 32);
+    print_probe_words("response", response.data(), response.Words);
+    print_probe_words("request", request.data(), request.Words);
+    fmt::print(stderr, "\n");
+}
+#endif
 
 // cleanup: mainly for Verilator FST waveform dump
 // tfp->close() is necessary to save complete waveform to file
@@ -348,6 +543,9 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     // Eval
     //
     dut->eval();
+#ifdef VENTUS_RTL_CPP_PROBE
+    rtl_cpp_probe(dut, contextp->time());
+#endif
     waveform_dump();
     if (dut->clock == 1 && need_perf_dump_summary) {
         need_perf_dump_summary = false;

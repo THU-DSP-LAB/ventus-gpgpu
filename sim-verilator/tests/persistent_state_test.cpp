@@ -144,6 +144,25 @@ void restore_state() {
     require(ventus_rtlsim_finish_checked(sim, false) == 0, "restore process cleanup failed");
 }
 
+void restore_state_with_waveform() {
+    const auto waveform = kRoot / "restore.fst";
+    std::filesystem::remove(waveform);
+    auto config = test_config();
+    const std::string waveform_filename = waveform.string();
+    config.waveform.enable = true;
+    config.waveform.time_begin = 0;
+    config.waveform.time_end = UINT64_MAX;
+    config.waveform.filename = waveform_filename.c_str();
+    ventus_rtlsim_t* sim = ventus_rtlsim_restore_state(&config, kState.c_str());
+    require(sim != nullptr, "waveform restore failed");
+    require(ventus_rtlsim_step(sim) != nullptr, "waveform restore step failed");
+    require(ventus_rtlsim_finish_checked(sim, false) == 0,
+            "waveform restore cleanup failed");
+    require(std::filesystem::exists(waveform)
+                && std::filesystem::file_size(waveform) > 0,
+            "waveform restore did not produce an FST");
+}
+
 void corrupt_state() {
     const auto corrupt = kRoot / "corrupt";
     std::filesystem::copy(
@@ -259,12 +278,14 @@ int main(int argc, char** argv) {
     try {
         require(
             argc == 2,
-            "usage: persistent_state_test save|restore|corrupt|unsupported|no-trace-config");
+            "usage: persistent_state_test save|restore|restore-waveform|corrupt|unsupported|no-trace-config");
         const std::string mode = argv[1];
         if (mode == "save") {
             save_state();
         } else if (mode == "restore") {
             restore_state();
+        } else if (mode == "restore-waveform") {
+            restore_state_with_waveform();
         } else if (mode == "corrupt") {
             corrupt_state();
         } else if (mode == "unsupported") {

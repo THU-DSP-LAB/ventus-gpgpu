@@ -155,10 +155,19 @@ bool read_manifest(
         std::ifstream input(manifest_path);
         if (!input) return false;
         input >> manifest;
-        return manifest.at("schema_version") == kManifestVersion
+        const bool metadata_matches = manifest.at("schema_version") == kManifestVersion
             && manifest.at("status") == "COMPLETE"
-            && manifest.at("state_file") == kStateFilename
-            && manifest.at("identity") == rtl_identity();
+            && manifest.at("state_file") == kStateFilename;
+        const auto expected_identity = rtl_identity();
+        const bool identity_matches = manifest.at("identity") == expected_identity;
+#ifdef VENTUS_RTL_CPP_PROBE
+        if (metadata_matches && !identity_matches) {
+            std::cerr << "persistent state identity mismatch\nobserved: "
+                      << manifest.at("identity").dump()
+                      << "\nexpected: " << expected_identity.dump() << std::endl;
+        }
+#endif
+        return metadata_matches && identity_matches;
     } catch (const std::exception&) {
         return false;
     }
@@ -311,7 +320,7 @@ int ventus_persistent_state_save(ventus_rtlsim_t* sim, const char* directory_raw
 ventus_rtlsim_t* ventus_persistent_state_restore(
     const ventus_rtlsim_config_t* config, const char* directory_raw) {
     if (config == nullptr || directory_raw == nullptr || directory_raw[0] == '\0'
-        || config->snapshot.enable || config->waveform.enable) {
+        || config->snapshot.enable) {
         return nullptr;
     }
     const std::filesystem::path directory(directory_raw);

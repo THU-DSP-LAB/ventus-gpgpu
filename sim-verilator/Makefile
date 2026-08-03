@@ -117,6 +117,9 @@ $(PERSISTENT_STATE_TEST): tests/persistent_state_test.cpp ventus_rtlsim.h $(VLIB
 test-persistent-state: $(PERSISTENT_STATE_TEST)
 	$(PERSISTENT_STATE_TEST) save
 	$(PERSISTENT_STATE_TEST) restore
+ifeq ($(TRACE),1)
+	$(PERSISTENT_STATE_TEST) restore-waveform
+endif
 	$(PERSISTENT_STATE_TEST) corrupt
 ifneq ($(TRACE),1)
 	$(PERSISTENT_STATE_TEST) no-trace-config
