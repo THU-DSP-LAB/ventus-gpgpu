@@ -7,6 +7,7 @@ export MAKEFLAGS += +r
 RELEASE ?= 0
 PREFIX ?= $(CURDIR)/install
 GVM_REF_DIR ?= ../../install/lib
+GVM_REF_INCLUDE_DIR ?= ../../spike/gvmref
 GVM_TRACE ?= 1
 VLIB_RANDOMIZE_FLAGS ?=
 
@@ -74,7 +75,7 @@ VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
 VLIB_SRC_V_DIR = $(VLIB_GEN_DIR)/verilog-out
 VLIB_SRC_V = $(VLIB_SRC_V_DIR)/dut.sv
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp# API in these files will be exported to shared library
-VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) gvm_care_insns.cpp gvm_dpic.cpp gvm.cpp gvm_global_var.cpp $(VLIB_SRC_CXX_EXPORT)
+VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp persistent_state.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) gvm_care_insns.cpp gvm_dpic.cpp gvm.cpp gvm_global_var.cpp $(VLIB_SRC_CXX_EXPORT)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
 VLIB_VERILATOR_INPUT = $(wildcard $(VLIB_SRC_V_DIR)/*.sv) $(VLIB_SRC_CXX_ABSPATH)
 VLIB_VERILATOR_OUTPUT = $(VLIB_DIR_BUILDOBJ)/libVdut.a
@@ -95,6 +96,7 @@ VLIB_OBJ_EXPORT = $(VLIB_SRC_CXX_EXPORT:%.cpp=$(VLIB_DIR_BUILDOBJ)/%.o)
 VLIB_NPROC_CPU = $(shell nproc)
 VLIB_NPROC_DUT = 8 # Depends on RTL circuit size, just try and find a verilator-allowed largest number
 VLIB_NPROC_SIM = $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
+VLIB_CXXFLAGS += -DVENTUS_RTL_MODEL_THREADS=$(VLIB_NPROC_SIM)
 
 # Generate C++ in executable form
 VLIB_VERILATOR_FLAGS += -cc --build
@@ -143,6 +145,7 @@ VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_CXXFLAGS += -DENABLE_GVM=1
 VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
+VLIB_CXXFLAGS += -I$(abspath $(GVM_REF_INCLUDE_DIR))
 #VLIB_CXXFLAGS += -fsanitize=address,undefined
 VLIB_LDFLAGS += -lc
 ifeq ($(VLIB_HAS_SYSTEM_LZ4),1)

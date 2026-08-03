@@ -10,7 +10,7 @@
 #include <string>
 #include <spdlog/logger.h>
 
-#include "../../spike/gvmref/gvmref_interface.h"
+#include "gvmref_interface.h"
 #include "gvm_global_var.hpp"
 #include "gvm_structs.hpp"
 

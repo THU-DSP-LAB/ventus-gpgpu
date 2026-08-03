@@ -8,7 +8,7 @@
 #include <cstring>
 #include <spdlog/logger.h>
 
-#include "../../spike/gvmref/gvmref_interface.h"
+#include "gvmref_interface.h"
 #include "gvm_global_var.hpp"
 #include "gvm.hpp"
 #include "gvm_structs.hpp"
@@ -309,7 +309,10 @@ void gvm_t::getDutInsnDispatch() {
     d.single_insn_cmp.care = isInsnCareCached(item.insn, single_insn_cmp_care_insns, single_cmp_care_cache);
     const bool scalar_single_cmp_care =
         isInsnCareCached(item.insn, scalar_single_insn_cmp_care_insns, scalar_single_cmp_care_cache);
-    if (scalar_single_cmp_care && getInsnRd(item.insn) == 0) {
+    // Spike and the DUT expose different platform-owned mstatus bits.
+    const bool is_mstatus_csr =
+        (item.insn & 0x7f) == 0x73 && ((item.insn >> 20) & 0xfff) == 0x300;
+    if ((scalar_single_cmp_care && getInsnRd(item.insn) == 0) || is_mstatus_csr) {
       d.single_insn_cmp.care = false;
     }
     d.single_insn_cmp.dut_done = 0;
