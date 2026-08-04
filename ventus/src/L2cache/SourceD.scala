@@ -129,9 +129,11 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
   val write_sent_reg=RegInit(false.B)
-  when((s1_w_valid&&io.bs_wadr.ready)){
+  // A hit Put owns exactly one BankedStore write. Keep completion sticky until
+  // the next request; port backpressure after the write must not re-arm it.
+  when(io.bs_wadr.fire) {
     write_sent_reg:=true.B
-  }.otherwise{
+  }.elsewhen(io.req.fire) {
     write_sent_reg:=false.B
   }
   val write_sent=Mux(io.req.fire,false.B,write_sent_reg)
@@ -273,11 +275,17 @@ val mshr_wait_reg =RegInit(false.B)
     }
   }
   io.mshr_wait      :=mshr_wait_reg
-  io.bs_wadr.valid   :=    s1_w_valid &&(!write_sent)
+  // A write is active only on initial request acceptance or while stage_2 is
+  // retrying a write that lost BankedStore arbitration to a refill.
+  val hitPutWriteActive = io.req.fire || stateReg === stage_2
+  io.bs_wadr.valid   :=    s1_w_valid && hitPutWriteActive &&(!write_sent)
   io.bs_wadr.bits.set:=    s1_req.set
   io.bs_wadr.bits.way:=    s1_req.way
   io.bs_wdat.data    :=    pb_beat.data
   io.bs_wadr.bits.mask:=   pb_beat.mask
+
+  assert(!(stateReg === stage_1 && !io.req.fire && io.bs_wadr.valid),
+    "SourceD emitted a stale hit-Put BankedStore write while idle")
 
   ///将读取数据输出d
   io.d.valid        :=((stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
