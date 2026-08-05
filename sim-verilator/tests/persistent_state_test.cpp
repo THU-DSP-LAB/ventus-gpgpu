@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <string>
 #include <unistd.h>
@@ -73,6 +74,22 @@ std::string read_file(const std::filesystem::path& path) {
         std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
 }
 
+nlohmann::json read_json_file(const std::filesystem::path& path) {
+    std::ifstream input(path);
+    require(static_cast<bool>(input), "cannot open JSON file");
+    nlohmann::json value;
+    input >> value;
+    return value;
+}
+
+void write_json_file(
+    const std::filesystem::path& path, const nlohmann::json& value) {
+    std::ofstream output(path, std::ios::trunc);
+    require(static_cast<bool>(output), "cannot open JSON file for writing");
+    output << value.dump(2) << '\n';
+    require(static_cast<bool>(output), "cannot write JSON file");
+}
+
 void require_same_file(
     const std::filesystem::path& actual, const std::filesystem::path& expected,
     const std::string& message) {
@@ -104,6 +121,18 @@ void save_state() {
     write_pmu(sim, kSavedPmu);
     require(ventus_rtlsim_save_state(sim, kState.c_str()) == 0,
             "persistent state save failed");
+    const auto manifest = read_json_file(kState / "manifest.json");
+    require(manifest.at("schema_version") == 2,
+            "persistent state manifest schema was not upgraded");
+    const auto& identity = manifest.at("identity");
+    require(identity.at("identity_schema_version") == 2,
+            "persistent state identity schema is missing");
+    require(identity.at("model_fingerprint").get<std::string>().size() == 64,
+            "persistent state model fingerprint is missing");
+    require(!identity.at("build_variant").get<std::string>().empty(),
+            "persistent state build variant is missing");
+    require(identity.at("trace_enabled").is_boolean(),
+            "persistent state trace identity is missing");
     step_until(sim, kSuffixTime);
     write_pmu(sim, kExpectedPmu);
     require(ventus_rtlsim_save_state(sim, kExpected.c_str()) == 0,
@@ -142,6 +171,13 @@ void restore_state() {
         kActual / "state.bin", kExpected / "state.bin",
         "restored suffix RTL state differs from continuous execution");
     require(ventus_rtlsim_finish_checked(sim, false) == 0, "restore process cleanup failed");
+}
+
+void reject_state() {
+    auto config = test_config();
+    require(
+        ventus_rtlsim_restore_state(&config, kState.c_str()) == nullptr,
+        "incompatible persistent state was accepted");
 }
 
 void restore_state_with_waveform() {
@@ -200,33 +236,50 @@ void corrupt_state() {
     std::filesystem::copy(
         kState, wrong_identity, std::filesystem::copy_options::recursive);
     const auto manifest_path = wrong_identity / "manifest.json";
-    std::ifstream manifest_input(manifest_path);
-    std::string manifest(
-        (std::istreambuf_iterator<char>(manifest_input)), std::istreambuf_iterator<char>());
-    const auto position = manifest.find("\"state_version\": 1");
-    require(position != std::string::npos, "cannot locate manifest identity");
-    manifest.replace(position, std::string("\"state_version\": 1").size(), "\"state_version\": 2");
-    std::ofstream manifest_output(manifest_path, std::ios::trunc);
-    manifest_output << manifest;
-    manifest_output.close();
+    auto manifest = read_json_file(manifest_path);
+    require(manifest.at("identity").at("state_version") == 1,
+            "cannot locate manifest identity");
+    manifest["identity"]["state_version"] = 2;
+    write_json_file(manifest_path, manifest);
     require(ventus_rtlsim_restore_state(&config, wrong_identity.c_str()) == nullptr,
             "wrong state identity was accepted");
+
+    const auto wrong_fingerprint = kRoot / "wrong-fingerprint";
+    std::filesystem::copy(
+        kState, wrong_fingerprint, std::filesystem::copy_options::recursive);
+    const auto fingerprint_manifest_path = wrong_fingerprint / "manifest.json";
+    auto fingerprint_manifest = read_json_file(fingerprint_manifest_path);
+    auto fingerprint = fingerprint_manifest.at("identity")
+                           .at("model_fingerprint").get<std::string>();
+    require(fingerprint.size() == 64, "cannot locate model fingerprint");
+    fingerprint.front() = fingerprint.front() == '0' ? '1' : '0';
+    fingerprint_manifest["identity"]["model_fingerprint"] = fingerprint;
+    write_json_file(fingerprint_manifest_path, fingerprint_manifest);
+    require(
+        ventus_rtlsim_restore_state(&config, wrong_fingerprint.c_str()) == nullptr,
+        "wrong model fingerprint was accepted");
+
+    const auto wrong_trace = kRoot / "wrong-trace";
+    std::filesystem::copy(
+        kState, wrong_trace, std::filesystem::copy_options::recursive);
+    const auto trace_manifest_path = wrong_trace / "manifest.json";
+    auto trace_manifest = read_json_file(trace_manifest_path);
+    const bool trace_enabled =
+        trace_manifest.at("identity").at("trace_enabled").get<bool>();
+    trace_manifest["identity"]["trace_enabled"] = !trace_enabled;
+    write_json_file(trace_manifest_path, trace_manifest);
+    require(ventus_rtlsim_restore_state(&config, wrong_trace.c_str()) == nullptr,
+            "wrong trace identity was accepted");
 
     const auto wrong_schema = kRoot / "wrong-schema";
     std::filesystem::copy(
         kState, wrong_schema, std::filesystem::copy_options::recursive);
     const auto schema_manifest_path = wrong_schema / "manifest.json";
-    std::ifstream schema_input(schema_manifest_path);
-    std::string schema_manifest(
-        (std::istreambuf_iterator<char>(schema_input)), std::istreambuf_iterator<char>());
-    const auto schema_position = schema_manifest.find("\"schema_version\": 1");
-    require(schema_position != std::string::npos, "cannot locate manifest schema");
-    schema_manifest.replace(
-        schema_position, std::string("\"schema_version\": 1").size(),
-        "\"schema_version\": 2");
-    std::ofstream schema_output(schema_manifest_path, std::ios::trunc);
-    schema_output << schema_manifest;
-    schema_output.close();
+    auto schema_manifest = read_json_file(schema_manifest_path);
+    require(schema_manifest.at("schema_version") == 2,
+            "cannot locate manifest schema");
+    schema_manifest["schema_version"] = 3;
+    write_json_file(schema_manifest_path, schema_manifest);
     require(ventus_rtlsim_restore_state(&config, wrong_schema.c_str()) == nullptr,
             "wrong manifest schema was accepted");
 
@@ -278,12 +331,14 @@ int main(int argc, char** argv) {
     try {
         require(
             argc == 2,
-            "usage: persistent_state_test save|restore|restore-waveform|corrupt|unsupported|no-trace-config");
+            "usage: persistent_state_test save|restore|reject|restore-waveform|corrupt|unsupported|no-trace-config");
         const std::string mode = argv[1];
         if (mode == "save") {
             save_state();
         } else if (mode == "restore") {
             restore_state();
+        } else if (mode == "reject") {
+            reject_state();
         } else if (mode == "restore-waveform") {
             restore_state_with_waveform();
         } else if (mode == "corrupt") {

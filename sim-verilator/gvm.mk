@@ -53,6 +53,24 @@ endif
 MOLD = $(shell which mold)
 VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
+VLIB_NPROC_CPU ?= $(shell nproc)
+VLIB_NPROC_DUT ?= 8
+VLIB_NPROC_SIM ?= $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
+
+ifeq ($(RELEASE),1)
+VLIB_BUILD_TYPE = release
+else
+VLIB_BUILD_TYPE = debug
+endif
+ifneq ($(filter 1 yes true on,$(GVM_TRACE)),)
+VLIB_TRACE_ENABLED = 1
+VLIB_TRACE_TYPE = trace
+else
+VLIB_TRACE_ENABLED = 0
+VLIB_TRACE_TYPE = notrace
+endif
+VLIB_VARIANT_KEY = gvm-$(VLIB_BUILD_TYPE)-nonsavable-$(VLIB_TRACE_TYPE)-t$(VLIB_NPROC_SIM)
+
 #=====================================================================
 # Source file list and build directories
 #=====================================================================
@@ -63,8 +81,11 @@ VLIB_GEN_DIR = build/generated/gvm
 VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
 VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
 VLIB_PMU_SNAPSHOT_INC = $(VLIB_GEN_DIR)/pmu_snapshot_copy.inc
-VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug
-VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release
+VLIB_MODEL_IDENTITY_DIR = $(VLIB_GEN_DIR)/model-identities/$(VLIB_VARIANT_KEY)
+VLIB_MODEL_IDENTITY_CPP = $(VLIB_MODEL_IDENTITY_DIR)/model_identity.cpp
+VLIB_MODEL_IDENTITY_JSON = $(VLIB_MODEL_IDENTITY_DIR)/model_identity.json
+VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/gvm-debug-nonsavable-$(VLIB_TRACE_TYPE)-t$(VLIB_NPROC_SIM)
+VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/gvm-release-nonsavable-$(VLIB_TRACE_TYPE)-t$(VLIB_NPROC_SIM)
 ifeq ($(RELEASE),1)
 VLIB_DIR_BUILDOBJ = $(VLIB_DIR_BUILDOBJ_RELEASE)
 else
@@ -75,7 +96,10 @@ VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
 VLIB_SRC_V_DIR = $(VLIB_GEN_DIR)/verilog-out
 VLIB_SRC_V = $(VLIB_SRC_V_DIR)/dut.sv
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp# API in these files will be exported to shared library
-VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp persistent_state.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) gvm_care_insns.cpp gvm_dpic.cpp gvm.cpp gvm_global_var.cpp $(VLIB_SRC_CXX_EXPORT)
+VLIB_SRC_CXX_BASE = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp persistent_state.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) gvm_care_insns.cpp gvm_dpic.cpp gvm.cpp gvm_global_var.cpp $(VLIB_SRC_CXX_EXPORT)
+VLIB_MODEL_INPUT_HEADERS = kernel.hpp physical_mem.hpp cta_sche_wrapper.hpp persistent_state.hpp ventus_rtlsim_impl.hpp ventus_rtlsim.h model_identity.hpp gvm.hpp gvm_dpic.hpp gvm_global_var.hpp gvm_macro.h gvm_structs.hpp
+VLIB_MODEL_INPUT_FILES = $(VLIB_SRC_CXX_BASE) $(VLIB_PMU_SNAPSHOT_INC) $(VLIB_MODEL_INPUT_HEADERS) gvm.mk gen_model_identity.py
+VLIB_SRC_CXX = $(VLIB_SRC_CXX_BASE) $(VLIB_MODEL_IDENTITY_CPP)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
 VLIB_VERILATOR_INPUT = $(wildcard $(VLIB_SRC_V_DIR)/*.sv) $(VLIB_SRC_CXX_ABSPATH)
 VLIB_VERILATOR_OUTPUT = $(VLIB_DIR_BUILDOBJ)/libVdut.a
@@ -92,10 +116,6 @@ VLIB_OBJ_EXPORT = $(VLIB_SRC_CXX_EXPORT:%.cpp=$(VLIB_DIR_BUILDOBJ)/%.o)
 # Verilator and toolchain flags
 #=====================================================================
 
-# Verilated model parallelism config
-VLIB_NPROC_CPU = $(shell nproc)
-VLIB_NPROC_DUT = 8 # Depends on RTL circuit size, just try and find a verilator-allowed largest number
-VLIB_NPROC_SIM = $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
 VLIB_CXXFLAGS += -DVENTUS_RTL_MODEL_THREADS=$(VLIB_NPROC_SIM)
 
 # Generate C++ in executable form
@@ -145,6 +165,7 @@ VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_CXXFLAGS += -DENABLE_GVM=1
 VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
+VLIB_CXXFLAGS += -I$(abspath .)
 VLIB_CXXFLAGS += -I$(abspath $(GVM_REF_INCLUDE_DIR))
 #VLIB_CXXFLAGS += -fsanitize=address,undefined
 VLIB_LDFLAGS += -lc
@@ -187,6 +208,18 @@ $(VLIB_PMU_SNAPSHOT_INC): $(VLIB_PARAMS_JSON) gen_pmu_snapshot_inc.py
 	mkdir -p $(dir $@)
 	python3 gen_pmu_snapshot_inc.py $< $@
 
+$(VLIB_MODEL_IDENTITY_CPP) $(VLIB_MODEL_IDENTITY_JSON) &: $(VLIB_SRC_V) $(VLIB_MODEL_INPUT_FILES)
+	mkdir -p $(VLIB_MODEL_IDENTITY_DIR)
+	python3 gen_model_identity.py \
+	  --root $(CURDIR) \
+	  $(foreach input,$(VLIB_MODEL_INPUT_FILES),--input $(input)) \
+	  --input-tree $(VLIB_SRC_V_DIR) \
+	  --variant $(VLIB_VARIANT_KEY) \
+	  --release $(RELEASE) --savable 0 --trace $(VLIB_TRACE_ENABLED) --gvm 1 \
+	  --model-threads $(VLIB_NPROC_SIM) \
+	  --output-cpp $(VLIB_MODEL_IDENTITY_CPP) \
+	  --output-json $(VLIB_MODEL_IDENTITY_JSON)
+
 verilog: $(VLIB_SRC_V)
 
 verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
@@ -224,13 +257,11 @@ install: $(VLIB_TARGET)
 	install -m 644 ventus_rtlsim.h $(PREFIX)/include/
 
 clean-lib:
-	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.a $(VLIB_DIR_BUILDOBJ_DEBUG)/*.o $(VLIB_DIR_BUILDOBJ_DEBUG)/*.so
-	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.a $(VLIB_DIR_BUILDOBJ_RELEASE)/*.o $(VLIB_DIR_BUILDOBJ_RELEASE)/*.so
+	-rm -rf $(VLIB_DIR_BUILDOBJ)
 	-rm -f $(VLIB_DIR_BUILD)/*.so
 
 clean-lib-dep: clean-lib
-	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.d
-	-rm -f $(VLIB_DIR_BUILDOBJ_RELEASE)/*.d
+	@true
 
 clean-verilated: 
 	-rm -rf $(VLIB_DIR_BUILD)

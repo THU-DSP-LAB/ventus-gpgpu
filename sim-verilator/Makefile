@@ -25,32 +25,26 @@ MOLD = $(shell which mold)
 # Source file list and build directories
 #=====================================================================
 
-DIR_BUILD = build/driver_example
-DIR_BUILDOBJ_DEBUG = $(DIR_BUILD)/debug
-DIR_BUILDOBJ_RELEASE = $(DIR_BUILD)/release
-ifeq ($(RELEASE),1)
-DIR_BUILDOBJ = $(DIR_BUILDOBJ_RELEASE)
-else
-DIR_BUILDOBJ = $(DIR_BUILDOBJ_DEBUG)
-endif
-
 SRC_CXX = sim_main.cpp cmdarg.cpp kernel.cpp
-OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
-DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
-
-APP = $(DIR_BUILDOBJ)/sim-VentusRTL
-METADATA_PARSER_TEST = build/tests/metadata_parser_test
-FORK_SNAPSHOT_TEST = build/tests/fork_snapshot_test
-PERSISTENT_STATE_TEST = build/tests/persistent_state_test
 
 #=====================================================================
 # Include Ventus RTL library build rules
 #=====================================================================
 
-# default build target should be set by this Makefile
-default: $(APP)
-
 include verilate.mk
+
+DIR_BUILD = build/driver_example
+DIR_BUILDOBJ = $(DIR_BUILD)/$(VLIB_VARIANT_KEY)
+OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
+DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
+
+APP = $(DIR_BUILDOBJ)/sim-VentusRTL
+METADATA_PARSER_TEST = build/tests/common/metadata_parser_test
+FORK_SNAPSHOT_TEST = build/tests/$(VLIB_VARIANT_KEY)/fork_snapshot_test
+PERSISTENT_STATE_TEST = build/tests/$(VLIB_VARIANT_KEY)/persistent_state_test
+
+# Extend verilate.mk's default target with the matching host variant.
+default: $(APP)
 
 #=====================================================================
 # Toolchain flags
@@ -125,13 +119,16 @@ ifneq ($(TRACE),1)
 	$(PERSISTENT_STATE_TEST) no-trace-config
 endif
 
+print-build-identity: $(VLIB_MODEL_IDENTITY_JSON)
+	@cat $(VLIB_MODEL_IDENTITY_JSON)
+
 gdb: $(APP)
 	@echo
 	-rm -f logs/ventus_rtlsim.log
 	gdb --tui $(APP)
 	@echo
 
-.PHONY: lib run test-metadata-parser test-fork-snapshot test-persistent-state gdb
+.PHONY: lib run test-metadata-parser test-fork-snapshot test-persistent-state print-build-identity gdb
 
 #=====================================================================
 # Other targets

@@ -1,6 +1,7 @@
 #include "persistent_state.hpp"
 
 #include "Vdut.h"
+#include "model_identity.hpp"
 #include "ventus_rtlsim_impl.hpp"
 #include "verilated.h"
 #include "verilated_save.h"
@@ -15,6 +16,7 @@
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <fcntl.h>
@@ -26,7 +28,8 @@
 namespace {
 constexpr uint64_t kStateMagic = 0x5652544c53544154ull;
 constexpr uint32_t kStateVersion = 1;
-constexpr uint32_t kManifestVersion = 1;
+constexpr uint32_t kManifestVersion = 2;
+constexpr uint32_t kIdentityVersion = 2;
 constexpr const char* kStateFilename = "state.bin";
 constexpr const char* kManifestFilename = "manifest.json";
 constexpr const char* kCompleteFilename = "COMPLETE";
@@ -102,11 +105,23 @@ std::string sha256_file(const std::filesystem::path& path) {
 }
 
 nlohmann::json rtl_identity() {
+    if (kVentusRtlModelIdentity.model_threads != kVentusRtlModelThreads
+        || !kVentusRtlModelIdentity.savable_enabled
+        || kVentusRtlModelIdentity.trace_enabled != static_cast<bool>(VM_TRACE)) {
+        throw std::runtime_error("compiled RTL model identity is inconsistent");
+    }
     nlohmann::json parameters = nlohmann::json::object();
     for (const auto& [name, value] : rtl_parameters) {
         parameters[name] = value;
     }
     return {
+        {"identity_schema_version", kIdentityVersion},
+        {"model_fingerprint", kVentusRtlModelIdentity.fingerprint},
+        {"build_variant", kVentusRtlModelIdentity.variant},
+        {"release_enabled", kVentusRtlModelIdentity.release_enabled},
+        {"savable_enabled", kVentusRtlModelIdentity.savable_enabled},
+        {"trace_enabled", kVentusRtlModelIdentity.trace_enabled},
+        {"gvm_enabled", kVentusRtlModelIdentity.gvm_enabled},
         {"verilator", {
             {"name", Verilated::productName()},
             {"version", Verilated::productVersion()},
@@ -160,13 +175,9 @@ bool read_manifest(
             && manifest.at("state_file") == kStateFilename;
         const auto expected_identity = rtl_identity();
         const bool identity_matches = manifest.at("identity") == expected_identity;
-#ifdef VENTUS_RTL_CPP_PROBE
         if (metadata_matches && !identity_matches) {
-            std::cerr << "persistent state identity mismatch\nobserved: "
-                      << manifest.at("identity").dump()
-                      << "\nexpected: " << expected_identity.dump() << std::endl;
+            std::cerr << "persistent state identity mismatch" << std::endl;
         }
-#endif
         return metadata_matches && identity_matches;
     } catch (const std::exception&) {
         return false;
