@@ -153,8 +153,13 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
   val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
-  val flush_set =flushCount/params.cache.ways.asUInt
-  val flush_way =(flushCount%params.cache.ways.asUInt)
+  // flushCount carries one terminal bit so completion can be observed by the
+  // following pipeline stage. Keep that bit for control, but never use it as
+  // part of a dynamic Vec index.
+  val flush_set_raw = flushCount / params.cache.ways.asUInt
+  val flush_way_raw = flushCount % params.cache.ways.asUInt
+  val flush_set = flush_set_raw(params.setBits - 1, 0)
+  val flush_way = flush_way_raw(params.wayBits - 1, 0)
   val regout = cc_dir.io.r.resp.data //
   val ways = regout.asTypeOf(Vec(params.cache.ways,new DirectoryEntry_lite(params)))
   val flush_tag =ways(flush_way).tag
