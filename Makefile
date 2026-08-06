@@ -5,6 +5,7 @@ PREFIX ?= $(CURDIR)/install
 GVM_REF_DIR ?= $(PREFIX)/lib
 GVM_TRACE ?= 1
 BACKEND_BUILD_RETRIES ?= 3
+PUBLIC_ABI_COMPILE_TEST := sim-verilator/tests/public_abi_compile_test.c
 
 define RUN_BACKEND_MAKE
 +@attempt=1; \
@@ -62,16 +63,20 @@ clean:
 clean-git:
 	git clean -fd
 
-rtlsim-withcache:
+check-rtlsim-public-abi:
+	$(CC) -std=c11 -fsyntax-only -Isim-verilator $(PUBLIC_ABI_COMPILE_TEST)
+	$(CC) -std=c11 -fsyntax-only -Isim-verilator-nocache $(PUBLIC_ABI_COMPILE_TEST)
+
+rtlsim-withcache: check-rtlsim-public-abi
 	$(call RUN_BACKEND_MAKE,-C sim-verilator lib RELEASE=$(RELEASE) PREFIX=$(PREFIX),rm -rf sim-verilator/build/libVentusRTL sim-verilator/build/generated/rtl sim-verilator/dut.v sim-verilator/parameters.json sim-verilator/rtl_parameters.cpp)
 
-rtlsim-nocache:
+rtlsim-nocache: check-rtlsim-public-abi
 	$(call RUN_BACKEND_MAKE,-C sim-verilator-nocache lib RELEASE=$(RELEASE) PREFIX=$(PREFIX),rm -rf sim-verilator-nocache/build/libVentusRTL sim-verilator-nocache/build/generated/rtl sim-verilator-nocache/dut.v sim-verilator-nocache/parameters.json sim-verilator-nocache/rtl_parameters.cpp)
 
-gvm-withcache:
+gvm-withcache: check-rtlsim-public-abi
 	$(call RUN_BACKEND_MAKE,-C sim-verilator -f gvm.mk lib RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_TRACE=$(GVM_TRACE) GVM_REF_DIR=$(GVM_REF_DIR),rm -rf sim-verilator/build/libVentusGVM sim-verilator/build/generated/gvm sim-verilator/verilog-out)
 
-gvm-nocache:
+gvm-nocache: check-rtlsim-public-abi
 	$(call RUN_BACKEND_MAKE,-C sim-verilator-nocache -f gvm.mk lib RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_TRACE=$(GVM_TRACE) GVM_REF_DIR=$(GVM_REF_DIR),rm -rf sim-verilator-nocache/build/libVentusGVM sim-verilator-nocache/build/generated/gvm sim-verilator-nocache/verilog-out)
 
 rtlsim-gvm-build: rtlsim-withcache rtlsim-nocache gvm-withcache gvm-nocache
@@ -82,5 +87,5 @@ rtlsim-gvm-install: rtlsim-gvm-build
 	+$(MAKE) -C sim-verilator -f gvm.mk install RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_REF_DIR=$(GVM_REF_DIR)
 	+$(MAKE) -C sim-verilator-nocache -f gvm.mk install RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_REF_DIR=$(GVM_REF_DIR)
 
-.PHONY: init bump bsp idea compile test verilog fpga-verilog clean clean-git
+.PHONY: init bump bsp idea compile test verilog fpga-verilog clean clean-git check-rtlsim-public-abi
 .PHONY: rtlsim-withcache rtlsim-nocache gvm-withcache gvm-nocache rtlsim-gvm-build rtlsim-gvm-install

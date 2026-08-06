@@ -139,6 +139,20 @@ typedef struct {
     const ventus_rtlsim_dcache_pmu_t *dcache;
 } ventus_rtlsim_pmu_t;
 
+// Public PMEM ABI types are shared by all RTL backends. The registration and
+// statistics entry points remain optional backend capabilities.
+typedef enum {
+    VENTUS_PMEM_REGION_BUFFER = 0,
+    VENTUS_PMEM_REGION_PDS = 1,
+} ventus_pmem_region_kind_t;
+
+typedef struct {
+    uint64_t cold_page;
+    uint64_t pds_cold_page;
+    uint64_t allocation_padding;
+    uint64_t out_of_bounds;
+} ventus_pmem_missing_read_stats_t;
+
 // =
 // API functions:
 // =
