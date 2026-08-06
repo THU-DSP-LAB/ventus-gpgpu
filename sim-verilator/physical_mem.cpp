@@ -1,6 +1,113 @@
 #include "physical_mem.hpp"
 #include "verilated_save.h"
 
+#include <iterator>
+#include <limits>
+
+bool PhysicalMemory::range_end(paddr_t base, uint64_t size, paddr_t& end) {
+    if (size == 0 || base > std::numeric_limits<paddr_t>::max() - size) {
+        return false;
+    }
+    end = base + size;
+    return true;
+}
+
+bool PhysicalMemory::region_register(const PmemRegion& region) {
+    paddr_t region_end = 0;
+    if (region.requested_size == 0 || region.allocated_size < region.requested_size
+        || !range_end(region.base, region.allocated_size, region_end)) {
+        return false;
+    }
+
+    auto next = m_regions.lower_bound(region.base);
+    if (next != m_regions.end() && next->first == region.base) {
+        const auto& existing = next->second;
+        return existing.requested_size == region.requested_size
+            && existing.allocated_size == region.allocated_size
+            && existing.kind == region.kind
+            && existing.allocation_id == region.allocation_id;
+    }
+    if (next != m_regions.end() && next->first < region_end) {
+        return false;
+    }
+    if (next != m_regions.begin()) {
+        const auto& previous = std::prev(next)->second;
+        paddr_t previous_end = 0;
+        if (!range_end(previous.base, previous.allocated_size, previous_end)
+            || previous_end > region.base) {
+            return false;
+        }
+    }
+
+    return m_regions.emplace(region.base, region).second;
+}
+
+bool PhysicalMemory::region_unregister(paddr_t base, uint64_t allocation_id) {
+    const auto region = m_regions.find(base);
+    if (region == m_regions.end() || region->second.allocation_id != allocation_id) {
+        return false;
+    }
+    m_regions.erase(region);
+    return true;
+}
+
+const PmemRegion* PhysicalMemory::find_region(paddr_t paddr, uint64_t size) const {
+    paddr_t access_end = 0;
+    if (!range_end(paddr, size, access_end)) {
+        return nullptr;
+    }
+
+    auto region = m_regions.upper_bound(paddr);
+    if (region == m_regions.begin()) {
+        return nullptr;
+    }
+    --region;
+
+    paddr_t allocated_end = 0;
+    if (!range_end(region->second.base, region->second.allocated_size, allocated_end)
+        || paddr < region->second.base || access_end > allocated_end) {
+        return nullptr;
+    }
+    return &region->second;
+}
+
+PmemMissingReadKind PhysicalMemory::classify_missing_read(
+    paddr_t paddr, uint64_t size) const {
+    const PmemRegion* region = find_region(paddr, size);
+    if (region == nullptr) {
+        return PmemMissingReadKind::OutOfBounds;
+    }
+    if (region->kind == PmemRegionKind::Pds) {
+        return PmemMissingReadKind::PdsColdPage;
+    }
+
+    paddr_t access_end = 0;
+    paddr_t requested_end = 0;
+    if (!range_end(paddr, size, access_end)
+        || !range_end(region->base, region->requested_size, requested_end)
+        || access_end > requested_end) {
+        return PmemMissingReadKind::AllocationPadding;
+    }
+    return PmemMissingReadKind::ColdPage;
+}
+
+void PhysicalMemory::record_missing_read(PmemMissingReadKind kind) const {
+    switch (kind) {
+    case PmemMissingReadKind::ColdPage:
+        ++m_missing_read_stats.cold_page;
+        break;
+    case PmemMissingReadKind::PdsColdPage:
+        ++m_missing_read_stats.pds_cold_page;
+        break;
+    case PmemMissingReadKind::AllocationPadding:
+        ++m_missing_read_stats.allocation_padding;
+        break;
+    case PmemMissingReadKind::OutOfBounds:
+        ++m_missing_read_stats.out_of_bounds;
+        break;
+    }
+}
+
 bool PhysicalMemory::page_alloc(paddr_t paddr) {
     if (paddr % m_pagesize != 0) {
         logger->warn("PMEM address 0x{:x} is not aligned to page! Align it...", paddr);
@@ -89,6 +196,7 @@ bool PhysicalMemory::read(paddr_t paddr, void* data_, uint64_t size) const {
         size = size_this_copy;
     }
     if (m_map.find(first_page_base) == m_map.end()) {
+        record_missing_read(classify_missing_read(paddr, size));
         logger->error("PMEM page at 0x{:x} not allocated, read as all zero", paddr);
         std::memset(data, 0, size);
         return false;

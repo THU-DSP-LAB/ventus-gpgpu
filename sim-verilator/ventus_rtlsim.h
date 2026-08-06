@@ -139,6 +139,18 @@ typedef struct {
     const ventus_rtlsim_dcache_pmu_t *dcache;
 } ventus_rtlsim_pmu_t;
 
+typedef enum {
+    VENTUS_PMEM_REGION_BUFFER = 0,
+    VENTUS_PMEM_REGION_PDS = 1,
+} ventus_pmem_region_kind_t;
+
+typedef struct {
+    uint64_t cold_page;
+    uint64_t pds_cold_page;
+    uint64_t allocation_padding;
+    uint64_t out_of_bounds;
+} ventus_pmem_missing_read_stats_t;
+
 // =
 // API functions:
 // =
@@ -223,6 +235,17 @@ DLL_PUBLIC void ventus_rtlsim_add_kernel(
 // If config.pmem.auto_alloc is set, you don't need to call these functions.
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
+
+// Register driver-owned physical ranges for classifying reads from sparse, unmaterialized pages.
+// Region metadata is diagnostic state and is intentionally not part of persistent RTL snapshots.
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_register(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t requested_size,
+    uint64_t allocated_size, ventus_pmem_region_kind_t kind,
+    uint64_t allocation_id);
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_unregister(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t allocation_id);
+DLL_PUBLIC ventus_pmem_missing_read_stats_t ventus_rtlsim_pmem_missing_read_stats(
+    const ventus_rtlsim_t* sim);
 
 // Physical memory read & write
 // copy data from host to device

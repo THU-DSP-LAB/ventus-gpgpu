@@ -42,6 +42,7 @@ APP = $(DIR_BUILDOBJ)/sim-VentusRTL
 METADATA_PARSER_TEST = build/tests/common/metadata_parser_test
 FORK_SNAPSHOT_TEST = build/tests/$(VLIB_VARIANT_KEY)/fork_snapshot_test
 PERSISTENT_STATE_TEST = build/tests/$(VLIB_VARIANT_KEY)/persistent_state_test
+PMEM_REGION_TEST = build/tests/$(VLIB_VARIANT_KEY)/pmem_region_test
 
 # Extend verilate.mk's default target with the matching host variant.
 default: $(APP)
@@ -122,13 +123,22 @@ endif
 print-build-identity: $(VLIB_MODEL_IDENTITY_JSON)
 	@cat $(VLIB_MODEL_IDENTITY_JSON)
 
+$(PMEM_REGION_TEST): tests/pmem_region_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/pmem_region_test.cpp \
+	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
+	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+
+test-pmem-region: $(PMEM_REGION_TEST)
+	$(PMEM_REGION_TEST)
+
 gdb: $(APP)
 	@echo
 	-rm -f logs/ventus_rtlsim.log
 	gdb --tui $(APP)
 	@echo
 
-.PHONY: lib run test-metadata-parser test-fork-snapshot test-persistent-state print-build-identity gdb
+.PHONY: lib run test-metadata-parser test-fork-snapshot test-persistent-state test-pmem-region print-build-identity gdb
 
 #=====================================================================
 # Other targets
