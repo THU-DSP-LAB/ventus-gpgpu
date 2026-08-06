@@ -196,8 +196,32 @@ bool PhysicalMemory::read(paddr_t paddr, void* data_, uint64_t size) const {
         size = size_this_copy;
     }
     if (m_map.find(first_page_base) == m_map.end()) {
-        record_missing_read(classify_missing_read(paddr, size));
-        logger->error("PMEM page at 0x{:x} not allocated, read as all zero", paddr);
+        const PmemMissingReadKind kind = classify_missing_read(paddr, size);
+        record_missing_read(kind);
+        switch (kind) {
+        case PmemMissingReadKind::ColdPage:
+            logger->warn(
+                "PMEM cold page read at 0x{:x} ({} bytes) inside buffer allocation; "
+                "returning zeros",
+                paddr, size);
+            break;
+        case PmemMissingReadKind::PdsColdPage:
+            logger->warn(
+                "PMEM PDS cold page read at 0x{:x} ({} bytes); returning zeros",
+                paddr, size);
+            break;
+        case PmemMissingReadKind::AllocationPadding:
+            logger->warn(
+                "PMEM allocation-padding read at 0x{:x} ({} bytes) inside aligned "
+                "buffer extent; returning zeros",
+                paddr, size);
+            break;
+        case PmemMissingReadKind::OutOfBounds:
+            logger->error(
+                "PMEM out-of-bounds read at 0x{:x} ({} bytes); returning zeros",
+                paddr, size);
+            break;
+        }
         std::memset(data, 0, size);
         return false;
     }
