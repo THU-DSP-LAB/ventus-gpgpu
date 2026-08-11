@@ -230,6 +230,15 @@ DLL_PUBLIC void ventus_rtlsim_add_kernel(
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
 
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_register(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t requested_size,
+    uint64_t allocated_size, ventus_pmem_region_kind_t kind,
+    uint64_t allocation_id);
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_unregister(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t allocation_id);
+DLL_PUBLIC ventus_pmem_missing_read_stats_t ventus_rtlsim_pmem_missing_read_stats(
+    const ventus_rtlsim_t* sim);
+
 // Physical memory read & write
 // copy data from host to device
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size);

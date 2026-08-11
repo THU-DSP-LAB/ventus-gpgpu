@@ -123,7 +123,7 @@ endif
 print-build-identity: $(VLIB_MODEL_IDENTITY_JSON)
 	@cat $(VLIB_MODEL_IDENTITY_JSON)
 
-$(PMEM_REGION_TEST): tests/pmem_region_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
+$(PMEM_REGION_TEST): tests/pmem_region_test.cpp standalone_pmem_regions.hpp ventus_rtlsim.h $(VLIB_TARGET)
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++20 -g -O1 -I. tests/pmem_region_test.cpp \
 	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \

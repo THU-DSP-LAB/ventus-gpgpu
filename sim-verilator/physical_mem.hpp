@@ -51,6 +51,7 @@ public:
     bool write(paddr_t paddr, const void* data, const bool mask[], uint64_t size);
     bool write(paddr_t paddr, const void* data, uint64_t size);
     bool read(paddr_t paddr, void* data, uint64_t size) const ;
+    bool read_d2h(paddr_t paddr, void* data, uint64_t size) const;
     inline paddr_t get_page_base(paddr_t paddr) const { return paddr - paddr % m_pagesize; }
     inline uint64_t page_count() const { return m_map.size(); }
     inline uint64_t region_count() const { return m_regions.size(); }

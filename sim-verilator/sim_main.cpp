@@ -1,4 +1,5 @@
 #include "kernel.hpp"
+#include "standalone_pmem_regions.hpp"
 #include "ventus_rtlsim.h"
 #include <cassert>
 #include <cstring>
@@ -66,6 +67,7 @@ int main(int argc, char* argv[]) {
     std::vector<std::shared_ptr<Kernel>> kernels;
     std::function<void(std::shared_ptr<Kernel>)> f_new_kernel = [sim, &kernels](std::shared_ptr<Kernel> kernel) {
         metadata_t metadata = *kernel->get_metadata();
+        register_standalone_pmem_regions(sim, metadata);
         metadata.data = new kernel_load_data_callback_t { .datafile = kernel->m_datafile, .sim = sim };
         ventus_rtlsim_add_kernel__delay_data_loading(sim, &metadata, kernel_load_data_callback, nullptr);
         kernels.push_back(std::move(kernel));

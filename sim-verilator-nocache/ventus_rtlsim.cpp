@@ -93,11 +93,45 @@ extern "C" bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base
     return sim->pmem->page_alloc(base);
 }
 extern "C" bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base) { return sim->pmem->page_free(base); }
+extern "C" bool ventus_rtlsim_pmem_region_register(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t requested_size,
+    uint64_t allocated_size, ventus_pmem_region_kind_t kind,
+    uint64_t allocation_id) {
+    if (sim == nullptr) {
+        return false;
+    }
+    PmemRegionKind internal_kind;
+    switch (kind) {
+    case VENTUS_PMEM_REGION_BUFFER: internal_kind = PmemRegionKind::Buffer; break;
+    case VENTUS_PMEM_REGION_PDS: internal_kind = PmemRegionKind::Pds; break;
+    default: return false;
+    }
+    return sim->pmem->region_register({
+        base, requested_size, allocated_size, internal_kind, allocation_id,
+    });
+}
+extern "C" bool ventus_rtlsim_pmem_region_unregister(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t allocation_id) {
+    return sim != nullptr && sim->pmem->region_unregister(base, allocation_id);
+}
+extern "C" ventus_pmem_missing_read_stats_t ventus_rtlsim_pmem_missing_read_stats(
+    const ventus_rtlsim_t* sim) {
+    if (sim == nullptr) {
+        return {};
+    }
+    const auto stats = sim->pmem->missing_read_stats();
+    return {
+        stats.cold_page,
+        stats.pds_cold_page,
+        stats.allocation_padding,
+        stats.out_of_bounds,
+    };
+}
 extern "C" bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size) {
     return sim->pmem->write(dst, src, size);
 }
 extern "C" bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size) {
-    return sim->pmem->read(src, dst, size);
+    return sim->pmem->read_d2h(src, dst, size);
 }
 
 extern "C" int ventus_rtlsim_get_parameter(const char* name, uint32_t* out_value) {

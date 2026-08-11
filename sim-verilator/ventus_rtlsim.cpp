@@ -225,7 +225,7 @@ extern "C" bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, con
     return sim->pmem->write(dst, src, size);
 }
 extern "C" bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size) {
-    return sim->pmem->read(src, dst, size);
+    return sim->pmem->read_d2h(src, dst, size);
 }
 
 extern "C" int ventus_rtlsim_get_parameter(const char* name, uint32_t* out_value) {

@@ -230,6 +230,21 @@ bool PhysicalMemory::read(paddr_t paddr, void* data_, uint64_t size) const {
     return success;
 }
 
+bool PhysicalMemory::read_d2h(paddr_t paddr, void* data, uint64_t size) const {
+    const PmemRegion* region = find_region(paddr, 1);
+    const bool read_success = read(paddr, data, size);
+    if (region == nullptr) {
+        return read_success;
+    }
+
+    paddr_t access_end = 0;
+    paddr_t requested_end = 0;
+    return region->kind == PmemRegionKind::Buffer
+        && range_end(paddr, size, access_end)
+        && range_end(region->base, region->requested_size, requested_end)
+        && access_end <= requested_end;
+}
+
 bool PhysicalMemory::save(VerilatedSerialize& output) const {
     output << m_pagesize << static_cast<uint64_t>(m_auto_alloc) << static_cast<uint64_t>(m_map.size());
     for (const auto& [address, page] : m_map) {
