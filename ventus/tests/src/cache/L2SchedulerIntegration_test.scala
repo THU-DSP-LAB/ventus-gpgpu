@@ -14,6 +14,7 @@ class SchedulerIntegrationHarness(params: InclusiveCacheParameters_lite) extends
     val in_d = Decoupled(new TLBundleD_lite_plus(params))
     val out_a = Decoupled(new TLBundleA_lite(params))
     val out_d = Flipped(Decoupled(new TLBundleD_lite(params)))
+    val directoryReservation = Output(UInt((params.cache.sets * params.cache.ways).W))
   })
 
   val scheduler = Module(new Scheduler(params))
@@ -52,6 +53,10 @@ class SchedulerIntegrationHarness(params: InclusiveCacheParameters_lite) extends
   val mshrOwned = expose(scheduler.mshr_ownedOH)
   val mshrWait = expose(scheduler.sourceD.io.mshr_wait)
   val maintenanceDrained = expose(scheduler.maintenanceDrained)
+  private val exposedReservation = (0 until params.cache.sets).map { set =>
+    expose(scheduler.directory.reservation(set))
+  }
+  io.directoryReservation := VecInit(exposedReservation).asUInt
 }
 
 class L2SchedulerIntegrationTest extends AnyFreeSpec with ChiselScalatestTester {
@@ -82,6 +87,10 @@ class L2SchedulerIntegrationTest extends AnyFreeSpec with ChiselScalatestTester 
   private val livenessParams = params.copy(
     cache = params.cache.copy(ways = 4),
     micro = params.micro.copy(memCycles = 3)
+  )
+  private val admissionParams = params.copy(
+    cache = params.cache.copy(ways = 4, blockBytes = 64),
+    micro = params.micro.copy(memCycles = 6)
   )
 
   private class Observer(dut: SchedulerIntegrationHarness) {
@@ -476,6 +485,80 @@ class L2SchedulerIntegrationTest extends AnyFreeSpec with ChiselScalatestTester 
       assert(cycles < 1024, "Scheduler did not drain after all backpressure was released")
       assert(observer.fillCommits == 5,
         "both additional refills must commit exactly once")
+    }
+  }
+
+  "a pending primary miss reserves the final free MSHR at admission" in {
+    test(new SchedulerIntegrationHarness(admissionParams)) { dut =>
+      initialize(dut)
+      val observer = new Observer(dut)
+      reset(dut, observer)
+
+      // Keep allocated misses resident in their MSHRs. With two MSHRs, the
+      // first request leaves exactly one free entry.
+      dut.io.out_a.ready.poke(false.B)
+      driveA(dut, observer, Get, address = 0x00, source = 1)
+      var cycles = 0
+      while (dut.mshrOwned.peek().litValue.bitCount != 1 && cycles < 32) {
+        observer.step()
+        cycles += 1
+      }
+      assert(dut.mshrOwned.peek().litValue.bitCount == 1,
+        "the setup request must own exactly one MSHR")
+
+      // This miss enters the Directory while one MSHR is still free.
+      dut.io.in_a.bits.opcode.poke(Get)
+      dut.io.in_a.bits.size.poke(4.U)
+      dut.io.in_a.bits.source.poke(2.U)
+      dut.io.in_a.bits.address.poke(0x80.U)
+      dut.io.in_a.bits.mask.poke(BigInt("ffff", 16).U)
+      dut.io.in_a.bits.data.poke(0.U)
+      dut.io.in_a.bits.param.poke(0.U)
+      dut.io.in_a.valid.poke(true.B)
+      dut.io.in_a.ready.expect(true.B)
+      observer.step()
+
+      // Its pending result consumes the final free MSHR on this cycle. Do not
+      // admit another lookup using the same apparent free entry: if that
+      // lookup misses, it could reserve a victim without an MSHR owner.
+      dut.io.in_a.bits.source.poke(3.U)
+      dut.io.in_a.bits.address.poke(0x100.U)
+      dut.io.in_a.ready.expect(false.B)
+      observer.step()
+      dut.io.in_a.valid.poke(false.B)
+      dut.mshrOwned.expect(3.U)
+
+      // Let the two owned misses reach memory, then complete one of them.
+      // The held result must subsequently allocate the released MSHR and
+      // issue its own memory request.
+      dut.io.out_a.ready.poke(true.B)
+      val (memorySource0, _) = waitForMemoryGet(dut, observer, 0x00)
+      val (memorySource1, _) = waitForMemoryGet(dut, observer, 0x80)
+      val line0 = BigInt("10101010101010101010101010101010", 16)
+      val line1 = BigInt("21212121212121212121212121212121", 16)
+      val line2 = BigInt("32323232323232323232323232323232", 16)
+
+      sendRefill(dut, observer, memorySource0, line0)
+      waitForFillCommit(dut, observer)
+      waitForResponse(dut, observer, source = 1, Some(line0))
+
+      driveA(dut, observer, Get, address = 0x100, source = 3)
+      val (memorySource2, _) = waitForMemoryGet(dut, observer, 0x100)
+      sendRefill(dut, observer, memorySource1, line1)
+      waitForFillCommit(dut, observer)
+      waitForResponse(dut, observer, source = 2, Some(line1))
+      sendRefill(dut, observer, memorySource2, line2)
+      waitForFillCommit(dut, observer)
+      waitForResponse(dut, observer, source = 3, Some(line2))
+
+      cycles = 0
+      while (!dut.maintenanceDrained.peek().litToBoolean && cycles < 128) {
+        observer.step()
+        cycles += 1
+      }
+      dut.maintenanceDrained.expect(true.B)
+      dut.mshrOwned.expect(0.U)
+      dut.io.directoryReservation.expect(0.U)
     }
   }
 }

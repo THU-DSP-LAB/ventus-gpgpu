@@ -422,7 +422,16 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   // btree-002 fix v3.2: request.ready 与 directory read 使用同一个 scoreboard accept gate。
   // 即使未来 scoreboard 满，新-line Put 也不会出现 Directory 消费而 SinkA 未出队的不一致。
-  val requestCanIssue = mshr_free && requests.io.push.ready && directory.io.ready &&
+  // A pending primary-miss result already owns the free MSHR selected by
+  // mshr_insertOH, even before its fire edge updates the registered ownership
+  // state. Do not admit another lookup using that same apparent free entry.
+  // Holding an extra result instead would deadlock a same-set refill against
+  // Directory's write/result stability interlock.
+  val resultReservesMshr = directory.io.result.valid &&
+    !directory.io.result.bits.hit && !directory.io.result.bits.flush && alloc
+  val resultMshrOH = Mux(resultReservesMshr, mshr_insertOH, 0.U(params.mshrs.W))
+  val mshrFreeAfterResult = ((~mshr_ownedOH).asUInt & (~resultMshrOH).asUInt).orR
+  val requestCanIssue = mshrFreeAfterResult && requests.io.push.ready && directory.io.ready &&
     wtScoreboardCanAccept && !(issue_flush_invalidate)
   directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && requestCanIssue
   directory.io.read.bits := request.bits
@@ -482,8 +491,20 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   val needEnq  = directory.io.result.bits.hit ||
                  directory.io.result.bits.dirty ||
                  directory.io.result.bits.last_flush
+  // ListBuffer capacity and MSHR ownership are separate resources. A primary
+  // miss needs both: push.ready alone can remain high when all MSHRs are owned
+  // because the request list has secondary entries beyond the MSHR count.
+  // Hold that result until an MSHR is free; a secondary miss can still merge
+  // into its matching owner without consuming a new MSHR.
+  val primaryMissCanTrack = !needPush || !alloc || mshr_free
   directory.io.result.ready := (!needPush || requests.io.push.ready) &&
-                               (!needEnq  || dir_result_buffer.io.enq.ready)
+                               (!needEnq  || dir_result_buffer.io.enq.ready) &&
+                               primaryMissCanTrack
+
+  when(directory.io.result.fire && needPush && alloc) {
+    assert(mshr_insertOH.orR,
+           "primary L2 miss retired without a free MSHR owner")
+  }
 
   // A directory sweep must not overlap responses which still reference a
   // BankedStore way. In particular, mshr_empty alone does not cover L2 hits:
