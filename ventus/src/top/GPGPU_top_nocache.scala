@@ -93,6 +93,7 @@ class SM_wrapper_nocache() extends Module {
   icache.io.memRsp :<>= io.icache.rsp
   io.dcache_req :<>= pipe.io.dcache_req
   pipe.io.dcache_rsp :<>= io.dcache_rsp
+  pipe.io.dcache_flush_done := io.dcache_req.fire && io.dcache_req.bits.isKernelFlush
 
   if(GVM_ENABLED){
     val WF_ID_WIDTH = log2Ceil(num_warp_in_a_block)

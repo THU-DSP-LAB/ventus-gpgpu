@@ -36,6 +36,8 @@ class DCacheCoreReq(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) exte
   val instrId = UInt(WIdBits.W)//TODO length unsure
   val opcode = UInt(3.W)//0-read 1-write 3- flush/invalidate
   val param = UInt(4.W)
+  // Kernel-boundary flushes complete out-of-band instead of through the LSU MSHR.
+  val isKernelFlush = Bool()
   val tag = UInt(TagBits.W)
   val asid = if(MMU_ENABLED) Some(UInt(asidLen.W)) else None
   val setIdx = UInt(SetIdxBits.W)

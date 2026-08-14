@@ -119,6 +119,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val memReq_coreRsp = Flipped(DecoupledIO(new DCacheCoreRsp))
 
     val CoreRsp = DecoupledIO(new DCacheCoreRsp)
+    val kernelFlushDone = Output(Bool())
 
     val memRspIsFlu = Input(Bool())
     val st2_ready = Output(Bool())
@@ -297,6 +298,12 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
       CoreRsp_pipeReg_st1_st2.enq.ready && !io.memRsp_coreRsp.valid
   val fluInvCoreRspFire =
     fluInvRspPendingFire || (CoreReq_pipeReg_st0_st1.deq.fire && FluInv_st1 && (FlushInvstateReg === responding))
+  val completingKernelFlush = Mux(
+    fluInvRspPendingFire,
+    FluInvRspReqReg.isKernelFlush,
+    CoreReq_pipeReg_st0_st1.deq.bits.Req.isKernelFlush
+  )
+  io.kernelFlushDone := fluInvCoreRspFire && completingKernelFlush
   FlushInvstateReg_next := FlushInvstateReg
   FlushInvstateReg := FlushInvstateReg_next
   when(FlushInvstateReg === idle){

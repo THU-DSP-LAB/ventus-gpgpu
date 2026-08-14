@@ -44,6 +44,7 @@ class DCacheCoreReq_np extends Bundle{
   val data = Vec(num_thread, UInt(xLen.W))
   val opcode = UInt(3.W)
   val param= UInt(4.W)
+  val isKernelFlush = Bool()
   val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
@@ -123,10 +124,11 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     })
     val idx_entry = Input(UInt(log2Up(lsu_nMshrEntry).W))
     val flush_dcache = Flipped(DecoupledIO(Bool()))
+    val flush_dcache_done = Input(Bool())
     val to_dcache = DecoupledIO(new DCacheCoreReq_np)
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
-  val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2:: Nil = Enum(6)
+  val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2::s_flush_wait:: Nil = Enum(7)
   val cnt = new Counter(n = num_thread)
   val state = RegInit(init = s_idle)
 
@@ -277,6 +279,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   }
   io.to_dcache.bits.opcode :=opcode_wire// fence=invalidate, atomic will split to maximum 3 instructions
   io.to_dcache.bits.param :=param_wire
+  io.to_dcache.bits.isKernelFlush := is_flush
 
   (0 until num_thread).foreach(x => {
     io.to_dcache.bits.perLaneAddr(x).blockOffset := blockOffset(x)
@@ -330,7 +333,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     is (s_dcache) {
       when(is_flush) {
         when(io.to_dcache.fire) {
-          state := s_idle
+          state := Mux(io.flush_dcache_done, s_idle, s_flush_wait)
         }.otherwise {
           state := state
         }
@@ -394,6 +397,9 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
       when(reg_save.ctrl.mem_cmd.orR){//===1.U){  // read
         when(io.to_mshr.fire){reg_entryID := io.idx_entry}  // get entryID from MSHR
       }
+    }
+    is(s_flush_wait){
+      when(io.flush_dcache_done){state := s_idle}
     }
     is (s_shared){
       // Maybe Nothing here :-)
@@ -554,6 +560,7 @@ class LSUexe() extends Module{
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val fence_end = Output(UInt(num_warp.W))
     val flush_dcache = Flipped(DecoupledIO(Bool()))
+    val flush_dcache_done = Input(Bool())
 
     val csr_wid = Output(UInt(depth_warp.W))
     val csr_pds = Input(UInt(xLen.W))
@@ -572,6 +579,7 @@ class LSUexe() extends Module{
   io.dcache_req <> AddrCalc.io.to_dcache
   io.shared_req <> AddrCalc.io.to_shared
   io.flush_dcache <> AddrCalc.io.flush_dcache
+  AddrCalc.io.flush_dcache_done := io.flush_dcache_done
 
   val rspArbiter = Module(new Arbiter(new DCacheCoreRsp_np, n = 2))
   rspArbiter.io.in(1) <> io.shared_rsp

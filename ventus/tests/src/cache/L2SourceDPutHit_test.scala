@@ -3,7 +3,7 @@ package play.cache
 import L2cache._
 import chisel3._
 import chiseltest._
-import freechips.rocketchip.tilelink.TLMessages.{PutFullData, PutPartialData}
+import freechips.rocketchip.tilelink.TLMessages.{Hint, HintAck, PutFullData, PutPartialData}
 import org.scalatest.freespec.AnyFreeSpec
 
 class L2SourceDPutHitTest extends AnyFreeSpec with ChiselScalatestTester {
@@ -60,6 +60,7 @@ class L2SourceDPutHitTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.bs_rdat.data.poke(0.U)
     dut.io.bs_wadr.ready.poke(true.B)
     dut.io.a.ready.poke(true.B)
+    dut.io.maintenance_writes_drained.poke(true.B)
   }
 
   private def driveHitPut(
@@ -155,6 +156,37 @@ class L2SourceDPutHitTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.clock.step()
       dut.io.bs_wadr.ready.poke(true.B)
       dut.io.bs_wadr.valid.expect(false.B)
+    }
+  }
+
+  "a final maintenance response waits for all generated writes to drain" in {
+    test(new SourceD(params)) { dut =>
+      initialize(dut)
+      reset(dut)
+
+      dut.io.req.bits.opcode.poke(Hint)
+      dut.io.req.bits.source.poke(1.U)
+      dut.io.req.bits.hit.poke(true.B)
+      dut.io.req.bits.dirty.poke(false.B)
+      dut.io.req.bits.last_flush.poke(true.B)
+      dut.io.maintenance_writes_drained.poke(false.B)
+      dut.io.req.valid.poke(true.B)
+      dut.io.req.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.req.valid.poke(false.B)
+
+      dut.io.d.valid.expect(false.B)
+      dut.io.finish_issue.expect(false.B)
+      dut.clock.step(2)
+      dut.io.d.valid.expect(false.B)
+
+      dut.io.maintenance_writes_drained.poke(true.B)
+      dut.io.d.valid.expect(true.B)
+      dut.io.d.bits.opcode.expect(HintAck)
+      dut.io.finish_issue.expect(true.B)
+      dut.clock.step()
+      dut.io.d.valid.expect(false.B)
+      dut.io.finish_issue.expect(false.B)
     }
   }
 }

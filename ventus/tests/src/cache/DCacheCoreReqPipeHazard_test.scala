@@ -96,6 +96,7 @@ class DCacheCoreReqPipeHazardTest extends AnyFreeSpec with ChiselScalatestTester
     dut.io.request.bits.instrId.poke(0.U)
     dut.io.request.bits.opcode.poke(0.U)
     dut.io.request.bits.param.poke(0.U)
+    dut.io.request.bits.isKernelFlush.poke(false.B)
     dut.io.request.bits.tag.poke(0.U)
     dut.io.request.bits.setIdx.poke(0.U)
     dut.io.request.bits.perLaneAddr.foreach { lane =>

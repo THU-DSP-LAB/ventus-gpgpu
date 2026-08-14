@@ -40,21 +40,25 @@ class warp_scheduler extends Module{
     //val ldst = Input(new warp_schedule_ldst_io()) // assume finish l2cache request
     //val switch = Input(Bool()) // assume coming from LDST unit (or other unit)
     val flushDCache = Decoupled(Bool())
+    val flushDCacheDone = Input(Bool())
     // val inquire_csr_wid = Output(UInt(depth_warp.W))
     // val inquire_csr_addr = Output(UInt(12.W))
     // val inquire_csr_data = Input(UInt(xLen.W))
   })
 
-  val warp_end=io.warp_control.fire&io.warp_control.bits.ctrl.simt_stack_op
   val warp_end_id=io.warp_control.bits.ctrl.wid
   val current_warp=RegInit(0.U(depth_warp.W))
   val next_warp=WireInit(current_warp)
+  val flush_inflight = RegInit(false.B)
+  val flush_done_pending = RegInit(false.B)
+  val flush_inflight_wg = RegInit(0.U(log2Ceil(num_block).W))
+  val final_warp_wid = RegInit(VecInit(Seq.fill(num_block)(0.U(depth_warp.W))))
+  val final_rsp_valid = flush_done_pending
   io.branch.ready:= !io.flushCache.valid
-  io.warp_control.ready:= !io.branch.fire & !io.flushCache.valid
+  io.warp_control.ready:= !io.branch.fire & !io.flushCache.valid & !final_rsp_valid
+  val warp_end=io.warp_control.fire&io.warp_control.bits.ctrl.simt_stack_op
 
   io.warpReq.ready:=true.B
-  io.warpRsp.valid:=warp_end // always ready.
-  io.warpRsp.bits.wid:=warp_end_id
 
   io.CTA2csr.bits:=io.warpReq.bits
   io.CTA2csr.valid:=io.warpReq.valid
@@ -101,7 +105,7 @@ class warp_scheduler extends Module{
   io.pc_req.bits.mask := pcControl(next_warp).mask_o
 
 
-  io.wg_id_lookup:=Mux(!io.warp_control.bits.ctrl.simt_stack_op,warp_end_id,io.warpRsp.bits.wid) //barrier的时候没有warp_end，只是叫这个名字
+  io.wg_id_lookup:=warp_end_id
 
   val warp_bar_cur=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
   val warp_bar_exp=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp_in_a_block.W))))
@@ -117,6 +121,12 @@ class warp_scheduler extends Module{
   val new_wg_wf_count=io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
   val end_wg_id=io.wg_id_tag(TAG_WIDTH-1, WF_ID_WIDTH)
   val end_wf_id=io.wg_id_tag(WF_ID_WIDTH-1, 0)
+  val ending_warp_mask = (1.U(num_warp_in_a_block.W) << warp_end_id).asUInt
+  val warp_end_is_last = warp_end && warp_wg_valid(end_wg_id) &&
+    ((warp_endprg_cnt(end_wg_id) & (~ending_warp_mask).asUInt) === 0.U)
+  val immediate_rsp_valid = warp_end && !warp_end_is_last
+  io.warpRsp.valid := final_rsp_valid || immediate_rsp_valid
+  io.warpRsp.bits.wid := Mux(final_rsp_valid, final_warp_wid(flush_inflight_wg), warp_end_id)
   val warp_bar_data=RegInit(0.U(num_warp.W))  // 0 means not locked by barrier
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
 
@@ -129,9 +139,9 @@ class warp_scheduler extends Module{
       warp_bar_exp(new_wg_id) := (1.U << new_wg_wf_count).asUInt - 1.U  // init to 1 for all future wfs in wg
     }
   }
-  when(io.warpRsp.fire){
+  when(warp_end){
 //    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
-    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+    warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<warp_end_id)).asUInt
   }
   warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
@@ -160,18 +170,32 @@ class warp_scheduler extends Module{
     warp_endprg_cnt(new_wg_id):=warp_endprg_cnt(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     warp_wg_valid(new_wg_id):=true.B
   }
-  when(io.warpRsp.fire){
-    warp_endprg_cnt(end_wg_id) := warp_endprg_cnt(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+  when(warp_end){
+    warp_endprg_cnt(end_wg_id) := warp_endprg_cnt(end_wg_id) & (~(1.U<<warp_end_id)).asUInt
+    when(warp_end_is_last){
+      final_warp_wid(end_wg_id) := warp_end_id
+    }
   }
   for(i<-0 until num_block){
     warp_endprg_mask_0(i) := (warp_endprg_cnt(i).orR === false.B) && warp_wg_valid(i)
   }
   val need_flush = warp_endprg_mask_0.asUInt.orR
   val flush_entry = PriorityEncoder(warp_endprg_mask_0.asUInt)
-  when(warp_endprg_mask_0(flush_entry) && io.flushDCache.ready){
+  when(io.flushDCache.fire){
     warp_wg_valid(flush_entry) := false.B
+    flush_inflight := true.B
+    flush_inflight_wg := flush_entry
+    assert(!flush_inflight, "only one kernel DCache flush may be in flight per SM")
   }
-  io.flushDCache.valid := need_flush
+  when(io.flushDCacheDone){
+    flush_done_pending := true.B
+    assert(flush_inflight, "kernel DCache flush completed without an in-flight request")
+  }
+  when(io.warpRsp.fire && final_rsp_valid){
+    flush_done_pending := false.B
+    flush_inflight := false.B
+  }
+  io.flushDCache.valid := need_flush && !flush_inflight
   io.flushDCache.bits := need_flush
 
 

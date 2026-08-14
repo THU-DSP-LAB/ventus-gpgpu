@@ -740,6 +740,7 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   pipe.io.dcache_rsp.bits.activeMask:=dcache.io.coreRsp.bits.activeMask
   //pipe.io.dcache_rsp.bits.isWrite:=dcache.io.coreRsp.bits.isWrite
   dcache.io.coreRsp.ready:=pipe.io.dcache_rsp.ready
+  pipe.io.dcache_flush_done := dcache.io.kernelFlushDone
   dcache.io.perfEnable := io.perfEnable
   dcache.io.perfReset := io.perfReset
   io.dcache_perf := dcache.io.perf

@@ -57,6 +57,7 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   val io = IO(new Bundle{
     val coreReq = Flipped(DecoupledIO(new DCacheCoreReq(SV)))
     val coreRsp = DecoupledIO(new DCacheCoreRsp)
+    val kernelFlushDone = Output(Bool())
     val memRsp = Flipped(DecoupledIO(new DCacheMemRsp))
     val memReq = if(MMU_ENABLED) Some(DecoupledIO(new DCacheMemReq_p)) else Some(DecoupledIO(new DCacheMemReq))
     val TLBRsp = if(MMU_ENABLED) Some(Flipped(DecoupledIO(new mmu.L1TlbRsp(SV.getOrElse(mmu.SV32))))) else None
@@ -270,6 +271,7 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   SMshrAccess.io.stage1_ready := coreReqPipe.io.st1_ready
 
   io.coreRsp <> coreReqPipe.io.CoreRsp
+  io.kernelFlushDone := coreReqPipe.io.kernelFlushDone
 
   // ------memRspPipe input connection------
   memRsp_Q.io.enq <> io.memRsp

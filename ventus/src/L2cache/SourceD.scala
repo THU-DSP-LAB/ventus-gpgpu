@@ -71,6 +71,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     // btree-002 fix v3.2: 当前 io.a beat 是否为真正的 write-through miss/no-allocate Put。
     // dirty-victim writeback 虽然 io.a.bits.opcode 也会被改成 PutFullData，但该标志保持 false。
     val wt_miss_a = Output(Bool())
+    val maintenance_writes_drained = Input(Bool())
   })
 
 
@@ -288,7 +289,9 @@ val mshr_wait_reg =RegInit(false.B)
     "SourceD emitted a stale hit-Put BankedStore write while idle")
 
   ///将读取数据输出d
-  io.d.valid        :=((stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
+  val finalMaintenanceRsp = s_final_req.opcode === Hint && s_final_req.last_flush
+  io.d.valid        :=((stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush) &&
+    (!finalMaintenanceRsp || io.maintenance_writes_drained)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
   io.d.bits.source  :=s_final_req.source
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,Mux(s_final_req.last_flush,HintAck,AccessAck))
   io.d.bits.size    := s_final_req.size
@@ -317,7 +320,7 @@ val mshr_wait_reg =RegInit(false.B)
   io.wt_miss_a := (stateReg === stage_4 || stateReg === stage_7) && !s_final_req.hit &&
     (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)
 
-  io.finish_issue := io.d.valid && s_final_req.last_flush
+  io.finish_issue := io.d.fire && s_final_req.last_flush
 
   // srad-004 Phase 4.5 A''': hit-reservation clear（one-shot，统一到 io.d.fire）。
   // io.d.fire 在 stage_4/stage_8 各自最多一次（SourceD entry 释放条件），保证 1:1 对应 will_resv_hit。

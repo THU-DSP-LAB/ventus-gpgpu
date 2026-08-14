@@ -38,6 +38,7 @@ class pipe() extends Module{
     val externalFlushPipe = ValidIO(UInt(depth_warp.W))
     val dcache_req = DecoupledIO(new DCacheCoreReq_np)
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    val dcache_flush_done = Input(Bool())
     val shared_req = DecoupledIO(new ShareMemCoreReq_np)
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val pc_reset = Input(Bool())
@@ -189,6 +190,8 @@ class pipe() extends Module{
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
   warp_sche.io.flushDCache <> lsu.io.flush_dcache
+  warp_sche.io.flushDCacheDone := io.dcache_flush_done
+  lsu.io.flush_dcache_done := io.dcache_flush_done
 
   //flush:=(warp_sche.io.branch.fire&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid
