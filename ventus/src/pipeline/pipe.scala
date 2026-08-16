@@ -174,6 +174,7 @@ class pipe() extends Module{
   warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
   val scoreboardBusy = (VecInit(scoreb.map(_.delay))).asUInt
   warp_sche.io.scoreboard_busy:=scoreboardBusy
+  warp_sche.io.lsu_idle:=lsu.io.fence_end
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
   val init_thread_mask = (1.U(num_thread.W) << warp_sche.io.CTA2csr.bits.CTAdata.dispatch2cu_wf_size_dispatch).asUInt - 1.U

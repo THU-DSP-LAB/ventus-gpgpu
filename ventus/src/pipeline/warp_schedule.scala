@@ -29,6 +29,7 @@ class warp_scheduler extends Module{
     val issued_warp=Flipped(Valid(UInt(depth_warp.W))) //not use
     val scoreboard_busy=Input(UInt(num_warp.W)) //scoreboard race
     val exe_busy=Input(UInt(num_warp.W)) //exe race
+    val lsu_idle=Input(UInt(num_warp.W)) //no outstanding LSU request for each warp
     //val pc_icache_ready=Input(Vec(num_warp,Bool()))
     val pc_ibuffer_ready=Input(Vec(num_warp,UInt(depth_ibuffer.W))) //ibuffer ready
     val asid =  if(MMU_ENABLED) Some(Output(UInt(KNL_ASID_WIDTH.W))) else None // 2ibuffer
@@ -55,7 +56,11 @@ class warp_scheduler extends Module{
   val final_warp_wid = RegInit(VecInit(Seq.fill(num_block)(0.U(depth_warp.W))))
   val final_rsp_valid = flush_done_pending
   io.branch.ready:= !io.flushCache.valid
-  io.warp_control.ready:= !io.branch.fire & !io.flushCache.valid & !final_rsp_valid
+  val warp_control_is_barrier = io.warp_control.bits.ctrl.barrier &&
+    !io.warp_control.bits.ctrl.simt_stack_op
+  val barrier_memory_idle = io.lsu_idle(io.warp_control.bits.ctrl.wid)
+  io.warp_control.ready:= !io.branch.fire & !io.flushCache.valid & !final_rsp_valid &
+    (!warp_control_is_barrier || barrier_memory_idle)
   val warp_end=io.warp_control.fire&io.warp_control.bits.ctrl.simt_stack_op
 
   io.warpReq.ready:=true.B
@@ -145,6 +150,7 @@ class warp_scheduler extends Module{
   }
   warp_bar_lock:=warp_bar_belong.map(x=>x.orR)
   when(io.warp_control.fire&(!io.warp_control.bits.ctrl.simt_stack_op)){ //means barrrier
+    assert(barrier_memory_idle, "barrier accepted before the warp LSU drained")
     warp_bar_cur(end_wg_id):=warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt
     warp_bar_data:=warp_bar_data | (1.U<<io.warp_control.bits.ctrl.wid).asUInt
     when((warp_bar_cur(end_wg_id) | (1.U<<end_wf_id).asUInt) === warp_bar_exp(end_wg_id)){
