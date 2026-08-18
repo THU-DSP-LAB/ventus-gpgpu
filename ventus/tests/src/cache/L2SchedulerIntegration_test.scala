@@ -5,7 +5,7 @@ import chisel3._
 import chisel3.util._
 import chiseltest._
 import chiseltest.experimental.expose
-import freechips.rocketchip.tilelink.TLMessages.{AccessAckData, Get, Hint}
+import freechips.rocketchip.tilelink.TLMessages.{AccessAckData, Get, Hint, PutFullData}
 import org.scalatest.freespec.AnyFreeSpec
 
 class SchedulerIntegrationHarness(params: InclusiveCacheParameters_lite) extends Module {
@@ -154,14 +154,16 @@ class L2SchedulerIntegrationTest extends AnyFreeSpec with ChiselScalatestTester 
     opcode: UInt,
     address: BigInt,
     source: BigInt,
-    param: BigInt = 0
+    param: BigInt = 0,
+    data: BigInt = 0,
+    mask: BigInt = BigInt("ffff", 16)
   ): Unit = {
     dut.io.in_a.bits.opcode.poke(opcode)
     dut.io.in_a.bits.size.poke(4.U)
     dut.io.in_a.bits.source.poke(source.U)
     dut.io.in_a.bits.address.poke(address.U)
-    dut.io.in_a.bits.mask.poke(BigInt("ffff", 16).U)
-    dut.io.in_a.bits.data.poke(0.U)
+    dut.io.in_a.bits.mask.poke(mask.U)
+    dut.io.in_a.bits.data.poke(data.U)
     dut.io.in_a.bits.param.poke(param.U)
     dut.io.in_a.valid.poke(true.B)
 
@@ -365,6 +367,53 @@ class L2SchedulerIntegrationTest extends AnyFreeSpec with ChiselScalatestTester 
       waitForResponse(dut, observer, source = 5, maxCycles = 128)
       assert(observer.fillCommits == commitsBeforeThirdFill + 1,
         "the third refill must commit exactly once")
+    }
+  }
+
+  "a dirty victim writeback reaches outer memory before the replacing miss Get" in {
+    test(new SchedulerIntegrationHarness(params)) { dut =>
+      initialize(dut)
+      val observer = new Observer(dut)
+      reset(dut, observer)
+
+      val address0 = BigInt("00000000", 16)
+      val address1 = BigInt("00000020", 16)
+      val address2 = BigInt("00000040", 16)
+      val line0 = BigInt("10101010101010101010101010101010", 16)
+      val line1 = BigInt("21212121212121212121212121212121", 16)
+      val dirty0 = BigInt("a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0", 16)
+      val dirty1 = BigInt("b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1", 16)
+      val line2 = BigInt("32323232323232323232323232323232", 16)
+
+      fillLine(dut, observer, address0, source = 1, line0)
+      fillLine(dut, observer, address1, source = 2, line1)
+
+      driveA(dut, observer, PutFullData, address0, source = 3, data = dirty0)
+      waitForResponse(dut, observer, source = 3)
+      driveA(dut, observer, PutFullData, address1, source = 4, data = dirty1)
+      waitForResponse(dut, observer, source = 4)
+
+      driveA(dut, observer, Get, address2, source = 5)
+
+      var cycles = 0
+      while (!dut.io.out_a.valid.peek().litToBoolean && cycles < 64) {
+        observer.step()
+        cycles += 1
+      }
+      dut.io.out_a.valid.expect(true.B)
+      dut.io.out_a.bits.opcode.expect(PutFullData)
+      val victimAddress = dut.io.out_a.bits.address.peek().litValue
+      val victimData = dut.io.out_a.bits.data.peek().litValue
+      assert(
+        (victimAddress == address0 && victimData == dirty0) ||
+          (victimAddress == address1 && victimData == dirty1),
+        "dirty writeback did not carry the selected victim line")
+      observer.step()
+
+      val (memorySource, _) = waitForMemoryGet(dut, observer, address2)
+      sendRefill(dut, observer, memorySource, line2)
+      waitForFillCommit(dut, observer)
+      waitForResponse(dut, observer, source = 5, Some(line2))
     }
   }
 

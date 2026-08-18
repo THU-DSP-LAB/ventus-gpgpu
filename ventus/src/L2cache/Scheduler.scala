@@ -95,9 +95,11 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   val mshrs = Seq.fill(params.mshrs) { Module(new MSHR(params)) }
 
-  // srad-007 Bug3 root-fix(B): L2 BankedStore evict-vs-fill WAR — per-MSHR 标志。dirty-victim 分配时置位，
-  // SourceD 发出 victim writeback(=evict 读已完成)时清。置位期间 block 该 MSHR 的 fill commit
-  // (schedule.d/dir + pop + bankedStore sinkD 写)，保证 evict 读早于 fill 写同 (set,way) → 消除 WAR。
+  // A dirty-victim miss owns its selected way until SourceD has read the
+  // victim and queued its writeback. While pending, block both the miss Get
+  // and fill commit. The write buffer has priority over MSHR A requests, so
+  // releasing the Get after enqueue preserves writeback-before-read ordering
+  // at outer memory and read-before-fill ordering in BankedStore.
   val evictReadPending = RegInit(VecInit(Seq.fill(params.mshrs)(false.B)))
 
   // lud-002/srad Bug C 修(B-2 + codex 3.5 修): flush 写回抢占 sourceD 的优先信号(前置 Wire, 实赋值在 dir_result_buffer 定义后)。
@@ -110,7 +112,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
 
   val mshr_request = Cat(mshrs.zipWithIndex.map {  case (m, i) =>
-    ((sourceA.io.req.ready  &&m.io.schedule.a.valid) ||
+    ((sourceA.io.req.ready  &&m.io.schedule.a.valid && !evictReadPending(i)) ||
       (sourceD.io.req.ready &&m.io.schedule.d.valid && !flush_wb_priority && !evictReadPending(i)) ||  // B-2 + srad-007 Bug3 fix(B): evict 读未完成不放 fill 完成路
       (m.io.schedule.dir.valid&&directory.io.write.ready && !evictReadPending(i)))  // srad-007 Bug3 fix(B)
   }.reverse)
@@ -145,7 +147,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt)&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
-    m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) && !write_buffer.io.deq.valid
+    m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) &&
+      !write_buffer.io.deq.valid && !evictReadPending(i)
     m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i) && !flush_wb_priority && !evictReadPending(i)  // B-2 + srad-007 Bug3 fix(B): evict 读未完成不 pop(否则丢 refill D)
     m.io.schedule.dir.ready:= directory.io.write.ready && (mshr_select===i.asUInt) &&
       !evictReadPending(i) && fillCommitAllowed
@@ -153,6 +156,8 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     m.io.mshr_wait  := sourceD.io.mshr_wait
     m.io.merge.valid:= m.io.schedule.d.valid && ((requests.io.data.opcode===PutFullData) ||(requests.io.data.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
     m.io.merge.bits := requests.io.data
+    assert(!(m.io.schedule.a.fire && evictReadPending(i)),
+      "dirty-victim miss Get issued before its writeback was queued")
   }
 
  
@@ -387,7 +392,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     }}
   }
 
-  // srad-007 Bug3 fix(B): dirty-victim 分配置 evictReadPending；SourceD 发出 victim writeback(=evict 读已完成)时清。
+  // Hold a dirty-victim MSHR until SourceD has queued the victim writeback.
   mshrs.zipWithIndex.foreach { case (m, i) =>
     val dirtyVictimAlloc = directory.io.result.fire && alloc && mshr_insertOH.asBools(i) &&
       !directory.io.result.bits.hit && directory.io.result.bits.dirty && !directory.io.result.bits.flush

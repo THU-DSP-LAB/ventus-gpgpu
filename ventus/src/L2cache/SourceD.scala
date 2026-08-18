@@ -62,7 +62,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val finish_issue = Output(Bool())
     // srad-004 Phase 4.5 A''': hit-reservation one-shot clear（io.d.fire 时回传 (set,way)→Directory 递减 hitRefCount）。
     val hit_done = Valid(new ResvClear_lite(params))
-    // srad-007 Bug3 fix(B): dirty-victim writeback A 请求发出那拍回传 (set,way)，给 Scheduler 清 evictReadPending。
+    // Dirty-victim data has entered the prioritized write buffer.
     val evict_read_done = Valid(new ResvClear_lite(params))
     // btree-002 fix: L2 hit Put 的 BankedStore 写已完成且 D ack 已 fire。
     // Scheduler 用该事件 retire L2 write-through scoreboard 的一个 pending count；
@@ -331,10 +331,10 @@ val mshr_wait_reg =RegInit(false.B)
   io.hit_done.bits.set  := s_final_req.set
   io.hit_done.bits.way  := s_final_req.way
 
-  // srad-007 Bug3 root-fix(B): L2 BankedStore evict-vs-fill WAR — dirty-victim eviction 的 BankedStore 读
-  // (SourceD stage_3 bs_radr) 必须早于 refill 经 sinkD 写同 (set,way)。dirtyVictimWbFire = 该 victim writeback
-  // A 请求发出那拍(io.a.fire 且 s_final_req 是 dirty miss 的读路径 Get/Hint-evict，非 write-through Put)，
-  // 此拍 evict 读已完成(stage_3 先读后发)，回传 (set,way) 给 Scheduler 清 evictReadPending → 放行 fill 写。
+  // SourceD stage_3 reads a dirty victim before presenting its writeback on A.
+  // io.a.fire means the writeback has entered Scheduler's prioritized write
+  // buffer. Scheduler can then release the miss Get without allowing it to
+  // overtake the victim writeback on the outer A channel.
   // codex 4.5.5: 收窄到 opcode===Get（refill-eviction 才置 pending）；flush-dirty writeback(Hint)也读 bs_rdat 写回
   // 但非 refill-eviction，不该按 (set,way) 误清 pending（flush 可与 MSHR 重叠）。
   val dirtyVictimWbFire = io.a.fire && s_final_req.dirty && !s_final_req.hit && (s_final_req.opcode === Get)
