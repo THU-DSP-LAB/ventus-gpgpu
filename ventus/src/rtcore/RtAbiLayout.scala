@@ -4,7 +4,7 @@
 package rtcore
 
 object RtAbiLayout {
-  final val AbiVersion: Int = 5
+  final val AbiVersion: Int = 6
   final val AbiWordBytes: Int = 4
   final val AbiAlignmentBytes: Int = 16
   final val AbiRayStateBaseBytes: Int = 0
@@ -71,7 +71,8 @@ object RtAbiLayout {
   final val HitRecordOpaque: Int = 16
   final val HitRecordNeedSoftwareOpacityTest: Int = 17
   final val HitRecordInstanceSbtRecordOffset: Int = 18
-  final val HitRecordWordCount: Int = 19
+  final val HitRecordInstanceCustomIndex: Int = 19
+  final val HitRecordWordCount: Int = 20
   final val HitRecordStatusInvalid: Int = 0
   final val HitRecordStatusValid: Int = 1
   final val ControlCallbackDecision: Int = 0
