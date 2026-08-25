@@ -167,9 +167,18 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   // 导致同一条外部请求被重复注入 st0。
   // 另外：当 RTAB 仅剩 1 个空位（almost_full）且本拍 st1 仍会向 RTAB 入队时，也要拉低 ready，
   // 否则可能出现“本拍占掉最后一个空位 + 同拍再接收下一条 coreReq，下一拍该 coreReq 也要入 RTAB -> 溢出”的情况。
+  // nn64k-009 fix: 上面的"为 st1 入队预留最后一格"必须用 CoreReqPipe 的 raw intent
+  // Req_st1_RTAB_reserve，而不是被 st1_ready 二次 gate 的 Req_st1_RTAB.valid。后者在 st1 因
+  // mshrReleasingSameBlock_st1(CoreReqPipe:660-662)等被 hold 的拍为 0，漏挡外部 in(1) 的
+  // st0-hitRTAB 快路径(CoreReqPipe:194 + L1RTAB:145-154)，让它占掉最后一格 → RTAB_full →
+  // st1 被 L649 永久 hold → replay 只能回注被该 st1 堵死的 st0 → ptr_r 不前进 → RTAB_full 保持
+  // = nn64k-009 的 st1⇄RTAB 循环资源死锁(true-LRU 触发, anti-LRU 掩盖)。用 raw intent 后，st1 持
+  // parkable 请求期间 RTAB 永远停在 almost_full(≤NRTABs-1)，给该请求留住落位槽，环在首跳前即消除。
+  val reserveRTABSlotForSt1 =
+    ReplayTable.io.RTAB_almost_full && coreReqPipe.io.Req_st1_RTAB_reserve
   val allowIn1 =
     !ReplayTable.io.RTAB_full &&
-      !(ReplayTable.io.RTAB_almost_full && coreReqPipe.io.Req_st1_RTAB.valid) &&
+      !reserveRTABSlotForSt1 &&
       !blockCoreReq
   CoreReqArb.io.in(1).valid := io.coreReq.valid && allowIn1
   CoreReqArb.io.in(1).bits  := io.coreReq.bits
@@ -237,6 +246,10 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   ReplayTable.io.RTABReq_st0     <> coreReqPipe.io.Req_st0_RTAB
   TagAccess.io.invalidateAll     := coreReqPipe.io.invalidate_tA
   TagAccess.io.flushChoosen.get  := coreReqPipe.io.flushDirty_tA
+  // lud-001 v6 Path A (改动 3b): flush PutPart fire + clear identity 连线 CoreReqPipe → L1TagAccess
+  TagAccess.io.flushPutFire.get    := coreReqPipe.io.flushPutFire.get
+  TagAccess.io.flushClrSetIdx.get  := coreReqPipe.io.flushClrSetIdx.get
+  TagAccess.io.flushClrWayMask.get := coreReqPipe.io.flushClrWayMask.get
   // st1
   TagAccess.io.tagFromCore_st1        := coreReqPipe.io.tagFromCore_tA_st1
   TagAccess.io.probeIsWrite_st1.get       := coreReqPipe.io.coreReq_Control_st1.isWrite

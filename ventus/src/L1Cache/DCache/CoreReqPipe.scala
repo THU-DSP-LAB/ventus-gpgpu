@@ -67,6 +67,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val Probe_tA_ready = Input(Bool())
     val Req_st0_RTAB   = Valid(new RTABReq())
     val flushDirty_tA  = Output(Bool())
+    // lud-001 v6 Path A (改动 3a): flush PutPart 真出站 fire + 清 way_dirty/dirtyMask 的 identity(与 a_addr 同源)
+    val flushPutFire    = Some(Output(Bool()))
+    val flushClrSetIdx  = Some(Output(UInt(dcache_SetIdxBits.W)))
+    val flushClrWayMask = Some(Output(UInt(dcache_NWays.W)))
 
     val st0_ready      = Output(Bool())
     val st0_valid      = Output(Bool())
@@ -92,6 +96,12 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val read_Req_dA         = ValidIO(Vec(BlockWords,new SRAMBundleA(NSets*NWays)))
     val CacheHit_st1        = Output(Bool())
     val Req_st1_RTAB        = ValidIO(new RTABReq())
+    // nn64k-009 fix: st1 的 raw RTAB-slot 占用意图，不带 st1_ready gate。
+    // DCachev2.allowIn1 用它在 RTAB almost_full 时为当前 st1 请求预留最后一格。
+    // 不能用 Req_st1_RTAB.valid(=Req_RTAB_st1_valid && st1_ready)：st1_ready 在
+    // mshrReleasingSameBlock_st1 等 hold 拍被拉低(L660-662)，会把真实 park 意图掩盖成 0，
+    // 让外部 in(1) 的 st0-hitRTAB 路径占掉最后一格 → 闭合 st1⇄RTAB 死锁环。
+    val Req_st1_RTAB_reserve = Output(Bool())
     val CheckReq_WSHR       = Output(new WSHRreq)
     // {S}MSHRmissReq.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
     // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
@@ -204,6 +214,10 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val FluInv_st1 = CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush || CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isInvalidate
   val FluInvReq_st1_valid = CoreReq_pipeReg_st0_st1.deq.valid && FluInv_st1
   val FluInvIsPut_st1 = CoreReq_pipeReg_st0_st1.deq.valid && (FlushInvstateReg === idle) && FluInv_st1
+  // lud-001 v6 Path A (改动 1): flush PutPart 真出站 fire (MissReq_Mem.fire && FluInvMemReq_valid && FluInvIsPut_st1)。
+  //   = 清 way_dirty/dirtyMask 的唯一 gate(改动 3d/3e, 经 io 传 L1TagAccess) + 挡同拍 duplicate enq(下方 st0_valid)。
+  //   FluInvMemReq_valid 是 Wire(L153 声明, L553 赋值), Chisel 前向引用合法。
+  val flushPutFire = io.MissReq_Mem.fire && FluInvMemReq_valid && FluInvIsPut_st1
   val FluInvIsFluL2_st1 =  CoreReq_pipeReg_st0_st1.deq.valid && (FlushInvstateReg === flushing) && FluInv_st1
   val FluInvL2MemReqIssuedReg = RegInit(false.B)
   val FluInvRspPendingReg = RegInit(false.B)
@@ -238,7 +252,9 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
             st0_ready := false.B
           }.elsewhen(io.hasDirty){
             //write back dirty cacheline
-            st0_valid  := io.CoreReq.valid
+            // lud-001 v6 Path A (改动 1): && !flushPutFire 挡 flush PutPart fire 同拍 duplicate enq token
+            //   (CoreReq_pipeReg_st0_st1 是 pipe=true Queue, fire 拍同时 deq.fire+enq.fire 复制 pre-clear cursor → batch-loss 之源)
+            st0_valid  := io.CoreReq.valid && !flushPutFire
             st0_ready := false.B
           }.otherwise{
             st0_valid := io.CoreReq.valid
@@ -407,6 +423,28 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val readMissFillWait_st1 = CoreReq_pipeReg_st0_st1.deq.valid && ReadMiss_st1 &&
     ( mshrReleasingSameBlock_st1 ||
       (straddledRelease_st1 && (straddleBlockAddr_st1 === BlockAddr_st1)) )
+  // btree-003 fix: 写侧对称 ReadMissFillWait —— write-miss 撞同 block fill-release 窗口的 straddle latch。
+  //   独立 latch (不复用 read-side straddledRelease_st1，语义/生命周期清晰; codex_fix_design_v3 §4 命名建议)。
+  //   SET 谓词 widened (belt-and-suspenders, round11 §11.4): mshrReleasing(窄 Case1, store 在 release 拍
+  //   已驻 st1) || 同 block fillCommit pulse(覆盖 store 晚到、过 mshrReleasing 但仍 fill-commit 在途变体)。
+  //   clear (!deq.valid||deq.fire) 优先 → 排除 st1 空时 stale deq.bits 误触发(同 read 侧 L417)。
+  val straddledReleaseW_st1  = RegInit(false.B)
+  val straddleBlockAddrW_st1 = Reg(UInt(bABits.W))
+  when(!CoreReq_pipeReg_st0_st1.deq.valid || CoreReq_pipeReg_st0_st1.deq.fire){
+    straddledReleaseW_st1 := false.B
+  }.elsewhen(WriteMiss_st1 &&
+             (mshrReleasingSameBlock_st1 ||
+              (io.fillCommit_valid && (io.fillCommit_blockAddr === BlockAddr_st1)))){
+    straddledReleaseW_st1  := true.B
+    straddleBlockAddrW_st1 := BlockAddr_st1
+  }
+  // writeMissFillWait_st1 谓词: mshrReleasing 当拍 || straddle latch 续命。
+  //   ★不直接用 io.fillCommit_valid（会经 Req_RTAB_st1_valid→st1_ready→io_memRsp_coreRsp_ready
+  //   →memRspPipe.dAmemRsp_wReq_valid 形成组合环, FIRRTL 拒绝）。straddle latch SET 条件已捕 fillCommit
+  //   入寄存器，predicate 只读 Reg → loop-free（与 readMissFillWait_st1 对称）。
+  val writeMissFillWait_st1 = CoreReq_pipeReg_st0_st1.deq.valid && WriteMiss_st1 &&
+    ( mshrReleasingSameBlock_st1 ||
+      (straddledReleaseW_st1 && (straddleBlockAddrW_st1 === BlockAddr_st1)) )
   // bfs4096-009 fix: commit-seen —— 当前 st1 req 驻留期间见过本 block 真实 fill commit。clear 同上优先。
   // 随 RTABReq.fillAlreadyCommitted 带入(同拍 commit 用组合 OR 补)，覆盖 commit 与 enq 同拍 / commit 在 enq 前两种 edge。
   val fillCommitSeen_st1 = RegInit(false.B)
@@ -457,7 +495,26 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // 与 fillConflictSt1(要求 ReadHit)天然互斥; 抑制第二条 memReq(L364 !Req_st1_RTAB.valid)+ MSHR alloc(L533 !Req_RTAB_st1_valid)。
     Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
     ReplayType := ReadMissFillWait
+  }.elsewhen(writeMissFillWait_st1){
+    // btree-003 fix: write-miss 撞同 block fill-release 窗口 (MSHR 释放/fill commit、tag 未 re-probe hit)
+    //   → 挂 RTAB 等 fill commit, replay re-probe 转 write-HIT 写 L1; 不发 write-through no-allocate
+    //   (否则 stale fill 占 L1 way → read-back 命中 stale 0)。写侧对称 ReadMissFillWait(bfs4096-009)。
+    // 互斥/优先级 (放链末最低优先): WriteMiss 撞 fill-release 窗口时 MshrStatus 已非 Secondary*
+    //   → writeMissHitMSHR(453) 不 fire (它要求 Secondary*); WSHR.Hit / SMSHR.hitblock 若同拍成立, 它们
+    //   (更高优先) 先 park (亦不逃逸), 本条仅在它们全落空 + fill-release 窗 fire → 不重不漏。
+    //   与 fillConflictSt1(要求 ReadHit)/readMissFillWait(ReadMiss) 天然互斥 (本条 WriteMiss)。
+    // 抑制第二条 memReq (L392 !Req_st1_RTAB.valid); write-miss 本不 alloc MSHR (L632 ReadMiss only)。
+    Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
+    ReplayType := WriteMissFillWait
   }
+  // nn64k-009 fix: 导出 st1 raw RTAB 预留意图(不经 st1_ready gate)。等价于 L599 "requesting RTAB"
+  // 分支谓词 (Req_RTAB_st1_valid || ReplayType===UCacheHitDirty)——凡这条 st1 请求最终必须进 RTAB
+  // 才能 drain 的情形都纳入预留，使 DCachev2 在 almost_full 时给它留住最后一格，防外部 st0-hitRTAB
+  // 抢槽把 RTAB 填满后 st1 被 L649 永久 hold(死锁环首跳)。UCacheHitDirty 在 evict 等待阶段
+  // Req_RTAB_st1_valid 可能尚为 0 但该请求已占 st1 且后续必进 RTAB，故一并纳入(对齐 L599 谓词)。
+  io.Req_st1_RTAB_reserve :=
+    Req_RTAB_st1_valid ||
+    (CoreReq_pipeReg_st0_st1.deq.valid && (ReplayType === UCacheHitDirty))
   // bfs4096-006 fix: gate 掉 dA read 避免被 bypass 污染。replay 出来后 tag 已 update，
   // 同 way 的 tag 已经是 fill 后新 tag (例: visited 0x90002)，原 hit-read 的 tag (cost 0x90034) 不再 match → miss
   // → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way (visited 此时是 MRU 不会被选中)。
@@ -507,6 +564,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   FluInvMemReq_st1.a_opcode := Mux(FluInvIsPut_st1,TLAOp_PutPart,TLAOp_Flush)
   FluInvMemReq_st1.a_param := Mux(FluInvIsPut_st1, 0.U, Mux(CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush, TLAParam_Flush, TLAParam_Inv))
   val dirtySetIdx_st1 = RegNext(io.tA_dirtySetIdx_st0)
+  // lud-001 v6 Path A (改动 2): live flush way, 与 dirtySetIdx_st1 对称; A3 way identity + flushClrWayMask Mux 依赖
+  val dirtyWayMask_st1 = RegNext(io.tA_dirtyWayMask_st0)
   // === backprop1024-001 fix: FluInvMemReq identity snapshot ===
   // flush sweep 期间 io.dA_data / io.tA_dirtyTag_st1 / dirtySetIdx_st1 是 live 信号，
   // 当 memReq_Q 反压、FluInvMemReq 不能 fire 时，下一个 sub-flush 的迭代会让这些
@@ -518,11 +577,16 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val fluInvSnapAddr = Reg(UInt(WordLength.W))
   // bfs4096-001 partial-write clobber fix: snapshot dirty byte-mask alongside addr/data
   val fluInvSnapMask = Reg(UInt((BlockWords * BytesOfWord).W))
+  // lud-001 v6 Path A (改动 2): snapshot 扩存 setIdx/wayMask, 与 a_addr 同捕获拍锁存 → clear identity 同源
+  val fluInvSnapSetIdx  = Reg(UInt(dcache_SetIdxBits.W))
+  val fluInvSnapWayMask = Reg(UInt(dcache_NWays.W))
   val fluInvSnapValid = RegInit(false.B)
   when(FluInvMemReq_valid && FluInvIsPut_st1 && !fluInvSnapValid){
     fluInvSnapData := io.dA_data
     fluInvSnapAddr := fluInvLiveAddr
     fluInvSnapMask := io.tA_dirtyMask_st1
+    fluInvSnapSetIdx  := dirtySetIdx_st1   // lud-001 v6 Path A (改动 2): 与 addr/data/mask 同拍捕获 → identity 同源
+    fluInvSnapWayMask := dirtyWayMask_st1
     fluInvSnapValid := true.B
   }
   when(io.MissReq_Mem.fire && FluInvMemReq_valid){
@@ -540,6 +604,32 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     (FluInvIsPut_st1 || (FluInvIsFluL2_st1 && !FluInvL2MemReqIssuedReg)) &&
       CoreReq_pipeReg_st0_st1.deq.valid
   FluInvMemReq_st1.spike_info.foreach(_ := DontCare )
+  // lud-001 v6 Path A (改动 2): 清 way_dirty/dirtyMask 的 identity 连出 L1TagAccess (snap/live Mux 同 fluInvSnapValid 选, 与 a_addr 同源)
+  io.flushClrSetIdx.get  := Mux(fluInvSnapValid, fluInvSnapSetIdx,  dirtySetIdx_st1)
+  io.flushClrWayMask.get := Mux(fluInvSnapValid, fluInvSnapWayMask, dirtyWayMask_st1)
+  io.flushPutFire.get    := flushPutFire
+  // lud-001 v6 Path A (改动 4) assert/monitor (CoreReqPipe 侧):
+  // A4: flush PutPart fire 时 a_mask 必非零 (抓 all-zero mask PutPartial)
+  assert(!flushPutFire || FluInvMemReq_st1.a_mask.asUInt =/= 0.U,
+         "lud-001: flush PutPart fired with all-zero a_mask")
+  // A2/A2-snap: 清的 set === live dirtySetIdx (非 snapshot 路径) / snapshot 锁的 set (与 a_addr 同捕获)
+  assert(!flushPutFire || fluInvSnapValid || io.flushClrSetIdx.get === dirtySetIdx_st1,
+         "lud-001: flush clear setIdx != live dirtySetIdx (non-snapshot path)")
+  assert(!(flushPutFire && fluInvSnapValid) || io.flushClrSetIdx.get === fluInvSnapSetIdx,
+         "lud-001: flush clear setIdx != snapshot setIdx")
+  // A3/A3-snap: 清的 way === live dirtyWayMask / snapshot 锁的 way (codex (e) 点名 v5 漏 way)
+  assert(!flushPutFire || fluInvSnapValid || io.flushClrWayMask.get === dirtyWayMask_st1,
+         "lud-001: flush clear wayMask != live dirtyWayMask (non-snapshot path)")
+  assert(!(flushPutFire && fluInvSnapValid) || io.flushClrWayMask.get === fluInvSnapWayMask,
+         "lud-001: flush clear wayMask != snapshot wayMask")
+  // M1: 同 (set,way) 连续两拍 flushPutFire (duplicate token 回归探测; v5 Path A 无 retry 应为 0)
+  val flushFirePrevSet = RegNext(Mux(flushPutFire, io.flushClrSetIdx.get, ~(0.U(dcache_SetIdxBits.W))))
+  val flushFirePrevWay = RegNext(Mux(flushPutFire, io.flushClrWayMask.get, 0.U(dcache_NWays.W)))
+  val dupFireCount = RegInit(0.U(32.W))
+  when(flushPutFire && (io.flushClrSetIdx.get === flushFirePrevSet) && (io.flushClrWayMask.get === flushFirePrevWay)){
+    dupFireCount := dupFireCount + 1.U
+  }
+  dontTouch(dupFireCount)
   // evictMemReq_st1: uncached 请求如果命中 dirty cacheline，需要先把当前 cacheline 写回，
   // 再通过 RTAB / replay 机制重放原始 uncached 请求。
   // uncache hit dirty cacheline evict request
