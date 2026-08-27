@@ -18,18 +18,26 @@ object RtCorePortParameters {
   // These are RTcore-local tags, not aliases for LSU or DCache MSHR indices.
   val issueIdWidth = 8
   val requestIdWidth = 8
-  val generationWidth = 4
   val pdsWordOffsetWidth = 10
   val lineWordCount = dcache_BlockWords
+  val laneIdWidth = log2Ceil(num_thread)
   val regidx_totalwidth = regidx_width + regext_width
 }
 
-/** Context needed to translate a logical PDS slot for one issued warp. */
+/**
+  * PDS context captured for one issued warp.
+  *
+  * The fixed RT header starts at PDS word zero.  For header word `word` and
+  * local lane `lane`, the PDS service derives:
+  *
+  *   baseAddress + word * (4 * numWarps * numThreads) +
+  *     4 * (pdsWarpTidBase + lane)
+  */
 class RtPdsContext extends Bundle {
   val baseAddress = UInt(xLen.W)
   val numWarps = UInt(xLen.W)
   val numThreads = UInt(xLen.W)
-  val threadId = UInt(xLen.W)
+  val pdsWarpTidBase = UInt(xLen.W)
 }
 
 /** Warp-granular representation of a decoded `vt.rt.traverse`. */
@@ -38,7 +46,6 @@ class RtWarpCommand extends Bundle {
   val issueId = UInt(RtCorePortParameters.issueIdWidth.W)
   val destinationVd = UInt(regidx_totalwidth.W)
   val activeMask = UInt(num_thread.W)
-  val pdsSlots = Vec(num_thread, UInt(xLen.W))
   val pds = new RtPdsContext
 }
 
@@ -51,20 +58,35 @@ class RtWarpCompletion extends Bundle {
   val laneStatus = Vec(num_thread, UInt(xLen.W))
 }
 
-/** Fixed-ABI PDS header operation.  It is deliberately separate from AS reads. */
+/**
+ * Fixed-ABI PDS header operation.
+ *
+ * A read names one field-major PDS word and returns that field for all lanes
+ * of the issuing warp.  A write owns one compact per-lane record/fragment and
+ * carries one entire DCache line; writeWordMask identifies the words that
+ * belong to that record.  This distinction is intentional: fixed ray-header
+ * reads remain field-major, while packed candidate/committed writes are
+ * lane-major without changing the cache-facing line contract.
+ */
 class RtPdsRequest extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val generation = UInt(RtCorePortParameters.generationWidth.W)
-  val wordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
   val write = Bool()
-  val laneMask = UInt(num_thread.W)
-  val slots = Vec(num_thread, UInt(xLen.W))
-  val writeData = Vec(num_thread, UInt(xLen.W))
+  // Read-only selector: the same fixed-header word for every lane.
+  val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
+  val readLaneMask = UInt(num_thread.W)
+  // Write-only owner: one lane's compact candidate/committed record fragment.
+  val compactLane = UInt(RtCorePortParameters.laneIdWidth.W)
+  val writeWordMask = UInt(RtCorePortParameters.lineWordCount.W)
+  val pds = new RtPdsContext
+  val writeLineData = Vec(
+    RtCorePortParameters.lineWordCount,
+    UInt(xLen.W)
+  )
 }
 
+/** A PDS field-major read response; readData(lane) is that lane's field word. */
 class RtPdsResponse extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val generation = UInt(RtCorePortParameters.generationWidth.W)
   val laneMask = UInt(num_thread.W)
   val readData = Vec(num_thread, UInt(xLen.W))
   val faultMask = UInt(num_thread.W)
@@ -73,14 +95,12 @@ class RtPdsResponse extends Bundle {
 /** Cache-line read transaction emitted by the AS fetch engine. */
 class RtAsReadRequest extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val generation = UInt(RtCorePortParameters.generationWidth.W)
   val lineAddress = UInt(memReqLen.W)
   val wordMask = UInt(RtCorePortParameters.lineWordCount.W)
 }
 
 class RtAsReadResponse extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val generation = UInt(RtCorePortParameters.generationWidth.W)
   val data = Vec(RtCorePortParameters.lineWordCount, UInt(xLen.W))
   val fault = Bool()
 }
@@ -90,7 +110,7 @@ class RtAsReadResponse extends Bundle {
  *
  * `as` is an adapter-level interface, not the current DCacheCoreReq_np port:
  * the present cache port has only LSU-sized instrId tags and cannot preserve an
- * RT request's source/generation across multiple outstanding reads.
+ * RT request's source identity across multiple outstanding reads.
  */
 class RtCoreIO extends Bundle {
   val command = Flipped(Decoupled(new RtWarpCommand))

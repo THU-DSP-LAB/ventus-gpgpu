@@ -16,6 +16,7 @@ import chisel3.util._
 import IDecode._
 import mmu.SV32.asidLen
 import top.cache_spike_info
+import rtcore.RtAbiLayout
 
 class toShared extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
@@ -148,12 +149,35 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     val privateByteOffset = reg_save.in1(x) + reg_save.in2(x)
     val wordBaseOffset = Cat(privateByteOffset(31,2), 0.U(2.W))
     val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, privateByteOffset(1,0))
-    val pdsWordStride = wordBaseOffset * io.csr_numw * io.csr_numt
+    val pdsThreadCount = io.csr_numw * io.csr_numt
+    val pdsWordStride = wordBaseOffset * pdsThreadCount
     val pdsLaneSlot = Cat(io.csr_tid + x.asUInt, 0.U(2.W))
+    // Dedicated NIR hit-record accesses carry this tag.  Candidate and
+    // committed records are lane-major so an independently completing lane
+    // owns nine contiguous words; regular private/AS5 accesses stay
+    // field-major below.
+    val hitRecordMode = privateByteOffset(31)
+    val logicalWord = privateByteOffset(30,2)
+    val candidateBaseWord = RtAbiLayout.AbiCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
+    val committedBaseWord = RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
+    val recordWords = RtAbiLayout.AbiPdsLaneMajorHitRecordWordCount
+    val candidateRecord = logicalWord >= candidateBaseWord.U && logicalWord < (candidateBaseWord + recordWords).U
+    val committedRecord = logicalWord >= committedBaseWord.U && logicalWord < (committedBaseWord + recordWords).U
+    val recordBaseWord = Mux(candidateRecord,
+      RtAbiLayout.AbiPdsFieldMajorPrefixWordCount.U,
+      (RtAbiLayout.AbiPdsFieldMajorPrefixWordCount + recordWords).U)
+    val recordWord = Mux(candidateRecord,
+      logicalWord - candidateBaseWord.U,
+      logicalWord - committedBaseWord.U)
+    val laneMajorPdsByteAddr = io.csr_pds +
+      ((recordBaseWord * pdsThreadCount +
+        (io.csr_tid + x.asUInt) * recordWords.U + recordWord) << 2)
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
                   Mux(reg_save.ctrl.is_vls12,
                     reg_save.in1(x)+reg_save.in2(x),
-                    byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride
+                    Mux(hitRecordMode,
+                      laneMajorPdsByteAddr,
+                      byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride)
                   ),
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
