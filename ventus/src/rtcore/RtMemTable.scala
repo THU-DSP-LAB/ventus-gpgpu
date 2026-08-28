@@ -13,12 +13,13 @@ import top.parameters._
 
 object RtMemTableParameters {
   /*
-   * Initial resource point. PDS reads/writes use a small ping-pong bank: a
-   * returned field-major line is consumed by ray setup and released. AS
-   * entries retain a returned line until all logical fetch waiters consume it.
+   * PDS reads/writes and AS fetches each have 32 independently allocatable
+   * entries. PDS entries are released after their direct consumer finishes;
+   * AS entries retain a returned line until all logical fetch waiters consume
+   * it.
    */
-  val pdsEntryCount = 2
-  val asEntryCount = 8
+  val pdsEntryCount = 32
+  val asEntryCount = 32
   val maxAsWaitersPerEntry = 2
 
   val lineWordCount = dcache_BlockWords
