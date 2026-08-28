@@ -20,18 +20,16 @@ object RtCorePortParameters {
   val requestIdWidth = 8
   val pdsWordOffsetWidth = 10
   val lineWordCount = dcache_BlockWords
-  val laneIdWidth = log2Ceil(num_thread)
   val regidx_totalwidth = regidx_width + regext_width
 }
 
 /**
   * PDS context captured for one issued warp.
   *
-  * The fixed RT header starts at PDS word zero.  For header word `word` and
-  * local lane `lane`, the PDS service derives:
-  *
-  *   baseAddress + word * (4 * numWarps * numThreads) +
-  *     4 * (pdsWarpTidBase + lane)
+  * Field-major PDS reads derive their address from this context and the
+  * requested field word. PDS writes carry their already-computed line address
+  * and mask directly, because the fixed layout mixes lane-major hit-record
+  * bodies with field-major ray-state and hit-kind planes.
   */
 class RtPdsContext extends Bundle {
   val baseAddress = UInt(xLen.W)
@@ -62,11 +60,11 @@ class RtWarpCompletion extends Bundle {
  * Fixed-ABI PDS header operation.
  *
  * A read names one field-major PDS word and returns that field for all lanes
- * of the issuing warp.  A write owns one compact per-lane record/fragment and
- * carries one entire DCache line; writeWordMask identifies the words that
- * belong to that record.  This distinction is intentional: fixed ray-header
- * reads remain field-major, while packed candidate/committed writes are
- * lane-major without changing the cache-facing line contract.
+ * of the issuing warp. This covers ray state and the separated candidate/
+ * committed hit-kind planes. A write carries the already-computed cache line,
+ * mask, and payload. It has no record-kind or owner-lane metadata: RTcore
+ * derives those from the result and merges up to two 64-byte lane result pairs
+ * into the one 128-byte line before allocation.
  */
 class RtPdsRequest extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
@@ -74,8 +72,8 @@ class RtPdsRequest extends Bundle {
   // Read-only selector: the same fixed-header word for every lane.
   val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
   val readLaneMask = UInt(num_thread.W)
-  // Write-only owner: one lane's compact candidate/committed record fragment.
-  val compactLane = UInt(RtCorePortParameters.laneIdWidth.W)
+  // Write-only: a line-aligned address computed by RTcore.
+  val writeLineAddress = UInt(memReqLen.W)
   val writeWordMask = UInt(RtCorePortParameters.lineWordCount.W)
   val pds = new RtPdsContext
   val writeLineData = Vec(

@@ -25,6 +25,21 @@ object RtMemTableParameters {
   val lineBytes = lineWordCount * (xLen / 8)
 
   /*
+   * A lane-major hit result stores its eight candidate-body words followed by
+   * its eight committed-body words: 16 words / 64 bytes per lane. Two such
+   * prepared result payloads fit in one 128-byte PDS write line. Candidate and
+   * committed hit_kind are separate field-major planes and use the same
+   * generic PDS write path.
+   */
+  val pdsHitRecordBodyWords = 8
+  val pdsResultPairWords = 2 * pdsHitRecordBodyWords
+  val maxPdsWriteRequestsPerLine = 2
+  require(
+    lineWordCount == maxPdsWriteRequestsPerLine * pdsResultPairWords,
+    "PDS result-pair write merging requires two 64-byte payloads per line"
+  )
+
+  /*
    * A field-major PDS read has exactly one word for every local lane. If
    * either width changes, the PDS address/response contract must be redesigned
    * explicitly instead of silently introducing a lane-word index.
@@ -70,9 +85,11 @@ class RtAsLineWaiter extends Bundle {
 /**
  * One PDS cache-line transaction.
  *
- * PDS is not coalesced through AS waiters: reads identify one field-major
- * header word for a warp, while writes already arrive as a computed cache
- * line. A PDS requestId identifies its direct response consumer.
+ * PDS is not coalesced through AS waiters. Reads identify a field-major ray
+ * state or hit-kind word for a warp. Writes already arrive as a computed cache
+ * line; before request issue the controller may merge up to two prepared
+ * 64-byte result-pair payloads by line address and word mask. Neither the
+ * entry nor its metadata classifies record bodies versus hit-kind writes.
  */
 class RtPdsMemTableEntry extends Bundle {
   val valid = Bool()
@@ -84,7 +101,7 @@ class RtPdsMemTableEntry extends Bundle {
   val write = Bool()
   val cacheWordMask = UInt(RtMemTableParameters.lineWordCount.W)
 
-  // Valid for reads: the same fixed-header field for every lane in the warp.
+  // Valid for reads: the same field-major word for every lane in the warp.
   val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
   val readLaneMask = UInt(num_thread.W)
 
