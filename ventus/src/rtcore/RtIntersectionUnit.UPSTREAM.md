@@ -6,6 +6,14 @@ implementation, `b835680cf66dae2b332bbe5ab8c2cdf16f2edb45`:
 
 <https://github.com/purdue-aalp/rayflex>
 
+RayFlex provenance is limited to `RtIntersectionUnit.scala`,
+`RtIntersectionUnitIO.scala`, `RtIntersectionSkidBuffer.scala`,
+`RtIntersectionCompareSelect.scala`, `RtIntersectionCompareAndSwap.scala`,
+`RtIntersectionQuadSort.scala`, `RtIntersectionQuadSortWithIndex.scala`, and
+`RtIntersectionFnHelpers.scala`. `RtCorePort.scala`, `RtMemTable.scala`, and
+`RtAbiLayout.scala` are Ventus-owned RTcore interface and ABI work, not
+RayFlex-derived source.
+
 Imported source was renamed into the `rtcore` package and fixed to the
 baseline disjoint configuration: four AABB candidates and one triangle per
 transaction.  Euclidean and angular-distance operations are not enabled.
