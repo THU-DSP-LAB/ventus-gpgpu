@@ -48,6 +48,17 @@ test:
 	./mill -i ventus[6.4.0].tests.testOnly play.AdvancedTest 2>&1 | tee test_run_dir/test.log
 	# ./mill -i ventus[6.4.0].tests.testOnly play.AsidTests 2>&1 | tee test_run_dir/test.log 	#for asid test, provide two asid test case
 
+# RTcore focused tests use the repository's Java 21 / Mill 0.11.8 toolchain.
+# Keep RayFlex as a source-level reference only; do not invoke its legacy Mill
+# or Chisel 5 build from this target.
+rtcore-test:
+	@rtcore_java_major="$$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p')"; \
+	if [ "$$rtcore_java_major" != "21" ]; then \
+		echo "RTcore tests require JDK 21; found $${rtcore_java_major:-unknown}."; \
+		exit 2; \
+	fi
+	./mill -i 'ventus[6.4.0].tests.testOnly' rtcore.RtIntersectionUnitParallelTest
+
 verilog:
 	./mill ventus[6.4.0].run
 
@@ -82,5 +93,5 @@ rtlsim-gvm-install: rtlsim-gvm-build
 	+$(MAKE) -C sim-verilator -f gvm.mk install RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_REF_DIR=$(GVM_REF_DIR)
 	+$(MAKE) -C sim-verilator-nocache -f gvm.mk install RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_REF_DIR=$(GVM_REF_DIR)
 
-.PHONY: init bump bsp idea compile test verilog fpga-verilog clean clean-git
+.PHONY: init bump bsp idea compile test rtcore-test verilog fpga-verilog clean clean-git
 .PHONY: rtlsim-withcache rtlsim-nocache gvm-withcache gvm-nocache rtlsim-gvm-build rtlsim-gvm-install
