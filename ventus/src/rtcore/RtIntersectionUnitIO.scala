@@ -6,6 +6,7 @@ package rtcore
 
 import chisel3._
 import hardfloat.{recFNFromFN, fNFromRecFN}
+import top.parameters._
 
 /// One-hot encoding
 object RtIntersectionUnitOpCode extends ChiselEnum {
@@ -105,6 +106,97 @@ class RayBoxPair(recorded_float: Boolean = false) extends Bundle {
   val ray = new Ray(recorded_float)
   val aabb = new AABB(recorded_float)
 }
+
+/** PDS ray-state fields consumed by intersection setup before Ray derivation. */
+class RtRayState(recorded_float: Boolean = false) extends Bundle {
+  val origin = new Float3(recorded_float)
+  val dir = new Float3(recorded_float)
+  val tmin = Bits(if (recorded_float) 33.W else 32.W)
+  val tmax = Bits(if (recorded_float) 33.W else 32.W)
+}
+
+/** Prepared geometry input for one four-box intersection operation. */
+class RtBox4IntersectionInput(recorded_float: Boolean = false) extends Bundle {
+  val ray = new Ray(recorded_float)
+  val aabb = Vec(4, new AABB(recorded_float))
+}
+
+/** Result of one four-box intersection operation. */
+class RtBox4IntersectionOutput extends Bundle {
+  // Intersecting boxes precede non-intersecting boxes; the latter use +Inf.
+  val tmin = Vec(4, Bits(32.W))
+  val isIntersect = Vec(4, Bool())
+  val boxIndex = Vec(4, UInt(2.W))
+}
+
+/** Prepared geometry input for one triangle intersection operation. */
+class RtTriangleIntersectionInput(recorded_float: Boolean = false)
+    extends Bundle {
+  val ray = new Ray(recorded_float)
+  val triangle = new Triangle(recorded_float)
+}
+
+/** Result of one triangle intersection operation. */
+class RtTriangleIntersectionOutput(recorded_float: Boolean = false)
+    extends Bundle {
+  val tNum = Bits(if (recorded_float) 33.W else 32.W)
+  val tDenom = Bits(if (recorded_float) 33.W else 32.W)
+  val hit = Bool()
+}
+
+/*
+ * The following operation-specific requests preserve the producer/consumer
+ * boundary at the table. The table itself only sees generic cache-line
+ * transactions; controller logic maps these request types to RtPdsRequest or
+ * RtAsReadRequest and demultiplexes their responses by requestId.
+ */
+class RtAsLineReadRequest extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val lineAddress = UInt(memReqLen.W)
+  val wordMask = UInt(dcache_BlockWords.W)
+}
+
+/** AS line request whose response supplies one box4 operation. */
+class RtBox4AsReadRequest extends RtAsLineReadRequest
+
+/**
+ * AS line request whose response supplies triangle geometry. triangleMask is
+ * the leaf selector (11/10/01/00) used when choosing the 64-byte load.
+ */
+class RtTriangleAsReadRequest extends RtAsLineReadRequest {
+  val triangleMask = UInt(2.W)
+}
+
+class RtRayStateFieldReadRequest extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val pds = new RtPdsContext
+  val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
+  val laneMask = UInt(num_thread.W)
+}
+
+/** Field-major ray-state PDS read for the box4 path. */
+class RtBox4RayStateReadRequest extends RtRayStateFieldReadRequest
+
+/** Field-major ray-state PDS read for the triangle path. */
+class RtTriangleRayStateReadRequest extends RtRayStateFieldReadRequest
+
+/*
+ * A write is already physical when it reaches RtMemTable. The type identifies
+ * the producing path, while address, mask, and payload remain generic so the
+ * table can merge two disjoint 64-byte result pairs without classifying their
+ * candidate/committed body or hit-kind contents.
+ */
+class RtPreparedHitRecordWrite extends Bundle {
+  val lineAddress = UInt(memReqLen.W)
+  val wordMask = UInt(dcache_BlockWords.W)
+  val lineData = Vec(dcache_BlockWords, UInt(xLen.W))
+}
+
+/** Prepared PDS hit-record write produced by the box4 path. */
+class RtBox4HitRecordWrite extends RtPreparedHitRecordWrite
+
+/** Prepared PDS hit-record write produced by the triangle path. */
+class RtTriangleHitRecordWrite extends RtPreparedHitRecordWrite
 
 class CombinedRayBoxTriangleBundle(val recorded_float: Boolean = false)
     extends Bundle {

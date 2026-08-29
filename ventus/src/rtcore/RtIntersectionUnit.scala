@@ -44,17 +44,15 @@ class RtIntersectionUnit(p: RtIntersectionParams) extends Module {
     " baseline disjoint intersection unit does not include euclidean or angular operations"
   )
 
-  // input is guaranteed to be registered by this module
-  val in = IO(
-    Flipped(
-      Decoupled(new EnhancedInputBundle(p))
-    )
-  )
+  // Box4 and triangle jobs enter through distinct operation-specific ports.
+  // The shared baseline pipeline accepts at most one job per cycle; its input
+  // arbiter round-robins when both producers are ready.
+  val boxIn = IO(Flipped(Decoupled(new RtBox4IntersectionInput)))
+  val triangleIn = IO(Flipped(Decoupled(new RtTriangleIntersectionInput)))
 
-  // output is also registered by the last stage's output buffer
-  val out = IO(
-    Decoupled(new EnhancedOutputBundle(p))
-  )
+  // Each result leaves through the port matching its original operation.
+  val boxOut = IO(Decoupled(new RtBox4IntersectionOutput))
+  val triangleOut = IO(Decoupled(new RtTriangleIntersectionOutput))
 
   // A cycle counter which we can use when debugging the module
   // It shall disappear in synthesis, so no PPA impact (provided we don't expose
@@ -66,8 +64,7 @@ class RtIntersectionUnit(p: RtIntersectionParams) extends Module {
   // SOME CONSTANTS
   /////////////
   val _max_stage_count = 12;
-  val _box_plurality =
-    in.bits.aabb.length // this is a variable known at Chisel elaboration time
+  val _box_plurality = 4
   val _rounding_rule = consts.round_near_even
   val _tininess_rule = consts.tininess_beforeRounding
 
@@ -1339,7 +1336,27 @@ class RtIntersectionUnit(p: RtIntersectionParams) extends Module {
     )
   ).suggestName(s"stage_1_actual")
 
-  stage_1_actual_module.intake :<>= in
+  val operationInputArbiter = Module(
+    new RRArbiter(new EnhancedInputBundle(p), 2)
+  ).suggestName("operation_input_arbiter")
+
+  val boxInput = WireDefault(0.U.asTypeOf(new EnhancedInputBundle(p)))
+  boxInput.opcode := RtIntersectionUnitOpCode.OpQuadbox
+  boxInput.ray := boxIn.bits.ray
+  boxInput.aabb := boxIn.bits.aabb
+  operationInputArbiter.io.in(0).valid := boxIn.valid
+  operationInputArbiter.io.in(0).bits := boxInput
+  boxIn.ready := operationInputArbiter.io.in(0).ready
+
+  val triangleInput = WireDefault(0.U.asTypeOf(new EnhancedInputBundle(p)))
+  triangleInput.opcode := RtIntersectionUnitOpCode.OpTriangle
+  triangleInput.ray := triangleIn.bits.ray
+  triangleInput.triangle := triangleIn.bits.triangle
+  operationInputArbiter.io.in(1).valid := triangleIn.valid
+  operationInputArbiter.io.in(1).bits := triangleInput
+  triangleIn.ready := operationInputArbiter.io.in(1).ready
+
+  stage_1_actual_module.intake :<>= operationInputArbiter.io.out
   stage_modules(2).intake :<>= stage_1_actual_module.emit
 
   ////////////////////////
@@ -1396,5 +1413,25 @@ class RtIntersectionUnit(p: RtIntersectionParams) extends Module {
 
   pre_output_conv_stage.intake :<>= stage_modules(10).emit
   output_stage.intake :<>= pre_output_conv_stage.emit
-  out :<>= output_stage.emit
+
+  val internalOut = output_stage.emit
+  val isBoxOutput = internalOut.bits.opcode === RtIntersectionUnitOpCode.OpQuadbox
+  val isTriangleOutput =
+    internalOut.bits.opcode === RtIntersectionUnitOpCode.OpTriangle
+
+  boxOut.valid := internalOut.valid && isBoxOutput
+  boxOut.bits.tmin := internalOut.bits.tmin_out
+  boxOut.bits.isIntersect := internalOut.bits.isIntersect
+  boxOut.bits.boxIndex := internalOut.bits.boxIndex
+
+  triangleOut.valid := internalOut.valid && isTriangleOutput
+  triangleOut.bits.tNum := internalOut.bits.t_num
+  triangleOut.bits.tDenom := internalOut.bits.t_denom
+  triangleOut.bits.hit := internalOut.bits.triangle_hit
+
+  internalOut.ready := Mux(
+    isBoxOutput,
+    boxOut.ready,
+    Mux(isTriangleOutput, triangleOut.ready, true.B)
+  )
 }
