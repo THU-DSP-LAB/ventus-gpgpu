@@ -147,35 +147,35 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
     val privateByteOffset = reg_save.in1(x) + reg_save.in2(x)
-    val wordBaseOffset = Cat(privateByteOffset(31,2), 0.U(2.W))
-    val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, privateByteOffset(1,0))
+    val untaggedPrivateByteOffset = Cat(0.U(1.W), privateByteOffset(30,0))
+    val wordBaseOffset = Cat(untaggedPrivateByteOffset(31,2), 0.U(2.W))
+    val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, untaggedPrivateByteOffset(1,0))
     val pdsThreadCount = io.csr_numw * io.csr_numt
     val pdsWordStride = wordBaseOffset * pdsThreadCount
     val pdsLaneSlot = Cat(io.csr_tid + x.asUInt, 0.U(2.W))
-    // Dedicated NIR hit-record accesses carry this tag.  Candidate and
-    // committed records are lane-major so an independently completing lane
-    // owns nine contiguous words; regular private/AS5 accesses stay
-    // field-major below.
+    // Existing dedicated hit-record accesses use the high address bit to
+    // select only the lane-major body. hit_kind uses an untagged ordinary
+    // field-major offset (candidate 140B, committed 144B).
     val hitRecordMode = privateByteOffset(31)
-    val logicalWord = privateByteOffset(30,2)
+    val logicalWord = untaggedPrivateByteOffset(31,2)
     val candidateBaseWord = RtAbiLayout.AbiCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
     val committedBaseWord = RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
-    val recordWords = RtAbiLayout.AbiPdsLaneMajorHitRecordWordCount
-    val candidateRecord = logicalWord >= candidateBaseWord.U && logicalWord < (candidateBaseWord + recordWords).U
-    val committedRecord = logicalWord >= committedBaseWord.U && logicalWord < (committedBaseWord + recordWords).U
+    val bodyWords = RtAbiLayout.AbiPdsLaneMajorHitRecordBodyWordCount
+    val candidateRecord = logicalWord >= candidateBaseWord.U && logicalWord < (candidateBaseWord + bodyWords).U
+    val committedRecord = logicalWord >= committedBaseWord.U && logicalWord < (committedBaseWord + bodyWords).U
     val recordBaseWord = Mux(candidateRecord,
       RtAbiLayout.AbiPdsFieldMajorPrefixWordCount.U,
-      (RtAbiLayout.AbiPdsFieldMajorPrefixWordCount + recordWords).U)
+      (RtAbiLayout.AbiPdsFieldMajorPrefixWordCount + bodyWords).U)
     val recordWord = Mux(candidateRecord,
       logicalWord - candidateBaseWord.U,
       logicalWord - committedBaseWord.U)
     val laneMajorPdsByteAddr = io.csr_pds +
       ((recordBaseWord * pdsThreadCount +
-        (io.csr_tid + x.asUInt) * recordWords.U + recordWord) << 2)
+        (io.csr_tid + x.asUInt) * (bodyWords * RtAbiLayout.AbiPdsLaneMajorHitRecordBodyRecordCount).U + recordWord) << 2)
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
                   Mux(reg_save.ctrl.is_vls12,
                     reg_save.in1(x)+reg_save.in2(x),
-                    Mux(hitRecordMode,
+                    Mux(hitRecordMode && (candidateRecord || committedRecord),
                       laneMajorPdsByteAddr,
                       byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride)
                   ),
