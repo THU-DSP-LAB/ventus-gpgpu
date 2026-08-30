@@ -98,12 +98,15 @@ class RtRayState(recorded_float: Boolean = false) extends Bundle {
 
 /** Prepared geometry input for one four-box intersection operation. */
 class RtBox4IntersectionInput(recorded_float: Boolean = false) extends Bundle {
+  /** Identifies the owning RtMemTable entry until its result is consumed. */
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   val ray = new Ray(recorded_float)
   val aabb = Vec(4, new AABB(recorded_float))
 }
 
 /** Result of one four-box intersection operation. */
 class RtBox4IntersectionOutput extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   // Intersecting boxes precede non-intersecting boxes; the latter use +Inf.
   val tmin = Vec(4, Bits(32.W))
   val isIntersect = Vec(4, Bool())
@@ -113,6 +116,8 @@ class RtBox4IntersectionOutput extends Bundle {
 /** Prepared geometry input for one triangle intersection operation. */
 class RtTriangleIntersectionInput(recorded_float: Boolean = false)
     extends Bundle {
+  /** Identifies the owning RtMemTable entry until its result is consumed. */
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   val ray = new Ray(recorded_float)
   val triangle = new Triangle(recorded_float)
 }
@@ -120,6 +125,7 @@ class RtTriangleIntersectionInput(recorded_float: Boolean = false)
 /** Result of one triangle intersection operation. */
 class RtTriangleIntersectionOutput(recorded_float: Boolean = false)
     extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   val tNum = Bits(if (recorded_float) 33.W else 32.W)
   val tDenom = Bits(if (recorded_float) 33.W else 32.W)
   val hit = Bool()
@@ -162,15 +168,14 @@ class RtBox4RayStateReadRequest extends RtRayStateFieldReadRequest
 class RtTriangleRayStateReadRequest extends RtRayStateFieldReadRequest
 
 /*
- * A write is already physical when it reaches RtMemTable. The type identifies
- * the producing path, while address, mask, and payload remain generic so the
- * table can merge two disjoint 64-byte result pairs without classifying their
- * candidate/committed body or hit-kind contents.
+ * A write is already physical when it reaches RtPdsTable. The type identifies
+ * the producing path while address, mask, and payload remain generic. Each
+ * request owns one 64-byte PDS block; the table does not merge adjacent blocks.
  */
 class RtPreparedHitRecordWrite extends Bundle {
-  val lineAddress = UInt(memReqLen.W)
-  val wordMask = UInt(dcache_BlockWords.W)
-  val lineData = Vec(dcache_BlockWords, UInt(xLen.W))
+  val blockAddress = UInt(memReqLen.W)
+  val wordMask = UInt(RtCorePortParameters.pdsWriteWordCount.W)
+  val data = Vec(RtCorePortParameters.pdsWriteWordCount, UInt(xLen.W))
 }
 
 /** Prepared PDS hit-record write produced by the box4 path. */

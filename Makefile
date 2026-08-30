@@ -58,6 +58,7 @@ rtcore-test:
 		exit 2; \
 	fi
 	./mill -i 'ventus[6.4.0].tests.testOnly' rtcore.RtIntersectionUnitParallelTest
+	./mill -i 'ventus[6.4.0].tests.testOnly' rtcore.RtPdsTableTest
 
 verilog:
 	./mill ventus[6.4.0].run
