@@ -135,60 +135,6 @@ class RtTriangleIntersectionOutput(recorded_float: Boolean = false)
   val hit = Bool()
 }
 
-/*
- * The following operation-specific requests preserve the producer/consumer
- * boundary at the table. The table itself only sees generic cache-line
- * transactions; controller logic maps these request types to RtPdsReadRequest,
- * RtPdsWriteRequest, or RtAsReadRequest and demultiplexes read responses by
- * requestId.
- */
-class RtAsLineReadRequest extends Bundle {
-  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val lineAddress = UInt(memReqLen.W)
-  val wordMask = UInt(dcache_BlockWords.W)
-}
-
-/** AS line request whose response supplies one box4 operation. */
-class RtBox4AsReadRequest extends RtAsLineReadRequest
-
-/**
- * AS line request whose response supplies triangle geometry. triangleMask is
- * the leaf selector (11/10/01/00) used when choosing the 64-byte load.
- */
-class RtTriangleAsReadRequest extends RtAsLineReadRequest {
-  val triangleMask = UInt(2.W)
-}
-
-class RtRayStateFieldReadRequest extends Bundle {
-  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val pds = new RtPdsContext
-  val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
-  val laneMask = UInt(num_thread.W)
-}
-
-/** Field-major ray-state PDS read for the box4 path. */
-class RtBox4RayStateReadRequest extends RtRayStateFieldReadRequest
-
-/** Field-major ray-state PDS read for the triangle path. */
-class RtTriangleRayStateReadRequest extends RtRayStateFieldReadRequest
-
-/*
- * A write is already physical when it reaches RtPdsTable. The type identifies
- * the producing path while address, mask, and payload remain generic. Each
- * request owns one 64-byte PDS block; the table does not merge adjacent blocks.
- */
-class RtPreparedHitRecordWrite extends Bundle {
-  val blockAddress = UInt(memReqLen.W)
-  val wordMask = UInt(RtCorePortParameters.pdsWriteWordCount.W)
-  val data = Vec(RtCorePortParameters.pdsWriteWordCount, UInt(xLen.W))
-}
-
-/** Prepared PDS hit-record write produced by the box4 path. */
-class RtBox4HitRecordWrite extends RtPreparedHitRecordWrite
-
-/** Prepared PDS hit-record write produced by the triangle path. */
-class RtTriangleHitRecordWrite extends RtPreparedHitRecordWrite
-
 // Conversion circuits between 32-bit IEEE float and 33-bit recorded float
 
 object Float3ConvertFNtoRecFN {
