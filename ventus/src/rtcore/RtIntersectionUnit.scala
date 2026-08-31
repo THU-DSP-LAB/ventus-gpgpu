@@ -18,6 +18,7 @@ private object RtIntersectionConstants {
 }
 
 private[rtcore] class RtBox4PipelineState extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   val ray = new Ray(recorded_float = true)
   val aabb = Vec(4, new AABB(recorded_float = true))
   val tMin = Vec(4, new Float3(recorded_float = true))
@@ -28,6 +29,7 @@ private[rtcore] class RtBox4PipelineState extends Bundle {
 }
 
 private[rtcore] class RtTrianglePipelineState extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   val ray = new Ray(recorded_float = true)
   val triangle = new Triangle(recorded_float = true)
   val A = new Float3(recorded_float = true)
@@ -60,6 +62,7 @@ class RtBox4Pipeline extends Module {
       new RtBox4PipelineState,
       { input: RtBox4IntersectionInput =>
         val emit = WireDefault(0.U.asTypeOf(new RtBox4PipelineState))
+        emit.requestId := input.requestId
         emit.ray := RayConvertFNtoRecFN(input.ray)
         emit.aabb.zip(input.aabb).foreach { case (outBox, inBox) =>
           outBox := AABBConvertFNtoRecFN(inBox)
@@ -227,6 +230,7 @@ class RtBox4Pipeline extends Module {
       new RtBox4IntersectionOutput,
       { intake: RtBox4PipelineState =>
         val emit = Wire(new RtBox4IntersectionOutput)
+        emit.requestId := intake.requestId
         emit.tmin := intake.tmin.map(fNFromRecFN(8, 24, _))
         emit.isIntersect := intake.isIntersect
         emit.boxIndex := intake.boxIndex
@@ -259,6 +263,7 @@ class RtTrianglePipeline extends Module {
       new RtTrianglePipelineState,
       { input: RtTriangleIntersectionInput =>
         val emit = WireDefault(0.U.asTypeOf(new RtTrianglePipelineState))
+        emit.requestId := input.requestId
         emit.ray := RayConvertFNtoRecFN(input.ray)
         emit.triangle := TriangleConvertFNtoRecFN(input.triangle)
         emit
@@ -482,6 +487,9 @@ class RtTrianglePipeline extends Module {
       new RtTriangleIntersectionOutput,
       { intake: RtTrianglePipelineState =>
         val emit = Wire(new RtTriangleIntersectionOutput)
+        emit.requestId := intake.requestId
+        emit.uNum := fNFromRecFN(8, 24, intake.U)
+        emit.vNum := fNFromRecFN(8, 24, intake.V)
         emit.tNum := fNFromRecFN(8, 24, intake.tNum)
         emit.tDenom := fNFromRecFN(8, 24, intake.tDenom)
         emit.hit := intake.hit

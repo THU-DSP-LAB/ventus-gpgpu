@@ -4,7 +4,7 @@
 package rtcore
 
 object RtAbiLayout {
-  final val AbiVersion: Int = 10
+  final val AbiVersion: Int = 11
   final val AbiWordBytes: Int = 4
   final val AbiAlignmentBytes: Int = 16
   final val TraceMeta0FlagsShift: Int = 0
@@ -38,15 +38,7 @@ object RtAbiLayout {
   final val AbiCandidateHitRecordSizeBytes: Int = 36
   final val AbiCommittedHitRecordBaseBytes: Int = 112
   final val AbiCommittedHitRecordSizeBytes: Int = 36
-  final val AbiPdsFieldMajorPrefixSizeBytes: Int = 76
-  final val AbiPdsFieldMajorPrefixWordCount: Int = 19
-  final val AbiPdsLaneMajorHitRecordBodyWordCount: Int = 8
-  final val AbiPdsLaneMajorHitRecordBodyRecordCount: Int = 2
-  final val AbiPdsLaneMajorHitRecordWordCount: Int = 9
-  final val AbiPdsLaneMajorHitRecordCount: Int = 2
-  final val AbiPdsCandidateHitKindBaseWordCount: Int = 35
-  final val AbiPdsCommittedHitKindBaseWordCount: Int = 36
-  final val AbiHitRecordAddrTag: Int = -2147483648
+  final val AbiPdsFieldMajorFixedHeaderWordCount: Int = 37
   final val AbiHitAttribBaseBytes: Int = 148
   final val AbiShaderRegionBaseBytes: Int = 148
   final val AbiFixedHeaderSizeBytes: Int = 148

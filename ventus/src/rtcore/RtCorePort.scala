@@ -31,8 +31,8 @@ object RtCorePortParameters {
   *
   * Field-major PDS reads derive their address from this context and the
   * requested field word. PDS writes carry their already-computed 64-byte block
-  * address and mask directly, because the fixed layout mixes lane-major
-  * hit-record bodies with field-major ray-state and hit-kind planes.
+  * address and mask directly. Every fixed-header field, including both
+  * hit-records, is field-major.
   */
 class RtPdsContext extends Bundle {
   val baseAddress = UInt(xLen.W)
@@ -59,22 +59,33 @@ class RtWarpCompletion extends Bundle {
   val laneStatus = Vec(num_thread, UInt(xLen.W))
 }
 
+/** Field-major PDS read for one fixed-header word across a warp. */
+class RtPdsReadRequest extends Bundle {
+  val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
+  val readLaneMask = UInt(num_thread.W)
+  val pds = new RtPdsContext
+}
+
+/** Physical 64-byte PDS write prepared by the hit-record write table. */
+class RtPdsWriteRequest extends Bundle {
+  val blockAddress = UInt(memReqLen.W)
+  val wordMask = UInt(RtCorePortParameters.pdsWriteWordCount.W)
+  val data = Vec(
+    RtCorePortParameters.pdsWriteWordCount,
+    UInt(xLen.W)
+  )
+}
+
 /**
- * Fixed-ABI PDS header operation.
- *
- * A read names one field-major PDS word and returns that field for all lanes
- * of the issuing warp. This covers ray state and the separated candidate/
- * committed hit-kind planes. A write carries one already-computed 64-byte PDS
- * block, its word mask, and payload. It has no record-kind or owner-lane
- * metadata: RTcore derives the physical block before allocation.
+ * Legacy combined PDS operation used only by RtPdsTable during migration.
+ * New RTcore interfaces use RtPdsReadRequest and RtPdsWriteRequest directly.
  */
 class RtPdsRequest extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
   val write = Bool()
-  // Read-only selector: the same fixed-header word for every lane.
   val fieldWordOffset = UInt(RtCorePortParameters.pdsWordOffsetWidth.W)
   val readLaneMask = UInt(num_thread.W)
-  // Write-only: a 64-byte-aligned address computed by RTcore.
   val writeBlockAddress = UInt(memReqLen.W)
   val writeWordMask = UInt(RtCorePortParameters.pdsWriteWordCount.W)
   val pds = new RtPdsContext
@@ -116,7 +127,8 @@ class RtCoreIO extends Bundle {
   val command = Flipped(Decoupled(new RtWarpCommand))
   val completion = Decoupled(new RtWarpCompletion)
 
-  val pdsRequest = Decoupled(new RtPdsRequest)
+  val pdsReadRequest = Decoupled(new RtPdsReadRequest)
+  val pdsWriteRequest = Decoupled(new RtPdsWriteRequest)
   val pdsResponse = Flipped(Decoupled(new RtPdsResponse))
 
   val asReadRequest = Decoupled(new RtAsReadRequest)

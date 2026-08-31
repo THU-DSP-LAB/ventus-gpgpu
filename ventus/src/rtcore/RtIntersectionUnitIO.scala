@@ -126,6 +126,10 @@ class RtTriangleIntersectionInput(recorded_float: Boolean = false)
 class RtTriangleIntersectionOutput(recorded_float: Boolean = false)
     extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
+  // Numerators share tDenom.  The traversal controller performs the final
+  // IEEE-754 divisions only for an accepted closest hit.
+  val uNum = Bits(if (recorded_float) 33.W else 32.W)
+  val vNum = Bits(if (recorded_float) 33.W else 32.W)
   val tNum = Bits(if (recorded_float) 33.W else 32.W)
   val tDenom = Bits(if (recorded_float) 33.W else 32.W)
   val hit = Bool()
@@ -134,8 +138,9 @@ class RtTriangleIntersectionOutput(recorded_float: Boolean = false)
 /*
  * The following operation-specific requests preserve the producer/consumer
  * boundary at the table. The table itself only sees generic cache-line
- * transactions; controller logic maps these request types to RtPdsRequest or
- * RtAsReadRequest and demultiplexes their responses by requestId.
+ * transactions; controller logic maps these request types to RtPdsReadRequest,
+ * RtPdsWriteRequest, or RtAsReadRequest and demultiplexes read responses by
+ * requestId.
  */
 class RtAsLineReadRequest extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)

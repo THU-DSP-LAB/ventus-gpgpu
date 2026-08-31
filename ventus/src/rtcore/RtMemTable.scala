@@ -20,6 +20,12 @@ object RtMemTableParameters {
   val pdsWorkContextCount = 32
   val pdsWarpContextCount = num_warp
 
+  // The resident traversal tables are warp-owned.  They deliberately do not
+  // borrow rows from the transient cache-line transaction pool.
+  val pdsReadWarpEntryCount = num_warp
+  val pdsWriteWarpEntryCount = num_warp
+  val hitRecordStorageWordCount = RtAbiLayout.HitRecordWordCount
+
   val asEntryCount = 32
   val maxAsWaitersPerEntry = 2
   val lineWordCount = dcache_BlockWords
@@ -29,6 +35,23 @@ object RtMemTableParameters {
   require(pdsRowWords == 16)
   require(pdsRayStateFieldCount <= pdsRowWords)
   require(lineWordCount == num_thread)
+  require(
+    RtAbiLayout.AbiCandidateHitRecordSizeBytes / RtAbiLayout.AbiWordBytes ==
+      hitRecordStorageWordCount
+  )
+  require(
+    RtAbiLayout.AbiCommittedHitRecordSizeBytes / RtAbiLayout.AbiWordBytes ==
+      hitRecordStorageWordCount
+  )
+  require(
+    RtAbiLayout.AbiCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes +
+      hitRecordStorageWordCount ==
+      RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
+  )
+  require(
+    RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes +
+      hitRecordStorageWordCount == RtAbiLayout.AbiPdsFieldMajorFixedHeaderWordCount
+  )
 }
 
 object RtPdsRowState {
@@ -140,8 +163,8 @@ class RtAsMemTableEntry extends Bundle {
   val responseFault = Bool()
 }
 
-/** Complete structural storage for future combined PDS and AS control. */
-class RtMemTable extends Bundle {
+/** Complete structural storage used by the legacy PDS table controller. */
+class RtMemTableStorage extends Bundle {
   val pds = new RtPdsTableStorage
   val asEntries = Vec(
     RtMemTableParameters.asEntryCount,
@@ -404,4 +427,572 @@ class RtPdsTable extends Module {
       }
     }
   }
+}
+
+/** Admission to the resident, field-major ray-state table. */
+class RtPdsReadAdmission extends Bundle {
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val warpId = UInt(depth_warp.W)
+  val pds = new RtPdsContext
+  val activeMask = UInt(num_thread.W)
+}
+
+/** A resident ray-state row made visible to the traversal scheduler. */
+class RtPdsReadLane extends Bundle {
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val warpId = UInt(depth_warp.W)
+  val laneId = UInt(log2Ceil(num_thread).W)
+  val data = Vec(RtMemTableParameters.pdsRayStateFieldCount, UInt(xLen.W))
+}
+
+class RtPdsReadRetire extends Bundle {
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val warpId = UInt(depth_warp.W)
+}
+
+private[rtcore] class RtPdsReadContext extends Bundle {
+  val valid = Bool()
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val pds = new RtPdsContext
+  val activeMask = UInt(num_thread.W)
+  val issuedFields = UInt(RtMemTableParameters.pdsRayStateFieldCount.W)
+  val receivedFields = UInt(RtMemTableParameters.pdsRayStateFieldCount.W)
+  val deliveredMask = UInt(num_thread.W)
+  val faultMask = UInt(num_thread.W)
+}
+
+private[rtcore] class RtPdsReadTrackerV2 extends Bundle {
+  val valid = Bool()
+  val warpId = UInt(depth_warp.W)
+  val field = UInt(log2Ceil(RtMemTableParameters.pdsRayStateFieldCount).W)
+  val laneMask = UInt(num_thread.W)
+}
+
+/**
+  * Warp-resident PDS ray-state table.  A delivered lane remains allocated;
+  * only the traversal owner may retire the whole warp context.
+  */
+class RtPdsReadTable extends Module {
+  private val params = RtMemTableParameters
+  private val allFields = ((BigInt(1) << params.pdsRayStateFieldCount) - 1).U(
+    params.pdsRayStateFieldCount.W
+  )
+
+  val io = IO(new Bundle {
+    val admission = Flipped(Decoupled(new RtPdsReadAdmission))
+    val laneOut = Decoupled(new RtPdsReadLane)
+    val faultOut = Decoupled(new RtPdsRayStateFault)
+    val retire = Flipped(Decoupled(new RtPdsReadRetire))
+    val request = Decoupled(new RtPdsReadRequest)
+    val response = Flipped(Decoupled(new RtPdsResponse))
+  })
+
+  val contexts = RegInit(VecInit(Seq.fill(params.pdsReadWarpEntryCount)(
+    0.U.asTypeOf(new RtPdsReadContext)
+  )))
+  val rows = Reg(Vec(
+    params.pdsReadWarpEntryCount,
+    Vec(num_thread, Vec(params.pdsRayStateFieldCount, UInt(xLen.W)))
+  ))
+  val trackers = RegInit(VecInit(Seq.fill(params.pdsReadTrackerCount)(
+    0.U.asTypeOf(new RtPdsReadTrackerV2)
+  )))
+
+  val admissionContext = contexts(io.admission.bits.warpId)
+  io.admission.ready := io.admission.bits.activeMask.orR && !admissionContext.valid
+  when(io.admission.fire) {
+    admissionContext.valid := true.B
+    admissionContext.workId := io.admission.bits.workId
+    admissionContext.pds := io.admission.bits.pds
+    admissionContext.activeMask := io.admission.bits.activeMask
+    admissionContext.issuedFields := 0.U
+    admissionContext.receivedFields := 0.U
+    admissionContext.deliveredMask := 0.U
+    admissionContext.faultMask := 0.U
+  }
+
+  val needsRead = Wire(Vec(params.pdsReadWarpEntryCount, Bool()))
+  for (warp <- 0 until params.pdsReadWarpEntryCount) {
+    needsRead(warp) := contexts(warp).valid &&
+      contexts(warp).issuedFields =/= allFields
+  }
+  val freeTrackers = Wire(Vec(params.pdsReadTrackerCount, Bool()))
+  for (index <- 0 until params.pdsReadTrackerCount)
+    freeTrackers(index) := !trackers(index).valid
+  val hasRead = needsRead.asUInt.orR
+  val hasTracker = freeTrackers.asUInt.orR
+  val readWarp = PriorityEncoder(needsRead.asUInt)
+  val trackerIndex = PriorityEncoder(freeTrackers.asUInt)
+  val readContext = contexts(readWarp)
+  val readField = PriorityEncoder((~readContext.issuedFields).asUInt & allFields)
+
+  io.request.valid := hasRead && hasTracker
+  io.request.bits := 0.U.asTypeOf(new RtPdsReadRequest)
+  when(io.request.valid) {
+    io.request.bits.requestId := trackerIndex
+    io.request.bits.fieldWordOffset := RtAbiLayout.SlotAccelLo.U + readField
+    io.request.bits.readLaneMask := readContext.activeMask
+    io.request.bits.pds := readContext.pds
+  }
+  when(io.request.fire) {
+    val tracker = trackers(trackerIndex)
+    tracker.valid := true.B
+    tracker.warpId := readWarp
+    tracker.field := readField
+    tracker.laneMask := readContext.activeMask
+    readContext.issuedFields := readContext.issuedFields |
+      UIntToOH(readField, params.pdsRayStateFieldCount)
+  }
+
+  val responseIndex = io.response.bits.requestId(
+    log2Ceil(params.pdsReadTrackerCount) - 1,
+    0
+  )
+  val responseInRange = io.response.bits.requestId < params.pdsReadTrackerCount.U
+  val responseTracker = trackers(responseIndex)
+  val responseMatches = responseInRange && responseTracker.valid
+  io.response.ready := responseMatches
+  when(io.response.fire) {
+    val context = contexts(responseTracker.warpId)
+    assert(context.valid, "PDS read response targets a live warp context")
+    assert(io.response.bits.laneMask === responseTracker.laneMask,
+      "PDS read response lane mask must match its request")
+    responseTracker.valid := false.B
+    context.receivedFields := context.receivedFields |
+      UIntToOH(responseTracker.field, params.pdsRayStateFieldCount)
+    context.faultMask := context.faultMask | io.response.bits.faultMask
+    for (lane <- 0 until num_thread) {
+      when(responseTracker.laneMask(lane)) {
+        rows(responseTracker.warpId)(lane)(responseTracker.field) :=
+          io.response.bits.readData(lane)
+      }
+    }
+  }
+
+  val completedWarps = Wire(Vec(params.pdsReadWarpEntryCount, Bool()))
+  for (warp <- 0 until params.pdsReadWarpEntryCount) {
+    completedWarps(warp) := contexts(warp).valid &&
+      contexts(warp).receivedFields === allFields
+  }
+  val laneAvailable = Wire(Vec(params.pdsReadWarpEntryCount, UInt(num_thread.W)))
+  val faultAvailable = Wire(Vec(params.pdsReadWarpEntryCount, UInt(num_thread.W)))
+  for (warp <- 0 until params.pdsReadWarpEntryCount) {
+    val undispatched = contexts(warp).activeMask & (~contexts(warp).deliveredMask).asUInt
+    laneAvailable(warp) := Mux(completedWarps(warp),
+      undispatched & (~contexts(warp).faultMask).asUInt, 0.U)
+    faultAvailable(warp) := Mux(completedWarps(warp),
+      undispatched & contexts(warp).faultMask, 0.U)
+  }
+  val hasLane = laneAvailable.map(_.orR).reduce(_ || _)
+  val hasFault = faultAvailable.map(_.orR).reduce(_ || _)
+  val laneWarpMask = VecInit(laneAvailable.map(_.orR)).asUInt
+  val faultWarpMask = VecInit(faultAvailable.map(_.orR)).asUInt
+  val laneWarp = PriorityEncoder(laneWarpMask)
+  val faultWarp = PriorityEncoder(faultWarpMask)
+  val laneId = PriorityEncoder(laneAvailable(laneWarp))
+  val faultLaneId = PriorityEncoder(faultAvailable(faultWarp))
+
+  io.laneOut.valid := hasLane && !hasFault
+  io.laneOut.bits := 0.U.asTypeOf(new RtPdsReadLane)
+  when(io.laneOut.valid) {
+    io.laneOut.bits.workId := contexts(laneWarp).workId
+    io.laneOut.bits.warpId := laneWarp
+    io.laneOut.bits.laneId := laneId
+    io.laneOut.bits.data := rows(laneWarp)(laneId)
+  }
+  io.faultOut.valid := hasFault
+  io.faultOut.bits := 0.U.asTypeOf(new RtPdsRayStateFault)
+  when(hasFault) {
+    io.faultOut.bits.workId := contexts(faultWarp).workId
+    io.faultOut.bits.laneId := faultLaneId
+  }
+  when(io.laneOut.fire) {
+    contexts(laneWarp).deliveredMask := contexts(laneWarp).deliveredMask |
+      UIntToOH(laneId, num_thread)
+  }
+  when(io.faultOut.fire) {
+    contexts(faultWarp).deliveredMask := contexts(faultWarp).deliveredMask |
+      UIntToOH(faultLaneId, num_thread)
+  }
+
+  val retireContext = contexts(io.retire.bits.warpId)
+  io.retire.ready := retireContext.valid &&
+    retireContext.workId === io.retire.bits.workId &&
+    (retireContext.deliveredMask & retireContext.activeMask) === retireContext.activeMask
+  when(io.retire.fire) {
+    retireContext.valid := false.B
+  }
+}
+
+/** A semantic hit-record update retained until its warp is ready to flush. */
+class RtPdsHitRecordUpdate extends Bundle {
+  val warpId = UInt(depth_warp.W)
+  val laneId = UInt(log2Ceil(num_thread).W)
+  val committed = Bool()
+  val dirty = UInt(RtMemTableParameters.hitRecordStorageWordCount.W)
+  val data = Vec(RtMemTableParameters.hitRecordStorageWordCount, UInt(xLen.W))
+}
+
+class RtPdsWriteAdmission extends Bundle {
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val warpId = UInt(depth_warp.W)
+  val pds = new RtPdsContext
+  val activeMask = UInt(num_thread.W)
+}
+
+class RtPdsWriteFinish extends Bundle {
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val warpId = UInt(depth_warp.W)
+  val terminalMask = UInt(num_thread.W)
+}
+
+class RtPdsWriteDrained extends Bundle {
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val warpId = UInt(depth_warp.W)
+}
+
+private[rtcore] class RtPdsWriteContext extends Bundle {
+  val valid = Bool()
+  val workId = UInt(RtCorePortParameters.requestIdWidth.W)
+  val pds = new RtPdsContext
+  val activeMask = UInt(num_thread.W)
+  val flushing = Bool()
+  val drained = Bool()
+  val record = Bool()
+  val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W)
+  val upperHalf = Bool()
+}
+
+/**
+  * Persistent hit-record write table.  Its internal organization is lane
+  * local for IU updates; its only external representation is field-major PDS
+  * blocks with a dirty word mask.
+  */
+class RtPdsWriteTable(
+    warpEntryCount: Int = RtMemTableParameters.pdsWriteWarpEntryCount
+) extends Module {
+  private val params = RtMemTableParameters
+  private val recordWords = params.hitRecordStorageWordCount
+  private val halfWords = RtCorePortParameters.pdsWriteWordCount
+  private val tableIndexWidth = log2Ceil(warpEntryCount)
+  require(num_thread == 2 * halfWords)
+
+  private def tableIndex(warpId: UInt): UInt = {
+    if (warpEntryCount == 1) 0.U else warpId(tableIndexWidth - 1, 0)
+  }
+
+  val io = IO(new Bundle {
+    val admission = Flipped(Decoupled(new RtPdsWriteAdmission))
+    val update = Flipped(Decoupled(new RtPdsHitRecordUpdate))
+    val finish = Flipped(Decoupled(new RtPdsWriteFinish))
+    val write = Decoupled(new RtPdsWriteRequest)
+    val drained = Decoupled(new RtPdsWriteDrained)
+  })
+
+  val contexts = RegInit(VecInit(Seq.fill(warpEntryCount)(
+    0.U.asTypeOf(new RtPdsWriteContext)
+  )))
+  val data = Reg(Vec(warpEntryCount,
+    Vec(num_thread, Vec(2, Vec(recordWords, UInt(xLen.W))))))
+  val dirty = RegInit(VecInit(Seq.fill(warpEntryCount)(
+    VecInit(Seq.fill(num_thread)(VecInit(Seq.fill(2)(
+      VecInit(Seq.fill(recordWords)(false.B))
+    ))))
+  )))
+
+  val admissionIndex = tableIndex(io.admission.bits.warpId)
+  val admissionContext = contexts(admissionIndex)
+  io.admission.ready := io.admission.bits.activeMask.orR && !admissionContext.valid
+  when(io.admission.fire) {
+    admissionContext.valid := true.B
+    admissionContext.workId := io.admission.bits.workId
+    admissionContext.pds := io.admission.bits.pds
+    admissionContext.activeMask := io.admission.bits.activeMask
+    admissionContext.flushing := false.B
+    admissionContext.drained := false.B
+    admissionContext.record := false.B
+    admissionContext.word := 0.U
+    admissionContext.upperHalf := false.B
+    for (lane <- 0 until num_thread; record <- 0 until 2; word <- 0 until recordWords)
+      dirty(admissionIndex)(lane)(record)(word) := false.B
+  }
+
+  val updateIndex = tableIndex(io.update.bits.warpId)
+  val updateContext = contexts(updateIndex)
+  io.update.ready := updateContext.valid && !updateContext.flushing &&
+    updateContext.activeMask(io.update.bits.laneId)
+  when(io.update.fire) {
+    for (word <- 0 until recordWords) {
+      when(io.update.bits.dirty(word)) {
+        data(updateIndex)(io.update.bits.laneId)(io.update.bits.committed)(word) :=
+          io.update.bits.data(word)
+        dirty(updateIndex)(io.update.bits.laneId)(io.update.bits.committed)(word) := true.B
+      }
+    }
+  }
+
+  val finishContext = contexts(tableIndex(io.finish.bits.warpId))
+  io.finish.ready := finishContext.valid && !finishContext.flushing &&
+    finishContext.workId === io.finish.bits.workId &&
+    io.finish.bits.terminalMask === finishContext.activeMask
+  when(io.finish.fire) {
+    finishContext.flushing := true.B
+    finishContext.record := false.B
+    finishContext.word := 0.U
+    finishContext.upperHalf := false.B
+  }
+
+  val flushing = Wire(Vec(warpEntryCount, Bool()))
+  for (warp <- 0 until warpEntryCount)
+    flushing(warp) := contexts(warp).valid && contexts(warp).flushing && !contexts(warp).drained
+  val hasFlush = flushing.asUInt.orR
+  val writeWarp = PriorityEncoder(flushing.asUInt)
+  val writeContext = contexts(writeWarp)
+  val halfBase = Mux(writeContext.upperHalf, halfWords.U, 0.U)
+  val halfDirty = Wire(Vec(halfWords, Bool()))
+  for (word <- 0 until halfWords) {
+    val lane = halfBase + word.U
+    halfDirty(word) := writeContext.activeMask(lane) &&
+      dirty(writeWarp)(lane)(writeContext.record)(writeContext.word)
+  }
+  val hasHalfDirty = halfDirty.asUInt.orR
+
+  io.write.valid := hasFlush && hasHalfDirty
+  io.write.bits := 0.U.asTypeOf(new RtPdsWriteRequest)
+  when(io.write.valid) {
+    val pdsThreadCount = writeContext.pds.numWarps * writeContext.pds.numThreads
+    val fieldBase = Mux(
+      writeContext.record,
+      (RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U,
+      (RtAbiLayout.AbiCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U
+    )
+    val field = fieldBase + writeContext.word
+    val physicalWord = field * pdsThreadCount + writeContext.pds.pdsWarpTidBase + halfBase
+    io.write.bits.blockAddress := writeContext.pds.baseAddress + (physicalWord << 2)
+    io.write.bits.wordMask := halfDirty.asUInt
+    for (word <- 0 until halfWords) {
+      val lane = halfBase + word.U
+      io.write.bits.data(word) := data(writeWarp)(lane)(writeContext.record)(writeContext.word)
+    }
+  }
+
+  def advance(context: RtPdsWriteContext): Unit = {
+    when(!context.upperHalf) {
+      context.upperHalf := true.B
+    }.elsewhen(context.word === (recordWords - 1).U) {
+      context.upperHalf := false.B
+      context.word := 0.U
+      when(!context.record) {
+        context.record := true.B
+      }.otherwise {
+        context.drained := true.B
+      }
+    }.otherwise {
+      context.upperHalf := false.B
+      context.word := context.word + 1.U
+    }
+  }
+  when(hasFlush && !hasHalfDirty) {
+    advance(writeContext)
+  }
+  when(io.write.fire) {
+    assert(io.write.bits.blockAddress(5, 0) === 0.U,
+      "PDS hit-record writes must be 64-byte aligned")
+    advance(writeContext)
+  }
+
+  val drainedContexts = Wire(Vec(warpEntryCount, Bool()))
+  for (warp <- 0 until warpEntryCount)
+    drainedContexts(warp) := contexts(warp).valid && contexts(warp).drained
+  val hasDrained = drainedContexts.asUInt.orR
+  val drainedWarp = PriorityEncoder(drainedContexts.asUInt)
+  io.drained.valid := hasDrained
+  io.drained.bits := 0.U.asTypeOf(new RtPdsWriteDrained)
+  when(hasDrained) {
+    io.drained.bits.workId := contexts(drainedWarp).workId
+    io.drained.bits.warpId := drainedWarp
+  }
+  when(io.drained.fire) {
+    contexts(drainedWarp).valid := false.B
+    contexts(drainedWarp).flushing := false.B
+    contexts(drainedWarp).drained := false.B
+  }
+}
+
+/** Identifies the lane operation waiting for an AS cache line. */
+class RtAsLineWaiterV2 extends Bundle {
+  val warpId = UInt(depth_warp.W)
+  val laneId = UInt(log2Ceil(num_thread).W)
+  val nodeKind = UInt(2.W)
+  val nodeRef = UInt(32.W)
+}
+
+class RtAsTableAcquire extends Bundle {
+  val lineAddress = UInt(memReqLen.W)
+  val wordMask = UInt(RtMemTableParameters.lineWordCount.W)
+  val waiter = new RtAsLineWaiterV2
+}
+
+class RtAsTableReadyLine extends Bundle {
+  val waiter = new RtAsLineWaiterV2
+  val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W))
+  val fault = Bool()
+}
+
+private[rtcore] class RtAsTableEntry extends Bundle {
+  val valid = Bool()
+  val cacheRequestSent = Bool()
+  val cacheResponseValid = Bool()
+  val lineAddress = UInt(memReqLen.W)
+  val cacheWordMask = UInt(RtMemTableParameters.lineWordCount.W)
+  val waiterValid = Vec(RtMemTableParameters.maxAsWaitersPerEntry, Bool())
+  val waiters = Vec(RtMemTableParameters.maxAsWaitersPerEntry, new RtAsLineWaiterV2)
+  val cacheLineData = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W))
+  val responseFault = Bool()
+}
+
+/**
+  * Line-granular AS transaction table.  It only combines identical pending
+  * lines; node decoding and traversal ownership remain outside the table.
+  */
+class RtAsTable extends Module {
+  private val params = RtMemTableParameters
+  val io = IO(new Bundle {
+    val acquire = Flipped(Decoupled(new RtAsTableAcquire))
+    val readyLine = Decoupled(new RtAsTableReadyLine)
+    val request = Decoupled(new RtAsReadRequest)
+    val response = Flipped(Decoupled(new RtAsReadResponse))
+  })
+
+  val entries = RegInit(VecInit(Seq.fill(params.asEntryCount)(
+    0.U.asTypeOf(new RtAsTableEntry)
+  )))
+  val mergeable = Wire(Vec(params.asEntryCount, Bool()))
+  val freeEntries = Wire(Vec(params.asEntryCount, Bool()))
+  for (entry <- 0 until params.asEntryCount) {
+    mergeable(entry) := entries(entry).valid && !entries(entry).cacheResponseValid &&
+      entries(entry).lineAddress === io.acquire.bits.lineAddress &&
+      !entries(entry).waiterValid.asUInt.andR
+    freeEntries(entry) := !entries(entry).valid
+  }
+  val hasMerge = mergeable.asUInt.orR
+  val hasFree = freeEntries.asUInt.orR
+  val mergeIndex = PriorityEncoder(mergeable.asUInt)
+  val freeIndex = PriorityEncoder(freeEntries.asUInt)
+  val acquireIndex = Mux(hasMerge, mergeIndex, freeIndex)
+  io.acquire.ready := hasMerge || hasFree
+  when(io.acquire.fire) {
+    val entry = entries(acquireIndex)
+    when(!hasMerge) {
+      entry.valid := true.B
+      entry.cacheRequestSent := false.B
+      entry.cacheResponseValid := false.B
+      entry.lineAddress := io.acquire.bits.lineAddress
+      entry.cacheWordMask := io.acquire.bits.wordMask
+      entry.waiterValid.foreach(_ := false.B)
+      entry.responseFault := false.B
+    }.otherwise {
+      entry.cacheWordMask := entry.cacheWordMask | io.acquire.bits.wordMask
+    }
+    val freeWaiter = PriorityEncoder((~entry.waiterValid.asUInt).asUInt)
+    entry.waiterValid(freeWaiter) := true.B
+    entry.waiters(freeWaiter) := io.acquire.bits.waiter
+  }
+
+  val unsent = Wire(Vec(params.asEntryCount, Bool()))
+  for (entry <- 0 until params.asEntryCount)
+    unsent(entry) := entries(entry).valid && !entries(entry).cacheRequestSent
+  val hasUnsent = unsent.asUInt.orR
+  val requestEntry = PriorityEncoder(unsent.asUInt)
+  io.request.valid := hasUnsent
+  io.request.bits := 0.U.asTypeOf(new RtAsReadRequest)
+  when(hasUnsent) {
+    io.request.bits.requestId := requestEntry
+    io.request.bits.lineAddress := entries(requestEntry).lineAddress
+    io.request.bits.wordMask := entries(requestEntry).cacheWordMask
+  }
+  when(io.request.fire) {
+    entries(requestEntry).cacheRequestSent := true.B
+  }
+
+  val responseEntry = io.response.bits.requestId(log2Ceil(params.asEntryCount) - 1, 0)
+  val responseInRange = io.response.bits.requestId < params.asEntryCount.U
+  val responseMatches = responseInRange && entries(responseEntry).valid &&
+    entries(responseEntry).cacheRequestSent && !entries(responseEntry).cacheResponseValid
+  io.response.ready := responseMatches
+  when(io.response.fire) {
+    entries(responseEntry).cacheResponseValid := true.B
+    entries(responseEntry).cacheLineData := io.response.bits.data
+    entries(responseEntry).responseFault := io.response.bits.fault
+  }
+
+  val readyEntries = Wire(Vec(params.asEntryCount, Bool()))
+  for (entry <- 0 until params.asEntryCount)
+    readyEntries(entry) := entries(entry).valid && entries(entry).cacheResponseValid &&
+      entries(entry).waiterValid.asUInt.orR
+  val hasReady = readyEntries.asUInt.orR
+  val readyEntry = PriorityEncoder(readyEntries.asUInt)
+  val readyWaiter = PriorityEncoder(entries(readyEntry).waiterValid.asUInt)
+  io.readyLine.valid := hasReady
+  io.readyLine.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
+  when(hasReady) {
+    io.readyLine.bits.waiter := entries(readyEntry).waiters(readyWaiter)
+    io.readyLine.bits.data := entries(readyEntry).cacheLineData
+    io.readyLine.bits.fault := entries(readyEntry).responseFault
+  }
+  when(io.readyLine.fire) {
+    val remaining = entries(readyEntry).waiterValid.asUInt &
+      (~UIntToOH(readyWaiter, params.maxAsWaitersPerEntry)).asUInt
+    entries(readyEntry).waiterValid(readyWaiter) := false.B
+    when(remaining === 0.U) {
+      entries(readyEntry).valid := false.B
+      entries(readyEntry).cacheResponseValid := false.B
+    }
+  }
+}
+
+/**
+  * RTcore's memory-table top level.  It owns the independent resident PDS
+  * read/write tables and the AS line table; consumers instantiate this module
+  * rather than wiring those banks directly.
+  */
+class RtMemTable extends Module {
+  val io = IO(new Bundle {
+    val pdsReadAdmission = Flipped(Decoupled(new RtPdsReadAdmission))
+    val pdsReadLane = Decoupled(new RtPdsReadLane)
+    val pdsFault = Decoupled(new RtPdsRayStateFault)
+    val pdsReadRetire = Flipped(Decoupled(new RtPdsReadRetire))
+    val pdsWriteAdmission = Flipped(Decoupled(new RtPdsWriteAdmission))
+    val pdsHitUpdate = Flipped(Decoupled(new RtPdsHitRecordUpdate))
+    val pdsWriteFinish = Flipped(Decoupled(new RtPdsWriteFinish))
+    val pdsWriteDrained = Decoupled(new RtPdsWriteDrained)
+    val asAcquire = Flipped(Decoupled(new RtAsTableAcquire))
+    val asReadyLine = Decoupled(new RtAsTableReadyLine)
+    val pdsReadRequest = Decoupled(new RtPdsReadRequest)
+    val pdsWriteRequest = Decoupled(new RtPdsWriteRequest)
+    val pdsResponse = Flipped(Decoupled(new RtPdsResponse))
+    val asRequest = Decoupled(new RtAsReadRequest)
+    val asResponse = Flipped(Decoupled(new RtAsReadResponse))
+  })
+
+  val pdsRead = Module(new RtPdsReadTable)
+  val pdsWrite = Module(new RtPdsWriteTable)
+  val asTable = Module(new RtAsTable)
+
+  pdsRead.io.admission <> io.pdsReadAdmission
+  io.pdsReadLane <> pdsRead.io.laneOut
+  io.pdsFault <> pdsRead.io.faultOut
+  pdsRead.io.retire <> io.pdsReadRetire
+  pdsWrite.io.admission <> io.pdsWriteAdmission
+  pdsWrite.io.update <> io.pdsHitUpdate
+  pdsWrite.io.finish <> io.pdsWriteFinish
+  io.pdsWriteDrained <> pdsWrite.io.drained
+  asTable.io.acquire <> io.asAcquire
+  io.asReadyLine <> asTable.io.readyLine
+  io.asRequest <> asTable.io.request
+  asTable.io.response <> io.asResponse
+
+  io.pdsReadRequest <> pdsRead.io.request
+  io.pdsWriteRequest <> pdsWrite.io.write
+  pdsRead.io.response <> io.pdsResponse
 }
