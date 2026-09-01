@@ -7,8 +7,8 @@ import top.parameters._
 
 object RtCoreSchedulerParameters {
   val boxUnitCount = 8
-  val triangleUnitCount = 8
-  require(RtCorePortParameters.requestIdWidth == depth_warp + log2Ceil(num_thread))
+  val triangleUnitCount = 2
+  require(RtCorePortParameters.requestIdWidth >= log2Ceil(num_thread))
 }
 
 private[rtcore] object RtVtasNodeKind {
@@ -37,6 +37,9 @@ private[rtcore] class RtTriangleDispatchMeta extends Bundle {
 class RtCoreScheduler extends Module {
   import RtCoreSchedulerParameters._
 
+  private val residentWarpCount = RtCorePortParameters.residentWarpCount
+  private val residentWarpIdWidth = RtCorePortParameters.residentWarpIdWidth
+
   val io = IO(new RtCoreIO)
   val boxIssue = IO(Vec(boxUnitCount, Decoupled(new RtBox4IntersectionInput)))
   val boxResult = IO(Flipped(Vec(boxUnitCount, Decoupled(new RtBox4IntersectionOutput))))
@@ -50,27 +53,26 @@ class RtCoreScheduler extends Module {
   io.rtLsuReport <> table.io.rtLsuReport
   table.io.rtLsuRespond <> io.rtLsuRespond
 
-  val Seq(sIdle, sPdsRead, sHeaderPending, sStackReady, sNodePending,
-    sBoxInflight, sBoxPush, sTriangleInflight, sTerminal) = Enum(9)
-  val laneState = RegInit(VecInit(Seq.fill(num_warp)(VecInit(Seq.fill(num_thread)(sIdle)))))
-  val laneStatus = Reg(Vec(num_warp, Vec(num_thread, UInt(xLen.W))))
-  val laneRay = Reg(Vec(num_warp, Vec(num_thread, new Ray(recorded_float = false))))
-  val laneAsBase = Reg(Vec(num_warp, Vec(num_thread, UInt(memReqLen.W))))
-  val laneTmax = Reg(Vec(num_warp, Vec(num_thread, UInt(32.W))))
-  val committedValid = RegInit(VecInit(Seq.fill(num_warp)(VecInit(Seq.fill(num_thread)(false.B)))))
-  val activeMask = RegInit(VecInit(Seq.fill(num_warp)(0.U(num_thread.W))))
-  val warpIssueId = Reg(Vec(num_warp, UInt(RtCorePortParameters.issueIdWidth.W)))
-  val warpDestination = Reg(Vec(num_warp, UInt(RtCorePortParameters.regidx_totalwidth.W)))
-  val warpBusy = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
-  val finishIssued = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
-  val boxChildRefs = Reg(Vec(num_warp, Vec(num_thread, Vec(4, UInt(32.W)))))
-  val boxDeferredRefs = Reg(Vec(num_warp, Vec(num_thread, Vec(4, UInt(32.W)))))
-  val boxDeferredCount = Reg(Vec(num_warp, Vec(num_thread, UInt(3.W))))
-  val boxPushedCount = Reg(Vec(num_warp, Vec(num_thread, UInt(3.W))))
-  val triangleMeta = Reg(Vec(num_warp, Vec(num_thread, new RtTriangleDispatchMeta)))
+  val Seq(sIdle, sPdsRead, sHeaderRequest, sHeaderPending, sStackReady,
+    sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal) = Enum(10)
+  val laneState = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(sIdle)))))
+  val laneStatus = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
+  val committedValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
+  val activeMask = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(num_thread.W))))
+  val warpIssueId = Reg(Vec(residentWarpCount, UInt(RtCorePortParameters.issueIdWidth.W)))
+  val warpDestination = Reg(Vec(residentWarpCount, UInt(RtCorePortParameters.regidx_totalwidth.W)))
+  val warpBusy = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
+  val finishIssued = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
+  val boxChildRefs = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(4, UInt(32.W)))))
+  val boxDeferredRefs = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(4, UInt(32.W)))))
+  val boxDeferredCount = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(3.W))))
+  val boxPushedCount = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(3.W))))
+  val triangleMeta = Reg(Vec(residentWarpCount, Vec(num_thread, new RtTriangleDispatchMeta)))
+  val residentOwnerWarpId = Reg(UInt(depth_warp.W))
 
-  private def requestId(warp: UInt, lane: UInt): UInt = Cat(warp, lane)
-  private def requestWarp(id: UInt): UInt = id(RtCorePortParameters.requestIdWidth - 1, log2Ceil(num_thread))
+  private def requestId(warp: UInt, lane: UInt): UInt =
+    Cat(0.U((RtCorePortParameters.requestIdWidth - log2Ceil(num_thread)).W), lane)
+  private def requestWarp(id: UInt): UInt = 0.U(residentWarpIdWidth.W)
   private def requestLane(id: UInt): UInt = id(log2Ceil(num_thread) - 1, 0)
   private def nodeType(nodeRef: UInt): UInt = nodeRef(2, 0)
   private def nodeOffset(nodeRef: UInt): UInt = nodeRef & RtVtasLayout.NodeRefOffsetMask.U(32.W)
@@ -79,10 +81,8 @@ class RtCoreScheduler extends Module {
     val rotated = (Cat(mask, mask) >> start)(count - 1, 0)
     (start + PriorityEncoder(rotated))(log2Ceil(count) - 1, 0)
   }
-  val nextStackWarp = RegInit(0.U(depth_warp.W))
-  val nextStackLane = RegInit(VecInit(Seq.fill(num_warp)(0.U(log2Ceil(num_thread).W))))
-  val nextPushWarp = RegInit(0.U(depth_warp.W))
-  val nextPushLane = RegInit(VecInit(Seq.fill(num_warp)(0.U(log2Ceil(num_thread).W))))
+  val nextStackLane = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(log2Ceil(num_thread).W))))
+  val nextPushLane = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(log2Ceil(num_thread).W))))
   val nextBoxIssue = RegInit(0.U(log2Ceil(boxUnitCount).W))
   val nextTriangleIssue = RegInit(0.U(log2Ceil(triangleUnitCount).W))
   val nextBoxResult = RegInit(0.U(log2Ceil(boxUnitCount).W))
@@ -90,20 +90,21 @@ class RtCoreScheduler extends Module {
 
   // Command admission is intentionally fresh-only for this baseline.  A lane
   // cannot be reused until its PDS records have drained and read context retires.
-  val commandWarpBusy = warpBusy(io.command.bits.warpId)
-  val commandAllowed = io.command.bits.activeMask.orR && !commandWarpBusy
+  val commandSlot = 0.U(residentWarpIdWidth.W)
+  val commandAllowed = io.command.bits.activeMask.orR && !warpBusy(commandSlot)
   table.io.pdsReadAdmission.valid := io.command.valid && commandAllowed
-  table.io.pdsReadAdmission.bits.warpId := io.command.bits.warpId
+  table.io.pdsReadAdmission.bits.warpId := commandSlot
   table.io.pdsReadAdmission.bits.pds := io.command.bits.pds
   table.io.pdsReadAdmission.bits.activeMask := io.command.bits.activeMask
   table.io.pdsWriteAdmission.valid := io.command.valid && commandAllowed
-  table.io.pdsWriteAdmission.bits.warpId := io.command.bits.warpId
+  table.io.pdsWriteAdmission.bits.warpId := commandSlot
   table.io.pdsWriteAdmission.bits.pds := io.command.bits.pds
   table.io.pdsWriteAdmission.bits.activeMask := io.command.bits.activeMask
   io.command.ready := commandAllowed && table.io.pdsReadAdmission.ready && table.io.pdsWriteAdmission.ready
   when(io.command.fire) {
-    val warp = io.command.bits.warpId
+    val warp = commandSlot
     warpBusy(warp) := true.B
+    residentOwnerWarpId := io.command.bits.warpId
     activeMask(warp) := io.command.bits.activeMask
     warpIssueId(warp) := io.command.bits.issueId
     warpDestination(warp) := io.command.bits.destinationVd
@@ -139,14 +140,14 @@ class RtCoreScheduler extends Module {
   raySetup.io.in.bits.rayState.tmax := table.io.pdsReadLane.bits.data(11)
   table.io.pdsReadLane.ready := raySetup.io.in.ready
   when(table.io.pdsReadLane.fire) {
-    assert(laneState(table.io.pdsReadLane.bits.warpId)(table.io.pdsReadLane.bits.laneId) === sPdsRead)
+    assert(laneState(0)(table.io.pdsReadLane.bits.laneId) === sPdsRead)
   }
 
   table.io.pdsFault.ready := true.B
   when(table.io.pdsFault.fire) {
     val fault = table.io.pdsFault.bits
-    laneState(fault.warpId)(fault.laneId) := sTerminal
-    laneStatus(fault.warpId)(fault.laneId) := RtAbiLayout.TraversalTerminated.U
+    laneState(0)(fault.laneId) := sTerminal
+    laneStatus(0)(fault.laneId) := RtAbiLayout.TraversalTerminated.U
   }
 
   // Stack operation defaults.  Header initialisation, deferred Box4 pushes,
@@ -161,25 +162,38 @@ class RtCoreScheduler extends Module {
   stack.io.clear.valid := false.B
   stack.io.clear.bits := 0.U.asTypeOf(new RtTraversalStackClear)
 
-  // RaySetup's output and a stack pop share the AS acquire port.  Header
-  // fetches are preferred so newly admitted rays do not wait behind traversal.
-  val headerAcquire = raySetup.io.out.valid
-  val readyMasks = Wire(Vec(num_warp, UInt(num_thread.W)))
-  for (warp <- 0 until num_warp) {
+  // RaySetup writes the derived ray into the PDS read context.  Thereafter the
+  // table, rather than scheduler registers, supplies the ray to AS/IU paths.
+  table.io.pdsRaySetup <> raySetup.io.out
+  when(raySetup.io.out.fire) {
+    laneState(0)(raySetup.io.out.bits.laneId) := sHeaderRequest
+  }
+
+  // A setup-complete header request and a stack pop share the AS acquire port.
+  // Header fetches are preferred so newly admitted rays do not wait behind traversal.
+  val headerMasks = Wire(Vec(residentWarpCount, UInt(num_thread.W)))
+  for (warp <- 0 until residentWarpCount) {
+    headerMasks(warp) := VecInit((0 until num_thread).map(lane =>
+      laneState(warp)(lane) === sHeaderRequest)).asUInt
+  }
+  val hasHeaderRequest = headerMasks.map(_.orR).reduce(_ || _)
+  val headerWarp = PriorityEncoder(VecInit(headerMasks.map(_.orR)).asUInt)
+  val headerLane = PriorityEncoder(headerMasks(headerWarp))
+  val readyMasks = Wire(Vec(residentWarpCount, UInt(num_thread.W)))
+  for (warp <- 0 until residentWarpCount) {
     readyMasks(warp) := VecInit((0 until num_thread).map(lane =>
       laneState(warp)(lane) === sStackReady)).asUInt
   }
   val hasStackReady = readyMasks.map(_.orR).reduce(_ || _)
-  val popWarp = roundRobin(VecInit(readyMasks.map(_.orR)).asUInt, nextStackWarp, num_warp)
+  val popWarp = 0.U(residentWarpIdWidth.W)
   val popLane = roundRobin(readyMasks(popWarp), nextStackLane(popWarp), num_thread)
-  stack.io.statusWarpId := popWarp
   val selectedEmpty = stack.io.laneEmpty(popLane)
   val selectedNodeRef = stack.io.popNodeRef(popLane)
   val selectedNodeType = nodeType(selectedNodeRef)
   val selectedUnsupported = selectedNodeType =/= RtVtasLayout.NodeBox4.U &&
     selectedNodeType =/= RtVtasLayout.NodeTriangle.U
   val selectedInvalid = selectedNodeRef === RtVtasLayout.InvalidNodeRef.U(32.W)
-  val anyBoxPush = (0 until num_warp).map { warp =>
+  val anyBoxPush = (0 until residentWarpCount).map { warp =>
     (0 until num_thread).map(lane => laneState(warp)(lane) === sBoxPush).reduce(_ || _)
   }.reduce(_ || _)
   val headerLineActive = table.io.asReadyLine.valid &&
@@ -188,21 +202,24 @@ class RtCoreScheduler extends Module {
   // Stack writes/initialisation are serialized ahead of a pop.  In
   // particular, never let an AS acquire consume a node unless the matching pop
   // can fire in the same cycle.
+  table.io.nodeRayLookup.warpId := Mux(hasHeaderRequest, headerWarp, popWarp)
+  table.io.nodeRayLookup.laneId := Mux(hasHeaderRequest, headerLane, popLane)
+  val headerAcquire = hasHeaderRequest && table.io.nodeRay.valid
   val popMayFire = !headerAcquire && !anyBoxPush && !headerLineActive
   val nodeAcquire = popMayFire && popNeedsAs
 
   table.io.asAcquire.valid := headerAcquire || nodeAcquire
   table.io.asAcquire.bits := 0.U.asTypeOf(new RtAsTableAcquire)
   when(headerAcquire) {
-    table.io.asAcquire.bits.lineAddress := raySetup.io.out.bits.accelLo
+    table.io.asAcquire.bits.lineAddress := table.io.nodeRay.asBase
     table.io.asAcquire.bits.wordMask := Fill(RtMemTableParameters.lineWordCount, 1.U(1.W))
     table.io.asAcquire.bits.is64B := false.B
-    table.io.asAcquire.bits.waiter.warpId := raySetup.io.out.bits.warpId
-    table.io.asAcquire.bits.waiter.laneId := raySetup.io.out.bits.laneId
+    table.io.asAcquire.bits.waiter.warpId := headerWarp
+    table.io.asAcquire.bits.waiter.laneId := headerLane
     table.io.asAcquire.bits.waiter.nodeKind := RtVtasNodeKind.header
     table.io.asAcquire.bits.waiter.nodeRef := 0.U
   }.elsewhen(nodeAcquire) {
-    table.io.asAcquire.bits.lineAddress := laneAsBase(popWarp)(popLane) + nodeOffset(selectedNodeRef)
+    table.io.asAcquire.bits.lineAddress := table.io.nodeRay.asBase + nodeOffset(selectedNodeRef)
     table.io.asAcquire.bits.wordMask := Mux(selectedNodeType === RtVtasLayout.NodeTriangle.U,
       Cat(0.U(16.W), Fill(16, 1.U(1.W))), Fill(32, 1.U(1.W)))
     table.io.asAcquire.bits.is64B := selectedNodeType === RtVtasLayout.NodeTriangle.U
@@ -212,13 +229,8 @@ class RtCoreScheduler extends Module {
       RtVtasNodeKind.box4, RtVtasNodeKind.triangle)
     table.io.asAcquire.bits.waiter.nodeRef := selectedNodeRef
   }
-  raySetup.io.out.ready := headerAcquire && table.io.asAcquire.ready
-  when(raySetup.io.out.fire) {
-    val result = raySetup.io.out.bits
-    laneRay(result.warpId)(result.laneId) := result.ray
-    laneAsBase(result.warpId)(result.laneId) := result.accelLo
-    laneTmax(result.warpId)(result.laneId) := result.ray.extent.asUInt
-    laneState(result.warpId)(result.laneId) := sHeaderPending
+  when(table.io.asAcquire.fire && headerAcquire) {
+    laneState(headerWarp)(headerLane) := sHeaderPending
   }
 
   // An empty stack terminates a lane without an LSU request.  Invalid and
@@ -230,10 +242,8 @@ class RtCoreScheduler extends Module {
   }
   stack.io.pop.valid := popMayFire && hasStackReady && !selectedEmpty &&
     (selectedInvalid || selectedUnsupported || table.io.asAcquire.ready)
-  stack.io.pop.bits.warpId := popWarp
   stack.io.pop.bits.laneMask := UIntToOH(popLane, num_thread)
   when(stack.io.pop.fire) {
-    nextStackWarp := popWarp + 1.U
     nextStackLane(popWarp) := popLane + 1.U
     when(selectedInvalid || selectedUnsupported) {
       laneState(popWarp)(popLane) := sTerminal
@@ -253,22 +263,23 @@ class RtCoreScheduler extends Module {
   val boxSelect = roundRobin(boxReadyMask, nextBoxIssue, boxUnitCount)
   val triangleSelect = roundRobin(triangleReadyMask, nextTriangleIssue, triangleUnitCount)
   val asReady = table.io.asReadyLine
+  table.io.issueRayLookup.warpId := asReady.bits.waiter.warpId
+  table.io.issueRayLookup.laneId := asReady.bits.waiter.laneId
   val headerRoot = asReady.bits.data((RtVtasLayout.AsHeaderRootNodeRef / 4).toInt)
   val headerInvalid = headerRoot === RtVtasLayout.InvalidNodeRef.U(32.W)
   val asIsHeader = asReady.bits.waiter.nodeKind === RtVtasNodeKind.header
   val asIsBox = asReady.bits.waiter.nodeKind === RtVtasNodeKind.box4
   val asIsTriangle = asReady.bits.waiter.nodeKind === RtVtasNodeKind.triangle
   stack.io.init.valid := asReady.valid && asIsHeader && !headerInvalid
-  stack.io.init.bits.warpId := asReady.bits.waiter.warpId
   stack.io.init.bits.laneMask := UIntToOH(asReady.bits.waiter.laneId, num_thread)
   for (lane <- 0 until num_thread) {
     stack.io.init.bits.rootNodeRef(lane) := headerRoot
   }
   for (unit <- 0 until boxUnitCount) {
-    boxIssue(unit).valid := asReady.valid && asIsBox && boxReadyMask.orR && boxSelect === unit.U
+    boxIssue(unit).valid := asReady.valid && asIsBox && table.io.issueRay.valid && boxReadyMask.orR && boxSelect === unit.U
     boxIssue(unit).bits := 0.U.asTypeOf(new RtBox4IntersectionInput)
     boxIssue(unit).bits.requestId := requestId(asReady.bits.waiter.warpId, asReady.bits.waiter.laneId)
-    boxIssue(unit).bits.ray := laneRay(asReady.bits.waiter.warpId)(asReady.bits.waiter.laneId)
+    boxIssue(unit).bits.ray := table.io.issueRay.ray
     for (child <- 0 until 4) {
       boxIssue(unit).bits.aabb(child).x_min := asReady.bits.data((RtVtasLayout.Box4MinX / 4).toInt + child)
       boxIssue(unit).bits.aabb(child).y_min := asReady.bits.data((RtVtasLayout.Box4MinY / 4).toInt + child)
@@ -279,10 +290,10 @@ class RtCoreScheduler extends Module {
     }
   }
   for (unit <- 0 until triangleUnitCount) {
-    triangleIssue(unit).valid := asReady.valid && asIsTriangle && triangleReadyMask.orR && triangleSelect === unit.U
+    triangleIssue(unit).valid := asReady.valid && asIsTriangle && table.io.issueRay.valid && triangleReadyMask.orR && triangleSelect === unit.U
     triangleIssue(unit).bits := 0.U.asTypeOf(new RtTriangleIntersectionInput)
     triangleIssue(unit).bits.requestId := requestId(asReady.bits.waiter.warpId, asReady.bits.waiter.laneId)
-    triangleIssue(unit).bits.ray := laneRay(asReady.bits.waiter.warpId)(asReady.bits.waiter.laneId)
+    triangleIssue(unit).bits.ray := table.io.issueRay.ray
     triangleIssue(unit).bits.triangle.A.x := asReady.bits.data((RtVtasLayout.TriangleV0 / 4).toInt)
     triangleIssue(unit).bits.triangle.A.y := asReady.bits.data((RtVtasLayout.TriangleV0 / 4 + 1).toInt)
     triangleIssue(unit).bits.triangle.A.z := asReady.bits.data((RtVtasLayout.TriangleV0 / 4 + 2).toInt)
@@ -294,35 +305,35 @@ class RtCoreScheduler extends Module {
     triangleIssue(unit).bits.triangle.C.z := asReady.bits.data((RtVtasLayout.TriangleV2 / 4 + 2).toInt)
   }
   val asHeaderReady = asReady.valid && asIsHeader && (headerInvalid || stack.io.init.ready)
-  val asBoxReady = asReady.valid && asIsBox && boxReadyMask.orR && boxIssue(boxSelect).ready
-  val asTriangleReady = asReady.valid && asIsTriangle && triangleReadyMask.orR && triangleIssue(triangleSelect).ready
+  val asBoxReady = asReady.valid && asIsBox && table.io.issueRay.valid && boxReadyMask.orR && boxIssue(boxSelect).ready
+  val asTriangleReady = asReady.valid && asIsTriangle && table.io.issueRay.valid && triangleReadyMask.orR && triangleIssue(triangleSelect).ready
   table.io.asReadyLine.ready := asHeaderReady || asBoxReady || asTriangleReady ||
     (asReady.valid && !asIsHeader && !asIsBox && !asIsTriangle)
   when(asReady.fire) {
     val waiter = asReady.bits.waiter
     when(asIsHeader) {
       when(headerInvalid) {
-        laneState(waiter.warpId)(waiter.laneId) := sTerminal
-        laneStatus(waiter.warpId)(waiter.laneId) := RtAbiLayout.TraversalCompleteMiss.U
+        laneState(0)(waiter.laneId) := sTerminal
+        laneStatus(0)(waiter.laneId) := RtAbiLayout.TraversalCompleteMiss.U
       }.otherwise {
-        laneState(waiter.warpId)(waiter.laneId) := sStackReady
+        laneState(0)(waiter.laneId) := sStackReady
       }
     }.elsewhen(asIsBox) {
       nextBoxIssue := boxSelect + 1.U
-      laneState(waiter.warpId)(waiter.laneId) := sBoxInflight
+      laneState(0)(waiter.laneId) := sBoxInflight
       for (child <- 0 until 4) {
-        boxChildRefs(waiter.warpId)(waiter.laneId)(child) := asReady.bits.data(child)
+        boxChildRefs(0)(waiter.laneId)(child) := asReady.bits.data(child)
       }
     }.elsewhen(asIsTriangle) {
       nextTriangleIssue := triangleSelect + 1.U
-      laneState(waiter.warpId)(waiter.laneId) := sTriangleInflight
-      triangleMeta(waiter.warpId)(waiter.laneId).opaque := asReady.bits.data((RtVtasLayout.TriangleFlags / 4).toInt)(0)
-      triangleMeta(waiter.warpId)(waiter.laneId).primitiveId := asReady.bits.data((RtVtasLayout.TrianglePrimitiveId / 4).toInt)
-      triangleMeta(waiter.warpId)(waiter.laneId).geometryId := asReady.bits.data((RtVtasLayout.TriangleGeometryId / 4).toInt)
-      triangleMeta(waiter.warpId)(waiter.laneId).sbtRecordOffset := asReady.bits.data((RtVtasLayout.TriangleSbtRecordOffset / 4).toInt)
+      laneState(0)(waiter.laneId) := sTriangleInflight
+      triangleMeta(0)(waiter.laneId).opaque := asReady.bits.data((RtVtasLayout.TriangleFlags / 4).toInt)(0)
+      triangleMeta(0)(waiter.laneId).primitiveId := asReady.bits.data((RtVtasLayout.TrianglePrimitiveId / 4).toInt)
+      triangleMeta(0)(waiter.laneId).geometryId := asReady.bits.data((RtVtasLayout.TriangleGeometryId / 4).toInt)
+      triangleMeta(0)(waiter.laneId).sbtRecordOffset := asReady.bits.data((RtVtasLayout.TriangleSbtRecordOffset / 4).toInt)
     }.otherwise {
-      laneState(waiter.warpId)(waiter.laneId) := sTerminal
-      laneStatus(waiter.warpId)(waiter.laneId) := RtAbiLayout.TraversalTerminated.U
+      laneState(0)(waiter.laneId) := sTerminal
+      laneStatus(0)(waiter.laneId) := RtAbiLayout.TraversalTerminated.U
     }
   }
 
@@ -347,23 +358,21 @@ class RtCoreScheduler extends Module {
     }
   }
 
-  val pushMasks = Wire(Vec(num_warp, UInt(num_thread.W)))
-  for (warp <- 0 until num_warp) {
+  val pushMasks = Wire(Vec(residentWarpCount, UInt(num_thread.W)))
+  for (warp <- 0 until residentWarpCount) {
     pushMasks(warp) := VecInit((0 until num_thread).map(lane =>
       laneState(warp)(lane) === sBoxPush)).asUInt
   }
   val hasPush = pushMasks.map(_.orR).reduce(_ || _)
-  val pushWarp = roundRobin(VecInit(pushMasks.map(_.orR)).asUInt, nextPushWarp, num_warp)
+  val pushWarp = 0.U(residentWarpIdWidth.W)
   val pushLane = roundRobin(pushMasks(pushWarp), nextPushLane(pushWarp), num_thread)
   val pushIndex = boxDeferredCount(pushWarp)(pushLane) - boxPushedCount(pushWarp)(pushLane) - 1.U
   stack.io.push.valid := hasPush
-  stack.io.push.bits.warpId := pushWarp
   stack.io.push.bits.laneMask := UIntToOH(pushLane, num_thread)
   for (lane <- 0 until num_thread) {
     stack.io.push.bits.nodeRef(lane) := boxDeferredRefs(pushWarp)(pushLane)(pushIndex(1, 0))
   }
   when(stack.io.push.fire) {
-    nextPushWarp := pushWarp + 1.U
     nextPushLane(pushWarp) := pushLane + 1.U
     assert(!stack.io.pushWouldOverflow, "RtTraversalStack overflow requires spill support")
     when(boxPushedCount(pushWarp)(pushLane) + 1.U === boxDeferredCount(pushWarp)(pushLane)) {
@@ -373,29 +382,54 @@ class RtCoreScheduler extends Module {
     }
   }
 
-  // One triangle result at a time enters the shared final-division engine.
+  // Compare tNum/tDenom against currentTmax before invoking a divider.  A
+  // positive denominator lets us compare tNum directly with tmax*tDenom, so
+  // rejected candidates do not consume the three final IEEE divisions.
   val triangleResultMask = VecInit(triangleResult.map(_.valid)).asUInt
   val triangleResultSelect = roundRobin(triangleResultMask, nextTriangleResult, triangleUnitCount)
-  triangleResolve.io.in.valid := triangleResultMask.orR
-  triangleResolve.io.in.bits := Mux1H((0 until triangleUnitCount).map(unit =>
+  val selectedTriangleResult = Mux1H((0 until triangleUnitCount).map(unit =>
     (triangleResultSelect === unit.U) -> triangleResult(unit).bits))
+  val selectedTriangleWarp = requestWarp(selectedTriangleResult.requestId)
+  val selectedTriangleLane = requestLane(selectedTriangleResult.requestId)
+  table.io.resultRayLookup.warpId := selectedTriangleWarp
+  table.io.resultRayLookup.laneId := selectedTriangleLane
+  val tBoundProduct = Module(new MulRecFN(8, 24))
+  tBoundProduct.io.a := recFNFromFN(8, 24, table.io.resultRay.currentTmax)
+  tBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
+  tBoundProduct.io.roundingMode := consts.round_near_even
+  tBoundProduct.io.detectTininess := consts.tininess_beforeRounding
+  val denominatorPositive = Module(new CompareRecFN(8, 24))
+  denominatorPositive.io.a := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
+  denominatorPositive.io.b := recFNFromFN(8, 24, 0.U(32.W))
+  denominatorPositive.io.signaling := false.B
+  val withinCurrentTmax = Module(new CompareRecFN(8, 24))
+  withinCurrentTmax.io.a := recFNFromFN(8, 24, selectedTriangleResult.tNum)
+  withinCurrentTmax.io.b := tBoundProduct.io.out
+  withinCurrentTmax.io.signaling := false.B
+  val acceptedTriangleResult = selectedTriangleResult.hit && table.io.resultRay.valid &&
+    denominatorPositive.io.gt && withinCurrentTmax.io.lt
+  when(triangleResultMask.orR && selectedTriangleResult.hit) {
+    assert(denominatorPositive.io.gt,
+      "RtTrianglePipeline hit must carry a positive tDenom for tmax prefilter")
+  }
+  triangleResolve.io.in.valid := triangleResultMask.orR && acceptedTriangleResult
+  triangleResolve.io.in.bits := selectedTriangleResult
   for (unit <- 0 until triangleUnitCount) {
-    triangleResult(unit).ready := triangleResultMask.orR && triangleResultSelect === unit.U && triangleResolve.io.in.ready
+    val selected = triangleResultMask.orR && triangleResultSelect === unit.U
+    triangleResult(unit).ready := selected && (!selectedTriangleResult.hit ||
+      (table.io.resultRay.valid && (!acceptedTriangleResult || triangleResolve.io.in.ready)))
   }
   when(triangleResultMask.orR && triangleResult(triangleResultSelect).fire) {
     nextTriangleResult := triangleResultSelect + 1.U
+    when(!acceptedTriangleResult) {
+      laneState(selectedTriangleWarp)(selectedTriangleLane) := sStackReady
+    }
   }
 
   val resultWarp = requestWarp(triangleResolve.io.out.bits.requestId)
   val resultLane = requestLane(triangleResolve.io.out.bits.requestId)
-  val compareT = Module(new CompareRecFN(8, 24))
-  compareT.io.a := recFNFromFN(8, 24, triangleResolve.io.out.bits.t)
-  compareT.io.b := recFNFromFN(8, 24, laneTmax(resultWarp)(resultLane))
-  compareT.io.signaling := false.B
-  val acceptedTriangle = triangleResolve.io.out.bits.hit && compareT.io.lt
   val triangleIsOpaque = triangleMeta(resultWarp)(resultLane).opaque
-  val writesHit = acceptedTriangle
-  table.io.pdsHitUpdate.valid := triangleResolve.io.out.valid && writesHit
+  table.io.pdsHitUpdate.valid := triangleResolve.io.out.valid
   table.io.pdsHitUpdate.bits := 0.U.asTypeOf(new RtPdsHitRecordUpdate)
   table.io.pdsHitUpdate.bits.warpId := resultWarp
   table.io.pdsHitUpdate.bits.laneId := resultLane
@@ -412,28 +446,30 @@ class RtCoreScheduler extends Module {
   table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordInstanceId) := 0.U
   table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordGeometryId) := triangleMeta(resultWarp)(resultLane).geometryId
   table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordHitKind) := "hfe".U
-  triangleResolve.io.out.ready := !writesHit || table.io.pdsHitUpdate.ready
+  table.io.pdsRayTmaxUpdate.valid := triangleResolve.io.out.valid && triangleIsOpaque
+  table.io.pdsRayTmaxUpdate.bits.warpId := resultWarp
+  table.io.pdsRayTmaxUpdate.bits.laneId := resultLane
+  table.io.pdsRayTmaxUpdate.bits.tmax := triangleResolve.io.out.bits.t
+  triangleResolve.io.out.ready := table.io.pdsHitUpdate.ready &&
+    (!triangleIsOpaque || table.io.pdsRayTmaxUpdate.ready)
   when(triangleResolve.io.out.fire) {
-    when(acceptedTriangle && triangleIsOpaque) {
+    when(triangleIsOpaque) {
       committedValid(resultWarp)(resultLane) := true.B
-      laneTmax(resultWarp)(resultLane) := triangleResolve.io.out.bits.t
       laneState(resultWarp)(resultLane) := sStackReady
-    }.elsewhen(acceptedTriangle) {
+    }.otherwise {
       laneState(resultWarp)(resultLane) := sTerminal
       laneStatus(resultWarp)(resultLane) := RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U
-    }.otherwise {
-      laneState(resultWarp)(resultLane) := sStackReady
     }
   }
 
   // A completed warp first flushes both hit-record planes.  The write table's
   // drain acknowledgement is the point at which completion may be published.
-  val terminalMasks = Wire(Vec(num_warp, UInt(num_thread.W)))
-  for (warp <- 0 until num_warp) {
+  val terminalMasks = Wire(Vec(residentWarpCount, UInt(num_thread.W)))
+  for (warp <- 0 until residentWarpCount) {
     terminalMasks(warp) := VecInit((0 until num_thread).map(lane =>
       laneState(warp)(lane) === sTerminal)).asUInt
   }
-  val finishMasks = VecInit((0 until num_warp).map { warp =>
+  val finishMasks = VecInit((0 until residentWarpCount).map { warp =>
     warpBusy(warp) && !finishIssued(warp) &&
       (terminalMasks(warp) & activeMask(warp)) === activeMask(warp)
   }).asUInt
@@ -446,33 +482,32 @@ class RtCoreScheduler extends Module {
   val completionPending = RegInit(false.B)
   val completionBits = Reg(new RtWarpCompletion)
   val retirePending = RegInit(false.B)
-  val retireWarp = Reg(UInt(depth_warp.W))
+  val retireWarp = Reg(UInt(residentWarpIdWidth.W))
   table.io.pdsWriteDrained.ready := !completionPending && !retirePending
   when(table.io.pdsWriteDrained.fire) {
     val warp = table.io.pdsWriteDrained.bits.warpId
-    completionBits.warpId := warp
-    completionBits.issueId := warpIssueId(warp)
-    completionBits.destinationVd := warpDestination(warp)
-    completionBits.completionMask := activeMask(warp)
-    completionBits.laneStatus := laneStatus(warp)
+    completionBits.warpId := residentOwnerWarpId
+    completionBits.issueId := warpIssueId(0)
+    completionBits.destinationVd := warpDestination(0)
+    completionBits.completionMask := activeMask(0)
+    completionBits.laneStatus := laneStatus(0)
     completionPending := true.B
   }
   io.completion.valid := completionPending
   io.completion.bits := completionBits
   when(io.completion.fire) {
     retirePending := true.B
-    retireWarp := completionBits.warpId
+    retireWarp := 0.U
     completionPending := false.B
   }
   table.io.pdsReadRetire.valid := retirePending && stack.io.clear.ready
   table.io.pdsReadRetire.bits.warpId := retireWarp
   stack.io.clear.valid := retirePending && table.io.pdsReadRetire.ready
-  stack.io.clear.bits.warpId := retireWarp
-  stack.io.clear.bits.laneMask := activeMask(retireWarp)
+  stack.io.clear.bits.laneMask := activeMask(0)
   when(table.io.pdsReadRetire.fire && stack.io.clear.fire) {
-    warpBusy(retireWarp) := false.B
-    finishIssued(retireWarp) := false.B
+    warpBusy(0) := false.B
+    finishIssued(0) := false.B
     retirePending := false.B
-    for (lane <- 0 until num_thread) { laneState(retireWarp)(lane) := sIdle }
+    for (lane <- 0 until num_thread) { laneState(0)(lane) := sIdle }
   }
 }

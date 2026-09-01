@@ -15,6 +15,10 @@ import top.parameters._
 import rtcore.RtCorePortParameters.{regidx_totalwidth => regidx_totalwidth}
 
 object RtCorePortParameters {
+  // RTcore accepts one warp command at a time.  This is deliberately
+  // independent of the number of resident SIMT warps in the enclosing SM.
+  val residentWarpCount = 1
+  val residentWarpIdWidth = math.max(1, log2Ceil(residentWarpCount))
   val issueIdWidth = 8
   // Intersection pipelines use this as an internal ownership tag.  RtLsu uses
   // rtLsuMshrIdWidth instead, so this is not an LSU request identifier.
@@ -23,7 +27,8 @@ object RtCorePortParameters {
   val lineBytes = lineWordCount * (xLen / 8)
   val pdsWriteWordCount = 16
   val pdsWriteBytes = pdsWriteWordCount * (xLen / 8)
-  val rtLsuMshrEntryCount = num_warp
+  // MSHR capacity is transaction concurrency, not warp residency.
+  val rtLsuMshrEntryCount = 16
   val rtLsuMshrIdWidth = log2Ceil(rtLsuMshrEntryCount)
   require(lineBytes == 128, "RTcore reads use one 128-byte DCache line")
   require(pdsWriteBytes == 64, "RTcore PDS writes are fixed 64-byte blocks")

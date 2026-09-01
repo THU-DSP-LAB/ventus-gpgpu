@@ -6,8 +6,8 @@ import top.parameters._
 
 object RtMemTableParameters {
   val pdsRayStateFieldCount = 12
-  val pdsReadWarpEntryCount = num_warp
-  val pdsWriteWarpEntryCount = num_warp
+  val pdsReadWarpEntryCount = RtCorePortParameters.residentWarpCount
+  val pdsWriteWarpEntryCount = RtCorePortParameters.residentWarpCount
   val hitRecordStorageWordCount = RtAbiLayout.HitRecordWordCount
   val asEntryCount = 32
   val maxAsWaitersPerEntry = 2
@@ -20,10 +20,28 @@ object RtMemTableParameters {
   require(RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes + hitRecordStorageWordCount == RtAbiLayout.AbiPdsFieldMajorFixedHeaderWordCount)
 }
 
-class RtPdsReadAdmission extends Bundle { val warpId = UInt(depth_warp.W); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W) }
-class RtPdsRayStateFault extends Bundle { val warpId = UInt(depth_warp.W); val laneId = UInt(log2Ceil(num_thread).W) }
-class RtPdsReadLane extends Bundle { val warpId = UInt(depth_warp.W); val laneId = UInt(log2Ceil(num_thread).W); val data = Vec(RtMemTableParameters.pdsRayStateFieldCount, UInt(xLen.W)) }
-class RtPdsReadRetire extends Bundle { val warpId = UInt(depth_warp.W) }
+class RtPdsReadAdmission extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W) }
+class RtPdsRayStateFault extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W) }
+class RtPdsReadLane extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val data = Vec(RtMemTableParameters.pdsRayStateFieldCount, UInt(xLen.W)) }
+class RtPdsReadRetire extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W) }
+class RtPdsRayTmaxUpdate extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val tmax = UInt(32.W) }
+class RtPdsRayLookup extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W) }
+class RtPdsPreparedRay extends Bundle {
+  val valid = Bool()
+  val asBase = UInt(memReqLen.W)
+  val currentTmax = UInt(32.W)
+  val inv = new Float3(recorded_float = false)
+  val shear = new Float3(recorded_float = false)
+  val kx = UInt(2.W)
+  val ky = UInt(2.W)
+  val kz = UInt(2.W)
+}
+class RtPdsRayLookupResult extends Bundle {
+  val valid = Bool()
+  val asBase = UInt(memReqLen.W)
+  val currentTmax = UInt(32.W)
+  val ray = new Ray(recorded_float = false)
+}
 private[rtcore] class RtPdsReadContext extends Bundle {
   val valid = Bool(); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W)
   val issued = UInt(RtMemTableParameters.pdsRayStateFieldCount.W)
@@ -37,15 +55,23 @@ class RtPdsReadTable extends Module {
   val io = IO(new Bundle {
     val admission = Flipped(Decoupled(new RtPdsReadAdmission)); val laneOut = Decoupled(new RtPdsReadLane)
     val faultOut = Decoupled(new RtPdsRayStateFault); val retire = Flipped(Decoupled(new RtPdsReadRetire))
+    val raySetup = Flipped(Decoupled(new RtRaySetupOutput)); val rayTmaxUpdate = Flipped(Decoupled(new RtPdsRayTmaxUpdate))
+    val nodeRayLookup = Input(new RtPdsRayLookup); val nodeRay = Output(new RtPdsRayLookupResult)
+    val issueRayLookup = Input(new RtPdsRayLookup); val issueRay = Output(new RtPdsRayLookupResult)
+    val resultRayLookup = Input(new RtPdsRayLookup); val resultRay = Output(new RtPdsRayLookupResult)
     val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtPdsReadInjection))
   })
-  val contexts = RegInit(VecInit(Seq.fill(p.pdsReadWarpEntryCount)(0.U.asTypeOf(new RtPdsReadContext))))
-  val rows = Reg(Vec(p.pdsReadWarpEntryCount, Vec(num_thread, Vec(p.pdsRayStateFieldCount, UInt(xLen.W)))))
-  val admit = contexts(io.admission.bits.warpId)
+  val context = RegInit(0.U.asTypeOf(new RtPdsReadContext))
+  val rows = Reg(Vec(num_thread, Vec(p.pdsRayStateFieldCount, UInt(xLen.W))))
+  val prepared = RegInit(VecInit(Seq.fill(num_thread)(0.U.asTypeOf(new RtPdsPreparedRay))))
+  val admit = context
   io.admission.ready := io.admission.bits.activeMask.orR && !admit.valid
-  when(io.admission.fire) { admit.valid := true.B; admit.pds := io.admission.bits.pds; admit.activeMask := io.admission.bits.activeMask; admit.issued := 0.U; admit.received := 0.U; admit.delivered := 0.U; admit.faultMask := 0.U }
-  val needed = VecInit(contexts.map(c => c.valid && c.issued =/= allFields)).asUInt
-  val hasNeeded = needed.orR; val warp = PriorityEncoder(needed); val context = contexts(warp)
+  when(io.admission.fire) {
+    admit.valid := true.B; admit.pds := io.admission.bits.pds; admit.activeMask := io.admission.bits.activeMask; admit.issued := 0.U; admit.received := 0.U; admit.delivered := 0.U; admit.faultMask := 0.U
+    for (lane <- 0 until num_thread) { prepared(lane).valid := false.B }
+  }
+  val hasNeeded = context.valid && context.issued =/= allFields
+  val warp = 0.U(RtCorePortParameters.residentWarpIdWidth.W)
   val field = PriorityEncoder((~context.issued).asUInt & allFields)
   val wordsPerField = context.pds.numWarps * context.pds.numThreads
   val physicalWord = (RtAbiLayout.SlotAccelLo.U + field) * wordsPerField + context.pds.pdsWarpTidBase
@@ -56,32 +82,72 @@ class RtPdsReadTable extends Module {
     io.candidate.bits.wordMask := Fill(p.lineWordCount, 1.U(1.W)); io.candidate.bits.locator.warpId := warp; io.candidate.bits.locator.field := field
   }
   when(io.candidate.fire) { assert(io.candidate.bits.cacheLineAddress(6, 0) === 0.U); context.issued := context.issued | UIntToOH(field, p.pdsRayStateFieldCount) }
-  val returned = contexts(io.injection.bits.warpId)
+  val returned = context
   io.injection.ready := returned.valid && returned.issued(io.injection.bits.field) && !returned.received(io.injection.bits.field)
   when(io.injection.fire) {
     returned.received := returned.received | UIntToOH(io.injection.bits.field, p.pdsRayStateFieldCount)
     when(io.injection.bits.fault) { returned.faultMask := returned.faultMask | returned.activeMask }
-    for (lane <- 0 until num_thread) when(returned.activeMask(lane)) { rows(io.injection.bits.warpId)(lane)(io.injection.bits.field) := io.injection.bits.data(lane) }
+    for (lane <- 0 until num_thread) when(returned.activeMask(lane)) { rows(lane)(io.injection.bits.field) := io.injection.bits.data(lane) }
   }
-  val completed = VecInit(contexts.map(c => c.valid && c.received === allFields))
-  val laneAvailable = Wire(Vec(p.pdsReadWarpEntryCount, UInt(num_thread.W))); val faultAvailable = Wire(Vec(p.pdsReadWarpEntryCount, UInt(num_thread.W)))
-  for (i <- 0 until p.pdsReadWarpEntryCount) { val left = contexts(i).activeMask & (~contexts(i).delivered).asUInt; laneAvailable(i) := Mux(completed(i), left & (~contexts(i).faultMask).asUInt, 0.U); faultAvailable(i) := Mux(completed(i), left & contexts(i).faultMask, 0.U) }
-  val hasFault = faultAvailable.map(_.orR).reduce(_ || _); val hasLane = laneAvailable.map(_.orR).reduce(_ || _)
-  val laneWarp = PriorityEncoder(VecInit(laneAvailable.map(_.orR)).asUInt); val faultWarp = PriorityEncoder(VecInit(faultAvailable.map(_.orR)).asUInt)
-  val lane = PriorityEncoder(laneAvailable(laneWarp)); val faultLane = PriorityEncoder(faultAvailable(faultWarp))
+  val completed = context.valid && context.received === allFields
+  val left = context.activeMask & (~context.delivered).asUInt
+  val laneAvailable = Mux(completed, left & (~context.faultMask).asUInt, 0.U)
+  val faultAvailable = Mux(completed, left & context.faultMask, 0.U)
+  val hasFault = faultAvailable.orR; val hasLane = laneAvailable.orR
+  val laneWarp = warp; val faultWarp = warp
+  val lane = PriorityEncoder(laneAvailable); val faultLane = PriorityEncoder(faultAvailable)
   io.laneOut.valid := hasLane && !hasFault; io.laneOut.bits := 0.U.asTypeOf(new RtPdsReadLane)
-  when(io.laneOut.valid) { io.laneOut.bits.warpId := laneWarp; io.laneOut.bits.laneId := lane; io.laneOut.bits.data := rows(laneWarp)(lane) }
+  when(io.laneOut.valid) { io.laneOut.bits.warpId := laneWarp; io.laneOut.bits.laneId := lane; io.laneOut.bits.data := rows(lane) }
   io.faultOut.valid := hasFault; io.faultOut.bits.warpId := faultWarp; io.faultOut.bits.laneId := faultLane
-  when(io.laneOut.fire) { contexts(laneWarp).delivered := contexts(laneWarp).delivered | UIntToOH(lane, num_thread) }
-  when(io.faultOut.fire) { contexts(faultWarp).delivered := contexts(faultWarp).delivered | UIntToOH(faultLane, num_thread) }
-  val retire = contexts(io.retire.bits.warpId); io.retire.ready := retire.valid && (retire.delivered & retire.activeMask) === retire.activeMask
+  when(io.laneOut.fire) { context.delivered := context.delivered | UIntToOH(lane, num_thread) }
+  when(io.faultOut.fire) { context.delivered := context.delivered | UIntToOH(faultLane, num_thread) }
+  val setupContext = context
+  val setupPrepared = prepared(io.raySetup.bits.laneId)
+  io.raySetup.ready := setupContext.valid && setupContext.activeMask(io.raySetup.bits.laneId) &&
+    setupContext.delivered(io.raySetup.bits.laneId) && !setupPrepared.valid
+  when(io.raySetup.fire) {
+    setupPrepared.valid := true.B
+    setupPrepared.asBase := io.raySetup.bits.accelLo
+    setupPrepared.currentTmax := io.raySetup.bits.ray.extent
+    setupPrepared.inv := io.raySetup.bits.ray.inv
+    setupPrepared.shear := io.raySetup.bits.ray.shear
+    setupPrepared.kx := io.raySetup.bits.ray.kx
+    setupPrepared.ky := io.raySetup.bits.ray.ky
+    setupPrepared.kz := io.raySetup.bits.ray.kz
+  }
+  val tmaxContext = context
+  val tmaxPrepared = prepared(io.rayTmaxUpdate.bits.laneId)
+  io.rayTmaxUpdate.ready := tmaxContext.valid && tmaxContext.activeMask(io.rayTmaxUpdate.bits.laneId) && tmaxPrepared.valid
+  when(io.rayTmaxUpdate.fire) { tmaxPrepared.currentTmax := io.rayTmaxUpdate.bits.tmax }
+  def driveRayLookup(lookup: RtPdsRayLookup, output: RtPdsRayLookupResult): Unit = {
+    val entry = prepared(lookup.laneId)
+    output.valid := entry.valid
+    output.asBase := entry.asBase
+    output.currentTmax := entry.currentTmax
+    output.ray.origin.x := rows(lookup.laneId)(4)
+    output.ray.origin.y := rows(lookup.laneId)(5)
+    output.ray.origin.z := rows(lookup.laneId)(6)
+    output.ray.dir.x := rows(lookup.laneId)(8)
+    output.ray.dir.y := rows(lookup.laneId)(9)
+    output.ray.dir.z := rows(lookup.laneId)(10)
+    output.ray.inv := entry.inv
+    output.ray.extent := entry.currentTmax
+    output.ray.kx := entry.kx
+    output.ray.ky := entry.ky
+    output.ray.kz := entry.kz
+    output.ray.shear := entry.shear
+  }
+  driveRayLookup(io.nodeRayLookup, io.nodeRay)
+  driveRayLookup(io.issueRayLookup, io.issueRay)
+  driveRayLookup(io.resultRayLookup, io.resultRay)
+  val retire = context; io.retire.ready := retire.valid && (retire.delivered & retire.activeMask) === retire.activeMask
   when(io.retire.fire) { retire.valid := false.B }
 }
 
-class RtPdsHitRecordUpdate extends Bundle { val warpId = UInt(depth_warp.W); val laneId = UInt(log2Ceil(num_thread).W); val committed = Bool(); val dirty = UInt(RtMemTableParameters.hitRecordStorageWordCount.W); val data = Vec(RtMemTableParameters.hitRecordStorageWordCount, UInt(xLen.W)) }
-class RtPdsWriteAdmission extends Bundle { val warpId = UInt(depth_warp.W); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W) }
-class RtPdsWriteFinish extends Bundle { val warpId = UInt(depth_warp.W); val terminalMask = UInt(num_thread.W) }
-class RtPdsWriteDrained extends Bundle { val warpId = UInt(depth_warp.W) }
+class RtPdsHitRecordUpdate extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val committed = Bool(); val dirty = UInt(RtMemTableParameters.hitRecordStorageWordCount.W); val data = Vec(RtMemTableParameters.hitRecordStorageWordCount, UInt(xLen.W)) }
+class RtPdsWriteAdmission extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W) }
+class RtPdsWriteFinish extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val terminalMask = UInt(num_thread.W) }
+class RtPdsWriteDrained extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W) }
 private[rtcore] class RtPdsWriteContext extends Bundle { val valid = Bool(); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W); val flushing = Bool(); val drained = Bool(); val waiting = Bool(); val record = Bool(); val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W); val upperHalf = Bool() }
 
 class RtPdsWriteTable(warpEntryCount: Int = RtMemTableParameters.pdsWriteWarpEntryCount) extends Module {
@@ -116,7 +182,7 @@ class RtPdsWriteTable(warpEntryCount: Int = RtMemTableParameters.pdsWriteWarpEnt
   when(io.drained.fire) { contexts(PriorityEncoder(drained)).valid := false.B }
 }
 
-class RtAsLineWaiter extends Bundle { val warpId = UInt(depth_warp.W); val laneId = UInt(log2Ceil(num_thread).W); val nodeKind = UInt(2.W); val nodeRef = UInt(32.W) }
+class RtAsLineWaiter extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val nodeKind = UInt(2.W); val nodeRef = UInt(32.W) }
 class RtAsTableAcquire extends Bundle { val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiter = new RtAsLineWaiter }
 class RtAsTableReadyLine extends Bundle { val waiter = new RtAsLineWaiter; val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)); val fault = Bool() }
 private[rtcore] class RtAsEntry extends Bundle { val valid = Bool(); val sent = Bool(); val returned = Bool(); val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiterValid = Vec(RtMemTableParameters.maxAsWaitersPerEntry, Bool()); val waiters = Vec(RtMemTableParameters.maxAsWaitersPerEntry, new RtAsLineWaiter); val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)); val fault = Bool() }
@@ -145,12 +211,20 @@ class RtAsTable extends Module {
 class RtMemTable extends Module {
   val io = IO(new Bundle {
     val pdsReadAdmission = Flipped(Decoupled(new RtPdsReadAdmission)); val pdsReadLane = Decoupled(new RtPdsReadLane); val pdsFault = Decoupled(new RtPdsRayStateFault); val pdsReadRetire = Flipped(Decoupled(new RtPdsReadRetire))
+    val pdsRaySetup = Flipped(Decoupled(new RtRaySetupOutput)); val pdsRayTmaxUpdate = Flipped(Decoupled(new RtPdsRayTmaxUpdate))
+    val nodeRayLookup = Input(new RtPdsRayLookup); val nodeRay = Output(new RtPdsRayLookupResult)
+    val issueRayLookup = Input(new RtPdsRayLookup); val issueRay = Output(new RtPdsRayLookupResult)
+    val resultRayLookup = Input(new RtPdsRayLookup); val resultRay = Output(new RtPdsRayLookupResult)
     val pdsWriteAdmission = Flipped(Decoupled(new RtPdsWriteAdmission)); val pdsHitUpdate = Flipped(Decoupled(new RtPdsHitRecordUpdate)); val pdsWriteFinish = Flipped(Decoupled(new RtPdsWriteFinish)); val pdsWriteDrained = Decoupled(new RtPdsWriteDrained)
     val asAcquire = Flipped(Decoupled(new RtAsTableAcquire)); val asReadyLine = Decoupled(new RtAsTableReadyLine)
     val rtLsuReport = Decoupled(new RtLsuReport); val rtLsuRespond = Flipped(Decoupled(new RtLsuRespond))
   })
   val read = Module(new RtPdsReadTable); val write = Module(new RtPdsWriteTable); val as = Module(new RtAsTable); val mshr = Module(new RtLsuMshr)
   read.io.admission <> io.pdsReadAdmission; io.pdsReadLane <> read.io.laneOut; io.pdsFault <> read.io.faultOut; read.io.retire <> io.pdsReadRetire
+  read.io.raySetup <> io.pdsRaySetup; read.io.rayTmaxUpdate <> io.pdsRayTmaxUpdate
+  read.io.nodeRayLookup := io.nodeRayLookup; io.nodeRay := read.io.nodeRay
+  read.io.issueRayLookup := io.issueRayLookup; io.issueRay := read.io.issueRay
+  read.io.resultRayLookup := io.resultRayLookup; io.resultRay := read.io.resultRay
   write.io.admission <> io.pdsWriteAdmission; write.io.update <> io.pdsHitUpdate; write.io.finish <> io.pdsWriteFinish; io.pdsWriteDrained <> write.io.drained
   as.io.acquire <> io.asAcquire; io.asReadyLine <> as.io.readyLine
   mshr.io.pdsRead <> read.io.candidate; mshr.io.pdsWrite <> write.io.candidate; mshr.io.as <> as.io.candidate

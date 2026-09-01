@@ -13,7 +13,7 @@ object RtLsuSource {
 
 /** The minimum table location retained while an LSU transaction is in flight. */
 class RtLsuLocator extends Bundle {
-  val warpId = UInt(depth_warp.W)
+  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val field = UInt(log2Ceil(RtMemTableParameters.pdsRayStateFieldCount).W)
   val record = Bool()
   val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W)
@@ -33,14 +33,14 @@ class RtLsuCandidate extends Bundle {
 }
 
 class RtPdsReadInjection extends Bundle {
-  val warpId = UInt(depth_warp.W)
+  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val field = UInt(log2Ceil(RtMemTableParameters.pdsRayStateFieldCount).W)
   val data = Vec(RtCorePortParameters.lineWordCount, UInt(xLen.W))
   val fault = Bool()
 }
 
 class RtPdsWriteInjection extends Bundle {
-  val warpId = UInt(depth_warp.W)
+  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val record = Bool()
   val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W)
   val upperHalf = Bool()

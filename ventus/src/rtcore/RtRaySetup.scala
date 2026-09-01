@@ -7,7 +7,7 @@ import top.parameters._
 
 /** Raw per-lane state consumed from the twelve RT PDS ray-state fields. */
 class RtRaySetupInput extends Bundle {
-  val warpId = UInt(depth_warp.W)
+  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
   val accelLo = UInt(xLen.W)
   val accelHi = UInt(xLen.W)
@@ -18,7 +18,7 @@ class RtRaySetupInput extends Bundle {
 
 /** RayFlex-compatible ray parameters derived once for a PDS ray-state row. */
 class RtRaySetupOutput extends Bundle {
-  val warpId = UInt(depth_warp.W)
+  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
   val accelLo = UInt(xLen.W)
   val accelHi = UInt(xLen.W)

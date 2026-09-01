@@ -10,24 +10,20 @@ object RtTraversalStackParameters {
 }
 
 class RtTraversalStackInit extends Bundle {
-  val warpId = UInt(depth_warp.W)
   val laneMask = UInt(num_thread.W)
   val rootNodeRef = Vec(num_thread, UInt(RtTraversalStackParameters.nodeRefWidth.W))
 }
 
 class RtTraversalStackPush extends Bundle {
-  val warpId = UInt(depth_warp.W)
   val laneMask = UInt(num_thread.W)
   val nodeRef = Vec(num_thread, UInt(RtTraversalStackParameters.nodeRefWidth.W))
 }
 
 class RtTraversalStackPop extends Bundle {
-  val warpId = UInt(depth_warp.W)
   val laneMask = UInt(num_thread.W)
 }
 
 class RtTraversalStackClear extends Bundle {
-  val warpId = UInt(depth_warp.W)
   val laneMask = UInt(num_thread.W)
 }
 
@@ -57,7 +53,6 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
     // warp before issuing the pop.
     val popNodeRef = Output(Vec(num_thread, UInt(nodeRefWidth.W)))
 
-    val statusWarpId = Input(UInt(depth_warp.W))
     val laneLive = Output(UInt(num_thread.W))
     val laneEmpty = Output(UInt(num_thread.W))
     val laneFull = Output(UInt(num_thread.W))
@@ -65,24 +60,18 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
     val popWouldUnderflow = Output(Bool())
   })
 
-  // At the default depth this is 8 warps x 32 lanes x 32 entries x 32 bits,
-  // or 32 KiB of continuation payload storage.
-  val entries = Reg(Vec(num_warp, Vec(num_thread, Vec(stackDepth, UInt(nodeRefWidth.W)))))
-  val stackPointer = RegInit(VecInit(Seq.fill(num_warp)(
-    VecInit(Seq.fill(num_thread)(0.U(stackPointerWidth.W)))
-  )))
-  val live = RegInit(VecInit(Seq.fill(num_warp)(
-    VecInit(Seq.fill(num_thread)(false.B))
-  )))
+  // At the default depth this is one warp x 32 lanes x 32 entries x 32 bits,
+  // or 4 KiB of continuation payload storage.
+  val entries = Reg(Vec(num_thread, Vec(stackDepth, UInt(nodeRefWidth.W))))
+  val stackPointer = RegInit(VecInit(Seq.fill(num_thread)(0.U(stackPointerWidth.W))))
+  val live = RegInit(VecInit(Seq.fill(num_thread)(false.B)))
 
-  val initLive = live(io.init.bits.warpId).asUInt
+  val initLive = live.asUInt
   val pushInvalid = VecInit((0 until num_thread).map { lane =>
-    !live(io.push.bits.warpId)(lane) ||
-      stackPointer(io.push.bits.warpId)(lane) === stackDepth.U
+    !live(lane) || stackPointer(lane) === stackDepth.U
   }).asUInt
   val popInvalid = VecInit((0 until num_thread).map { lane =>
-    !live(io.pop.bits.warpId)(lane) ||
-      stackPointer(io.pop.bits.warpId)(lane) === 0.U
+    !live(lane) || stackPointer(lane) === 0.U
   }).asUInt
 
   val initAllowed = (io.init.bits.laneMask & initLive) === 0.U
@@ -101,13 +90,13 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
   io.pop.ready := selectPop
 
   for (lane <- 0 until num_thread) {
-    val pointer = stackPointer(io.pop.bits.warpId)(lane)
+    val pointer = stackPointer(lane)
     if (stackDepth == 1) {
       io.popNodeRef(lane) := Mux(pointer === 0.U, 0.U,
-        entries(io.pop.bits.warpId)(lane)(0))
+        entries(lane)(0))
     } else {
       io.popNodeRef(lane) := Mux(pointer === 0.U, 0.U,
-        entries(io.pop.bits.warpId)(lane)(
+        entries(lane)(
           (pointer - 1.U)(stackEntryIndexWidth - 1, 0)
         ))
     }
@@ -116,46 +105,45 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
   when(io.init.fire) {
     for (lane <- 0 until num_thread) {
       when(io.init.bits.laneMask(lane)) {
-        entries(io.init.bits.warpId)(lane)(0) := io.init.bits.rootNodeRef(lane)
-        stackPointer(io.init.bits.warpId)(lane) := 1.U
-        live(io.init.bits.warpId)(lane) := true.B
+        entries(lane)(0) := io.init.bits.rootNodeRef(lane)
+        stackPointer(lane) := 1.U
+        live(lane) := true.B
       }
     }
   }.elsewhen(io.clear.fire) {
     for (lane <- 0 until num_thread) {
       when(io.clear.bits.laneMask(lane)) {
-        stackPointer(io.clear.bits.warpId)(lane) := 0.U
-        live(io.clear.bits.warpId)(lane) := false.B
+        stackPointer(lane) := 0.U
+        live(lane) := false.B
       }
     }
   }.elsewhen(io.push.fire) {
     for (lane <- 0 until num_thread) {
       when(io.push.bits.laneMask(lane)) {
-        val pointer = stackPointer(io.push.bits.warpId)(lane)
+        val pointer = stackPointer(lane)
         if (stackDepth == 1) {
-          entries(io.push.bits.warpId)(lane)(0) := io.push.bits.nodeRef(lane)
+          entries(lane)(0) := io.push.bits.nodeRef(lane)
         } else {
-          entries(io.push.bits.warpId)(lane)(
+          entries(lane)(
             pointer(stackEntryIndexWidth - 1, 0)
           ) := io.push.bits.nodeRef(lane)
         }
-        stackPointer(io.push.bits.warpId)(lane) := pointer + 1.U
+        stackPointer(lane) := pointer + 1.U
       }
     }
   }.elsewhen(io.pop.fire) {
     for (lane <- 0 until num_thread) {
       when(io.pop.bits.laneMask(lane)) {
-        stackPointer(io.pop.bits.warpId)(lane) :=
-          stackPointer(io.pop.bits.warpId)(lane) - 1.U
+        stackPointer(lane) := stackPointer(lane) - 1.U
       }
     }
   }
 
-  val statusLive = live(io.statusWarpId).asUInt
+  val statusLive = live.asUInt
   val statusEmpty = VecInit((0 until num_thread).map { lane =>
-    live(io.statusWarpId)(lane) && stackPointer(io.statusWarpId)(lane) === 0.U
+    live(lane) && stackPointer(lane) === 0.U
   }).asUInt
-  val statusFull = VecInit(stackPointer(io.statusWarpId).map(_ === stackDepth.U)).asUInt
+  val statusFull = VecInit(stackPointer.map(_ === stackDepth.U)).asUInt
   io.laneLive := statusLive
   io.laneEmpty := statusEmpty
   io.laneFull := statusFull
