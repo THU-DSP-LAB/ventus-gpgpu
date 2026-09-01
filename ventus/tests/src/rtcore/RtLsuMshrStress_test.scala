@@ -17,12 +17,7 @@ class RtLsuMshrStressTest extends AnyFreeSpec with ChiselScalatestTester {
     candidate.bits.is64B.poke(is64B.B)
     candidate.bits.wordMask.poke(wordMask.U)
     candidate.bits.writeData.foreach(_.poke(0.U))
-    candidate.bits.locator.warpId.poke(0.U)
-    candidate.bits.locator.field.poke(field.U)
-    candidate.bits.locator.record.poke(false.B)
-    candidate.bits.locator.word.poke(0.U)
-    candidate.bits.locator.upperHalf.poke(false.B)
-    candidate.bits.locator.asEntry.poke(0.U)
+    candidate.bits.locator.tableLocation.poke(field.U)
   }
 
   private def driveIdle(dut: RtLsuMshr): Unit = {
@@ -54,7 +49,6 @@ class RtLsuMshrStressTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.clock.step()
     dut.io.response.valid.poke(false.B)
     dut.io.pdsReadInjection.valid.expect(true.B)
-    dut.io.pdsReadInjection.bits.warpId.expect(0.U)
     dut.io.pdsReadInjection.bits.field.expect(field.U)
     dut.io.pdsReadInjection.bits.data(0).expect((tag * 0x100).U)
     dut.clock.step()
@@ -139,6 +133,45 @@ class RtLsuMshrStressTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.clock.step()
       }
       dut.io.pdsReadInjection.valid.expect(false.B)
+    }
+  }
+
+  "RtLsuMshr retains a back-pressured PDS write in its single data buffer" in {
+    test(new RtLsuMshr).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.io.request.ready.poke(false.B)
+      driveCandidate(dut.io.pdsWrite, RtLsuSource.pdsWrite, 0x5000, 0)
+      dut.io.pdsWrite.bits.write.poke(true.B)
+      dut.io.pdsWrite.bits.writeData.zipWithIndex.foreach { case (word, index) =>
+        word.poke((0x700 + index).U)
+      }
+      // {record = 1, word = 2, upperHalf = 0}
+      dut.io.pdsWrite.bits.locator.tableLocation.poke("b100100".U)
+      dut.io.pdsWrite.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.pdsWrite.valid.poke(false.B)
+
+      dut.io.request.ready.poke(true.B)
+      dut.io.request.valid.expect(true.B)
+      dut.io.request.bits.write.expect(true.B)
+      dut.io.request.bits.writeData(0).expect(0x700.U)
+      dut.io.request.bits.writeData(31).expect(0x71f.U)
+      dut.clock.step()
+
+      dut.io.response.bits.clientId.poke(LsuClientId.RtCore)
+      dut.io.response.bits.lineBase.poke(0x5000.U)
+      dut.io.response.bits.coverageMask.poke(1.U)
+      dut.io.response.bits.data.foreach(_.poke(0.U))
+      dut.io.response.bits.fault.poke(false.B)
+      dut.io.response.valid.poke(true.B)
+      dut.io.response.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.response.valid.poke(false.B)
+
+      dut.io.pdsWriteInjection.valid.expect(true.B)
+      dut.io.pdsWriteInjection.bits.record.expect(true.B)
+      dut.io.pdsWriteInjection.bits.word.expect(2.U)
+      dut.io.pdsWriteInjection.bits.upperHalf.expect(false.B)
     }
   }
 }

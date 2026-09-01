@@ -187,7 +187,7 @@ class RtBox4Pipeline extends Module {
         minSort.io.in(0) := selectedMin(index).x
         minSort.io.in(1) := selectedMin(index).y
         minSort.io.in(2) := selectedMin(index).z
-        minSort.io.in(3) := zero
+        minSort.io.in(3) := intake.ray.originalTmin
         tmin(index) := minSort.io.largest
 
         val maxSort = Module(new QuadSortRecFN)

@@ -15,7 +15,6 @@ private[rtcore] object RtVtasNodeKind {
   val header = 0.U(2.W)
   val box4 = 1.U(2.W)
   val triangle = 2.U(2.W)
-  val unsupported = 3.U(2.W)
 }
 
 private[rtcore] class RtTriangleDispatchMeta extends Bundle {
@@ -217,7 +216,6 @@ class RtCoreScheduler extends Module {
     table.io.asAcquire.bits.waiter.warpId := headerWarp
     table.io.asAcquire.bits.waiter.laneId := headerLane
     table.io.asAcquire.bits.waiter.nodeKind := RtVtasNodeKind.header
-    table.io.asAcquire.bits.waiter.nodeRef := 0.U
   }.elsewhen(nodeAcquire) {
     table.io.asAcquire.bits.lineAddress := table.io.nodeRay.asBase + nodeOffset(selectedNodeRef)
     table.io.asAcquire.bits.wordMask := Mux(selectedNodeType === RtVtasLayout.NodeTriangle.U,
@@ -227,7 +225,6 @@ class RtCoreScheduler extends Module {
     table.io.asAcquire.bits.waiter.laneId := popLane
     table.io.asAcquire.bits.waiter.nodeKind := Mux(selectedNodeType === RtVtasLayout.NodeBox4.U,
       RtVtasNodeKind.box4, RtVtasNodeKind.triangle)
-    table.io.asAcquire.bits.waiter.nodeRef := selectedNodeRef
   }
   when(table.io.asAcquire.fire && headerAcquire) {
     laneState(headerWarp)(headerLane) := sHeaderPending
@@ -382,9 +379,10 @@ class RtCoreScheduler extends Module {
     }
   }
 
-  // Compare tNum/tDenom against currentTmax before invoking a divider.  A
-  // positive denominator lets us compare tNum directly with tmax*tDenom, so
-  // rejected candidates do not consume the three final IEEE divisions.
+  // Compare tNum/tDenom against immutable originalTmin and mutable
+  // currentTmax before invoking a divider.  A positive denominator lets us
+  // compare tNum directly with each bound multiplied by tDenom, so rejected
+  // candidates do not consume the three final IEEE divisions.
   val triangleResultMask = VecInit(triangleResult.map(_.valid)).asUInt
   val triangleResultSelect = roundRobin(triangleResultMask, nextTriangleResult, triangleUnitCount)
   val selectedTriangleResult = Mux1H((0 until triangleUnitCount).map(unit =>
@@ -398,6 +396,11 @@ class RtCoreScheduler extends Module {
   tBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
   tBoundProduct.io.roundingMode := consts.round_near_even
   tBoundProduct.io.detectTininess := consts.tininess_beforeRounding
+  val tMinBoundProduct = Module(new MulRecFN(8, 24))
+  tMinBoundProduct.io.a := recFNFromFN(8, 24, table.io.resultRay.ray.originalTmin)
+  tMinBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
+  tMinBoundProduct.io.roundingMode := consts.round_near_even
+  tMinBoundProduct.io.detectTininess := consts.tininess_beforeRounding
   val denominatorPositive = Module(new CompareRecFN(8, 24))
   denominatorPositive.io.a := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
   denominatorPositive.io.b := recFNFromFN(8, 24, 0.U(32.W))
@@ -406,8 +409,13 @@ class RtCoreScheduler extends Module {
   withinCurrentTmax.io.a := recFNFromFN(8, 24, selectedTriangleResult.tNum)
   withinCurrentTmax.io.b := tBoundProduct.io.out
   withinCurrentTmax.io.signaling := false.B
+  val aboveOriginalTmin = Module(new CompareRecFN(8, 24))
+  aboveOriginalTmin.io.a := recFNFromFN(8, 24, selectedTriangleResult.tNum)
+  aboveOriginalTmin.io.b := tMinBoundProduct.io.out
+  aboveOriginalTmin.io.signaling := false.B
   val acceptedTriangleResult = selectedTriangleResult.hit && table.io.resultRay.valid &&
-    denominatorPositive.io.gt && withinCurrentTmax.io.lt
+    denominatorPositive.io.gt &&
+    (aboveOriginalTmin.io.gt || aboveOriginalTmin.io.eq) && withinCurrentTmax.io.lt
   when(triangleResultMask.orR && selectedTriangleResult.hit) {
     assert(denominatorPositive.io.gt,
       "RtTrianglePipeline hit must carry a positive tDenom for tmax prefilter")
@@ -485,7 +493,6 @@ class RtCoreScheduler extends Module {
   val retireWarp = Reg(UInt(residentWarpIdWidth.W))
   table.io.pdsWriteDrained.ready := !completionPending && !retirePending
   when(table.io.pdsWriteDrained.fire) {
-    val warp = table.io.pdsWriteDrained.bits.warpId
     completionBits.warpId := residentOwnerWarpId
     completionBits.issueId := warpIssueId(0)
     completionBits.destinationVd := warpDestination(0)

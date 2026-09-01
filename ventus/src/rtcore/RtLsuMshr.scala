@@ -12,14 +12,11 @@ object RtLsuSource {
   val as = 2.U(width.W)
 }
 
-/** The minimum table location retained while an LSU transaction is in flight. */
+/** The source-specific table location retained while an LSU transaction is in flight. */
 class RtLsuLocator extends Bundle {
-  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
-  val field = UInt(log2Ceil(RtMemTableParameters.pdsRayStateFieldCount).W)
-  val record = Bool()
-  val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W)
-  val upperHalf = Bool()
-  val asEntry = UInt(log2Ceil(RtMemTableParameters.asEntryCount).W)
+  // PDS read: field in bits [3:0].  PDS write: {record, word, upperHalf}.
+  // AS: entry in bits [4:0].
+  val tableLocation = UInt(6.W)
 }
 
 /** A table-owned request payload.  It is a wire into RtLsuMshr, never MSHR state. */
@@ -34,14 +31,12 @@ class RtLsuCandidate extends Bundle {
 }
 
 class RtPdsReadInjection extends Bundle {
-  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val field = UInt(log2Ceil(RtMemTableParameters.pdsRayStateFieldCount).W)
   val data = Vec(RtCorePortParameters.lineWordCount, UInt(xLen.W))
   val fault = Bool()
 }
 
 class RtPdsWriteInjection extends Bundle {
-  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val record = Bool()
   val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W)
   val upperHalf = Bool()
@@ -62,10 +57,8 @@ private[rtcore] class RtLsuMshrEntry extends Bundle {
   val issued = Bool()
   val source = UInt(RtLsuSource.width.W)
   val lineBase = UInt(memReqLen.W)
-  val coverageMask = UInt(RtCorePortParameters.lineWordCount.W)
   val requestMask = UInt(RtCorePortParameters.lineWordCount.W)
   val write = Bool()
-  val writeData = Vec(RtCorePortParameters.lineWordCount, UInt(xLen.W))
   val wordOffset = UInt(log2Ceil(RtCorePortParameters.lineWordCount).W)
   val locator = new RtLsuLocator
 }
@@ -92,6 +85,11 @@ class RtLsuMshr extends Module {
   val entries = RegInit(VecInit(Seq.fill(entryCount)(
     0.U.asTypeOf(new RtLsuMshrEntry)
   )))
+  // PDS write serialization guarantees no more than one write request can be
+  // resident.  Keep its payload once, rather than replicating 128 bytes in
+  // every MSHR entry.
+  val writeBufferValid = RegInit(false.B)
+  val writeBufferData = Reg(Vec(RtCorePortParameters.lineWordCount, UInt(xLen.W)))
   val free = VecInit(entries.map(!_.valid)).asUInt
   val hasFree = free.orR
   val freeIndex = PriorityEncoder(free)
@@ -176,7 +174,11 @@ class RtLsuMshr extends Module {
     io.request.bits.lineBase := pendingLeader.lineBase
     io.request.bits.coverageMask := pendingLeader.requestMask
     io.request.bits.write := pendingLeader.write
-    io.request.bits.writeData := pendingLeader.writeData
+    when(pendingLeader.write) {
+      io.request.bits.writeData := writeBufferData
+      assert(writeBufferValid,
+        "pending RTcore write must retain its single write-data buffer")
+    }
   }.otherwise {
     io.request.bits.lineBase := lineBase
     io.request.bits.coverageMask := coverageMask
@@ -191,10 +193,8 @@ class RtLsuMshr extends Module {
     entry.issued := !hasMergeTarget && io.request.fire && !hasPendingLeader
     entry.source := selected.source
     entry.lineBase := lineBase
-    entry.coverageMask := coverageMask
     entry.requestMask := coverageMask
     entry.write := selected.write
-    entry.writeData := selectedWriteData
     entry.wordOffset := wordOffset
     entry.locator := selected.locator
     when(hasMergeTarget) {
@@ -204,6 +204,15 @@ class RtLsuMshr extends Module {
   }
   when(io.request.fire && hasPendingLeader) {
     entries(pendingLeaderIndex).issued := true.B
+  }
+  when(candidateFire && selected.write && !(io.request.fire && !hasPendingLeader)) {
+    assert(!writeBufferValid,
+      "PDS write serialization permits only one buffered RTcore write")
+    writeBufferValid := true.B
+    writeBufferData := selectedWriteData
+  }
+  when(io.request.fire && hasPendingLeader && pendingLeader.write) {
+    writeBufferValid := false.B
   }
 
   val responseRegValid = RegInit(false.B)
@@ -240,8 +249,7 @@ class RtLsuMshr extends Module {
     routeEntry.source === RtLsuSource.pdsRead
   io.pdsReadInjection.bits := 0.U.asTypeOf(new RtPdsReadInjection)
   when(io.pdsReadInjection.valid) {
-    io.pdsReadInjection.bits.warpId := routeEntry.locator.warpId
-    io.pdsReadInjection.bits.field := routeEntry.locator.field
+    io.pdsReadInjection.bits.field := routeEntry.locator.tableLocation(3, 0)
     io.pdsReadInjection.bits.data := routedData
     io.pdsReadInjection.bits.fault := responseReg.fault
   }
@@ -249,16 +257,15 @@ class RtLsuMshr extends Module {
     routeEntry.source === RtLsuSource.pdsWrite
   io.pdsWriteInjection.bits := 0.U.asTypeOf(new RtPdsWriteInjection)
   when(io.pdsWriteInjection.valid) {
-    io.pdsWriteInjection.bits.warpId := routeEntry.locator.warpId
-    io.pdsWriteInjection.bits.record := routeEntry.locator.record
-    io.pdsWriteInjection.bits.word := routeEntry.locator.word
-    io.pdsWriteInjection.bits.upperHalf := routeEntry.locator.upperHalf
+    io.pdsWriteInjection.bits.record := routeEntry.locator.tableLocation(5)
+    io.pdsWriteInjection.bits.word := routeEntry.locator.tableLocation(4, 1)
+    io.pdsWriteInjection.bits.upperHalf := routeEntry.locator.tableLocation(0)
     io.pdsWriteInjection.bits.fault := responseReg.fault
   }
   io.asInjection.valid := responseRegValid && routeEntry.source === RtLsuSource.as
   io.asInjection.bits := 0.U.asTypeOf(new RtAsInjection)
   when(io.asInjection.valid) {
-    io.asInjection.bits.entry := routeEntry.locator.asEntry
+    io.asInjection.bits.entry := routeEntry.locator.tableLocation(4, 0)
     io.asInjection.bits.data := routedData
     io.asInjection.bits.fault := responseReg.fault
   }

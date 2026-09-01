@@ -6,7 +6,7 @@ import lsu.LsuClientId
 import org.scalatest.freespec.AnyFreeSpec
 
 class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
-  private val fieldCount = RtMemTableParameters.pdsRayStateFieldCount
+  private val traversalFields = RtMemTableParameters.pdsTraversalReadFields
 
   private def driveContext(context: RtPdsContext): Unit = {
     context.baseAddress.poke(0x1000.U)
@@ -32,16 +32,16 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.clock.step()
       dut.io.admission.valid.poke(false.B)
 
-      for (field <- 0 until fieldCount) {
+      for (field <- traversalFields) {
         dut.io.candidate.valid.expect(true.B)
         dut.io.candidate.bits.source.expect(RtLsuSource.pdsRead)
-        dut.io.candidate.bits.locator.warpId.expect(0.U)
-        dut.io.candidate.bits.locator.field.expect(field.U)
+        dut.io.candidate.bits.locator.tableLocation.expect(field.U)
+        dut.io.candidate.bits.cacheLineAddress.expect((0x1300 + field * 0x200).U)
+        dut.io.candidate.bits.wordMask.expect("hffffffff".U)
         dut.clock.step()
       }
 
-      for (field <- (0 until fieldCount).reverse) {
-        dut.io.injection.bits.warpId.poke(0.U)
+      for (field <- traversalFields.reverse) {
         dut.io.injection.bits.field.poke(field.U)
         dut.io.injection.bits.fault.poke(false.B)
         dut.io.injection.bits.data.zipWithIndex.foreach { case (word, lane) =>
@@ -56,8 +56,8 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.laneOut.valid.expect(true.B)
       dut.io.laneOut.bits.warpId.expect(0.U)
       dut.io.laneOut.bits.laneId.expect(2.U)
-      dut.io.laneOut.bits.data.zipWithIndex.foreach { case (word, field) =>
-        word.expect((field * 100 + 2).U)
+      traversalFields.foreach { field =>
+        dut.io.laneOut.bits.data(field).expect((field * 100 + 2).U)
       }
       dut.io.retire.bits.warpId.poke(0.U)
       dut.io.retire.valid.poke(true.B)
@@ -94,9 +94,8 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.admission.valid.poke(true.B)
       dut.clock.step()
       dut.io.admission.valid.poke(false.B)
-      for (_ <- 0 until fieldCount) { dut.clock.step() }
-      for (field <- 0 until fieldCount) {
-        dut.io.injection.bits.warpId.poke(0.U)
+      for (_ <- traversalFields) { dut.clock.step() }
+      for (field <- traversalFields) {
         dut.io.injection.bits.field.poke(field.U)
         dut.io.injection.bits.fault.poke(false.B)
         dut.io.injection.bits.data.zipWithIndex.foreach { case (word, lane) =>
@@ -125,6 +124,7 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.raySetup.bits.ray.inv.x.poke(0x3f800000L.U)
       dut.io.raySetup.bits.ray.inv.y.poke(0x40000000L.U)
       dut.io.raySetup.bits.ray.inv.z.poke(0x40400000L.U)
+      dut.io.raySetup.bits.ray.originalTmin.poke(0x3dcccccdL.U)
       dut.io.raySetup.bits.ray.extent.poke(0x41200000L.U)
       dut.io.raySetup.bits.ray.kx.poke(0.U)
       dut.io.raySetup.bits.ray.ky.poke(1.U)
@@ -145,6 +145,7 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.nodeRay.ray.origin.x.expect(400.U)
       dut.io.nodeRay.ray.dir.z.expect(1000.U)
       dut.io.nodeRay.ray.inv.z.expect(0x40400000L.U)
+      dut.io.nodeRay.ray.originalTmin.expect(0x3dcccccdL.U)
       dut.io.nodeRay.ray.kz.expect(2.U)
 
       dut.io.rayTmaxUpdate.bits.warpId.poke(0.U)
@@ -198,12 +199,11 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
           dut.io.candidate.bits.source.expect(RtLsuSource.pdsWrite)
           dut.io.candidate.bits.write.expect(true.B)
           dut.io.candidate.bits.is64B.expect(true.B)
-          if (dut.io.candidate.bits.locator.upperHalf.peek().litToBoolean)
+          if (dut.io.candidate.bits.locator.tableLocation.peek().litValue.testBit(0))
             dut.io.candidate.bits.writeData(1).expect(1702.U)
           else
             dut.io.candidate.bits.writeData(0).expect(2.U)
           dut.clock.step()
-          dut.io.injection.bits.warpId.poke(0.U)
           dut.io.injection.bits.record.poke(true.B)
           dut.io.injection.bits.word.poke(2.U)
           dut.io.injection.bits.upperHalf.poke((acknowledgements == 1).B)
@@ -237,7 +237,6 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.io.acquire.bits.waiter.warpId.poke(0.U)
         dut.io.acquire.bits.waiter.laneId.poke(lane.U)
         dut.io.acquire.bits.waiter.nodeKind.poke(0.U)
-        dut.io.acquire.bits.waiter.nodeRef.poke(0x180.U)
         dut.io.acquire.valid.poke(true.B)
         dut.io.acquire.ready.expect(true.B)
         dut.clock.step()
@@ -255,7 +254,6 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.acquire.bits.waiter.warpId.poke(0.U)
       dut.io.acquire.bits.waiter.laneId.poke(9.U)
       dut.io.acquire.bits.waiter.nodeKind.poke(0.U)
-      dut.io.acquire.bits.waiter.nodeRef.poke(0x180.U)
       dut.io.acquire.valid.poke(true.B)
       dut.clock.step()
       dut.io.acquire.valid.poke(false.B)
@@ -278,12 +276,7 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
         candidate.bits.is64B.poke(false.B)
         candidate.bits.wordMask.poke(1.U)
         candidate.bits.writeData.foreach(_.poke(0.U))
-        candidate.bits.locator.warpId.poke(0.U)
-        candidate.bits.locator.field.poke(4.U)
-        candidate.bits.locator.record.poke(false.B)
-        candidate.bits.locator.word.poke(0.U)
-        candidate.bits.locator.upperHalf.poke(false.B)
-        candidate.bits.locator.asEntry.poke(0.U)
+        candidate.bits.locator.tableLocation.poke(4.U)
       }
       dut.io.pdsRead.bits.source.poke(RtLsuSource.pdsRead)
       dut.io.pdsWrite.bits.source.poke(RtLsuSource.pdsWrite)
@@ -309,7 +302,6 @@ class RtResidentTablesTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.clock.step()
       dut.io.response.valid.poke(false.B)
       dut.io.pdsReadInjection.valid.expect(true.B)
-      dut.io.pdsReadInjection.bits.warpId.expect(0.U)
       dut.io.pdsReadInjection.bits.field.expect(4.U)
       dut.io.pdsReadInjection.bits.data(0).expect(0x100.U)
       dut.clock.step()

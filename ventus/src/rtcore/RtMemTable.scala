@@ -7,7 +7,24 @@ import top.parameters._
 
 object RtMemTableParameters {
   val pdsRayStateFieldCount = 12
-  val pdsReadWarpEntryCount = RtCorePortParameters.residentWarpCount
+  // Keep raw rows indexed relative to SlotAccelLo. Traversal needs accelLo
+  // plus origin, tmin, direction, and tmax: nine cache lines in total.
+  // accelHi and trace metadata remain unfetched until a later traversal mode
+  // needs them.
+  val pdsTraversalReadFields = Seq(
+    RtAbiLayout.SlotAccelLo,
+    RtAbiLayout.SlotOriginX,
+    RtAbiLayout.SlotOriginY,
+    RtAbiLayout.SlotOriginZ,
+    RtAbiLayout.SlotTmin,
+    RtAbiLayout.SlotDirectionX,
+    RtAbiLayout.SlotDirectionY,
+    RtAbiLayout.SlotDirectionZ,
+    RtAbiLayout.SlotTmax
+  ).map(_ - RtAbiLayout.SlotAccelLo)
+  val pdsTraversalReadMask = pdsTraversalReadFields.foldLeft(BigInt(0)) {
+    case (mask, field) => mask | (BigInt(1) << field)
+  }
   val pdsWriteWarpEntryCount = RtCorePortParameters.residentWarpCount
   val hitRecordStorageWordCount = RtAbiLayout.HitRecordWordCount
   val asEntryCount = 32
@@ -31,6 +48,7 @@ class RtPdsPreparedRay extends Bundle {
   val valid = Bool()
   val asBase = UInt(memReqLen.W)
   val currentTmax = UInt(32.W)
+  val originalTmin = UInt(32.W)
   val inv = new Float3(recorded_float = false)
   val shear = new Float3(recorded_float = false)
   val kx = UInt(2.W)
@@ -52,7 +70,7 @@ private[rtcore] class RtPdsReadContext extends Bundle {
 
 class RtPdsReadTable extends Module {
   private val p = RtMemTableParameters
-  private val allFields = ((BigInt(1) << p.pdsRayStateFieldCount) - 1).U(p.pdsRayStateFieldCount.W)
+  private val traversalFields = p.pdsTraversalReadMask.U(p.pdsRayStateFieldCount.W)
   val io = IO(new Bundle {
     val admission = Flipped(Decoupled(new RtPdsReadAdmission)); val laneOut = Decoupled(new RtPdsReadLane)
     val faultOut = Decoupled(new RtPdsRayStateFault); val retire = Flipped(Decoupled(new RtPdsReadRetire))
@@ -71,18 +89,24 @@ class RtPdsReadTable extends Module {
     admit.valid := true.B; admit.pds := io.admission.bits.pds; admit.activeMask := io.admission.bits.activeMask; admit.issued := 0.U; admit.received := 0.U; admit.delivered := 0.U; admit.faultMask := 0.U
     for (lane <- 0 until num_thread) { prepared(lane).valid := false.B }
   }
-  val hasNeeded = context.valid && context.issued =/= allFields
+  val hasNeeded = context.valid && (context.issued & traversalFields) =/= traversalFields
   val warp = 0.U(RtCorePortParameters.residentWarpIdWidth.W)
-  val field = PriorityEncoder((~context.issued).asUInt & allFields)
+  val field = PriorityEncoder((~context.issued).asUInt & traversalFields)
   val wordsPerField = context.pds.numWarps * context.pds.numThreads
   val physicalWord = (RtAbiLayout.SlotAccelLo.U + field) * wordsPerField + context.pds.pdsWarpTidBase
   io.candidate.valid := hasNeeded
   io.candidate.bits := 0.U.asTypeOf(new RtLsuCandidate)
   when(hasNeeded) {
     io.candidate.bits.source := RtLsuSource.pdsRead; io.candidate.bits.cacheLineAddress := context.pds.baseAddress + (physicalWord << 2)
-    io.candidate.bits.wordMask := Fill(p.lineWordCount, 1.U(1.W)); io.candidate.bits.locator.warpId := warp; io.candidate.bits.locator.field := field
+    io.candidate.bits.wordMask := Fill(p.lineWordCount, 1.U(1.W)); io.candidate.bits.locator.tableLocation := field
+    assert(context.pds.numThreads === num_thread.U,
+      "RT PDS field reads require one 32-word cacheline per warp")
+    assert(context.pds.pdsWarpTidBase(log2Ceil(num_thread) - 1, 0) === 0.U,
+      "RT PDS warp TID base must start at a warp boundary")
+    assert(io.candidate.bits.cacheLineAddress(6, 0) === 0.U,
+      "RT PDS field reads must start on a 128-byte cacheline boundary")
   }
-  when(io.candidate.fire) { assert(io.candidate.bits.cacheLineAddress(6, 0) === 0.U); context.issued := context.issued | UIntToOH(field, p.pdsRayStateFieldCount) }
+  when(io.candidate.fire) { context.issued := context.issued | UIntToOH(field, p.pdsRayStateFieldCount) }
   val returned = context
   io.injection.ready := returned.valid && returned.issued(io.injection.bits.field) && !returned.received(io.injection.bits.field)
   when(io.injection.fire) {
@@ -90,7 +114,7 @@ class RtPdsReadTable extends Module {
     when(io.injection.bits.fault) { returned.faultMask := returned.faultMask | returned.activeMask }
     for (lane <- 0 until num_thread) when(returned.activeMask(lane)) { rows(lane)(io.injection.bits.field) := io.injection.bits.data(lane) }
   }
-  val completed = context.valid && context.received === allFields
+  val completed = context.valid && (context.received & traversalFields) === traversalFields
   val left = context.activeMask & (~context.delivered).asUInt
   val laneAvailable = Mux(completed, left & (~context.faultMask).asUInt, 0.U)
   val faultAvailable = Mux(completed, left & context.faultMask, 0.U)
@@ -110,6 +134,7 @@ class RtPdsReadTable extends Module {
     setupPrepared.valid := true.B
     setupPrepared.asBase := io.raySetup.bits.accelLo
     setupPrepared.currentTmax := io.raySetup.bits.ray.extent
+    setupPrepared.originalTmin := io.raySetup.bits.ray.originalTmin
     setupPrepared.inv := io.raySetup.bits.ray.inv
     setupPrepared.shear := io.raySetup.bits.ray.shear
     setupPrepared.kx := io.raySetup.bits.ray.kx
@@ -132,6 +157,7 @@ class RtPdsReadTable extends Module {
     output.ray.dir.y := rows(lookup.laneId)(9)
     output.ray.dir.z := rows(lookup.laneId)(10)
     output.ray.inv := entry.inv
+    output.ray.originalTmin := entry.originalTmin
     output.ray.extent := entry.currentTmax
     output.ray.kx := entry.kx
     output.ray.ky := entry.ky
@@ -152,6 +178,8 @@ class RtPdsWriteDrained extends Bundle { val warpId = UInt(RtCorePortParameters.
 private[rtcore] class RtPdsWriteContext extends Bundle { val valid = Bool(); val pds = new RtPdsContext; val activeMask = UInt(num_thread.W); val flushing = Bool(); val drained = Bool(); val waiting = Bool(); val record = Bool(); val word = UInt(log2Ceil(RtMemTableParameters.hitRecordStorageWordCount).W); val upperHalf = Bool() }
 
 class RtPdsWriteTable(warpEntryCount: Int = RtMemTableParameters.pdsWriteWarpEntryCount) extends Module {
+  require(warpEntryCount == 1,
+    "RtPdsWriteTable currently owns one physical RTcore warp")
   private val p = RtMemTableParameters; private val words = p.hitRecordStorageWordCount; private val half = RtCorePortParameters.pdsWriteWordCount; private val indexWidth = log2Ceil(warpEntryCount)
   private def index(warp: UInt): UInt = if (warpEntryCount == 1) 0.U else warp(indexWidth - 1, 0)
   val io = IO(new Bundle { val admission = Flipped(Decoupled(new RtPdsWriteAdmission)); val update = Flipped(Decoupled(new RtPdsHitRecordUpdate)); val finish = Flipped(Decoupled(new RtPdsWriteFinish)); val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtPdsWriteInjection)); val drained = Decoupled(new RtPdsWriteDrained) })
@@ -174,19 +202,19 @@ class RtPdsWriteTable(warpEntryCount: Int = RtMemTableParameters.pdsWriteWarpEnt
     val physicalWord = (fieldBase + context.word) * (context.pds.numWarps * context.pds.numThreads) + context.pds.pdsWarpTidBase + halfBase
     io.candidate.bits.source := RtLsuSource.pdsWrite; io.candidate.bits.cacheLineAddress := context.pds.baseAddress + (physicalWord << 2); io.candidate.bits.write := true.B; io.candidate.bits.is64B := true.B; io.candidate.bits.wordMask := Cat(0.U(half.W), dirtyHalf.asUInt)
     for (w <- 0 until half) { io.candidate.bits.writeData(w) := data(warp)(halfBase + w.U)(context.record)(context.word) }
-    io.candidate.bits.locator.warpId := warp; io.candidate.bits.locator.record := context.record; io.candidate.bits.locator.word := context.word; io.candidate.bits.locator.upperHalf := context.upperHalf
+    io.candidate.bits.locator.tableLocation := Cat(context.record, context.word, context.upperHalf)
   }
   when(io.candidate.fire) { assert(io.candidate.bits.cacheLineAddress(5, 0) === 0.U); context.waiting := true.B }
-  val returned = contexts(index(io.injection.bits.warpId)); io.injection.ready := returned.valid && returned.flushing && returned.waiting && returned.record === io.injection.bits.record && returned.word === io.injection.bits.word && returned.upperHalf === io.injection.bits.upperHalf
+  val returned = contexts(0); io.injection.ready := returned.valid && returned.flushing && returned.waiting && returned.record === io.injection.bits.record && returned.word === io.injection.bits.word && returned.upperHalf === io.injection.bits.upperHalf
   when(io.injection.fire) { assert(!io.injection.bits.fault); returned.waiting := false.B; advance(returned) }
   val drained = VecInit(contexts.map(c => c.valid && c.drained)).asUInt; io.drained.valid := drained.orR; io.drained.bits.warpId := PriorityEncoder(drained)
   when(io.drained.fire) { contexts(PriorityEncoder(drained)).valid := false.B }
 }
 
-class RtAsLineWaiter extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val nodeKind = UInt(2.W); val nodeRef = UInt(32.W) }
+class RtAsLineWaiter extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val nodeKind = UInt(2.W) }
 class RtAsTableAcquire extends Bundle { val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiter = new RtAsLineWaiter }
-class RtAsTableReadyLine extends Bundle { val waiter = new RtAsLineWaiter; val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)); val fault = Bool() }
-private[rtcore] class RtAsEntry extends Bundle { val valid = Bool(); val sent = Bool(); val returned = Bool(); val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiterValid = Vec(RtMemTableParameters.maxAsWaitersPerEntry, Bool()); val waiters = Vec(RtMemTableParameters.maxAsWaitersPerEntry, new RtAsLineWaiter); val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)); val fault = Bool() }
+class RtAsTableReadyLine extends Bundle { val waiter = new RtAsLineWaiter; val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)) }
+private[rtcore] class RtAsEntry extends Bundle { val valid = Bool(); val sent = Bool(); val returned = Bool(); val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiterValid = Vec(RtMemTableParameters.maxAsWaitersPerEntry, Bool()); val waiters = Vec(RtMemTableParameters.maxAsWaitersPerEntry, new RtAsLineWaiter); val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)) }
 
 class RtAsTable extends Module {
   private val p = RtMemTableParameters
@@ -196,16 +224,16 @@ class RtAsTable extends Module {
   val hasMerge = merge.orR; val place = Mux(hasMerge, PriorityEncoder(merge), PriorityEncoder(free)); io.acquire.ready := hasMerge || free.orR
   when(io.acquire.fire) {
     assert(Mux(io.acquire.bits.is64B, io.acquire.bits.lineAddress(5, 0) === 0.U, io.acquire.bits.lineAddress(6, 0) === 0.U))
-    val e = entries(place); when(!hasMerge) { e.valid := true.B; e.sent := false.B; e.returned := false.B; e.lineAddress := io.acquire.bits.lineAddress; e.wordMask := io.acquire.bits.wordMask; e.is64B := io.acquire.bits.is64B; e.waiterValid.foreach(_ := false.B); e.fault := false.B }.otherwise { e.wordMask := e.wordMask | io.acquire.bits.wordMask }; val w = PriorityEncoder((~e.waiterValid.asUInt).asUInt); e.waiterValid(w) := true.B; e.waiters(w) := io.acquire.bits.waiter
+    val e = entries(place); when(!hasMerge) { e.valid := true.B; e.sent := false.B; e.returned := false.B; e.lineAddress := io.acquire.bits.lineAddress; e.wordMask := io.acquire.bits.wordMask; e.is64B := io.acquire.bits.is64B; e.waiterValid.foreach(_ := false.B) }.otherwise { e.wordMask := e.wordMask | io.acquire.bits.wordMask }; val w = PriorityEncoder((~e.waiterValid.asUInt).asUInt); e.waiterValid(w) := true.B; e.waiters(w) := io.acquire.bits.waiter
   }
   val unsent = VecInit(entries.map(e => e.valid && !e.sent)).asUInt; val request = PriorityEncoder(unsent); io.candidate.valid := unsent.orR; io.candidate.bits := 0.U.asTypeOf(new RtLsuCandidate)
-  when(io.candidate.valid) { io.candidate.bits.source := RtLsuSource.as; io.candidate.bits.cacheLineAddress := entries(request).lineAddress; io.candidate.bits.is64B := entries(request).is64B; io.candidate.bits.wordMask := entries(request).wordMask; io.candidate.bits.locator.asEntry := request }
+  when(io.candidate.valid) { io.candidate.bits.source := RtLsuSource.as; io.candidate.bits.cacheLineAddress := entries(request).lineAddress; io.candidate.bits.is64B := entries(request).is64B; io.candidate.bits.wordMask := entries(request).wordMask; io.candidate.bits.locator.tableLocation := request }
   when(io.candidate.fire) { entries(request).sent := true.B }
   val response = entries(io.injection.bits.entry); io.injection.ready := response.valid && response.sent && !response.returned
-  when(io.injection.fire) { assert(!io.injection.bits.fault); response.returned := true.B; response.data := io.injection.bits.data; response.fault := io.injection.bits.fault }
+  when(io.injection.fire) { assert(!io.injection.bits.fault); response.returned := true.B; response.data := io.injection.bits.data }
   val ready = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid.asUInt.orR)).asUInt; val entry = PriorityEncoder(ready); val waiter = PriorityEncoder(entries(entry).waiterValid.asUInt)
   io.readyLine.valid := ready.orR; io.readyLine.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
-  when(io.readyLine.valid) { io.readyLine.bits.waiter := entries(entry).waiters(waiter); io.readyLine.bits.data := entries(entry).data; io.readyLine.bits.fault := entries(entry).fault }
+  when(io.readyLine.valid) { io.readyLine.bits.waiter := entries(entry).waiters(waiter); io.readyLine.bits.data := entries(entry).data }
   when(io.readyLine.fire) { val left = entries(entry).waiterValid.asUInt & (~UIntToOH(waiter, p.maxAsWaitersPerEntry)).asUInt; entries(entry).waiterValid(waiter) := false.B; when(left === 0.U) { entries(entry).valid := false.B } }
 }
 

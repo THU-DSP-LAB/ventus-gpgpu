@@ -100,7 +100,7 @@ class RtCoreSchedulerFlowTest extends AnyFreeSpec with ChiselScalatestTester {
         0x3f800000L, 0x40000000L, 0x40400000L, 0,
         0x40800000L, 0x41000000L, 0x41400000L, 0x42c80000L
       )
-      var pendingRayFields = rayFields.indices.toSet
+      var pendingRayFields = RtMemTableParameters.pdsTraversalReadFields.toSet
       while (pendingRayFields.nonEmpty) {
         val (address, coverage) = waitForRequest(dut)
         val field = ((address - pdsBase) / RtCorePortParameters.lineBytes).toInt - RtAbiLayout.SlotAccelLo

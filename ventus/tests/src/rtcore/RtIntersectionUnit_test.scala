@@ -12,6 +12,7 @@ class RtIntersectionUnitParallelTest
     with ChiselScalatestTester {
   private val zero = 0.U
   private val one = "h3f800000".U
+  private val onePointFive = "h3fc00000".U
   private val two = "h40000000".U
   private val three = "h40400000".U
   private val four = "h40800000".U
@@ -32,6 +33,7 @@ class RtIntersectionUnitParallelTest
       ray: Ray,
       direction: UInt = one,
       inverseDirection: UInt = one,
+      originalTmin: UInt = zero,
       extent: UInt = positiveInfinity,
       kx: Int = 0,
       ky: Int = 1,
@@ -41,6 +43,7 @@ class RtIntersectionUnitParallelTest
     pokeFloat3(ray.dir, direction, direction, direction)
     pokeFloat3(ray.inv, inverseDirection, inverseDirection, inverseDirection)
     pokeFloat3(ray.shear, zero, zero, one)
+    ray.originalTmin.poke(originalTmin)
     ray.extent.poke(extent)
     ray.kx.poke(kx.U)
     ray.ky.poke(ky.U)
@@ -63,10 +66,11 @@ class RtIntersectionUnitParallelTest
       upper: UInt,
       direction: UInt = one,
       inverseDirection: UInt = one,
+      originalTmin: UInt = zero,
       extent: UInt = positiveInfinity
   ): Unit = {
     dut.boxIn.bits.requestId.poke(requestId.U)
-    driveRay(dut.boxIn.bits.ray, direction, inverseDirection, extent)
+    driveRay(dut.boxIn.bits.ray, direction, inverseDirection, originalTmin, extent)
     dut.boxIn.bits.aabb.foreach(box => driveBox(box, lower, upper))
   }
 
@@ -193,10 +197,14 @@ class RtIntersectionUnitParallelTest
       driveBoxJob(dut, 32, one, two, extent = one)
       dut.boxIn.ready.expect(true.B)
       dut.clock.step()
+      driveBoxJob(dut, 33, one, two, originalTmin = onePointFive)
+      dut.boxIn.ready.expect(true.B)
+      dut.clock.step()
       dut.boxIn.valid.poke(false.B)
 
       var negativeDirectionSeen = false
       var extentBoundarySeen = false
+      var tminSeen = false
       for (_ <- 0 until 24) {
         if (dut.boxOut.valid.peek().litToBoolean) {
           dut.boxOut.bits.requestId.peek().litValue match {
@@ -208,6 +216,10 @@ class RtIntersectionUnitParallelTest
               dut.boxOut.bits.tmin.foreach(_.expect(positiveInfinity))
               dut.boxOut.bits.isIntersect.foreach(_.expect(false.B))
               extentBoundarySeen = true
+            case requestId if requestId == BigInt(33) =>
+              dut.boxOut.bits.tmin.foreach(_.expect(onePointFive))
+              dut.boxOut.bits.isIntersect.foreach(_.expect(true.B))
+              tminSeen = true
             case other => fail(s"unexpected Box4 requestId $other")
           }
         }
@@ -215,6 +227,7 @@ class RtIntersectionUnitParallelTest
       }
       assert(negativeDirectionSeen)
       assert(extentBoundarySeen)
+      assert(tminSeen)
     }
   }
 

@@ -45,6 +45,9 @@ class Ray(recorded_float: Boolean = false) extends Bundle {
   val inv = new Float3(recorded_float)
 
   val _bit_width = if (recorded_float) 33.W else 32.W
+  // Immutable lower traversal bound supplied by traceRay.
+  val originalTmin = Bits(_bit_width)
+  // Mutable upper traversal bound; this is narrowed after committed hits.
   val extent = Bits(_bit_width)
 
   val kx = UInt(2.W)
@@ -81,11 +84,6 @@ class Triangle(recorded_float: Boolean = false) extends Bundle {
   val C = new Float3(recorded_float)
 
   def isRecordedFloat(): Boolean = { recorded_float }
-}
-
-class RayBoxPair(recorded_float: Boolean = false) extends Bundle {
-  val ray = new Ray(recorded_float)
-  val aabb = new AABB(recorded_float)
 }
 
 /** PDS ray-state fields consumed by intersection setup before Ray derivation. */
@@ -152,21 +150,6 @@ object Float3ConvertFNtoRecFN {
   }
 }
 
-object Float3ConvertRecFNtoFN {
-  def apply(in: Float3): Float3 = {
-    if (!in.isRecordedFloat()) {
-      throw new Exception(
-        "input must be in recorded format before it can be converted to IEEE-754 format"
-      )
-    }
-    val out = Wire(new Float3(recorded_float = false))
-    out.x := fNFromRecFN(8, 24, in.x)
-    out.y := fNFromRecFN(8, 24, in.y)
-    out.z := fNFromRecFN(8, 24, in.z)
-    out
-  }
-}
-
 object RayConvertFNtoRecFN {
   def apply(in: Ray): Ray = {
     if (in.isRecordedFloat()) {
@@ -185,6 +168,7 @@ object RayConvertFNtoRecFN {
     out.inv.x := recFNFromFN(8, 24, in.inv.x)
     out.inv.y := recFNFromFN(8, 24, in.inv.y)
     out.inv.z := recFNFromFN(8, 24, in.inv.z)
+    out.originalTmin := recFNFromFN(8, 24, in.originalTmin)
     out.extent := recFNFromFN(8, 24, in.extent)
     out.kx := in.kx
     out.ky := in.ky
@@ -192,36 +176,6 @@ object RayConvertFNtoRecFN {
     out.shear.x := recFNFromFN(8, 24, in.shear.x)
     out.shear.y := recFNFromFN(8, 24, in.shear.y)
     out.shear.z := recFNFromFN(8, 24, in.shear.z)
-
-    out
-  }
-}
-
-object RayConvertRecFNtoFN {
-  def apply(in: Ray): Ray = {
-    if (in.isRecordedFloat() == false) {
-      throw new Exception(
-        "Ray must be in recorded format before it can be converted to IEEE-754 format"
-      )
-    }
-
-    val out = Wire(new Ray(recorded_float = false))
-    out.origin.x := fNFromRecFN(8, 24, in.origin.x)
-    out.origin.y := fNFromRecFN(8, 24, in.origin.y)
-    out.origin.z := fNFromRecFN(8, 24, in.origin.z)
-    out.dir.x := fNFromRecFN(8, 24, in.dir.x)
-    out.dir.y := fNFromRecFN(8, 24, in.dir.y)
-    out.dir.z := fNFromRecFN(8, 24, in.dir.z)
-    out.inv.x := fNFromRecFN(8, 24, in.inv.x)
-    out.inv.y := fNFromRecFN(8, 24, in.inv.y)
-    out.inv.z := fNFromRecFN(8, 24, in.inv.z)
-    out.extent := fNFromRecFN(8, 24, in.extent)
-    out.kx := in.kx
-    out.ky := in.ky
-    out.kz := in.kz
-    out.shear.x := fNFromRecFN(8, 24, in.shear.x)
-    out.shear.y := fNFromRecFN(8, 24, in.shear.y)
-    out.shear.z := fNFromRecFN(8, 24, in.shear.z)
 
     out
   }
@@ -248,27 +202,6 @@ object AABBConvertFNtoRecFN {
   }
 }
 
-object AABBConvertRecFNtoFN {
-  def apply(in: AABB): AABB = {
-    if (in.isRecordedFloat() == false) {
-      throw new Exception(
-        "AABB must be in recorded format before it can be converted to IEEE-754 format"
-      )
-    }
-
-    val out = Wire(new AABB(recorded_float = false))
-    out.x_min := fNFromRecFN(8, 24, in.x_min)
-    out.y_min := fNFromRecFN(8, 24, in.y_min)
-    out.z_min := fNFromRecFN(8, 24, in.z_min)
-
-    out.x_max := fNFromRecFN(8, 24, in.x_max)
-    out.y_max := fNFromRecFN(8, 24, in.y_max)
-    out.z_max := fNFromRecFN(8, 24, in.z_max)
-
-    out
-  }
-}
-
 object TriangleConvertFNtoRecFN {
   def apply(in: Triangle): Triangle = {
     if (in.isRecordedFloat() == true) {
@@ -281,23 +214,6 @@ object TriangleConvertFNtoRecFN {
     out.A := Float3ConvertFNtoRecFN(in.A)
     out.B := Float3ConvertFNtoRecFN(in.B)
     out.C := Float3ConvertFNtoRecFN(in.C)
-
-    out
-  }
-}
-
-object TriangleConvertRecFNtoFN {
-  def apply(in: Triangle): Triangle = {
-    if (in.isRecordedFloat() == false) {
-      throw new Exception(
-        "AABB must be in recorded format before it can be converted to IEEE-754 format"
-      )
-    }
-
-    val out = Wire(new Triangle(false))
-    out.A := Float3ConvertRecFNtoFN(in.A)
-    out.B := Float3ConvertRecFNtoFN(in.B)
-    out.C := Float3ConvertRecFNtoFN(in.C)
 
     out
   }

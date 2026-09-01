@@ -30,8 +30,8 @@ class RtRaySetupOutput extends Bundle {
 /**
   * Converts raw PDS ray state into the prepared ray consumed by the two
   * intersection pipelines.  The three reciprocal operations share one input
-  * transaction and complete together; the remaining axis selection and shear
-  * multiplies are combinational from those reciprocal results.
+  * transaction; their independently returned results are accumulated before
+  * the remaining axis selection and shear multiplies are evaluated.
   */
 class RtRaySetup extends Module {
   private val rounding = consts.round_near_even
@@ -123,9 +123,10 @@ class RtRaySetup extends Module {
     outBits.traceMeta1 := saved.traceMeta1
     outBits.ray.origin := saved.rayState.origin
     outBits.ray.dir := saved.rayState.dir
-    outBits.ray.inv.x := reciprocal(0)
-    outBits.ray.inv.y := reciprocal(1)
-    outBits.ray.inv.z := reciprocal(2)
+    outBits.ray.inv.x := reciprocalVec(0)
+    outBits.ray.inv.y := reciprocalVec(1)
+    outBits.ray.inv.z := reciprocalVec(2)
+    outBits.ray.originalTmin := saved.rayState.tmin
     outBits.ray.extent := saved.rayState.tmax
     outBits.ray.kx := kx
     outBits.ray.ky := ky

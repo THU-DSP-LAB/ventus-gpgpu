@@ -17,12 +17,3 @@ object FNFlipSign {
     (~in(w - 1)) ## in(w - 2, 0)
   }
 }
-
-object FNAbsoluteVal {
-  def apply(in: Bits): Bits = {
-    assert(in.widthKnown)
-    val w = in.getWidth
-
-    0.U(1.W) ## in(w - 2, 0)
-  }
-}

@@ -4,10 +4,9 @@ import chisel3._
 import chisel3.util._
 import hardfloat._
 
-/** Final IEEE divisions for a triangle hit returned by RtTrianglePipeline. */
+/** Final IEEE divisions for an accepted triangle hit. */
 class RtTriangleResolveResult extends Bundle {
   val requestId = UInt(RtCorePortParameters.requestIdWidth.W)
-  val hit = Bool()
   val u = UInt(32.W)
   val v = UInt(32.W)
   val t = UInt(32.W)
@@ -15,8 +14,9 @@ class RtTriangleResolveResult extends Bundle {
 
 /**
   * Triangle intersection deliberately leaves barycentric/depth division out of
-  * the high-throughput RayFlex pipeline.  This single resolver is backpressured
-  * by the scheduler's hit-record update path instead of by every Triangle IU.
+  * the high-throughput RayFlex pipeline.  The scheduler sends only accepted
+  * hits here; this single resolver is backpressured by the hit-record update
+  * path instead of by every Triangle IU.
   */
 class RtTriangleResolve extends Module {
   private val rounding = consts.round_near_even
@@ -37,7 +37,7 @@ class RtTriangleResolve extends Module {
   val dividerReady = dividers.map(_.io.inReady).reduce(_ && _)
   val numerators = Seq(io.in.bits.uNum, io.in.bits.vNum, io.in.bits.tNum)
   dividers.zip(numerators).foreach { case (divider, numerator) =>
-    divider.io.inValid := io.in.fire && io.in.bits.hit
+    divider.io.inValid := io.in.fire
     divider.io.sqrtOp := false.B
     divider.io.a := recFNFromFN(8, 24, numerator)
     divider.io.b := recFNFromFN(8, 24, io.in.bits.tDenom)
@@ -45,24 +45,15 @@ class RtTriangleResolve extends Module {
     divider.io.detectTininess := tininess
   }
 
-  io.in.ready := !busy && !outValid && (!io.in.bits.hit || dividerReady)
+  io.in.ready := !busy && !outValid && dividerReady
   io.out.valid := outValid
   io.out.bits := outBits
   when(io.out.fire) { outValid := false.B }
 
   when(io.in.fire) {
-    when(io.in.bits.hit) {
-      saved := io.in.bits
-      busy := true.B
-      divisionReturned := 0.U
-    }.otherwise {
-      outBits.requestId := io.in.bits.requestId
-      outBits.hit := false.B
-      outBits.u := 0.U
-      outBits.v := 0.U
-      outBits.t := 0.U
-      outValid := true.B
-    }
+    saved := io.in.bits
+    busy := true.B
+    divisionReturned := 0.U
   }
 
   val resultValid = VecInit(dividers.map(_.io.outValid_div)).asUInt
@@ -82,7 +73,6 @@ class RtTriangleResolve extends Module {
   }
   when(busy && divisionComplete.andR) {
     outBits.requestId := saved.requestId
-    outBits.hit := true.B
     outBits.u := completedDivision(0)
     outBits.v := completedDivision(1)
     outBits.t := completedDivision(2)

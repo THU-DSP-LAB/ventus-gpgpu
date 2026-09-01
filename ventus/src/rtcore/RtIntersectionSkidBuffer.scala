@@ -88,7 +88,6 @@ class GenerializedSkidBufferController[T <: Data, V <: Data](
 
   // internal control signals
   val load = WireInit(state === SkidBufferState.Empty && in.fire)
-  val unload = WireInit(state === SkidBufferState.Busy && out.fire && !in.fire)
   val flow = WireInit(state === SkidBufferState.Busy && in.fire && out.fire)
   val fill = WireInit(state === SkidBufferState.Busy && in.fire && !out.fire)
   val flush = WireInit(state === SkidBufferState.Full && out.fire)
