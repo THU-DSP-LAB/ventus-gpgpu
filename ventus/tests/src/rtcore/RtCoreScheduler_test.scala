@@ -2,6 +2,7 @@ package rtcore
 
 import chisel3._
 import chiseltest._
+import lsu.LsuClientId
 import org.scalatest.freespec.AnyFreeSpec
 import top.parameters._
 
@@ -17,11 +18,13 @@ class RtCoreSchedulerTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.command.bits.pds.numThreads.poke(num_thread.U)
     dut.io.command.bits.pds.pdsWarpTidBase.poke(0.U)
     dut.io.completion.ready.poke(true.B)
-    dut.io.rtLsuReport.ready.poke(true.B)
-    dut.io.rtLsuRespond.valid.poke(false.B)
-    dut.io.rtLsuRespond.bits.mshrId.poke(0.U)
-    dut.io.rtLsuRespond.bits.data.foreach(_.poke(0.U))
-    dut.io.rtLsuRespond.bits.fault.poke(false.B)
+    dut.io.lsuRequest.ready.poke(true.B)
+    dut.io.lsuResponse.valid.poke(false.B)
+    dut.io.lsuResponse.bits.clientId.poke(LsuClientId.RtCore)
+    dut.io.lsuResponse.bits.lineBase.poke(0.U)
+    dut.io.lsuResponse.bits.coverageMask.poke(0.U)
+    dut.io.lsuResponse.bits.data.foreach(_.poke(0.U))
+    dut.io.lsuResponse.bits.fault.poke(false.B)
     dut.boxIssue.foreach(_.ready.poke(true.B))
     dut.boxResult.foreach { result =>
       result.valid.poke(false.B)
@@ -58,10 +61,11 @@ class RtCoreSchedulerTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.command.valid.poke(false.B)
 
       // Field 0 is accel_lo, which follows status in the physical PDS header.
-      dut.io.rtLsuReport.valid.expect(true.B)
-      dut.io.rtLsuReport.bits.write.expect(false.B)
-      dut.io.rtLsuReport.bits.is64B.expect(false.B)
-      dut.io.rtLsuReport.bits.cacheLineAddress.expect(0x8500.U)
+      dut.io.lsuRequest.valid.expect(true.B)
+      dut.io.lsuRequest.bits.clientId.expect(LsuClientId.RtCore)
+      dut.io.lsuRequest.bits.write.expect(false.B)
+      dut.io.lsuRequest.bits.lineBase.expect(0x8500.U)
+      dut.io.lsuRequest.bits.coverageMask.expect("hffffffff".U)
     }
   }
 }

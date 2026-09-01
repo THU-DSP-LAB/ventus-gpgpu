@@ -47,6 +47,8 @@ class RtRaySetup extends Module {
   val busy = RegInit(false.B)
   val outValid = RegInit(false.B)
   val outBits = Reg(new RtRaySetupOutput)
+  val reciprocalBits = Reg(Vec(3, UInt(32.W)))
+  val reciprocalReturned = RegInit(0.U(3.W))
 
   val dividers = Seq.fill(3)(Module(new DivSqrtRecFN_small(8, 24, 0)))
   val dividerReady = dividers.map(_.io.inReady).reduce(_ && _)
@@ -64,10 +66,27 @@ class RtRaySetup extends Module {
   io.out.valid := outValid
   io.out.bits := outBits
   when(io.out.fire) { outValid := false.B }
-  when(io.in.fire) { saved := io.in.bits; busy := true.B }
+  when(io.in.fire) {
+    saved := io.in.bits
+    busy := true.B
+    reciprocalReturned := 0.U
+  }
 
-  val reciprocalValid = dividers.map(_.io.outValid_div).reduce(_ && _)
+  val reciprocalValid = VecInit(dividers.map(_.io.outValid_div)).asUInt
   val reciprocal = dividers.map(divider => fNFromRecFN(8, 24, divider.io.out))
+  when(busy && reciprocalValid.orR) {
+    reciprocalReturned := reciprocalReturned | reciprocalValid
+  }
+  for (index <- reciprocal.indices) {
+    when(busy && reciprocalValid(index)) {
+      reciprocalBits(index) := reciprocal(index)
+    }
+  }
+  val reciprocalComplete = reciprocalReturned | reciprocalValid
+  val completedReciprocal = Wire(Vec(3, UInt(32.W)))
+  for (index <- completedReciprocal.indices) {
+    completedReciprocal(index) := Mux(reciprocalValid(index), reciprocal(index), reciprocalBits(index))
+  }
   val direction = Wire(Vec(3, UInt(32.W)))
   direction(0) := saved.rayState.dir.x.asUInt
   direction(1) := saved.rayState.dir.y.asUInt
@@ -82,7 +101,7 @@ class RtRaySetup extends Module {
   val kx = Mux(negativeDirection, positiveKy, positiveKx)
   val ky = Mux(negativeDirection, positiveKx, positiveKy)
   val reciprocalVec = Wire(Vec(3, UInt(32.W)))
-  reciprocalVec := VecInit(reciprocal)
+  reciprocalVec := completedReciprocal
 
   val shearX = Module(new MulRecFN(8, 24))
   val shearY = Module(new MulRecFN(8, 24))
@@ -95,7 +114,7 @@ class RtRaySetup extends Module {
   shearY.io.a := recFNFromFN(8, 24, direction(ky))
   shearY.io.b := recFNFromFN(8, 24, reciprocalVec(kz))
 
-  when(busy && reciprocalValid) {
+  when(busy && reciprocalComplete.andR) {
     outBits.warpId := saved.warpId
     outBits.laneId := saved.laneId
     outBits.accelLo := saved.accelLo

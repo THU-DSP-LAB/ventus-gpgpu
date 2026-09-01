@@ -50,8 +50,8 @@ class RtCoreScheduler extends Module {
   val stack = Module(new RtTraversalStack)
   val raySetup = Module(new RtRaySetup)
   val triangleResolve = Module(new RtTriangleResolve)
-  io.rtLsuReport <> table.io.rtLsuReport
-  table.io.rtLsuRespond <> io.rtLsuRespond
+  io.lsuRequest <> table.io.lsuRequest
+  table.io.lsuResponse <> io.lsuResponse
 
   val Seq(sIdle, sPdsRead, sHeaderRequest, sHeaderPending, sStackReady,
     sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal) = Enum(10)

@@ -2,6 +2,7 @@ package rtcore
 
 import chisel3._
 import chisel3.util._
+import lsu.{LsuClientRequest, LsuClientResponse}
 import top.parameters._
 
 object RtMemTableParameters {
@@ -217,7 +218,7 @@ class RtMemTable extends Module {
     val resultRayLookup = Input(new RtPdsRayLookup); val resultRay = Output(new RtPdsRayLookupResult)
     val pdsWriteAdmission = Flipped(Decoupled(new RtPdsWriteAdmission)); val pdsHitUpdate = Flipped(Decoupled(new RtPdsHitRecordUpdate)); val pdsWriteFinish = Flipped(Decoupled(new RtPdsWriteFinish)); val pdsWriteDrained = Decoupled(new RtPdsWriteDrained)
     val asAcquire = Flipped(Decoupled(new RtAsTableAcquire)); val asReadyLine = Decoupled(new RtAsTableReadyLine)
-    val rtLsuReport = Decoupled(new RtLsuReport); val rtLsuRespond = Flipped(Decoupled(new RtLsuRespond))
+    val lsuRequest = Decoupled(new LsuClientRequest); val lsuResponse = Flipped(Decoupled(new LsuClientResponse))
   })
   val read = Module(new RtPdsReadTable); val write = Module(new RtPdsWriteTable); val as = Module(new RtAsTable); val mshr = Module(new RtLsuMshr)
   read.io.admission <> io.pdsReadAdmission; io.pdsReadLane <> read.io.laneOut; io.pdsFault <> read.io.faultOut; read.io.retire <> io.pdsReadRetire
@@ -229,5 +230,5 @@ class RtMemTable extends Module {
   as.io.acquire <> io.asAcquire; io.asReadyLine <> as.io.readyLine
   mshr.io.pdsRead <> read.io.candidate; mshr.io.pdsWrite <> write.io.candidate; mshr.io.as <> as.io.candidate
   read.io.injection <> mshr.io.pdsReadInjection; write.io.injection <> mshr.io.pdsWriteInjection; as.io.injection <> mshr.io.asInjection
-  io.rtLsuReport <> mshr.io.report; mshr.io.respond <> io.rtLsuRespond
+  io.lsuRequest <> mshr.io.request; mshr.io.response <> io.lsuResponse
 }

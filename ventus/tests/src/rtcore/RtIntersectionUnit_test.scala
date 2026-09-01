@@ -4,6 +4,7 @@ import chisel3._
 import chiseltest._
 import org.scalatest.freespec.AnyFreeSpec
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 /** Checks independent IU arithmetic and Decoupled transaction ownership. */
 class RtIntersectionUnitParallelTest
@@ -296,6 +297,44 @@ class RtIntersectionUnitParallelTest
       dut.clock.step()
       for (_ <- 0 until 4) {
         dut.boxOut.valid.expect(false.B)
+        dut.clock.step()
+      }
+    }
+  }
+
+  "box4 fixed-seed finite cases sort all four near distances" in {
+    test(new RtIntersectionUnit) { dut =>
+      initialize(dut)
+      val random = new Random(0x5eedb0L)
+      def finiteInteger(value: Int): UInt =
+        BigInt(java.lang.Float.floatToRawIntBits(value.toFloat).toLong & 0xffffffffL).U(32.W)
+
+      for (requestId <- 0 until 4) {
+        val base = 1 + random.nextInt(27)
+        val lower = random.shuffle(Vector.tabulate(4)(base + _))
+        dut.boxIn.bits.requestId.poke(requestId.U)
+        driveRay(dut.boxIn.bits.ray)
+        lower.zipWithIndex.foreach { case (near, index) =>
+          driveBox(dut.boxIn.bits.aabb(index), finiteInteger(near), finiteInteger(near + 1))
+        }
+        dut.boxIn.valid.poke(true.B)
+        dut.boxIn.ready.expect(true.B)
+        dut.clock.step()
+        dut.boxIn.valid.poke(false.B)
+
+        var remaining = 24
+        while (!dut.boxOut.valid.peek().litToBoolean && remaining > 0) {
+          dut.clock.step()
+          remaining -= 1
+        }
+        assert(remaining > 0, s"Box4 request $requestId did not complete")
+        dut.boxOut.bits.requestId.expect(requestId.U)
+        val expected = lower.zipWithIndex.sortBy { case (near, index) => (near, index) }
+        expected.zipWithIndex.foreach { case ((near, index), output) =>
+          dut.boxOut.bits.tmin(output).expect(finiteInteger(near))
+          dut.boxOut.bits.boxIndex(output).expect(index.U)
+          dut.boxOut.bits.isIntersect(output).expect(true.B)
+        }
         dut.clock.step()
       }
     }
