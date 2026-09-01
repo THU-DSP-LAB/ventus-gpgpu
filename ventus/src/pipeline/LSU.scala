@@ -14,9 +14,9 @@ import top.parameters._
 import chisel3._
 import chisel3.util._
 import IDecode._
+import lsu.{LsuClientId, LsuClientRequest, LsuClientResponse}
 import mmu.SV32.asidLen
 import top.cache_spike_info
-import rtcore.RtAbiLayout
 
 class toShared extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
@@ -59,6 +59,12 @@ class DCacheCoreRsp_np extends Bundle{
  // val isWrite = Bool()
 }
 
+/** Accepted cacheline-client request awaiting its LSU-private DCache tag. */
+class LsuClientDcachePending extends Bundle {
+  val request = new LsuClientRequest
+  val instrId = UInt(log2Up(lsu_nMshrEntry).W)
+}
+
 class ShareMemPerLaneAddr_np extends Bundle{
   val activeMask = Bool()
   val blockOffset = UInt(dcache_BlockOffsetBits.W)
@@ -81,13 +87,17 @@ class ShareMemCoreRsp_np extends Bundle{
 }
 
 class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag的接口
+  // The physical DCache instrId is allocated by MSHRv2.  client metadata is
+  // retained here so completion can be routed without exposing that tag.
+  val clientId = UInt(LsuClientId.width.W)
+  val lineBase = UInt(memReqLen.W)
+  val coverageMask = UInt(dcache_BlockWords.W)
   val warp_id = UInt(depth_warp.W)
   val wfd = Bool()
   val wxd = Bool()
   val reg_idxw = UInt((regidx_width + regext_width).W)
   val mask = Vec(num_thread, Bool())
   val unsigned = Bool()
-  val isvec = Bool()
   val wordOffset1H = Vec(num_thread, UInt(BytesOfWord.W))
   val isWrite = Bool()
   val spike_info = if (SPIKE_OUTPUT) Some(new InstWriteBack) else None
@@ -147,37 +157,15 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
     val privateByteOffset = reg_save.in1(x) + reg_save.in2(x)
-    val untaggedPrivateByteOffset = Cat(0.U(1.W), privateByteOffset(30,0))
-    val wordBaseOffset = Cat(untaggedPrivateByteOffset(31,2), 0.U(2.W))
-    val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, untaggedPrivateByteOffset(1,0))
+    val wordBaseOffset = Cat(privateByteOffset(31,2), 0.U(2.W))
+    val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, privateByteOffset(1,0))
     val pdsThreadCount = io.csr_numw * io.csr_numt
     val pdsWordStride = wordBaseOffset * pdsThreadCount
     val pdsLaneSlot = Cat(io.csr_tid + x.asUInt, 0.U(2.W))
-    // Existing dedicated hit-record accesses use the high address bit to
-    // select only the lane-major body. hit_kind uses an untagged ordinary
-    // field-major offset (candidate 140B, committed 144B).
-    val hitRecordMode = privateByteOffset(31)
-    val logicalWord = untaggedPrivateByteOffset(31,2)
-    val candidateBaseWord = RtAbiLayout.AbiCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
-    val committedBaseWord = RtAbiLayout.AbiCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
-    val bodyWords = RtAbiLayout.AbiPdsLaneMajorHitRecordBodyWordCount
-    val candidateRecord = logicalWord >= candidateBaseWord.U && logicalWord < (candidateBaseWord + bodyWords).U
-    val committedRecord = logicalWord >= committedBaseWord.U && logicalWord < (committedBaseWord + bodyWords).U
-    val recordBaseWord = Mux(candidateRecord,
-      RtAbiLayout.AbiPdsFieldMajorPrefixWordCount.U,
-      (RtAbiLayout.AbiPdsFieldMajorPrefixWordCount + bodyWords).U)
-    val recordWord = Mux(candidateRecord,
-      logicalWord - candidateBaseWord.U,
-      logicalWord - committedBaseWord.U)
-    val laneMajorPdsByteAddr = io.csr_pds +
-      ((recordBaseWord * pdsThreadCount +
-        (io.csr_tid + x.asUInt) * (bodyWords * RtAbiLayout.AbiPdsLaneMajorHitRecordBodyRecordCount).U + recordWord) << 2)
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
                   Mux(reg_save.ctrl.is_vls12,
                     reg_save.in1(x)+reg_save.in2(x),
-                    Mux(hitRecordMode && (candidateRecord || committedRecord),
-                      laneMajorPdsByteAddr,
-                      byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride)
+                    byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride
                   ),
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
@@ -203,10 +191,6 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
                         addr_wire(log2Ceil(sharedmem_depth) + dcache_BlockOffsetBits + dcache_WordOffsetBits - 1, 
                                   dcache_BlockOffsetBits + dcache_WordOffsetBits), 
                         0.U)
-  val same_tag = Wire(Vec(num_thread, Bool()))
-    (0 until num_thread).foreach( x =>
-      same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
-    )
   val blockOffset = Wire(Vec(num_thread, UInt(dcache_BlockOffsetBits.W)))
   (0 until num_thread).foreach( x => blockOffset(x) := addr(x)(10, 2) )
   val wordOffset1H = Wire(Vec(num_thread, UInt(BytesOfWord.W)))
@@ -227,11 +211,13 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   //val reg_toMSHR = Reg(new MshrTag)
   //val vld_toMSHR = Reg(Bool())
   io.to_mshr.bits.tag.mask := reg_save.mask
+  io.to_mshr.bits.tag.clientId := LsuClientId.Pipe
+  io.to_mshr.bits.tag.lineBase := Cat(addr_wire(memReqLen - 1, 7), 0.U(7.W))
+  io.to_mshr.bits.tag.coverageMask := reg_save.mask.asUInt
   io.to_mshr.bits.tag.reg_idxw := reg_save.ctrl.reg_idxw
   io.to_mshr.bits.tag.warp_id := reg_save.ctrl.wid
   io.to_mshr.bits.tag.wxd:=reg_save.ctrl.wxd
   io.to_mshr.bits.tag.wfd:=reg_save.ctrl.wvd
-  io.to_mshr.bits.tag.isvec := reg_save.ctrl.isvec
   io.to_mshr.bits.tag.unsigned := reg_save.ctrl.mem_unsigned
   io.to_mshr.bits.tag.wordOffset1H := wordOffset1H
   io.to_mshr.valid := state===s_save & (reg_save.ctrl.mem_cmd.orR)
@@ -573,6 +559,10 @@ class LSUexe() extends Module{
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np()))
     //val lsu_rsp = DecoupledIO(new WriteBackControl())
     val lsu_rsp = DecoupledIO(new MSHROutput)
+    // A cacheline client is independent from the legacy vector-LSU ingress.
+    // clientId=PIPE remains reserved for that legacy path.
+    val cachelineClientReq = Flipped(Decoupled(new LsuClientRequest))
+    val cachelineClientRsp = Decoupled(new LsuClientResponse)
     val dcache_req = DecoupledIO(new DCacheCoreReq_np())
     val shared_req = DecoupledIO(new ShareMemCoreReq_np())
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
@@ -593,7 +583,6 @@ class LSUexe() extends Module{
 
   val AddrCalc = Module(new AddrCalculate(sharedmemory_addr_max))
   AddrCalc.io.from_fifo <> InputFIFO.io.deq
-  io.dcache_req <> AddrCalc.io.to_dcache
   io.shared_req <> AddrCalc.io.to_shared
   io.flush_dcache <> AddrCalc.io.flush_dcache
 
@@ -603,11 +592,78 @@ class LSUexe() extends Module{
 
   // SOME MSHR INTERFACE
   val Coalscer = Module(new MSHRv2)
-  //val outputFIFO = Module(new Queue(new MSHROutput, num_warp+1, pipe=true))
   Coalscer.io.from_dcache <> rspArbiter.io.out
-  Coalscer.io.from_addr <> AddrCalc.io.to_mshr
+
+  // The legacy PIPE path and cacheline clients contend only for an LSU-private
+  // MSHR allocation.  DCache tags are retained in the pending queue and never
+  // leave LSU.
+  val addrArbiter = Module(new RRArbiter(AddrCalc.io.to_mshr.bits.cloneType, 2))
+  addrArbiter.io.in(0) <> AddrCalc.io.to_mshr
+  addrArbiter.io.in(1).bits := 0.U.asTypeOf(AddrCalc.io.to_mshr.bits.cloneType)
+  addrArbiter.io.in(1).bits.tag.clientId := io.cachelineClientReq.bits.clientId
+  addrArbiter.io.in(1).bits.tag.lineBase := io.cachelineClientReq.bits.lineBase
+  addrArbiter.io.in(1).bits.tag.coverageMask := io.cachelineClientReq.bits.coverageMask
+  addrArbiter.io.in(1).bits.tag.mask := VecInit(io.cachelineClientReq.bits.coverageMask.asBools)
+  addrArbiter.io.in(1).bits.tag.unsigned := true.B
+  addrArbiter.io.in(1).bits.tag.wordOffset1H := VecInit(Seq.fill(num_thread)(15.U(BytesOfWord.W)))
+  addrArbiter.io.in(1).bits.tag.isWrite := io.cachelineClientReq.bits.write
+
+  val clientPending = Module(new Queue(new LsuClientDcachePending, entries = lsu_nMshrEntry, pipe = true))
+  val isExternalClient = io.cachelineClientReq.bits.clientId =/= LsuClientId.Pipe
+  when(io.cachelineClientReq.valid) {
+    assert(isExternalClient, "PIPE must use the legacy vector-LSU ingress")
+    assert(io.cachelineClientReq.bits.lineBase(6, 0) === 0.U,
+      "cacheline client requests must be 128-byte aligned")
+  }
+  addrArbiter.io.in(1).valid := io.cachelineClientReq.valid && isExternalClient && clientPending.io.enq.ready
+  io.cachelineClientReq.ready := addrArbiter.io.in(1).ready && clientPending.io.enq.ready && isExternalClient
+  clientPending.io.enq.valid := addrArbiter.io.in(1).fire
+  clientPending.io.enq.bits.request := io.cachelineClientReq.bits
+  clientPending.io.enq.bits.instrId := Coalscer.io.idx_entry
+
+  Coalscer.io.from_addr <> addrArbiter.io.out
   AddrCalc.io.idx_entry:=Coalscer.io.idx_entry
-  io.lsu_rsp <> Coalscer.io.to_pipe
+
+  // Request arbitration is independent of MSHR admission.  Once accepted, a
+  // client request retains its allocated physical tag until DCache accepts it.
+  val dcacheArbiter = Module(new RRArbiter(new DCacheCoreReq_np, 2))
+  dcacheArbiter.io.in(0) <> AddrCalc.io.to_dcache
+  dcacheArbiter.io.in(1).bits := 0.U.asTypeOf(new DCacheCoreReq_np)
+  dcacheArbiter.io.in(1).bits.instrId := clientPending.io.deq.bits.instrId
+  dcacheArbiter.io.in(1).bits.tag := clientPending.io.deq.bits.request.lineBase(
+    memReqLen - 1, memReqLen - dcache_TagBits)
+  dcacheArbiter.io.in(1).bits.setIdx := clientPending.io.deq.bits.request.lineBase(
+    memReqLen - dcache_TagBits - 1,
+    dcache_BlockOffsetBits + dcache_WordOffsetBits)
+  dcacheArbiter.io.in(1).bits.opcode := clientPending.io.deq.bits.request.write
+  dcacheArbiter.io.in(1).bits.param := 0.U
+  dcacheArbiter.io.in(1).bits.data := clientPending.io.deq.bits.request.writeData
+  for (lane <- 0 until num_thread) {
+    dcacheArbiter.io.in(1).bits.perLaneAddr(lane).activeMask :=
+      clientPending.io.deq.bits.request.coverageMask(lane)
+    dcacheArbiter.io.in(1).bits.perLaneAddr(lane).blockOffset := lane.U
+    dcacheArbiter.io.in(1).bits.perLaneAddr(lane).wordOffset1H := 15.U
+  }
+  dcacheArbiter.io.in(1).bits.asid.foreach(_ := 0.U)
+  dcacheArbiter.io.in(1).bits.spike_info.foreach(_ := 0.U.asTypeOf(new cache_spike_info(mmu.SV32)))
+  dcacheArbiter.io.in(1).valid := clientPending.io.deq.valid
+  clientPending.io.deq.ready := dcacheArbiter.io.in(1).ready
+  io.dcache_req <> dcacheArbiter.io.out
+
+  // The MSHR owns physical-tag completion.  PIPE uses the legacy writeback
+  // path; every other client ID returns through the generic cacheline port.
+  val complete = Coalscer.io.to_pipe
+  val completeIsCachelineClient = complete.bits.tag.clientId =/= LsuClientId.Pipe
+  io.lsu_rsp.valid := complete.valid && !completeIsCachelineClient
+  io.lsu_rsp.bits := complete.bits
+  io.cachelineClientRsp.valid := complete.valid && completeIsCachelineClient
+  io.cachelineClientRsp.bits := 0.U.asTypeOf(new LsuClientResponse)
+  io.cachelineClientRsp.bits.clientId := complete.bits.tag.clientId
+  io.cachelineClientRsp.bits.lineBase := complete.bits.tag.lineBase
+  io.cachelineClientRsp.bits.coverageMask := complete.bits.tag.coverageMask
+  io.cachelineClientRsp.bits.data := complete.bits.data
+  io.cachelineClientRsp.bits.fault := false.B
+  complete.ready := Mux(completeIsCachelineClient, io.cachelineClientRsp.ready, io.lsu_rsp.ready)
 
   val shiftBoard=VecInit(Seq.fill(num_warp)(Module(new ShiftBoard(lsu_num_entry_each_warp)).io))
   shiftBoard.zipWithIndex.foreach{case(a,b)=> {

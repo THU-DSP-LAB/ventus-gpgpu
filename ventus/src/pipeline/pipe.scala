@@ -430,6 +430,12 @@ class pipe() extends Module{
   lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
   lsu.io.shared_rsp<>io.shared_rsp
   lsu.io.shared_req<>io.shared_req
+  // RT dispatch is integrated separately from the cacheline interconnect.
+  // Keep the generic cacheline-client port quiescent until that control-plane
+  // owner instantiates RtCoreScheduler and connects its lsuRequest/lsuResponse.
+  lsu.io.cachelineClientReq.valid := false.B
+  lsu.io.cachelineClientReq.bits := 0.U.asTypeOf(new _root_.lsu.LsuClientRequest)
+  lsu.io.cachelineClientRsp.ready := true.B
 
   wb.io.in_x(0)<>alu.io.out
   wb.io.in_x(1)<>fpu.io.out_x
