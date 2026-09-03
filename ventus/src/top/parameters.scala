@@ -154,6 +154,15 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def l2cache_memCycles: Int = 32
 
+  // The Verilator simulation memory model uses this fixed delay for non-LDS
+  // responses.  It is intentionally explicit so performance artifacts carry
+  // a reproducible off-chip-memory assumption.
+  def rtl_external_mem_latency: Int = {
+    val latency = sys.env.get("VENTUS_RTL_EXTMEM_LATENCY").map(_.toInt).getOrElse(100)
+    require(latency > 0, "VENTUS_RTL_EXTMEM_LATENCY must be positive")
+    latency
+  }
+
   def l2cache_portFactor: Int = 2
 
   def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)

@@ -30,6 +30,7 @@ struct ventus_rtlsim_pmu_storage_t {
     std::vector<ventus_rtlsim_pipeline_pmu_t> pipeline;
     std::vector<ventus_rtlsim_inst_class_pmu_t> inst_class;
     std::vector<ventus_rtlsim_dcache_pmu_t> dcache;
+    std::vector<ventus_rtlsim_rtcore_pmu_t> rtcore;
 };
 
 extern "C" struct ventus_rtlsim_t {
@@ -58,6 +59,7 @@ extern "C" struct ventus_rtlsim_t {
     void destructor(bool snapshot_rollback_forcing);
     void dump_testcase_pmu_summary();
     ventus_rtlsim_pmu_t pmu_view() const;
+    ventus_rtlsim_rtcore_pmu_view_t rtcore_pmu_view() const;
     void sample_pmu_snapshot();
     void update_pmu_watchdog();
     void copy_pmu_counters_from_dut();

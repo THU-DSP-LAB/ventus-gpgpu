@@ -52,6 +52,21 @@ DCACHE_FIELDS = (
     ("mem_rsp_pipe_decoupled_cycles", "memRspPipeDecoupledCycles"),
 )
 
+RTCORE_FIELDS = (
+    ("traverse_issued", "traverseIssued"),
+    ("traverse_active_lanes", "traverseActiveLanes"),
+    ("completion_count", "completionCount"),
+    ("completion_lanes", "completionLanes"),
+    ("release_issued", "releaseIssued"),
+    ("active_session_cycles", "activeSessionCycles"),
+    ("command_backpressure_cycles", "commandBackpressureCycles"),
+    ("completion_backpressure_cycles", "completionBackpressureCycles"),
+    ("release_backpressure_cycles", "releaseBackpressureCycles"),
+    ("lsu_requests", "lsuRequests"),
+    ("lsu_responses", "lsuResponses"),
+    ("lsu_backpressure_cycles", "lsuBackpressureCycles"),
+)
+
 
 def parameter_u32(parameters: dict, name: str) -> int:
     value = parameters.get(name)
@@ -81,6 +96,13 @@ def emit_sm_copy(sm: int) -> list[str]:
     ])
     for dst, src in DCACHE_FIELDS:
         lines.append(f"        dst.{dst} = dut->io_pmu_dcache_{sm}_{src};")
+    lines.extend([
+        f"    }}",
+        f"    {{",
+        f"        auto& dst = pmu_snapshot.rtcore[{sm}];",
+    ])
+    for dst, src in RTCORE_FIELDS:
+        lines.append(f"        dst.{dst} = dut->io_pmu_rtcore_{sm}_{src};")
     lines.append(f"    }}")
     return lines
 

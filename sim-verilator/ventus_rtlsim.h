@@ -132,12 +132,32 @@ typedef struct {
 } ventus_rtlsim_dcache_pmu_t;
 
 typedef struct {
+    uint64_t traverse_issued;
+    uint64_t traverse_active_lanes;
+    uint64_t completion_count;
+    uint64_t completion_lanes;
+    uint64_t release_issued;
+    uint64_t active_session_cycles;
+    uint64_t command_backpressure_cycles;
+    uint64_t completion_backpressure_cycles;
+    uint64_t release_backpressure_cycles;
+    uint64_t lsu_requests;
+    uint64_t lsu_responses;
+    uint64_t lsu_backpressure_cycles;
+} ventus_rtlsim_rtcore_pmu_t;
+
+typedef struct {
     uint32_t num_sm;
     bool has_dcache;
     const ventus_rtlsim_pipeline_pmu_t *pipeline;
     const ventus_rtlsim_inst_class_pmu_t *inst_class;
     const ventus_rtlsim_dcache_pmu_t *dcache;
 } ventus_rtlsim_pmu_t;
+
+typedef struct {
+    uint32_t num_sm;
+    const ventus_rtlsim_rtcore_pmu_t *rtcore;
+} ventus_rtlsim_rtcore_pmu_view_t;
 
 // =
 // API functions:
@@ -173,6 +193,8 @@ DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 // Return a read-only view of the latest PMU counters sampled after the most recent step().
 // The pointed-to storage is owned by sim and may change after the next ventus_rtlsim_step().
 DLL_PUBLIC ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim);
+// Optional RTcore PMU extension.  Older and no-cache backends may not export it.
+DLL_PUBLIC ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_get_rtcore_pmu(const ventus_rtlsim_t* sim);
 
 // Calculate 1 unit-time of simulation.
 // Return the result of this step: ok, error, time_exceed, or idle.

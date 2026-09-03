@@ -32,3 +32,25 @@ class InstClassPerfCounters extends Bundle {
   val memIssued = UInt(64.W)
   val ctrlIssued = UInt(64.W)
 }
+
+/**
+  * RTcore boundary counters.
+  *
+  * These counters deliberately observe only the instruction-pipeline and LSU
+  * boundary.  They remain valid while the RTcore's private SRAM implementation
+  * evolves, and can later be complemented with table- and unit-internal PMUs.
+  */
+class RtCorePerfCounters extends Bundle {
+  val traverseIssued = UInt(64.W)
+  val traverseActiveLanes = UInt(64.W)
+  val completionCount = UInt(64.W)
+  val completionLanes = UInt(64.W)
+  val releaseIssued = UInt(64.W)
+  val activeSessionCycles = UInt(64.W)
+  val commandBackpressureCycles = UInt(64.W)
+  val completionBackpressureCycles = UInt(64.W)
+  val releaseBackpressureCycles = UInt(64.W)
+  val lsuRequests = UInt(64.W)
+  val lsuResponses = UInt(64.W)
+  val lsuBackpressureCycles = UInt(64.W)
+}

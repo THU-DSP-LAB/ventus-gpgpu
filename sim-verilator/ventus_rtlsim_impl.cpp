@@ -215,6 +215,7 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     pmu_snapshot.pipeline.resize(pmu_num_sm);
     pmu_snapshot.inst_class.resize(pmu_num_sm);
     pmu_snapshot.dcache.resize(pmu_num_sm);
+    pmu_snapshot.rtcore.resize(pmu_num_sm);
 
     // waveform traces (FST)
     if (config.waveform.enable) {
@@ -399,6 +400,10 @@ ventus_rtlsim_pmu_t ventus_rtlsim_t::pmu_view() const {
         pmu_snapshot.inst_class.data(),
         pmu_snapshot.has_dcache ? pmu_snapshot.dcache.data() : nullptr,
     };
+}
+
+ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_t::rtcore_pmu_view() const {
+    return {pmu_snapshot.num_sm, pmu_snapshot.rtcore.data()};
 }
 
 void ventus_rtlsim_t::update_pmu_watchdog() {

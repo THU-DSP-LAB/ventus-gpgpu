@@ -6,7 +6,7 @@ import L1Cache.MyConfig
 import L1Cache.ICache.{InstructionCache, ICacheMemReq_p, ICacheMemRsp, ICacheBundle}
 import pipeline.{CTAreqData, CTArspData, CTA2warp, pipe}
 import pipeline.{ICachePipeReq_np, ICachePipeRsp_np, DCacheCoreReq_np, DCacheCoreRsp_np}
-import pipeline.{InstClassPerfCounters, PipelinePerfCounters}
+import pipeline.{InstClassPerfCounters, PipelinePerfCounters, RtCorePerfCounters}
 import L1Cache.ShareMem.SharedMemory
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public, Instantiate}
 import config.config.Parameters
@@ -31,6 +31,7 @@ class SM_wrapper_nocache() extends Module {
     val perfReset = Input(Bool())
     val pipeline_perf = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
     val inst_class_perf = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
+    val rtcore_perf = Output(new RtCorePerfCounters)
     val icache_invalidate = Input(Bool())
   })
 
@@ -44,6 +45,7 @@ class SM_wrapper_nocache() extends Module {
   pipe.io.perfReset := io.perfReset
   io.pipeline_perf.foreach(_ := pipe.io.perf_pipeline.getOrElse(0.U.asTypeOf(new PipelinePerfCounters)))
   io.inst_class_perf.foreach(_ := pipe.io.perf_inst_class.getOrElse(0.U.asTypeOf(new InstClassPerfCounters)))
+  io.rtcore_perf := pipe.io.perf_rtcore
 
   val cnt = Counter(10)
   when(cnt.value < 5.U) { cnt.inc() }
@@ -214,6 +216,7 @@ class GPGPU_top_nocache() extends Module {
     sm_wrapper(i).perfReset := perfStartPulse
     io.pmu.pipeline(i) := sm_wrapper(i).pipeline_perf.getOrElse(0.U.asTypeOf(new PipelinePerfCounters))
     io.pmu.instClass(i) := sm_wrapper(i).inst_class_perf.getOrElse(0.U.asTypeOf(new InstClassPerfCounters))
+    io.pmu.rtcore(i) := sm_wrapper(i).rtcore_perf
     io.icache(i).req :<>= sm_wrapper(i).icache.req
     sm_wrapper(i).icache.rsp :<>= io.icache(i).rsp
     sm_wrapper(i).icache_invalidate := io.icache_invalidate

@@ -68,6 +68,12 @@ extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim)
     }
     return sim->pmu_view();
 }
+extern "C" ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_get_rtcore_pmu(const ventus_rtlsim_t* sim) {
+    if (sim == nullptr) {
+        return {};
+    }
+    return sim->rtcore_pmu_view();
+}
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
 extern "C" uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim) { return sim->contextp->time(); }

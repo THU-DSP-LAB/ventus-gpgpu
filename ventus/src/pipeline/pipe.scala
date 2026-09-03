@@ -52,6 +52,7 @@ class pipe() extends Module{
     val perfReset = Input(Bool())
     val perf_pipeline = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
     val perf_inst_class = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
+    val perf_rtcore = Output(new RtCorePerfCounters)
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -467,6 +468,19 @@ class pipe() extends Module{
   val memIssued = RegInit(0.U(64.W))
   val ctrlIssued = RegInit(0.U(64.W))
 
+  val rtTraverseIssued = RegInit(0.U(64.W))
+  val rtTraverseActiveLanes = RegInit(0.U(64.W))
+  val rtCompletionCount = RegInit(0.U(64.W))
+  val rtCompletionLanes = RegInit(0.U(64.W))
+  val rtReleaseIssued = RegInit(0.U(64.W))
+  val rtActiveSessionCycles = RegInit(0.U(64.W))
+  val rtCommandBackpressureCycles = RegInit(0.U(64.W))
+  val rtCompletionBackpressureCycles = RegInit(0.U(64.W))
+  val rtReleaseBackpressureCycles = RegInit(0.U(64.W))
+  val rtLsuRequests = RegInit(0.U(64.W))
+  val rtLsuResponses = RegInit(0.U(64.W))
+  val rtLsuBackpressureCycles = RegInit(0.U(64.W))
+
   def isCtrlInst(ctrl: CtrlSigs): Bool = {
     ctrl.csr.orR || ctrl.barrier || ctrl.simt_stack || ctrl.branch.orR
   }
@@ -499,6 +513,18 @@ class pipe() extends Module{
     computeIssued := 0.U
     memIssued := 0.U
     ctrlIssued := 0.U
+    rtTraverseIssued := 0.U
+    rtTraverseActiveLanes := 0.U
+    rtCompletionCount := 0.U
+    rtCompletionLanes := 0.U
+    rtReleaseIssued := 0.U
+    rtActiveSessionCycles := 0.U
+    rtCommandBackpressureCycles := 0.U
+    rtCompletionBackpressureCycles := 0.U
+    rtReleaseBackpressureCycles := 0.U
+    rtLsuRequests := 0.U
+    rtLsuResponses := 0.U
+    rtLsuBackpressureCycles := 0.U
   }.elsewhen(io.perfEnable){
     activeCycles := activeCycles + 1.U
 
@@ -548,7 +574,53 @@ class pipe() extends Module{
     when(ibuffer.io.in.valid && !ibuffer.io.in.ready){
       ibufferFullCycles := ibufferFullCycles + 1.U
     }
+
+    when(rtcore.io.command.fire) {
+      rtTraverseIssued := rtTraverseIssued + 1.U
+      rtTraverseActiveLanes := rtTraverseActiveLanes + PopCount(rtcore.io.command.bits.activeMask)
+    }
+    when(rtcore.io.completion.fire) {
+      rtCompletionCount := rtCompletionCount + 1.U
+      rtCompletionLanes := rtCompletionLanes + PopCount(rtcore.io.completion.bits.completionMask)
+    }
+    when(rtcore.io.release.fire) {
+      rtReleaseIssued := rtReleaseIssued + 1.U
+    }
+    when(rtInFlight.asUInt.orR || rtCompletionAwaitingWb || rtReleaseSent) {
+      rtActiveSessionCycles := rtActiveSessionCycles + 1.U
+    }
+    when(rtcore.io.command.valid && !rtcore.io.command.ready) {
+      rtCommandBackpressureCycles := rtCommandBackpressureCycles + 1.U
+    }
+    when(rtcore.io.completion.valid && !rtcore.io.completion.ready) {
+      rtCompletionBackpressureCycles := rtCompletionBackpressureCycles + 1.U
+    }
+    when(rtcore.io.release.valid && !rtcore.io.release.ready) {
+      rtReleaseBackpressureCycles := rtReleaseBackpressureCycles + 1.U
+    }
+    when(rtcore.io.lsuRequest.fire) {
+      rtLsuRequests := rtLsuRequests + 1.U
+    }
+    when(rtcore.io.lsuResponse.fire) {
+      rtLsuResponses := rtLsuResponses + 1.U
+    }
+    when(rtcore.io.lsuRequest.valid && !rtcore.io.lsuRequest.ready) {
+      rtLsuBackpressureCycles := rtLsuBackpressureCycles + 1.U
+    }
   }
+
+  io.perf_rtcore.traverseIssued := rtTraverseIssued
+  io.perf_rtcore.traverseActiveLanes := rtTraverseActiveLanes
+  io.perf_rtcore.completionCount := rtCompletionCount
+  io.perf_rtcore.completionLanes := rtCompletionLanes
+  io.perf_rtcore.releaseIssued := rtReleaseIssued
+  io.perf_rtcore.activeSessionCycles := rtActiveSessionCycles
+  io.perf_rtcore.commandBackpressureCycles := rtCommandBackpressureCycles
+  io.perf_rtcore.completionBackpressureCycles := rtCompletionBackpressureCycles
+  io.perf_rtcore.releaseBackpressureCycles := rtReleaseBackpressureCycles
+  io.perf_rtcore.lsuRequests := rtLsuRequests
+  io.perf_rtcore.lsuResponses := rtLsuResponses
+  io.perf_rtcore.lsuBackpressureCycles := rtLsuBackpressureCycles
 
   io.perf_pipeline.foreach { perf =>
     perf.activeCycles := activeCycles
