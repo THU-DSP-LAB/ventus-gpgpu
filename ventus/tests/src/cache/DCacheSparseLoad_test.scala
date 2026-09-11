@@ -199,4 +199,33 @@ class DCacheSparseLoadTest extends AnyFreeSpec with ChiselScalatestTester {
       expectSparseResponse(dut, 2, lowerLanes, BigInt("66000000", 16))
     }
   }
+
+  "DCache keeps four sampled-load masks with their out-of-order cache-line replies" in {
+    test(new DataCachev2(None)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      val requests = Seq(
+        (1, BigInt("90003000", 16), Map(0 -> 1, 4 -> 9), BigInt("11000000", 16)),
+        (2, BigInt("90003080", 16), Map(1 -> 7, 5 -> 7, 12 -> 25), BigInt("22000000", 16)),
+        (3, BigInt("90003100", 16), Map(3 -> 2, 6 -> 18), BigInt("33000000", 16)),
+        (4, BigInt("90003180", 16), Map(2 -> 31, 7 -> 11, 15 -> 11), BigInt("44000000", 16)))
+      dut.io.coreReq.valid.poke(false.B)
+      dut.io.coreRsp.ready.poke(true.B)
+      dut.io.memReq.get.ready.poke(true.B)
+      driveMemoryIdle(dut)
+      dut.clock.step(2)
+
+      val pending = requests.map { case (instrId, base, lanes, dataBase) =>
+        (instrId, base, lanes, dataBase, sendRequestAndCaptureMiss(dut, instrId, base, lanes))
+      }
+      // This permutation deliberately crosses both arrival order and masks;
+      // it models the independent texel loads issued for bilinear filtering.
+      Seq(2, 0, 3, 1).foreach { index =>
+        val (instrId, base, lanes, dataBase, source) = pending(index)
+        returnMiss(dut, source, base, dataBase)
+        waitFor(dut, dut.io.coreRsp.valid.peek().litToBoolean,
+          s"sampled-load response for request $instrId")
+        expectSparseResponse(dut, instrId, lanes, dataBase)
+        dut.clock.step()
+      }
+    }
+  }
 }
