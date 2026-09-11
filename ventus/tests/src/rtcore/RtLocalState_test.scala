@@ -109,8 +109,9 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.request.valid.expect(false.B)
   }
 
-  private def finishAndCollectWrites(dut: RtLocalRayState): Seq[(BigInt, BigInt, BigInt)] = {
-    dut.io.finish.bits.terminalMask.poke(activeLane0.U)
+  private def finishAndCollectWrites(dut: RtLocalRayState, mask: Int = activeLane0,
+                                    stall: Boolean = false): Seq[(BigInt, BigInt, BigInt)] = {
+    dut.io.finish.bits.terminalMask.poke(mask.U)
     dut.io.finish.valid.poke(true.B)
     dut.io.finish.ready.expect(true.B)
     dut.clock.step()
@@ -120,7 +121,9 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     var writes = Vector.empty[(BigInt, BigInt, BigInt)]
     var cycles = 0
     while (!dut.io.drained.valid.peek().litToBoolean && cycles < 64) {
-      if (dut.io.request.valid.peek().litToBoolean) {
+      val ready = !stall || cycles % 3 == 2
+      dut.io.request.ready.poke(ready.B)
+      if (ready && dut.io.request.valid.peek().litToBoolean) {
         dut.io.request.bits.write.expect(true.B)
         writes :+= (
           dut.io.request.bits.fieldId.peek().litValue,
@@ -132,6 +135,136 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     }
     assert(cycles < 64, "Local hit records never drained")
     writes
+  }
+
+  "resume reloads shader committed HitT only for ACCEPT and preserves other lane bounds" in {
+    test(new RtLocalRayState) { dut =>
+      def raw(f: Float): BigInt = BigInt(java.lang.Float.floatToRawIntBits(f)) & BigInt("ffffffff", 16)
+      def zero(data: Data): Unit = data match {
+        case b: Bool => b.poke(false.B)
+        case u: UInt => u.poke(0.U)
+        case a: Aggregate => a.getElements.foreach(zero)
+      }
+      idle(dut)
+      admit(dut, restart = false, mask = 15)
+      completeRayGather(dut)
+      dut.clock.step(4)
+      val bounds = Array.fill(4)(raw(100.0f))
+      for (lane <- 0 until 4) {
+        zero(dut.io.raySetup.bits)
+        dut.io.raySetup.bits.laneId.poke(lane.U)
+        dut.io.raySetup.bits.ray.extent.poke(bounds(lane).U)
+        dut.io.raySetup.bits.ray.originalTmin.poke(raw(0.25f).U)
+        dut.io.raySetup.valid.poke(true.B)
+        dut.io.raySetup.ready.expect(true.B)
+        dut.clock.step()
+      }
+      dut.io.raySetup.valid.poke(false.B)
+      finishAndCollectWrites(dut, mask = 15)
+      dut.io.drained.ready.poke(true.B)
+      dut.clock.step()
+      dut.io.drained.ready.poke(false.B)
+
+      def checkBounds(): Unit = for (lane <- 0 until 4) {
+        dut.io.nodeRayLookup.laneId.poke(lane.U)
+        dut.io.nodeRay.currentTmax.expect(bounds(lane).U)
+        dut.io.nodeRay.ray.originalTmin.expect(raw(0.25f).U)
+      }
+      def respond(field: Int, values: Seq[BigInt]): Unit = {
+        dut.io.request.ready.poke(false.B)
+        for (_ <- 0 until 3) {
+          dut.io.request.valid.expect(true.B)
+          dut.io.request.bits.write.expect(false.B)
+          dut.io.request.bits.fieldId.expect(field.U)
+          dut.io.resumeOut.valid.expect(false.B)
+          checkBounds()
+          dut.clock.step()
+        }
+        dut.io.request.ready.poke(true.B)
+        dut.clock.step()
+        dut.io.request.ready.poke(false.B)
+        dut.clock.step(2)
+        dut.io.response.ready.expect(true.B)
+        dut.io.response.bits.readData.foreach(_.poke(0.U))
+        values.zipWithIndex.foreach { case (value, lane) => dut.io.response.bits.readData(lane).poke(value.U) }
+        dut.io.response.valid.poke(true.B)
+        dut.clock.step()
+        dut.io.response.valid.poke(false.B)
+      }
+      val accept = RtAbiLayout.CallbackAccept
+      val ignore = RtAbiLayout.CallbackIgnore
+      val terminate = RtAbiLayout.CallbackTerminate
+      // Nonselected lanes deliberately contain ACCEPT and plausible committed
+      // values. Neither may influence this command's reads or private bounds.
+      val rounds = Seq(
+        (15, Seq(accept, ignore, terminate, accept), Seq(3.0f, 4.0f, 5.0f, 6.0f)),
+        (2, Seq(accept, ignore, accept, accept), Seq(1.0f, 2.0f, 3.0f, 4.0f)),
+        (4, Seq(accept, accept, terminate, accept), Seq(1.0f, 2.0f, 3.0f, 4.0f)),
+        (9, Seq(accept, ignore, terminate, accept), Seq(2.5f, 1.0f, 1.0f, 5.0f)))
+      for ((mask, decisions, distances) <- rounds) {
+        dut.io.resumeOut.ready.poke(false.B)
+        dut.io.resume.bits.activeMask.poke(mask.U)
+        dut.io.resume.valid.poke(true.B)
+        dut.io.resume.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.resume.valid.poke(false.B)
+        respond(RtAbiLayout.LocalControlBaseBytes / RtAbiLayout.AbiWordBytes, decisions.map(BigInt(_)))
+        if ((0 until 4).exists(lane => (mask & (1 << lane)) != 0 && decisions(lane) == accept))
+          respond(committedBase + RtAbiLayout.HitRecordHitT, distances.map(raw))
+        for (lane <- 0 until 4 if (mask & (1 << lane)) != 0) {
+          for (_ <- 0 until 3) {
+            dut.io.request.valid.expect(false.B)
+            dut.io.resumeOut.valid.expect(true.B)
+            dut.io.resumeOut.bits.laneId.expect(lane.U)
+            dut.io.resumeOut.bits.callbackDecision.expect(decisions(lane).U)
+            checkBounds()
+            dut.clock.step()
+          }
+          dut.io.resumeOut.ready.poke(true.B)
+          dut.clock.step()
+          dut.io.resumeOut.ready.poke(false.B)
+          if (decisions(lane) == accept) bounds(lane) = raw(distances(lane))
+          checkBounds()
+        }
+        dut.io.resumeOut.valid.expect(false.B)
+        dut.io.request.valid.expect(false.B)
+        // No callback is permitted to mark the shader's hit records dirty.
+        assert(finishAndCollectWrites(dut, mask = 15).isEmpty)
+        dut.io.drained.ready.poke(true.B)
+        dut.clock.step()
+        dut.io.drained.ready.poke(false.B)
+      }
+    }
+  }
+
+  "drained hit records cannot overwrite shader commits on a later completion" in {
+    test(new RtLocalRayState) { dut =>
+      idle(dut)
+      admit(dut, restart = false)
+      completeRayGather(dut)
+      val first = finishAndCollectWrites(dut, stall = true)
+      assert(first.size == 2 * hitWords)
+      dut.io.drained.ready.poke(true.B)
+      dut.clock.step()
+      dut.io.drained.ready.poke(false.B)
+      // The shader may now change every record word in SRAM. A completion
+      // with no new hardware hit must not rewrite any old buffered word.
+      assert(finishAndCollectWrites(dut).isEmpty, "stale records were written a second time")
+      dut.io.drained.ready.poke(true.B)
+      dut.clock.step()
+      dut.io.drained.ready.poke(false.B)
+      // A later hardware hit still dirties and flushes exactly its update.
+      dut.io.hitUpdate.bits.laneId.poke(0.U)
+      dut.io.hitUpdate.bits.committed.poke(true.B)
+      dut.io.hitUpdate.bits.dirty.poke((1 << RtAbiLayout.HitRecordHitT).U)
+      dut.io.hitUpdate.bits.data(RtAbiLayout.HitRecordHitT).poke("h40000000".U)
+      dut.io.hitUpdate.valid.poke(true.B)
+      dut.io.hitUpdate.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.hitUpdate.valid.poke(false.B)
+      val writes = finishAndCollectWrites(dut, stall = true)
+      assert(writes == Seq((BigInt(committedBase + RtAbiLayout.HitRecordHitT), BigInt(1), BigInt("40000000", 16))))
+    }
   }
 
   "flushes a hit record before completion and clears it before a restarted completion" in {

@@ -56,6 +56,8 @@ class RtLocalRayState extends Module {
   val resumeDelivered = RegInit(0.U(num_thread.W))
   val controlLoaded = RegInit(false.B)
   val control = Reg(Vec(num_thread, UInt(xLen.W)))
+  val resumeTLoaded = RegInit(false.B)
+  val resumeHitT = Reg(Vec(num_thread, UInt(xLen.W)))
   val flushing = RegInit(false.B)
   val flushRecord = RegInit(false.B)
   val flushWord = RegInit(0.U(log2Ceil(hitWords).W))
@@ -81,7 +83,8 @@ class RtLocalRayState extends Module {
     valid := true.B; gatherMask := startBits.activeMask
     when(io.admission.fire) { ownerWarp := startBits.warpId; activeMask := startBits.activeMask }
     loadIndex := 0.U; loaded := false.B; delivered := 0.U; readOutstanding := false.B
-    resumeActive := false.B; controlLoaded := false.B; flushing := false.B; drainPending := false.B
+    resumeActive := false.B; controlLoaded := false.B; resumeTLoaded := false.B
+    flushing := false.B; drainPending := false.B
     for (lane <- 0 until num_thread) {
       prepared(lane).valid := false.B
       // The shader may inspect either hit-record plane after a traversal,
@@ -100,7 +103,12 @@ class RtLocalRayState extends Module {
   // In particular, a stale/incomplete gather state must never override the
   // committed-record field ID in the request mux below.
   val loadRequest = valid && !flushing && !loaded && !readOutstanding
-  val resumeRequest = valid && !flushing && resumeActive && !controlLoaded && !readOutstanding
+  // The shader owns callback commits. Only ACCEPT consumes committed HitT;
+  // IGNORE/TERMINATE retain the current bound, even if committed is valid.
+  val resumeNeedsT = VecInit((0 until num_thread).map(lane =>
+    resumeMask(lane) && control(lane) === RtAbiLayout.CallbackAccept.U)).asUInt.orR
+  val resumeRequest = valid && !flushing && resumeActive && !readOutstanding &&
+    (!controlLoaded || (resumeNeedsT && !resumeTLoaded))
   val flushMask = Wire(UInt(num_thread.W))
   flushMask := VecInit((0 until num_thread).map(lane =>
     activeMask(lane) && dirty(lane)(flushRecord)(flushWord))).asUInt
@@ -109,7 +117,9 @@ class RtLocalRayState extends Module {
   io.request.bits := 0.U.asTypeOf(new RtLocalSramRequest)
   io.request.bits.warpId := ownerWarp
   io.request.bits.fieldId := Mux(loadRequest, traversalField(loadIndex),
-    Mux(resumeRequest, (RtAbiLayout.LocalControlBaseBytes / RtAbiLayout.AbiWordBytes).U,
+    Mux(resumeRequest, Mux(controlLoaded,
+      (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes + RtAbiLayout.HitRecordHitT).U,
+      (RtAbiLayout.LocalControlBaseBytes / RtAbiLayout.AbiWordBytes).U),
       Mux(flushRecord,
         (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord,
         (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord)))
@@ -117,8 +127,18 @@ class RtLocalRayState extends Module {
   io.request.bits.laneMask := Mux(flushRequest, flushMask, 0.U)
   for (lane <- 0 until num_thread) io.request.bits.writeData(lane) := recordData(lane)(flushRecord)(flushWord)
   when(io.request.fire) {
-    when(loadRequest || resumeRequest) { readOutstanding := true.B; readField := Mux(loadRequest, loadIndex, rayFieldCount.U) }
-    when(flushRequest) { advanceFlush() }
+    when(loadRequest || resumeRequest) {
+      readOutstanding := true.B
+      readField := Mux(loadRequest, loadIndex, Mux(controlLoaded, (rayFieldCount + 1).U, rayFieldCount.U))
+    }
+    when(flushRequest) {
+      // After SRAM accepts a row it belongs to the shader until a new
+      // hardware hit dirties it. Never replay old data over shader commits.
+      for (lane <- 0 until num_thread) when(flushMask(lane)) {
+        dirty(lane)(flushRecord)(flushWord) := false.B
+      }
+      advanceFlush()
+    }
   }
   when(flushing && !flushMask.orR && !flushRequest) { advanceFlush() }
 
@@ -126,6 +146,7 @@ class RtLocalRayState extends Module {
   when(io.response.fire) {
     readOutstanding := false.B
     when(readField === rayFieldCount.U) { control := io.response.bits.readData; controlLoaded := true.B }
+      .elsewhen(readField === (rayFieldCount + 1).U) { resumeHitT := io.response.bits.readData; resumeTLoaded := true.B }
       .otherwise {
         rows(readField(log2Ceil(rayFieldCount) - 1, 0)) := io.response.bits.readData
         when(readField === (rayFieldCount - 1).U) { loaded := true.B }
@@ -141,13 +162,19 @@ class RtLocalRayState extends Module {
   when(io.laneOut.fire) { delivered := delivered | UIntToOH(lane, num_thread) }
 
   io.resume.ready := valid && loaded && !resumeActive && delivered === gatherMask
-  when(io.resume.fire) { resumeActive := true.B; controlLoaded := false.B; resumeMask := io.resume.bits.activeMask; resumeDelivered := 0.U }
+  when(io.resume.fire) {
+    resumeActive := true.B; controlLoaded := false.B; resumeTLoaded := false.B
+    resumeMask := io.resume.bits.activeMask; resumeDelivered := 0.U
+  }
   val resumePending = resumeMask & (~resumeDelivered).asUInt
   val resumeLane = PriorityEncoder(resumePending)
-  io.resumeOut.valid := resumeActive && controlLoaded && resumePending.orR
+  io.resumeOut.valid := resumeActive && controlLoaded && (!resumeNeedsT || resumeTLoaded) && resumePending.orR
   io.resumeOut.bits.laneId := resumeLane
   io.resumeOut.bits.callbackDecision := control(resumeLane)
   when(io.resumeOut.fire) {
+    when(control(resumeLane) === RtAbiLayout.CallbackAccept.U) {
+      prepared(resumeLane).currentTmax := resumeHitT(resumeLane)
+    }
     resumeDelivered := resumeDelivered | UIntToOH(resumeLane, num_thread)
     when((resumeDelivered | UIntToOH(resumeLane, num_thread)) === resumeMask) { resumeActive := false.B; controlLoaded := false.B; resumeDelivered := 0.U }
   }

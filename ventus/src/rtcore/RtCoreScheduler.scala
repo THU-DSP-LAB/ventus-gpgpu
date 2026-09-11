@@ -218,16 +218,11 @@ class RtCoreScheduler extends Module {
     }
   }
 
-  // Resume reloads only the software callback decision.  Ray-state tmax is
-  // immutable for a session; accepting a candidate narrows the private bound
-  // to that candidate's hitT, while ignoring one leaves the bound unchanged.
-  // Candidate acceptance updates the same local hit-record buffer as an IU hit.  It
-  // receives priority because the software callback is the explicit resume
-  // boundary; Triangle output remains back-pressured for that one cycle.
-  val resumeCommit = local.io.resumeOut.valid &&
-    local.io.resumeOut.bits.callbackDecision === RtAbiLayout.CallbackAccept.U
-  local.io.resumeOut.ready := !resumeCommit ||
-    (local.io.hitUpdate.ready && local.io.rayTmaxUpdate.ready)
+  // Software callbacks already committed their accepted hit in Local SRAM.
+  // LocalState reloads that HitT and updates its private bound on this
+  // handshake only for ACCEPT. Resume never copies our stale candidate over
+  // the shader's record; IGNORE/TERMINATE do not update the bound.
+  local.io.resumeOut.ready := true.B
   val resumeLane = local.io.resumeOut.bits.laneId
   val resumeDecision = local.io.resumeOut.bits.callbackDecision
   val resumeAccept = resumeDecision === RtAbiLayout.CallbackAccept.U
@@ -243,11 +238,9 @@ class RtCoreScheduler extends Module {
       laneState(0)(resumeLane) := sTerminal
       laneStatus(0)(resumeLane) := RtAbiLayout.TraversalTerminated.U
     }
-    // A software callback's ACCEPT makes its retained candidate the closest
-    // committed hit.  The later empty-stack path consults this bit to choose
-    // HIT rather than overwriting the callback result with MISS.
+    // Track the shader's commit so empty-stack completion reports HIT.
     when(resumeAccept) { committedValid(0)(resumeLane) := true.B }
-    when(resumeAccept || resumeTerminate) { candidateValid(0)(resumeLane) := false.B }
+    candidateValid(0)(resumeLane) := false.B
   }
 
   // A gathered local row is the input transaction of RaySetup.  Retirement
@@ -809,12 +802,6 @@ class RtCoreScheduler extends Module {
   triangleHitUpdate.data(RtAbiLayout.HitRecordInstanceId) := triangleMeta(resultWarp)(resultLane).instanceId
   triangleHitUpdate.data(RtAbiLayout.HitRecordGeometryId) := triangleMeta(resultWarp)(resultLane).geometryId
   triangleHitUpdate.data(RtAbiLayout.HitRecordHitKind) := "hfe".U
-  val resumeHitUpdate = Wire(new RtLocalHitRecordUpdate)
-  resumeHitUpdate := 0.U.asTypeOf(new RtLocalHitRecordUpdate)
-  resumeHitUpdate.laneId := resumeLane
-  resumeHitUpdate.committed := true.B
-  resumeHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
-  resumeHitUpdate.data := candidateData(0)(resumeLane)
   val aabbCandidateMask = VecInit((0 until num_thread).map(lane =>
     laneState(0)(lane) === sAabbCandidate)).asUInt
   val aabbCandidateLane = PriorityEncoder(aabbCandidateMask)
@@ -824,19 +811,14 @@ class RtCoreScheduler extends Module {
   aabbHitUpdate.committed := false.B
   aabbHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
   aabbHitUpdate.data := candidateData(0)(aabbCandidateLane)
-  local.io.hitUpdate.valid := resumeCommit || aabbCandidateMask.orR || triangleResolve.io.out.valid
-  local.io.hitUpdate.bits := Mux(resumeCommit, resumeHitUpdate,
-    Mux(aabbCandidateMask.orR, aabbHitUpdate, triangleHitUpdate))
+  local.io.hitUpdate.valid := aabbCandidateMask.orR || triangleResolve.io.out.valid
+  local.io.hitUpdate.bits := Mux(aabbCandidateMask.orR, aabbHitUpdate, triangleHitUpdate)
   val triangleTmaxUpdate = Wire(new RtLocalRayTmaxUpdate)
   triangleTmaxUpdate.laneId := resultLane
   triangleTmaxUpdate.tmax := triangleResolve.io.out.bits.t
-  val resumeTmaxUpdate = Wire(new RtLocalRayTmaxUpdate)
-  resumeTmaxUpdate.laneId := resumeLane
-  resumeTmaxUpdate.tmax := candidateData(0)(resumeLane)(RtAbiLayout.HitRecordHitT)
-  local.io.rayTmaxUpdate.valid := resumeCommit ||
-    (triangleResolve.io.out.valid && triangleIsOpaque)
-  local.io.rayTmaxUpdate.bits := Mux(resumeCommit, resumeTmaxUpdate, triangleTmaxUpdate)
-  triangleResolve.io.out.ready := !resumeCommit && !aabbCandidateMask.orR && local.io.hitUpdate.ready &&
+  local.io.rayTmaxUpdate.valid := triangleResolve.io.out.valid && triangleIsOpaque
+  local.io.rayTmaxUpdate.bits := triangleTmaxUpdate
+  triangleResolve.io.out.ready := !aabbCandidateMask.orR && local.io.hitUpdate.ready &&
     (!triangleIsOpaque || local.io.rayTmaxUpdate.ready)
   when(triangleResolve.io.out.fire) {
     when(triangleIsOpaque) {
@@ -846,10 +828,9 @@ class RtCoreScheduler extends Module {
       laneState(resultWarp)(resultLane) := sTerminal
       laneStatus(resultWarp)(resultLane) := RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U
       candidateValid(resultWarp)(resultLane) := true.B
-      candidateData(resultWarp)(resultLane) := triangleHitUpdate.data
     }
   }
-  when(local.io.hitUpdate.fire && !resumeCommit && aabbCandidateMask.orR) {
+  when(local.io.hitUpdate.fire && aabbCandidateMask.orR) {
     laneState(0)(aabbCandidateLane) := sTerminal
     laneStatus(0)(aabbCandidateLane) := RtAbiLayout.TraversalCandidateProceduralAabb.U
     candidateValid(0)(aabbCandidateLane) := true.B
