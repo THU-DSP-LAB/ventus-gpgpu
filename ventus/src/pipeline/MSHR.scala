@@ -50,7 +50,8 @@ class MSHRv2 extends Module{
     when(io.from_dcache.fire){
       when(io.from_addr.fire){
         state := s_add
-      }.elsewhen(currentMask(io.from_dcache.bits.instrId)===io.from_dcache.bits.activeMask.asUInt){
+      }.elsewhen(used(io.from_dcache.bits.instrId) &&
+        currentMask(io.from_dcache.bits.instrId)===io.from_dcache.bits.activeMask.asUInt){
         state := s_out
       }.otherwise{state := s_idle}
     }.elsewhen(complete.orR){

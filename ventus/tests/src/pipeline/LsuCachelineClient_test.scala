@@ -175,6 +175,139 @@ class LsuCachelineClientTest extends AnyFreeSpec with ChiselScalatestTester {
     }
   }
 
+  "LSU ignores a zero-mask reply for an unused tag while an AS-style read is outstanding" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+
+      driveClientRequest(dut, clientId = 2, lineBase = 0x2400,
+        mask = BigInt("ffffffff", 16))
+      dut.io.cachelineClientReq.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      val asInstrId = acceptDcache(dut)._1
+      val unusedInstrId = (asInstrId + 1) % 8
+
+      // Flush/invalidate acknowledgements carry no lane data and do not own an
+      // LSU MSHR.  They must not turn an unused entry into a fake completion.
+      returnDcache(dut, unusedInstrId, 0, 0)
+      dut.io.cachelineClientRsp.valid.expect(false.B)
+
+      // Before the fix, MSHRv2 enters s_out here with no complete entry, so
+      // this real AS-style reply is permanently backpressured.
+      returnDcache(dut, asInstrId, BigInt("ffffffff", 16), 0x300)
+      dut.io.cachelineClientRsp.valid.expect(true.B)
+      dut.io.cachelineClientRsp.bits.clientId.expect(2.U)
+      dut.io.cachelineClientRsp.bits.lineBase.expect(0x2400.U)
+      dut.io.cachelineClientRsp.bits.data(0).expect(0x300.U)
+      dut.io.cachelineClientRsp.bits.data(31).expect(0x31f.U)
+      dut.clock.step()
+    }
+  }
+
+  "LSU accepts an AS-style reply after a real flush acknowledgement" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+
+      // Keep tag 0 allocated for the cacheline client, then allocate and
+      // release another tag through PIPE.  AddrCalculate retains that second
+      // tag for the following zero-mask flush acknowledgement.
+      driveClientRequest(dut, clientId = 2, lineBase = 0x3400,
+        mask = BigInt("ffffffff", 16))
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      val asInstrId = acceptDcache(dut)._1
+
+      drivePipeLoad(dut, address = 0x4000)
+      dut.io.lsu_req.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.lsu_req.valid.poke(false.B)
+      val pipeInstrId = acceptDcache(dut)._1
+      assert(pipeInstrId != asInstrId)
+      returnDcache(dut, pipeInstrId, 1, 0x500)
+      dut.io.lsu_rsp.valid.expect(true.B)
+      dut.clock.step()
+
+      dut.io.flush_dcache.valid.poke(true.B)
+      dut.io.flush_dcache.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.flush_dcache.valid.poke(false.B)
+      val flushInstrId = acceptDcache(dut)._1
+      assert(flushInstrId == pipeInstrId)
+      returnDcache(dut, flushInstrId, 0, 0)
+
+      returnDcache(dut, asInstrId, BigInt("ffffffff", 16), 0x600)
+      dut.io.cachelineClientRsp.valid.expect(true.B)
+      dut.io.cachelineClientRsp.bits.clientId.expect(2.U)
+      dut.io.cachelineClientRsp.bits.lineBase.expect(0x3400.U)
+      dut.io.cachelineClientRsp.bits.data(31).expect(0x61f.U)
+      dut.clock.step()
+    }
+  }
+
+  "LSU accepts a zero-mask reply and a new cacheline request in one cycle" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+
+      driveClientRequest(dut, clientId = 2, lineBase = 0x4400,
+        mask = BigInt("ffffffff", 16))
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      val asInstrId = acceptDcache(dut)._1
+
+      driveClientRequest(dut, clientId = 3, lineBase = 0x4800,
+        mask = BigInt("ffffffff", 16))
+      dut.io.dcache_rsp.bits.instrId.poke(((asInstrId + 2) % 8).U)
+      dut.io.dcache_rsp.bits.activeMask.foreach(_.poke(false.B))
+      dut.io.dcache_rsp.bits.data.foreach(_.poke(0.U))
+      dut.io.dcache_rsp.valid.poke(true.B)
+      dut.io.cachelineClientReq.ready.expect(true.B)
+      dut.io.dcache_rsp.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      dut.io.dcache_rsp.valid.poke(false.B)
+      // Simultaneous address allocation takes MSHRv2 through s_add for one
+      // cycle before it can accept the held AS response.
+      dut.clock.step()
+
+      returnDcache(dut, asInstrId, BigInt("ffffffff", 16), 0x700)
+      dut.io.cachelineClientRsp.valid.expect(true.B)
+      dut.io.cachelineClientRsp.bits.lineBase.expect(0x4400.U)
+      dut.clock.step()
+    }
+  }
+
+  "LSU ignores a zero-mask reply after its tag has been reused" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+
+      driveClientRequest(dut, clientId = 2, lineBase = 0x4c00,
+        mask = BigInt("ffffffff", 16))
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      val firstInstrId = acceptDcache(dut)._1
+      returnDcache(dut, firstInstrId, BigInt("ffffffff", 16), 0x800)
+      dut.io.cachelineClientRsp.valid.expect(true.B)
+      dut.clock.step()
+
+      driveClientRequest(dut, clientId = 3, lineBase = 0x5000,
+        mask = BigInt("ffffffff", 16))
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      val reusedInstrId = acceptDcache(dut)._1
+      assert(reusedInstrId == firstInstrId)
+      returnDcache(dut, reusedInstrId, 0, 0)
+      dut.io.cachelineClientRsp.valid.expect(false.B)
+      returnDcache(dut, reusedInstrId, BigInt("ffffffff", 16), 0x900)
+      dut.io.cachelineClientRsp.valid.expect(true.B)
+      dut.io.cachelineClientRsp.bits.lineBase.expect(0x5000.U)
+      dut.clock.step()
+    }
+  }
+
   "LSU preserves queued generic writes and routes client IDs after out-of-order replies" in {
     test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       driveIdle(dut)
