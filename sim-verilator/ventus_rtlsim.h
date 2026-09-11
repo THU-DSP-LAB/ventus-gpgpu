@@ -141,9 +141,22 @@ typedef struct {
     uint64_t command_backpressure_cycles;
     uint64_t completion_backpressure_cycles;
     uint64_t release_backpressure_cycles;
-    uint64_t lsu_requests;
-    uint64_t lsu_responses;
-    uint64_t lsu_backpressure_cycles;
+    uint64_t local_sram_read_requests;
+    uint64_t local_sram_write_requests;
+    uint64_t local_sram_read_responses;
+    uint64_t local_sram_backpressure_cycles;
+    uint64_t ray_setup_outputs;
+    uint64_t as_line_acquires;
+    uint64_t as_line_ready;
+    uint64_t as_acquire_backpressure_cycles;
+    uint64_t box4_issued;
+    uint64_t box4_results;
+    uint64_t triangle_issued;
+    uint64_t triangle_results;
+    uint64_t triangle_resolve_issued;
+    uint64_t triangle_resolve_results;
+    uint64_t stack_pushes;
+    uint64_t stack_pops;
 } ventus_rtlsim_rtcore_pmu_t;
 
 typedef struct {

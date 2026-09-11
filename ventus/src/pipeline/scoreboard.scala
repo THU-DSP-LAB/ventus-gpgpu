@@ -81,6 +81,17 @@ class scoreboardIO extends Bundle{
   val if_ctrl=Input(new CtrlSigs())
   val wb_v_ctrl=Input(new WriteVecCtrl())
   val wb_x_ctrl=Input(new WriteScalarCtrl())
+  // Diagnostic decomposition of delay.  Functional users need only `delay`,
+  // but exposing the terms lets the pipeline report a precise deadlock cause.
+  val stall_read1 = Output(Bool())
+  val stall_read2 = Output(Bool())
+  val stall_read3 = Output(Bool())
+  val stall_mask = Output(Bool())
+  val stall_write = Output(Bool())
+  val stall_branch = Output(Bool())
+  val stall_fence = Output(Bool())
+  val stall_opcol_v = Output(Bool())
+  val stall_opcol_x = Output(Bool())
   val if_fire=Input(Bool())
   val br_ctrl=Input(Bool())
   val fence_end=Input(Bool())
@@ -144,6 +155,15 @@ class Scoreboard extends Module{
   val read_op_colV=OpColRegV.read(0.U)
   val read_op_colX=OpColRegX.read(0.U)
   val readf=io.ibuffer_if_ctrl.mem & fenceReg.read(0.U)
+  io.stall_read1 := read1
+  io.stall_read2 := read2
+  io.stall_read3 := read3
+  io.stall_mask := readm
+  io.stall_write := readw
+  io.stall_branch := readb
+  io.stall_fence := readf
+  io.stall_opcol_v := read_op_colV
+  io.stall_opcol_x := read_op_colX
   dontTouch(read1)
   dontTouch(read2)
   dontTouch(read3)

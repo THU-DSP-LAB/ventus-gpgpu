@@ -15,7 +15,12 @@ object RtMemTableParameters {
   require(lineWordCount == num_thread)
 }
 
-class RtAsLineWaiter extends Bundle { val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W); val laneId = UInt(log2Ceil(num_thread).W); val nodeKind = UInt(2.W) }
+class RtAsLineWaiter extends Bundle {
+  val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
+  val laneId = UInt(log2Ceil(num_thread).W)
+  val nodeKind = UInt(3.W)
+  val objectRay = Bool()
+}
 class RtAsTableAcquire extends Bundle { val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiter = new RtAsLineWaiter }
 class RtAsTableReadyLine extends Bundle { val waiter = new RtAsLineWaiter; val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)) }
 private[rtcore] class RtAsEntry extends Bundle { val valid = Bool(); val sent = Bool(); val returned = Bool(); val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiterValid = Vec(RtMemTableParameters.maxAsWaitersPerEntry, Bool()); val waiters = Vec(RtMemTableParameters.maxAsWaitersPerEntry, new RtAsLineWaiter); val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)) }

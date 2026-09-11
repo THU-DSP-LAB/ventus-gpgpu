@@ -12,11 +12,16 @@ object RtTraversalStackParameters {
 class RtTraversalStackInit extends Bundle {
   val laneMask = UInt(num_thread.W)
   val rootNodeRef = Vec(num_thread, UInt(RtTraversalStackParameters.nodeRefWidth.W))
+  // A root fetched from the command AS is always a world-ray node.  Keeping
+  // this beside the ref (rather than one mutable lane-global bit) is what
+  // lets DFS return from a BLAS to a sibling TLAS node correctly.
+  val objectRay = Vec(num_thread, Bool())
 }
 
 class RtTraversalStackPush extends Bundle {
   val laneMask = UInt(num_thread.W)
   val nodeRef = Vec(num_thread, UInt(RtTraversalStackParameters.nodeRefWidth.W))
+  val objectRay = Vec(num_thread, Bool())
 }
 
 class RtTraversalStackPop extends Bundle {
@@ -52,6 +57,7 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
     // pop.fire.  It is combinational because the scheduler already selects the
     // warp before issuing the pop.
     val popNodeRef = Output(Vec(num_thread, UInt(nodeRefWidth.W)))
+    val popObjectRay = Output(Vec(num_thread, Bool()))
 
     val laneLive = Output(UInt(num_thread.W))
     val laneEmpty = Output(UInt(num_thread.W))
@@ -60,9 +66,11 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
     val popWouldUnderflow = Output(Bool())
   })
 
-  // At the default depth this is one warp x 32 lanes x 32 entries x 32 bits,
-  // or 4 KiB of continuation payload storage.
+  // At the default depth this is one warp x 32 lanes x 32 entries.  The tag
+  // adds one bit per entry and prevents an object-space BLAS ray from being
+  // accidentally reused for a later world-space TLAS sibling.
   val entries = Reg(Vec(num_thread, Vec(stackDepth, UInt(nodeRefWidth.W))))
+  val objectEntries = Reg(Vec(num_thread, Vec(stackDepth, Bool())))
   val stackPointer = RegInit(VecInit(Seq.fill(num_thread)(0.U(stackPointerWidth.W))))
   val live = RegInit(VecInit(Seq.fill(num_thread)(false.B)))
 
@@ -94,9 +102,15 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
     if (stackDepth == 1) {
       io.popNodeRef(lane) := Mux(pointer === 0.U, 0.U,
         entries(lane)(0))
+      io.popObjectRay(lane) := Mux(pointer === 0.U, false.B,
+        objectEntries(lane)(0))
     } else {
       io.popNodeRef(lane) := Mux(pointer === 0.U, 0.U,
         entries(lane)(
+          (pointer - 1.U)(stackEntryIndexWidth - 1, 0)
+        ))
+      io.popObjectRay(lane) := Mux(pointer === 0.U, false.B,
+        objectEntries(lane)(
           (pointer - 1.U)(stackEntryIndexWidth - 1, 0)
         ))
     }
@@ -106,6 +120,7 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
     for (lane <- 0 until num_thread) {
       when(io.init.bits.laneMask(lane)) {
         entries(lane)(0) := io.init.bits.rootNodeRef(lane)
+        objectEntries(lane)(0) := io.init.bits.objectRay(lane)
         stackPointer(lane) := 1.U
         live(lane) := true.B
       }
@@ -123,10 +138,14 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
         val pointer = stackPointer(lane)
         if (stackDepth == 1) {
           entries(lane)(0) := io.push.bits.nodeRef(lane)
+          objectEntries(lane)(0) := io.push.bits.objectRay(lane)
         } else {
           entries(lane)(
             pointer(stackEntryIndexWidth - 1, 0)
           ) := io.push.bits.nodeRef(lane)
+          objectEntries(lane)(
+            pointer(stackEntryIndexWidth - 1, 0)
+          ) := io.push.bits.objectRay(lane)
         }
         stackPointer(lane) := pointer + 1.U
       }

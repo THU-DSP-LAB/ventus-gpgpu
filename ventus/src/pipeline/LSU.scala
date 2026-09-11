@@ -171,7 +171,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
                       x.asUInt<<2,
-                      Mux(reg_save.ctrl.mop===3.U,
+                      Mux(reg_save.ctrl.mop(0),
                         reg_save.in2(x),
                         x.asUInt*reg_save.in2(x))
                     ),
@@ -463,6 +463,29 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
           p" [l${i}]=${Hexadecimal(d)}@${Hexadecimal(a)}"
         }.reduceOption(_ + _).getOrElse(p"")
         printf(common_prefix + p"lsu.w v${idx} op ${reg_save.ctrl.mop} mask ${Binary(reg_save.mask.asUInt)}" + store_print + p"\n")
+      }
+    }
+  }
+
+  // Opt-in trace for the PDS-backed private payload frames used by the RT
+  // megakernel.  Unlike RT Local SRAM accesses, these are normal vector LSU
+  // transactions.  Keep this elaboration-time gated so ordinary RTL builds
+  // and timing are unaffected.  Lane 0 is sufficient for the 1x1 regression
+  // and keeps full-app logs tractable.
+  if (sys.env.get("VENTUS_PDS_TRACE").contains("1")) {
+    when(state === s_save && io.to_mshr.fire && reg_save.ctrl.isvec &&
+         reg_save.ctrl.disable_mask && !reg_save.ctrl.is_vls12 &&
+         reg_save.mask(0)) {
+      val lane0PrivateOffset = reg_save.in1(0) + reg_save.in2(0)
+      when(lane0PrivateOffset <= 64.U) {
+        when(reg_save.ctrl.mem_cmd === IDecode.M_XRD) {
+          printf(p"[PDS trace] r pc=0x${Hexadecimal(reg_save.ctrl.pc)}" +
+            p" off=${Decimal(lane0PrivateOffset)} paddr=0x${Hexadecimal(addr(0))}\n")
+        }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XWR) {
+          printf(p"[PDS trace] w pc=0x${Hexadecimal(reg_save.ctrl.pc)}" +
+            p" off=${Decimal(lane0PrivateOffset)} data=0x${Hexadecimal(reg_save.in3(0))}" +
+            p" paddr=0x${Hexadecimal(addr(0))}\n")
+        }
       }
     }
   }

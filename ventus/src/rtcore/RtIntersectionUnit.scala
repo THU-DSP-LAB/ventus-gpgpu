@@ -476,7 +476,28 @@ class RtTrianglePipeline extends Module {
         comparison.io.b := zero
         comparison.io.signaling := true.B
       }
-      emit.hit := !(comparisons(0).io.lt || comparisons(1).io.lt || comparisons(2).io.lt || comparisons(4).io.lt || comparisons(3).io.eq)
+      // Watertight edge functions inherit the triangle winding.  The old
+      // predicate admitted only the positive-winding half of the geometry;
+      // a clockwise triangle has U/V/W/tNum/tDenom all negative even when it
+      // is a valid front-facing intersection.  Vulkan traversal is two-sided
+      // unless an explicit cull flag says otherwise (culling belongs in the
+      // scheduler, not this arithmetic IU), so accept either common sign.
+      // Normalize a negative-winding hit here, before the scheduler's
+      // positive-denominator interval prefilter and final IEEE divisions.
+      val negativeWinding = comparisons(3).io.lt
+      val positiveInside = !(comparisons(0).io.lt || comparisons(1).io.lt ||
+        comparisons(2).io.lt || comparisons(4).io.lt)
+      val negativeInside = !(comparisons(0).io.gt || comparisons(1).io.gt ||
+        comparisons(2).io.gt || comparisons(4).io.gt)
+      emit.hit := !comparisons(3).io.eq && Mux(negativeWinding,
+        negativeInside, positiveInside)
+      when(negativeWinding) {
+        emit.U := FNFlipSign(intake.U)
+        emit.V := FNFlipSign(intake.V)
+        emit.W := FNFlipSign(intake.W)
+        emit.tNum := FNFlipSign(intake.tNum)
+        emit.tDenom := FNFlipSign(intake.tDenom)
+      }
       emit
     })
   ).suggestName("classify")
@@ -488,8 +509,11 @@ class RtTrianglePipeline extends Module {
       { intake: RtTrianglePipelineState =>
         val emit = Wire(new RtTriangleIntersectionOutput)
         emit.requestId := intake.requestId
-        emit.uNum := fNFromRecFN(8, 24, intake.U)
-        emit.vNum := fNFromRecFN(8, 24, intake.V)
+        // U/V/W are the RayFlex vertex weights for A/B/C respectively.
+        // Vulkan hitAttributeEXT.xy is the conventional barycentric pair for
+        // vertices B/C (A is reconstructed as 1-u-v), so do not expose U.
+        emit.uNum := fNFromRecFN(8, 24, intake.V)
+        emit.vNum := fNFromRecFN(8, 24, intake.W)
         emit.tNum := fNFromRecFN(8, 24, intake.tNum)
         emit.tDenom := fNFromRecFN(8, 24, intake.tDenom)
         emit.hit := intake.hit

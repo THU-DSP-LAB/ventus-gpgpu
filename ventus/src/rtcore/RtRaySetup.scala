@@ -5,7 +5,7 @@ import chisel3.util._
 import hardfloat._
 import top.parameters._
 
-/** Raw per-lane state consumed from the twelve RT Local SRAM ray-state fields. */
+/** Raw per-lane state consumed from the fifteen RT Local SRAM ray-state fields. */
 class RtRaySetupInput extends Bundle {
   val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
@@ -29,9 +29,9 @@ class RtRaySetupOutput extends Bundle {
 
 /**
   * Converts raw RT Local SRAM ray state into the prepared ray consumed by the two
-  * intersection pipelines.  The three reciprocal operations share one input
-  * transaction; their independently returned results are accumulated before
-  * the remaining axis selection and shear multiplies are evaluated.
+ * intersection pipelines.  Shader SFUs precompute the three reciprocal
+ * values and store them in RT Local SRAM before publishing the trace request;
+ * this module only performs axis selection and the two shear multiplies.
   */
 class RtRaySetup extends Module {
   private val rounding = consts.round_near_even
@@ -46,44 +46,15 @@ class RtRaySetup extends Module {
   val busy = RegInit(false.B)
   val outValid = RegInit(false.B)
   val outBits = Reg(new RtRaySetupOutput)
-  val reciprocalBits = Reg(Vec(3, UInt(32.W)))
-  val reciprocalReturned = RegInit(0.U(3.W))
-
-  val dividers = Seq.fill(3)(Module(new RtFpDiv))
-  val dividerReady = dividers.map(_.io.in.ready).reduce(_ && _)
-  dividers.zip(Seq(io.in.bits.rayState.dir.x, io.in.bits.rayState.dir.y,
-    io.in.bits.rayState.dir.z)).foreach { case (divider, direction) =>
-    divider.io.in.valid := io.in.fire
-    divider.io.in.bits.a := "h3f800000".U
-    divider.io.in.bits.b := direction
-    divider.io.out.ready := true.B
-  }
-
-  io.in.ready := !busy && !outValid && dividerReady
+  io.in.ready := !busy && !outValid
   io.out.valid := outValid
   io.out.bits := outBits
   when(io.out.fire) { outValid := false.B }
   when(io.in.fire) {
     saved := io.in.bits
     busy := true.B
-    reciprocalReturned := 0.U
   }
 
-  val reciprocalValid = VecInit(dividers.map(_.io.out.valid)).asUInt
-  val reciprocal = dividers.map(_.io.out.bits)
-  when(busy && reciprocalValid.orR) {
-    reciprocalReturned := reciprocalReturned | reciprocalValid
-  }
-  for (index <- reciprocal.indices) {
-    when(busy && reciprocalValid(index)) {
-      reciprocalBits(index) := reciprocal(index)
-    }
-  }
-  val reciprocalComplete = reciprocalReturned | reciprocalValid
-  val completedReciprocal = Wire(Vec(3, UInt(32.W)))
-  for (index <- completedReciprocal.indices) {
-    completedReciprocal(index) := Mux(reciprocalValid(index), reciprocal(index), reciprocalBits(index))
-  }
   val direction = Wire(Vec(3, UInt(32.W)))
   direction(0) := saved.rayState.dir.x.asUInt
   direction(1) := saved.rayState.dir.y.asUInt
@@ -98,7 +69,9 @@ class RtRaySetup extends Module {
   val kx = Mux(negativeDirection, positiveKy, positiveKx)
   val ky = Mux(negativeDirection, positiveKx, positiveKy)
   val reciprocalVec = Wire(Vec(3, UInt(32.W)))
-  reciprocalVec := completedReciprocal
+  reciprocalVec(0) := saved.rayState.inv.x
+  reciprocalVec(1) := saved.rayState.inv.y
+  reciprocalVec(2) := saved.rayState.inv.z
 
   val shearX = Module(new MulRecFN(8, 24))
   val shearY = Module(new MulRecFN(8, 24))
@@ -111,7 +84,7 @@ class RtRaySetup extends Module {
   shearY.io.a := recFNFromFN(8, 24, direction(ky))
   shearY.io.b := recFNFromFN(8, 24, reciprocalVec(kz))
 
-  when(busy && reciprocalComplete.andR) {
+  when(busy) {
     outBits.warpId := saved.warpId
     outBits.laneId := saved.laneId
     outBits.accelLo := saved.accelLo

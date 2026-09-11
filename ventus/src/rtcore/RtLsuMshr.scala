@@ -42,7 +42,18 @@ class RtLsuMshr extends Module {
   when(io.response.fire) { responseBits := io.response.bits; responseValid := true.B }
   io.asInjection.valid := responseValid
   io.asInjection.bits.entry := requestBits.locator.tableLocation
-  io.asInjection.bits.data := responseBits.data
+  // LSU responses are a complete 128-byte cache line.  A Triangle/AABB
+  // request is a 64-byte half-line, for which `coverageMask` is already
+  // shifted above.  Normalize that selected half back to word zero before it
+  // reaches the AS table: all node consumers index their payload relative to
+  // the requested node, not to the containing cache line.
+  val responseWordOffset = Mux(requestBits.is64B,
+    requestBits.cacheLineAddress(6, 2), 0.U(5.W))
+  for (word <- 0 until RtCorePortParameters.lineWordCount) {
+    val source = (word.U(5.W) + responseWordOffset)(4, 0)
+    io.asInjection.bits.data(word) := Mux(requestBits.is64B && word.U >= 16.U,
+      0.U, responseBits.data(source))
+  }
   io.asInjection.bits.fault := responseBits.fault
   when(io.asInjection.fire) { pending := false.B; issued := false.B; responseValid := false.B }
   io.idle := !pending && !responseValid

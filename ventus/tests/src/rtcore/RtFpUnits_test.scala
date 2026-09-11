@@ -136,8 +136,10 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
       lane: Int,
       origin: Seq[Float],
       direction: Seq[Float],
-      tmax: Float
+      tmax: Float,
+      inverse: Seq[Float] = Seq.empty
   ): Unit = {
+    val reciprocal = if (inverse.nonEmpty) inverse else direction.map(value => 1.0f / value)
     dut.io.in.bits.warpId.poke(0.U)
     dut.io.in.bits.laneId.poke(lane.U)
     dut.io.in.bits.accelLo.poke(0x8000.U)
@@ -152,6 +154,9 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.in.bits.rayState.dir.z.poke(raw(direction(2)).U)
     dut.io.in.bits.rayState.tmin.poke(raw(0.125f).U)
     dut.io.in.bits.rayState.tmax.poke(raw(tmax).U)
+    dut.io.in.bits.rayState.inv.x.poke(raw(reciprocal(0)).U)
+    dut.io.in.bits.rayState.inv.y.poke(raw(reciprocal(1)).U)
+    dut.io.in.bits.rayState.inv.z.poke(raw(reciprocal(2)).U)
   }
 
   private def expectedAxes(direction: Seq[Float]): (Int, Int, Int) = {
@@ -171,10 +176,11 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
       lane: Int,
       origin: Seq[Float],
       direction: Seq[Float],
-      tmax: Float
+      tmax: Float,
+      inverse: Seq[Float] = Seq.empty
   ): Unit = {
     val (kx, ky, kz) = expectedAxes(direction)
-    val reciprocal = direction.map(value => 1.0f / value)
+    val reciprocal = if (inverse.nonEmpty) inverse else direction.map(value => 1.0f / value)
     dut.io.out.bits.warpId.expect(0.U)
     dut.io.out.bits.laneId.expect(lane.U)
     dut.io.out.bits.accelLo.expect(0x8000.U)
@@ -205,16 +211,17 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
       lane: Int,
       origin: Seq[Float],
       direction: Seq[Float],
-      tmax: Float
+      tmax: Float,
+      inverse: Seq[Float] = Seq.empty
   ): Unit = {
-    pokeSetup(dut, lane, origin, direction, tmax)
+    pokeSetup(dut, lane, origin, direction, tmax, inverse)
     dut.io.in.valid.poke(true.B)
     waitUntil(4)(dut.io.in.ready.peek().litToBoolean)(dut.clock.step())
     dut.clock.step()
     dut.io.in.valid.poke(false.B)
   }
 
-  "RaySetup matches IEEE reciprocal, axis selection, and shear" in {
+  "RaySetup passes through shader IEEE reciprocal, axis selection, and shear" in {
     test(new RtRaySetup).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       reset(dut)
       dut.io.in.valid.poke(false.B)
@@ -259,6 +266,21 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.out.ready.poke(true.B)
       dut.clock.step()
       dut.io.out.valid.expect(false.B)
+    }
+  }
+
+  "RaySetup consumes the reciprocal written by the shader SFU" in {
+    test(new RtRaySetup).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      reset(dut)
+      dut.io.in.valid.poke(false.B)
+      dut.io.out.ready.poke(true.B)
+      val origin = Seq(1.0f, 2.0f, 3.0f)
+      val direction = Seq(8.0f, 2.0f, 1.0f)
+      val suppliedInverse = Seq(0.5f, 0.25f, 1.0f)
+      submitSetup(dut, 5, origin, direction, 20.0f, suppliedInverse)
+      waitUntil(4)(dut.io.out.valid.peek().litToBoolean)(dut.clock.step())
+      checkSetupResult(dut, 5, origin, direction, 20.0f, suppliedInverse)
+      dut.clock.step()
     }
   }
 

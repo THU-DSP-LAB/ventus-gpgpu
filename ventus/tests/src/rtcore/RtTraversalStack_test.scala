@@ -12,8 +12,10 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.clear.valid.poke(false.B)
     dut.io.init.bits.laneMask.poke(0.U)
     dut.io.init.bits.rootNodeRef.foreach(_.poke(0.U))
+    dut.io.init.bits.objectRay.foreach(_.poke(false.B))
     dut.io.push.bits.laneMask.poke(0.U)
     dut.io.push.bits.nodeRef.foreach(_.poke(0.U))
+    dut.io.push.bits.objectRay.foreach(_.poke(false.B))
     dut.io.pop.bits.laneMask.poke(0.U)
     dut.io.clear.bits.laneMask.poke(0.U)
   }
@@ -21,11 +23,15 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
   private def init(
       dut: RtTraversalStack,
       mask: BigInt,
-      roots: Map[Int, BigInt]
+      roots: Map[Int, BigInt],
+      objectRays: Map[Int, Boolean] = Map.empty
   ): Unit = {
     dut.io.init.bits.laneMask.poke(mask.U)
     dut.io.init.bits.rootNodeRef.zipWithIndex.foreach { case (ref, lane) =>
       ref.poke(roots.getOrElse(lane, BigInt(0)).U)
+    }
+    dut.io.init.bits.objectRay.zipWithIndex.foreach { case (tag, lane) =>
+      tag.poke(objectRays.getOrElse(lane, false).B)
     }
     dut.io.init.valid.poke(true.B)
     dut.io.init.ready.expect(true.B)
@@ -36,11 +42,15 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
   private def push(
       dut: RtTraversalStack,
       mask: BigInt,
-      values: Map[Int, BigInt]
+      values: Map[Int, BigInt],
+      objectRays: Map[Int, Boolean] = Map.empty
   ): Unit = {
     dut.io.push.bits.laneMask.poke(mask.U)
     dut.io.push.bits.nodeRef.zipWithIndex.foreach { case (ref, lane) =>
       ref.poke(values.getOrElse(lane, BigInt(0)).U)
+    }
+    dut.io.push.bits.objectRay.zipWithIndex.foreach { case (tag, lane) =>
+      tag.poke(objectRays.getOrElse(lane, false).B)
     }
     dut.io.push.valid.poke(true.B)
     dut.io.push.ready.expect(true.B)
@@ -51,14 +61,30 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
   private def pop(
       dut: RtTraversalStack,
       mask: BigInt,
-      expected: Map[Int, BigInt]
+      expected: Map[Int, BigInt],
+      objectRays: Map[Int, Boolean] = Map.empty
   ): Unit = {
     dut.io.pop.bits.laneMask.poke(mask.U)
     dut.io.pop.valid.poke(true.B)
     dut.io.pop.ready.expect(true.B)
-    expected.foreach { case (lane, value) => dut.io.popNodeRef(lane).expect(value.U) }
+    expected.foreach { case (lane, value) =>
+      dut.io.popNodeRef(lane).expect(value.U)
+      dut.io.popObjectRay(lane).expect(objectRays.getOrElse(lane, false).B)
+    }
     dut.clock.step()
     dut.io.pop.valid.poke(false.B)
+  }
+
+  "ray-space tags follow their node reference through LIFO operations" in {
+    test(new RtTraversalStack(stackDepth = 4)) { dut =>
+      driveIdle(dut)
+      init(dut, BigInt(1), Map(0 -> 0x10), Map(0 -> false))
+      push(dut, BigInt(1), Map(0 -> 0x20), Map(0 -> true))
+      push(dut, BigInt(1), Map(0 -> 0x30), Map(0 -> false))
+      pop(dut, BigInt(1), Map(0 -> 0x30), Map(0 -> false))
+      pop(dut, BigInt(1), Map(0 -> 0x20), Map(0 -> true))
+      pop(dut, BigInt(1), Map(0 -> 0x10), Map(0 -> false))
+    }
   }
 
   private def clear(dut: RtTraversalStack, mask: BigInt): Unit = {

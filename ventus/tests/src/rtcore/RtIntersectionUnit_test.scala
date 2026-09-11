@@ -182,7 +182,9 @@ class RtIntersectionUnitParallelTest
         dut.clock.step()
       }
       assert(boxResults.toSeq == Seq((BigInt(11), one.litValue), (BigInt(12), two.litValue)))
-      assert(triangleResults.toSeq == Seq((BigInt(21), true), (BigInt(22), false)))
+      // Traversal is two-sided without an explicit cull flag: reversing the
+      // winding must preserve the hit after the IU normalizes its numerators.
+      assert(triangleResults.toSeq == Seq((BigInt(21), true), (BigInt(22), true)))
     }
   }
 

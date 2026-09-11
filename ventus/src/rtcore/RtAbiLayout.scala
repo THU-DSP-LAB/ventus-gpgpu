@@ -4,7 +4,7 @@
 package rtcore
 
 object RtAbiLayout {
-  final val AbiVersion: Int = 11
+  final val AbiVersion: Int = 12
   final val AbiWordBytes: Int = 4
   final val AbiAlignmentBytes: Int = 16
   final val TraceMeta0FlagsShift: Int = 0
@@ -31,15 +31,15 @@ object RtAbiLayout {
   final val HitRecordMeta1InstanceSbtRecordOffsetShift: Int = 0
   final val HitRecordMeta1InstanceSbtRecordOffsetBits: Int = 24
   final val LocalRayStateBaseBytes: Int = 0
-  final val LocalRayStateSizeBytes: Int = 72
-  final val LocalControlBaseBytes: Int = 72
+  final val LocalRayStateSizeBytes: Int = 84
+  final val LocalControlBaseBytes: Int = 84
   final val LocalControlSizeBytes: Int = 4
-  final val LocalCandidateHitRecordBaseBytes: Int = 76
+  final val LocalCandidateHitRecordBaseBytes: Int = 88
   final val LocalCandidateHitRecordSizeBytes: Int = 36
-  final val LocalCommittedHitRecordBaseBytes: Int = 112
+  final val LocalCommittedHitRecordBaseBytes: Int = 124
   final val LocalCommittedHitRecordSizeBytes: Int = 36
-  final val LocalFieldMajorFixedHeaderWordCount: Int = 37
-  final val LocalHeaderSizeBytes: Int = 148
+  final val LocalFieldMajorFixedHeaderWordCount: Int = 40
+  final val LocalHeaderSizeBytes: Int = 160
   final val PdsCandidateHitAttribBaseBytes: Int = 0
   final val SlotStatus: Int = 0
   final val SlotAccelLo: Int = 1
@@ -54,12 +54,15 @@ object RtAbiLayout {
   final val SlotDirectionY: Int = 10
   final val SlotDirectionZ: Int = 11
   final val SlotTmax: Int = 12
-  final val SlotPayloadPtrLo: Int = 13
-  final val SlotPayloadPtrHi: Int = 14
-  final val SlotLaunchIdX: Int = 15
-  final val SlotLaunchIdY: Int = 16
-  final val SlotLaunchIdZ: Int = 17
-  final val SlotWordCount: Int = 18
+  final val SlotInvX: Int = 13
+  final val SlotInvY: Int = 14
+  final val SlotInvZ: Int = 15
+  final val SlotPayloadPtrLo: Int = 16
+  final val SlotPayloadPtrHi: Int = 17
+  final val SlotLaunchIdX: Int = 18
+  final val SlotLaunchIdY: Int = 19
+  final val SlotLaunchIdZ: Int = 20
+  final val SlotWordCount: Int = 21
   final val SlotStatusIdle: Int = 0
   final val SlotStatusTraceRequest: Int = 1
   final val SlotStatusTerminated: Int = 2

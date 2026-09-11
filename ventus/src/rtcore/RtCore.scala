@@ -29,6 +29,9 @@ class RtCore extends Module {
   io.releaseAck <> scheduler.io.releaseAck
   io.lsuRequest <> scheduler.io.lsuRequest
   scheduler.io.lsuResponse <> io.lsuResponse
+  io.localRequest <> scheduler.io.localRequest
+  scheduler.io.localResponse <> io.localResponse
+  io.perf := scheduler.io.perf
 
   for (index <- 0 until boxUnitCount) {
     boxUnits(index).in <> scheduler.boxIssue(index)

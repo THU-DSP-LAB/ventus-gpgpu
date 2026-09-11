@@ -33,13 +33,7 @@ class InstClassPerfCounters extends Bundle {
   val ctrlIssued = UInt(64.W)
 }
 
-/**
-  * RTcore boundary counters.
-  *
-  * These counters deliberately observe only the instruction-pipeline and LSU
-  * boundary.  They remain valid while the RTcore's private SRAM implementation
-  * evolves, and can later be complemented with table- and unit-internal PMUs.
-  */
+/** RTcore command-boundary and internal-work counters. */
 class RtCorePerfCounters extends Bundle {
   val traverseIssued = UInt(64.W)
   val traverseActiveLanes = UInt(64.W)
@@ -50,7 +44,20 @@ class RtCorePerfCounters extends Bundle {
   val commandBackpressureCycles = UInt(64.W)
   val completionBackpressureCycles = UInt(64.W)
   val releaseBackpressureCycles = UInt(64.W)
-  val lsuRequests = UInt(64.W)
-  val lsuResponses = UInt(64.W)
-  val lsuBackpressureCycles = UInt(64.W)
+  val localSramReadRequests = UInt(64.W)
+  val localSramWriteRequests = UInt(64.W)
+  val localSramReadResponses = UInt(64.W)
+  val localSramBackpressureCycles = UInt(64.W)
+  val raySetupOutputs = UInt(64.W)
+  val asLineAcquires = UInt(64.W)
+  val asLineReady = UInt(64.W)
+  val asAcquireBackpressureCycles = UInt(64.W)
+  val box4Issued = UInt(64.W)
+  val box4Results = UInt(64.W)
+  val triangleIssued = UInt(64.W)
+  val triangleResults = UInt(64.W)
+  val triangleResolveIssued = UInt(64.W)
+  val triangleResolveResults = UInt(64.W)
+  val stackPushes = UInt(64.W)
+  val stackPops = UInt(64.W)
 }

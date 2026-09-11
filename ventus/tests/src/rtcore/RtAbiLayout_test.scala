@@ -4,12 +4,13 @@ import org.scalatest.freespec.AnyFreeSpec
 
 /** Guards the generated Mesa ABI assumptions consumed by RTcore tables. */
 class RtAbiLayoutTest extends AnyFreeSpec {
-  "RT Local SRAM keeps the twelve ray-state fields and both hit records field-major" in {
-    val rayEnd = RtAbiLayout.SlotAccelLo + 12
+  "RT Local SRAM keeps the fifteen ray-state fields and both hit records field-major" in {
+    val rayEnd = RtAbiLayout.SlotInvZ + 1
     val candidateBase = RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
     val committedBase = RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
 
     assert(RtAbiLayout.AbiWordBytes == 4)
+    assert(RtAbiLayout.AbiVersion == 12)
     assert(rayEnd <= RtAbiLayout.SlotWordCount)
     assert(candidateBase + RtAbiLayout.HitRecordWordCount == committedBase)
     assert(committedBase + RtAbiLayout.HitRecordWordCount ==

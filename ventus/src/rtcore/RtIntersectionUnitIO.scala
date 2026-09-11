@@ -86,12 +86,13 @@ class Triangle(recorded_float: Boolean = false) extends Bundle {
   def isRecordedFloat(): Boolean = { recorded_float }
 }
 
-/** PDS ray-state fields consumed by intersection setup before Ray derivation. */
+/** RT Local ray-state fields consumed by intersection setup before Ray derivation. */
 class RtRayState(recorded_float: Boolean = false) extends Bundle {
   val origin = new Float3(recorded_float)
   val dir = new Float3(recorded_float)
   val tmin = Bits(if (recorded_float) 33.W else 32.W)
   val tmax = Bits(if (recorded_float) 33.W else 32.W)
+  val inv = new Float3(recorded_float)
 }
 
 /** Prepared geometry input for one four-box intersection operation. */

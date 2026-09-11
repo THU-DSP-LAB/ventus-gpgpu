@@ -305,13 +305,13 @@ class pipe() extends Module{
   // ibuffer2issue模块的IO都是实际发射但尚未执行的指令，在这检查undefined instruction
   when(ibuffer2issue.io.out_x.fire){
     val ctrl = ibuffer2issue.io.out_x.bits
-    assert(ctrl.alu_fn =/= 63.U, 
+    assert(ctrl.alu_fn =/= 63.U || ctrl.rtOp.orR,
            p"UNDEFINED INSTRUCTION @ SM ${sm_id} warp ${Decimal(ctrl.wid)} " + 
            p"PC 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}")
   }
   when(ibuffer2issue.io.out_v.fire){
     val ctrl = ibuffer2issue.io.out_v.bits
-    assert(ctrl.alu_fn =/= 63.U, 
+    assert(ctrl.alu_fn =/= 63.U || ctrl.rtOp.orR,
            p"UNDEFINED INSTRUCTION @ SM ${sm_id} warp ${Decimal(ctrl.wid)} " + 
            p"PC 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}")
   }
@@ -586,9 +586,22 @@ class pipe() extends Module{
   val rtCommandBackpressureCycles = RegInit(0.U(64.W))
   val rtCompletionBackpressureCycles = RegInit(0.U(64.W))
   val rtReleaseBackpressureCycles = RegInit(0.U(64.W))
-  val rtLsuRequests = RegInit(0.U(64.W))
-  val rtLsuResponses = RegInit(0.U(64.W))
-  val rtLsuBackpressureCycles = RegInit(0.U(64.W))
+  val rtLocalSramReadRequests = RegInit(0.U(64.W))
+  val rtLocalSramWriteRequests = RegInit(0.U(64.W))
+  val rtLocalSramReadResponses = RegInit(0.U(64.W))
+  val rtLocalSramBackpressureCycles = RegInit(0.U(64.W))
+  val rtRaySetupOutputs = RegInit(0.U(64.W))
+  val rtAsLineAcquires = RegInit(0.U(64.W))
+  val rtAsLineReady = RegInit(0.U(64.W))
+  val rtAsAcquireBackpressureCycles = RegInit(0.U(64.W))
+  val rtBox4Issued = RegInit(0.U(64.W))
+  val rtBox4Results = RegInit(0.U(64.W))
+  val rtTriangleIssued = RegInit(0.U(64.W))
+  val rtTriangleResults = RegInit(0.U(64.W))
+  val rtTriangleResolveIssued = RegInit(0.U(64.W))
+  val rtTriangleResolveResults = RegInit(0.U(64.W))
+  val rtStackPushes = RegInit(0.U(64.W))
+  val rtStackPops = RegInit(0.U(64.W))
 
   def isCtrlInst(ctrl: CtrlSigs): Bool = {
     ctrl.csr.orR || ctrl.barrier || ctrl.simt_stack || ctrl.branch.orR
@@ -604,6 +617,22 @@ class pipe() extends Module{
   val barrierStall = noIssueFire && noIssueInput && anyBufferedInst && !anySchedulableInst &&
     !anyScoreExeBlockedInst && anyBarrierBlockedInst
   val frontendStall = noIssueFire && noIssueInput && !dataDepStall && !barrierStall
+
+  // Elaborate-only deadlock aid.  A long no-issue interval used to require
+  // guessing whether the pending warp was blocked by a register, the operand
+  // collector, or a control dependency.  Keep it out of normal RTL builds.
+  if (sys.env.get("VENTUS_SCOREBOARD_TRACE").contains("1")) {
+    val noIssueCycles = RegInit(0.U(16.W))
+    when(noIssueFire) { noIssueCycles := noIssueCycles + 1.U }
+      .otherwise { noIssueCycles := 0.U }
+    when(noIssueCycles === 1024.U) {
+      for (i <- 0 until num_warp) {
+        when(ibuffer.io.out(i).valid && warp_sche.io.warp_ready(i)) {
+          printf(p"[SCOREBOARD trace] warp=${Decimal(i.U)} pc=0x${Hexadecimal(ibuffer.io.out(i).bits.pc)} inst=0x${Hexadecimal(ibuffer.io.out(i).bits.inst)} delay=${scoreb(i).delay} r1=${scoreb(i).stall_read1} r2=${scoreb(i).stall_read2} r3=${scoreb(i).stall_read3} mask=${scoreb(i).stall_mask} wr=${scoreb(i).stall_write} br=${scoreb(i).stall_branch} fence=${scoreb(i).stall_fence} opv=${scoreb(i).stall_opcol_v} opx=${scoreb(i).stall_opcol_x}\n")
+        }
+      }
+    }
+  }
 
   val flushEvent = warp_sche.io.flush.valid && !RegNext(warp_sche.io.flush.valid, false.B)
 
@@ -631,9 +660,22 @@ class pipe() extends Module{
     rtCommandBackpressureCycles := 0.U
     rtCompletionBackpressureCycles := 0.U
     rtReleaseBackpressureCycles := 0.U
-    rtLsuRequests := 0.U
-    rtLsuResponses := 0.U
-    rtLsuBackpressureCycles := 0.U
+    rtLocalSramReadRequests := 0.U
+    rtLocalSramWriteRequests := 0.U
+    rtLocalSramReadResponses := 0.U
+    rtLocalSramBackpressureCycles := 0.U
+    rtRaySetupOutputs := 0.U
+    rtAsLineAcquires := 0.U
+    rtAsLineReady := 0.U
+    rtAsAcquireBackpressureCycles := 0.U
+    rtBox4Issued := 0.U
+    rtBox4Results := 0.U
+    rtTriangleIssued := 0.U
+    rtTriangleResults := 0.U
+    rtTriangleResolveIssued := 0.U
+    rtTriangleResolveResults := 0.U
+    rtStackPushes := 0.U
+    rtStackPops := 0.U
   }.elsewhen(io.perfEnable){
     activeCycles := activeCycles + 1.U
 
@@ -707,15 +749,22 @@ class pipe() extends Module{
     when(rtcore.io.release.valid && !rtcore.io.release.ready) {
       rtReleaseBackpressureCycles := rtReleaseBackpressureCycles + 1.U
     }
-    when(rtcore.io.lsuRequest.fire) {
-      rtLsuRequests := rtLsuRequests + 1.U
-    }
-    when(rtcore.io.lsuResponse.fire) {
-      rtLsuResponses := rtLsuResponses + 1.U
-    }
-    when(rtcore.io.lsuRequest.valid && !rtcore.io.lsuRequest.ready) {
-      rtLsuBackpressureCycles := rtLsuBackpressureCycles + 1.U
-    }
+    when(rtcore.io.perf.localSramReadRequest) { rtLocalSramReadRequests := rtLocalSramReadRequests + 1.U }
+    when(rtcore.io.perf.localSramWriteRequest) { rtLocalSramWriteRequests := rtLocalSramWriteRequests + 1.U }
+    when(rtcore.io.perf.localSramReadResponse) { rtLocalSramReadResponses := rtLocalSramReadResponses + 1.U }
+    when(rtcore.io.perf.localSramBackpressure) { rtLocalSramBackpressureCycles := rtLocalSramBackpressureCycles + 1.U }
+    when(rtcore.io.perf.raySetupOutput) { rtRaySetupOutputs := rtRaySetupOutputs + 1.U }
+    when(rtcore.io.perf.asLineAcquire) { rtAsLineAcquires := rtAsLineAcquires + 1.U }
+    when(rtcore.io.perf.asLineReady) { rtAsLineReady := rtAsLineReady + 1.U }
+    when(rtcore.io.perf.asAcquireBackpressure) { rtAsAcquireBackpressureCycles := rtAsAcquireBackpressureCycles + 1.U }
+    when(rtcore.io.perf.box4Issue) { rtBox4Issued := rtBox4Issued + 1.U }
+    when(rtcore.io.perf.box4Result) { rtBox4Results := rtBox4Results + 1.U }
+    when(rtcore.io.perf.triangleIssue) { rtTriangleIssued := rtTriangleIssued + 1.U }
+    when(rtcore.io.perf.triangleResult) { rtTriangleResults := rtTriangleResults + 1.U }
+    when(rtcore.io.perf.triangleResolveIssue) { rtTriangleResolveIssued := rtTriangleResolveIssued + 1.U }
+    when(rtcore.io.perf.triangleResolveResult) { rtTriangleResolveResults := rtTriangleResolveResults + 1.U }
+    when(rtcore.io.perf.stackPush) { rtStackPushes := rtStackPushes + 1.U }
+    when(rtcore.io.perf.stackPop) { rtStackPops := rtStackPops + 1.U }
   }
 
   io.perf_rtcore.traverseIssued := rtTraverseIssued
@@ -727,9 +776,22 @@ class pipe() extends Module{
   io.perf_rtcore.commandBackpressureCycles := rtCommandBackpressureCycles
   io.perf_rtcore.completionBackpressureCycles := rtCompletionBackpressureCycles
   io.perf_rtcore.releaseBackpressureCycles := rtReleaseBackpressureCycles
-  io.perf_rtcore.lsuRequests := rtLsuRequests
-  io.perf_rtcore.lsuResponses := rtLsuResponses
-  io.perf_rtcore.lsuBackpressureCycles := rtLsuBackpressureCycles
+  io.perf_rtcore.localSramReadRequests := rtLocalSramReadRequests
+  io.perf_rtcore.localSramWriteRequests := rtLocalSramWriteRequests
+  io.perf_rtcore.localSramReadResponses := rtLocalSramReadResponses
+  io.perf_rtcore.localSramBackpressureCycles := rtLocalSramBackpressureCycles
+  io.perf_rtcore.raySetupOutputs := rtRaySetupOutputs
+  io.perf_rtcore.asLineAcquires := rtAsLineAcquires
+  io.perf_rtcore.asLineReady := rtAsLineReady
+  io.perf_rtcore.asAcquireBackpressureCycles := rtAsAcquireBackpressureCycles
+  io.perf_rtcore.box4Issued := rtBox4Issued
+  io.perf_rtcore.box4Results := rtBox4Results
+  io.perf_rtcore.triangleIssued := rtTriangleIssued
+  io.perf_rtcore.triangleResults := rtTriangleResults
+  io.perf_rtcore.triangleResolveIssued := rtTriangleResolveIssued
+  io.perf_rtcore.triangleResolveResults := rtTriangleResolveResults
+  io.perf_rtcore.stackPushes := rtStackPushes
+  io.perf_rtcore.stackPops := rtStackPops
 
   io.perf_pipeline.foreach { perf =>
     perf.activeCycles := activeCycles

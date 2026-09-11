@@ -8,10 +8,14 @@ import top.parameters._
   * register buffer, not a cache/PDS table: SRAM has fixed one-cycle access
   * and all requests are field-major vectors. */
 class RtLocalRayState extends Module {
-  private val rayFieldCount = 12
+  private val rayFieldCount = 15
   private val hitWords = RtAbiLayout.HitRecordWordCount
   val io = IO(new Bundle {
     val admission = Flipped(Decoupled(new RtLocalAdmission))
+    // A closest-hit/miss shader may launch another trace before the warp's
+    // eventual release.  It reuses the resident Local-SRAM allocation but
+    // starts a fresh gather and hit-record lifetime.
+    val restart = Flipped(Decoupled(new RtLocalAdmission))
     val laneOut = Decoupled(new RtLocalRayLane)
     val resume = Flipped(Decoupled(new RtLocalResume))
     val resumeOut = Decoupled(new RtLocalResumeLane)
@@ -63,18 +67,33 @@ class RtLocalRayState extends Module {
   }
 
   io.admission.ready := !valid
-  when(io.admission.fire) {
-    valid := true.B; ownerWarp := io.admission.bits.warpId; activeMask := io.admission.bits.activeMask
+  io.restart.ready := valid && !flushing && !readOutstanding && !resumeActive && !drainPending
+  val startSession = io.admission.fire || io.restart.fire
+  val startBits = Wire(new RtLocalAdmission)
+  startBits := Mux(io.admission.fire, io.admission.bits, io.restart.bits)
+  when(startSession) {
+    valid := true.B; ownerWarp := startBits.warpId; activeMask := startBits.activeMask
     loadIndex := 0.U; loaded := false.B; delivered := 0.U; readOutstanding := false.B
     resumeActive := false.B; controlLoaded := false.B; flushing := false.B; drainPending := false.B
     for (lane <- 0 until num_thread) {
       prepared(lane).valid := false.B
-      for (record <- 0 until 2; word <- 0 until hitWords) dirty(lane)(record)(word) := false.B
+      // The shader may inspect either hit-record plane after a traversal,
+      // including the candidate plane after an opaque hit.  A fresh command
+      // therefore must not expose the macro's power-up contents as ABI data.
+      // Mark both planes dirty with zeroes; a later hitUpdate overwrites the
+      // selected plane before finish flushes these field-major rows.
+      for (record <- 0 until 2; word <- 0 until hitWords) {
+        recordData(lane)(record)(word) := 0.U
+        dirty(lane)(record)(word) := startBits.activeMask(lane)
+      }
     }
   }
 
-  val loadRequest = valid && !loaded && !readOutstanding
-  val resumeRequest = valid && resumeActive && !controlLoaded && !readOutstanding
+  // Finish owns the Local-SRAM port until both hit-record planes are flushed.
+  // In particular, a stale/incomplete gather state must never override the
+  // committed-record field ID in the request mux below.
+  val loadRequest = valid && !flushing && !loaded && !readOutstanding
+  val resumeRequest = valid && !flushing && resumeActive && !controlLoaded && !readOutstanding
   val flushMask = Wire(UInt(num_thread.W))
   flushMask := VecInit((0 until num_thread).map(lane =>
     activeMask(lane) && dirty(lane)(flushRecord)(flushWord))).asUInt
@@ -85,8 +104,8 @@ class RtLocalRayState extends Module {
   io.request.bits.fieldId := Mux(loadRequest, traversalField(loadIndex),
     Mux(resumeRequest, (RtAbiLayout.LocalControlBaseBytes / RtAbiLayout.AbiWordBytes).U,
       Mux(flushRecord,
-        (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U + flushWord,
-        (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U + flushWord)))
+        (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord,
+        (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord)))
   io.request.bits.write := flushRequest
   io.request.bits.laneMask := Mux(flushRequest, flushMask, 0.U)
   for (lane <- 0 until num_thread) io.request.bits.writeData(lane) := recordData(lane)(flushRecord)(flushWord)
@@ -159,7 +178,7 @@ class RtLocalRayState extends Module {
 }
 
 class RtLocalAdmission extends Bundle { val warpId = UInt(depth_warp.W); val activeMask = UInt(num_thread.W) }
-class RtLocalRayLane extends Bundle { val laneId = UInt(log2Ceil(num_thread).W); val data = Vec(12, UInt(xLen.W)) }
+class RtLocalRayLane extends Bundle { val laneId = UInt(log2Ceil(num_thread).W); val data = Vec(15, UInt(xLen.W)) }
 class RtLocalResume extends Bundle { val activeMask = UInt(num_thread.W) }
 class RtLocalResumeLane extends Bundle { val laneId = UInt(log2Ceil(num_thread).W); val callbackDecision = UInt(xLen.W) }
 class RtLocalRayTmaxUpdate extends Bundle { val laneId = UInt(log2Ceil(num_thread).W); val tmax = UInt(32.W) }

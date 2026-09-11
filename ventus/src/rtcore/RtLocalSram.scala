@@ -24,10 +24,10 @@ object RtLocalSramParameters {
   final val bankDepth = warpCount * fieldCount
   require(num_thread == 32)
   require(xLen == 32)
-  require(bankDepth == 296)
+  require(bankDepth == 320)
 }
 
-/** Behavioural replacement for 32 single-port 296x32 SRAM macros.
+/** Behavioural replacement for 32 single-port 320x32 SRAM macros.
   *
   * A request consumes the sole field-wide port.  Reads are synchronous and
   * writes have no response, matching the intended macro wrapper contract.
@@ -48,7 +48,11 @@ class RtLocalSram extends Module {
     readData(lane) := banks(lane).read(address, readEnable)
   }
 
-  io.request.ready := !readPending || io.response.ready
+  // A SyncReadMem result is exposed directly during the response cycle.
+  // Do not start another access in that cycle: a back-to-back read lets the
+  // next address advance the macro output before the current consumer has a
+  // stable field-major response.
+  io.request.ready := !readPending
   io.response.valid := readPending
   io.response.bits.readData := readData
 

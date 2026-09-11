@@ -186,7 +186,10 @@ object IDecodeLUT_IMF{
     CSRRWI-> List(N,N,N,B_N,N,N,CSR.W,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     CSRRSI-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
     CSRRCI-> List(N,N,N,B_N,N,N,CSR.C,N,A3_X,A2_X,A1_IMM,IMM_Z,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
-    CSRRSV-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,N,N,N,Y,N,N,N,N),
+    // CSRRSV is issued by the scalar CSR pipe, but rd denotes a VGPR.  Keep
+    // `isvec` clear (there is no vector CSR issue port), while advertising its
+    // vector writeback to the scoreboard so consumers wait for the CSR result.
+    CSRRSV-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,Y,N,N,N,N),
 
     FENCE->  List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_X,IMM_I,MEM_X,FN_ADD,N,M_X,N,Y,N,N,N,N,Y,N,N,N,N),
     LW->     List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,N,N,N,Y,N,N,N,N),
@@ -428,9 +431,11 @@ object IDecodeLUT_VL{
 
     VLE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_X, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
     VLSE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_RS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
+    VLUXEI32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_VRS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
     VLOXEI32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_X, A2_VRS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XRD, N, N, N, Y, N, N, N, N, N, N, N),
     VSE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_X, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
     VSSE32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_RS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
+    VSUXEI32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_VRS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
     VSOXEI32_V -> List(Y, N, N, B_N, N, N, CSR.N, N, A3_SD, A2_VRS2, A1_RS1, IMM_X, MEM_W, FN_ADD, N, M_XWR, N, N, N, N, N, N, N, N, N, N, N),
 
     VLW_V->   List(Y,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_VRS1,IMM_L11,MEM_W,FN_ADD,N,M_XRD,N,N,N,Y,Y,N,N,N,Y,N,N),
@@ -586,7 +591,7 @@ class InstrDecodeV2 extends Module {
     c.csr := s(6)
     c.reverse := s(7) //for some vector inst,change in1 and in2, e.g. subr
     val rtTraverseOp = Mux(io.inst(i)(31, 26) === "b111000".U &&
-      io.inst(i)(6, 0) === "b0001011".U,
+      io.inst(i)(6, 0) === "b0001010".U,
       MuxLookup(io.inst(i)(14, 12), RtOp.none)(Seq(
         "b000".U -> RtOp.traverse,
         "b001".U -> RtOp.release)), RtOp.none)

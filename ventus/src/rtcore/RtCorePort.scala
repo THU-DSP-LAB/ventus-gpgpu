@@ -3,8 +3,9 @@
  *
  * This file intentionally defines bundles only: it lets the decoder/issue path,
  * RTcore implementation, PDS service, and cache adapter evolve independently.
- * It is not wired into pipe.scala yet, so it cannot alter existing GPGPU timing
- * or LSU behaviour.  The interface is described by
+ * The interface is wired into `pipe.scala`; its local-SRAM and performance
+ * event ports deliberately stay distinct from generic GPGPU LSU traffic.  The
+ * interface is described by
  * docs/rtcore/microarchitecture/rtcore-hardware-microarchitecture.md.
  */
 package rtcore
@@ -62,6 +63,31 @@ class RtReleaseAck extends Bundle {
 }
 
 /**
+  * One-cycle RTcore-internal PMU events.  They deliberately expose completed
+  * handshakes rather than inferred state so `pipe` can keep the common
+  * performance-window/reset policy without confusing RT Local SRAM traffic
+  * with the generic pipeline LSU.
+  */
+class RtCorePerfEvents extends Bundle {
+  val localSramReadRequest = Bool()
+  val localSramWriteRequest = Bool()
+  val localSramReadResponse = Bool()
+  val localSramBackpressure = Bool()
+  val raySetupOutput = Bool()
+  val asLineAcquire = Bool()
+  val asLineReady = Bool()
+  val asAcquireBackpressure = Bool()
+  val box4Issue = Bool()
+  val box4Result = Bool()
+  val triangleIssue = Bool()
+  val triangleResult = Bool()
+  val triangleResolveIssue = Bool()
+  val triangleResolveResult = Bool()
+  val stackPush = Bool()
+  val stackPop = Bool()
+}
+
+/**
  * All externally visible RTcore ports.
  *
  * RtLsu is the sole RTcore-to-LSU boundary.  It is a cacheline client: DCache
@@ -78,4 +104,5 @@ class RtCoreIO extends Bundle {
 
   val lsuRequest = Decoupled(new LsuClientRequest)
   val lsuResponse = Flipped(Decoupled(new LsuClientResponse))
+  val perf = Output(new RtCorePerfEvents)
 }
