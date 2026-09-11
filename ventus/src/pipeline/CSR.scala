@@ -382,18 +382,11 @@ class CSRexe extends Module {
     val vgpr_base = Output(Vec(num_warp,UInt((VGPR_ID_WIDTH+1).W)))
     //val warpsetting = Input()
     val lsu_wid = Input(UInt(depth_warp.W))
-    // Independent combinational read selector for RTcore.  LSU requests can
-    // continue to select their own warp while an RT command is issued.
-    val rt_wid = Input(UInt(depth_warp.W))
     val simt_wid = Input(UInt(depth_warp.W))
     val lsu_tid = Output(UInt(xLen.W))
     val lsu_pds = Output(UInt(xLen.W))
     val lsu_numw= Output(UInt(xLen.W))
     val lsu_numt= Output(UInt(xLen.W))
-    val rt_tid = Output(UInt(xLen.W))
-    val rt_pds = Output(UInt(xLen.W))
-    val rt_numw= Output(UInt(xLen.W))
-    val rt_numt= Output(UInt(xLen.W))
     val simt_rpc = Output(UInt(xLen.W))
   })
   val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
@@ -412,10 +405,6 @@ class CSRexe extends Module {
   io.lsu_pds:=vCSR(io.lsu_wid).lsu_pds
   io.lsu_numw:=vCSR(io.lsu_wid).lsu_numw
   io.lsu_numt:=vCSR(io.lsu_wid).lsu_numt
-  io.rt_tid:=vCSR(io.rt_wid).lsu_tid
-  io.rt_pds:=vCSR(io.rt_wid).lsu_pds
-  io.rt_numw:=vCSR(io.rt_wid).lsu_numw
-  io.rt_numt:=vCSR(io.rt_wid).lsu_numt
   io.simt_rpc:=vCSR(io.simt_wid).simt_rpc
 
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire

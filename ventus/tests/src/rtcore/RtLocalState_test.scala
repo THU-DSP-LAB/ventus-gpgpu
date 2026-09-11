@@ -53,10 +53,10 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.response.bits.readData.foreach(_.poke(0.U))
   }
 
-  private def admit(dut: RtLocalRayState, restart: Boolean): Unit = {
+  private def admit(dut: RtLocalRayState, restart: Boolean, mask: Int = activeLane0): Unit = {
     val port = if (restart) dut.io.restart else dut.io.admission
     port.bits.warpId.poke(3.U)
-    port.bits.activeMask.poke(activeLane0.U)
+    port.bits.activeMask.poke(mask.U)
     port.valid.poke(true.B)
     port.ready.expect(true.B)
     dut.clock.step()
@@ -158,6 +158,35 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
         assert(field == expectedField)
         assert(data == 0, s"restart left stale hit data in field $field")
       }
+    }
+  }
+
+  "keeps the session mask while a nested trace gathers only its divergent lanes" in {
+    test(new RtLocalRayState) { dut =>
+      val sessionMask = 3
+      val childMask = 2
+      idle(dut)
+      dut.clock.step()
+
+      admit(dut, restart = false, mask = sessionMask)
+      // A nested command replaces the pending gather with its own divergent
+      // mask, but must not shrink the session that eventual finish/release
+      // flushes from RT Local SRAM.
+      admit(dut, restart = true, mask = childMask)
+      dut.io.finish.bits.terminalMask.poke(childMask.U)
+      dut.io.finish.valid.poke(true.B)
+      dut.io.finish.ready.expect(false.B)
+      dut.io.finish.bits.terminalMask.poke(sessionMask.U)
+      dut.io.finish.ready.expect(true.B)
+      dut.io.finish.valid.poke(false.B)
+
+      dut.io.laneOut.ready.poke(false.B)
+      completeRayGather(dut)
+      dut.io.laneOut.valid.expect(true.B)
+      dut.io.laneOut.bits.laneId.expect(1.U)
+      dut.io.laneOut.ready.poke(true.B)
+      dut.clock.step()
+      dut.io.laneOut.valid.expect(false.B)
     }
   }
 }

@@ -45,8 +45,10 @@ static uint32_t rtl_parameter_u32(const char* name) {
 //  in this case, a .fst.hier file appears. 
 static void cleanup() {
     for (auto* sim : g_instances) {
+#if VM_TRACE
         if (sim->tfp)
             sim->tfp->close(); // save waveform to file
+#endif
         // No need to delete tfp, the process is exiting
         // delete sim->tfp; // This will cause segfault sometimes, why?
         sim->tfp = nullptr;
@@ -217,7 +219,8 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     pmu_snapshot.dcache.resize(pmu_num_sm);
     pmu_snapshot.rtcore.resize(pmu_num_sm);
 
-    // waveform traces (FST)
+    // Waveform traces are available only in a model built with VLIB_TRACE=1.
+#if VM_TRACE
     if (config.waveform.enable) {
         tfp = new VerilatedFstC;
         dut->trace(tfp, config.waveform.levels);
@@ -236,6 +239,11 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     } else {
         tfp = nullptr;
     }
+#else
+    tfp = nullptr;
+    if (config.waveform.enable)
+        logger->warn("waveform requested from a no-trace RTL model; rebuild with VLIB_TRACE=1");
+#endif
 
     // push into global instances, prepare cleanup at exit
     g_instances.push_back(this);
@@ -473,8 +481,10 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
         }
     }
 
+    #if VM_TRACE
     if (tfp)
         tfp->close();
+    #endif
     dut->final();                  // Final model cleanup
     contextp->statsPrintSummary(); // Final simulation summary
 
@@ -491,8 +501,10 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
 
     delete dut;
     delete cta;
+    #if VM_TRACE
     if (tfp)
         delete tfp;
+    #endif
     dut = nullptr;
     cta = nullptr;
     tfp = nullptr;
@@ -563,6 +575,7 @@ void ventus_rtlsim_t::snapshot_fork() {
             snapshots.main_exit_time
         );
         // create a new waveform dump file
+#if VM_TRACE
         //  delete tfp;             // Cannot do this, or it will block the process
         //  (maybe because Vdut.fst was already closed in the parent process?)
         tfp = new VerilatedFstC(); // This will cause memory leak for once, but not serious. How to fix it?
@@ -574,6 +587,10 @@ void ventus_rtlsim_t::snapshot_fork() {
             config.snapshot.filename = "logs/ventus_rtlsim.snapshot.fst";
         }
         tfp->open(config.snapshot.filename);
+#else
+        logger->critical("snapshot child requires a RTL model built with VLIB_TRACE=1");
+        std::abort();
+#endif
     }
 }
 
@@ -612,6 +629,9 @@ void ventus_rtlsim_t::snapshot_kill_all() {
 }
 
 void ventus_rtlsim_t::waveform_dump() const {
+#if !VM_TRACE
+    return;
+#else
     // snapshot child process always enables waveform dump
     bool is_snapshot = config.snapshot.enable && snapshots.is_child;
     if (!config.waveform.enable && !is_snapshot)
@@ -622,6 +642,7 @@ void ventus_rtlsim_t::waveform_dump() const {
     if (is_snapshot || time >= config.waveform.time_begin && time < config.waveform.time_end) {
         tfp->dump(time);
     }
+#endif
 }
 
 void ventus_rtlsim_t::dut_reset() const {

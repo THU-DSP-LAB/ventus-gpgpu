@@ -6,6 +6,10 @@ export MAKEFLAGS += +r
 
 RELEASE ?= 0
 PREFIX ?= $(CURDIR)/install
+# Full FST support substantially increases generated C++ size and simulation
+# cost.  Keep normal RTL regressions waveform-free; request it explicitly for
+# waveform debugging with `make ... VLIB_TRACE=1`.
+VLIB_TRACE ?= 0
 
 export RTL_GVM_ENABLED = false
 VLIB_MILL = ./mill --no-server
@@ -110,8 +114,10 @@ VLIB_VERILATOR_FLAGS += -DPRINTF_COND=1
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE_MEM_INIT
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE_REG_INIT
-# Make waveforms
+# Make waveforms only in an explicit waveform-debug build.
+ifneq ($(filter 1 yes true on,$(VLIB_TRACE)),)
 VLIB_VERILATOR_FLAGS += --trace-fst
+endif
 # Check SystemVerilog assertions
 VLIB_VERILATOR_FLAGS += --assert
 # Generate coverage analysis

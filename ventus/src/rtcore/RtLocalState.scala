@@ -37,7 +37,11 @@ class RtLocalRayState extends Module {
 
   val valid = RegInit(false.B)
   val ownerWarp = Reg(UInt(depth_warp.W))
+  // Session ownership survives nested traces so final hit-record flush and
+  // release still cover the original warp.  A restart may gather only the
+  // divergent lanes which actually issued the child trace.
   val activeMask = Reg(UInt(num_thread.W))
+  val gatherMask = Reg(UInt(num_thread.W))
   val rows = Reg(Vec(rayFieldCount, Vec(num_thread, UInt(xLen.W))))
   val prepared = RegInit(VecInit(Seq.fill(num_thread)(0.U.asTypeOf(new RtPreparedRay))))
   val recordData = Reg(Vec(num_thread, Vec(2, Vec(hitWords, UInt(xLen.W)))))
@@ -72,7 +76,8 @@ class RtLocalRayState extends Module {
   val startBits = Wire(new RtLocalAdmission)
   startBits := Mux(io.admission.fire, io.admission.bits, io.restart.bits)
   when(startSession) {
-    valid := true.B; ownerWarp := startBits.warpId; activeMask := startBits.activeMask
+    valid := true.B; ownerWarp := startBits.warpId; gatherMask := startBits.activeMask
+    when(io.admission.fire) { activeMask := startBits.activeMask }
     loadIndex := 0.U; loaded := false.B; delivered := 0.U; readOutstanding := false.B
     resumeActive := false.B; controlLoaded := false.B; flushing := false.B; drainPending := false.B
     for (lane <- 0 until num_thread) {
@@ -126,14 +131,14 @@ class RtLocalRayState extends Module {
       }
   }
 
-  val pendingLanes = activeMask & (~delivered).asUInt
+  val pendingLanes = gatherMask & (~delivered).asUInt
   val lane = PriorityEncoder(pendingLanes)
   io.laneOut.valid := valid && loaded && !resumeActive && pendingLanes.orR
   io.laneOut.bits.laneId := lane
   io.laneOut.bits.data := VecInit((0 until rayFieldCount).map(field => rows(field)(lane)))
   when(io.laneOut.fire) { delivered := delivered | UIntToOH(lane, num_thread) }
 
-  io.resume.ready := valid && loaded && !resumeActive && delivered === activeMask
+  io.resume.ready := valid && loaded && !resumeActive && delivered === gatherMask
   when(io.resume.fire) { resumeActive := true.B; controlLoaded := false.B; resumeMask := io.resume.bits.activeMask; resumeDelivered := 0.U }
   val resumePending = resumeMask & (~resumeDelivered).asUInt
   val resumeLane = PriorityEncoder(resumePending)
@@ -145,7 +150,7 @@ class RtLocalRayState extends Module {
     when((resumeDelivered | UIntToOH(resumeLane, num_thread)) === resumeMask) { resumeActive := false.B; controlLoaded := false.B; resumeDelivered := 0.U }
   }
 
-  io.raySetup.ready := valid && activeMask(io.raySetup.bits.laneId) && !prepared(io.raySetup.bits.laneId).valid
+  io.raySetup.ready := valid && gatherMask(io.raySetup.bits.laneId) && !prepared(io.raySetup.bits.laneId).valid
   when(io.raySetup.fire) {
     val dst = prepared(io.raySetup.bits.laneId)
     dst.valid := true.B; dst.asBase := io.raySetup.bits.accelLo; dst.currentTmax := io.raySetup.bits.ray.extent

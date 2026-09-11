@@ -158,7 +158,6 @@ class pipe() extends Module{
   io.externalFlushPipe.bits:=Mux(warp_sche.io.flush.valid,warp_sche.io.flush.bits,warp_sche.io.flushCache.bits)
 
   csrfile.io.lsu_wid:=lsu.io.csr_wid
-  csrfile.io.rt_wid := issueV.io.out_RT.bits.ctrl.wid
   lsu.io.csr_pds:=csrfile.io.lsu_pds
   lsu.io.csr_tid:=csrfile.io.lsu_tid
   lsu.io.csr_numw:=csrfile.io.lsu_numw
@@ -493,6 +492,20 @@ class pipe() extends Module{
   if (SPIKE_OUTPUT) { rtLocalWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
   rtLocalSram.io.response.ready := Mux(rtLocalResponseToCore,
     rtcore.io.localResponse.ready, rtLocalWriteback.io.enq.ready)
+  if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
+    when(rtLocalSram.io.request.fire) {
+      printf(p"[RTLOCAL trace] request core=${Decimal(rtcore.io.localRequest.valid)}" +
+        p" warp=${Decimal(rtLocalSram.io.request.bits.warpId)}" +
+        p" field=${Decimal(rtLocalSram.io.request.bits.fieldId)}" +
+        p" write=${Decimal(rtLocalSram.io.request.bits.write)}" +
+        p" lane0=0x${Hexadecimal(rtLocalSram.io.request.bits.writeData(0))}\n")
+    }
+    when(rtLocalSram.io.response.fire) {
+      printf(p"[RTLOCAL trace] response core=${Decimal(rtLocalResponseToCore)}" +
+        p" warp=${Decimal(rtLocalReadWarp)}" +
+        p" lane0=0x${Hexadecimal(rtLocalSram.io.response.bits.readData(0))}\n")
+    }
+  }
   // release is a lifecycle barrier: software TERMINATED stores for this warp
   // must complete through the legacy LSU before RTcore may reclaim its state.
   val rtReleaseStoreDrained = lsu.io.fence_end(rtIssue.ctrl.wid)
@@ -534,6 +547,12 @@ class pipe() extends Module{
   if (SPIKE_OUTPUT) { rtWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
   rtcore.io.completion.ready := rtWriteback.io.enq.ready && !rtCompletionAwaitingWb
   when(rtcore.io.completion.fire) {
+    if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
+      printf(p"[RTLOCAL trace] completion warp=${Decimal(rtcore.io.completion.bits.warpId)}" +
+        p" vd=${Decimal(rtcore.io.completion.bits.destinationVd)}" +
+        p" mask0=${Decimal(rtcore.io.completion.bits.completionMask(0))}" +
+        p" status0=0x${Hexadecimal(rtcore.io.completion.bits.laneStatus(0))}\n")
+    }
     rtCompletionAwaitingWb := true.B
     rtCompletionWarp := rtcore.io.completion.bits.warpId
     rtCompletionDestination := rtcore.io.completion.bits.destinationVd
@@ -557,6 +576,11 @@ class pipe() extends Module{
   when(wb.io.out_v.fire && rtCompletionAwaitingWb &&
     wb.io.out_v.bits.warp_id === rtCompletionWarp &&
     wb.io.out_v.bits.reg_idxw === rtCompletionDestination) {
+    if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
+      printf(p"[RTLOCAL trace] completion-wb warp=${Decimal(wb.io.out_v.bits.warp_id)}" +
+        p" vd=${Decimal(wb.io.out_v.bits.reg_idxw)}" +
+        p" status0=0x${Hexadecimal(wb.io.out_v.bits.wb_wvd_rd(0))}\n")
+    }
     rtInFlight(rtCompletionWarp) := false.B
     rtCompletionAwaitingWb := false.B
   }
@@ -627,8 +651,8 @@ class pipe() extends Module{
       .otherwise { noIssueCycles := 0.U }
     when(noIssueCycles === 1024.U) {
       for (i <- 0 until num_warp) {
-        when(ibuffer.io.out(i).valid && warp_sche.io.warp_ready(i)) {
-          printf(p"[SCOREBOARD trace] warp=${Decimal(i.U)} pc=0x${Hexadecimal(ibuffer.io.out(i).bits.pc)} inst=0x${Hexadecimal(ibuffer.io.out(i).bits.inst)} delay=${scoreb(i).delay} r1=${scoreb(i).stall_read1} r2=${scoreb(i).stall_read2} r3=${scoreb(i).stall_read3} mask=${scoreb(i).stall_mask} wr=${scoreb(i).stall_write} br=${scoreb(i).stall_branch} fence=${scoreb(i).stall_fence} opv=${scoreb(i).stall_opcol_v} opx=${scoreb(i).stall_opcol_x}\n")
+        when(ibuffer.io.out(i).valid) {
+          printf(p"[SCOREBOARD trace] warp=${Decimal(i.U)} pc=0x${Hexadecimal(ibuffer.io.out(i).bits.pc)} inst=0x${Hexadecimal(ibuffer.io.out(i).bits.inst)} ready=${warp_sche.io.warp_ready(i)} exe=${warp_sche.io.exe_busy(i)} barrier=${warp_sche.io.barrier_busy(i)} delay=${scoreb(i).delay} r1=${scoreb(i).stall_read1} r2=${scoreb(i).stall_read2} r3=${scoreb(i).stall_read3} mask=${scoreb(i).stall_mask} wr=${scoreb(i).stall_write} br=${scoreb(i).stall_branch} fence=${scoreb(i).stall_fence} opv=${scoreb(i).stall_opcol_v} opx=${scoreb(i).stall_opcol_x}\n")
         }
       }
     }

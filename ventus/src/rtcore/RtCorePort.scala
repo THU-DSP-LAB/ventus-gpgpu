@@ -2,7 +2,7 @@
  * RTcore module boundary for the evolving Ventus SM pipeline.
  *
  * This file intentionally defines bundles only: it lets the decoder/issue path,
- * RTcore implementation, PDS service, and cache adapter evolve independently.
+ * RTcore implementation, RT Local SRAM service, and cache adapter evolve independently.
  * The interface is wired into `pipe.scala`; its local-SRAM and performance
  * event ports deliberately stay distinct from generic GPGPU LSU traffic.  The
  * interface is described by
@@ -27,8 +27,6 @@ object RtCorePortParameters {
   val requestIdWidth = 8
   val lineWordCount = dcache_BlockWords
   val lineBytes = lineWordCount * (xLen / 8)
-  // MSHR capacity is transaction concurrency, not warp residency.
-  val rtLsuMshrEntryCount = 16
   require(lineBytes == 128, "RTcore reads use one 128-byte DCache line")
   val regidx_totalwidth = regidx_width + regext_width
 }
@@ -56,7 +54,7 @@ class RtReleaseCommand extends Bundle {
   val activeMask = UInt(num_thread.W)
 }
 
-/** Release retires only the lanes named by the command mask. */
+/** Release retires the complete original mask of the retained RT session. */
 class RtReleaseAck extends Bundle {
   val warpId = UInt(depth_warp.W)
   val releasedMask = UInt(num_thread.W)

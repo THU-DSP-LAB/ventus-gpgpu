@@ -466,13 +466,42 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
       }
     }
   }
+  }
 
   // Opt-in trace for the PDS-backed private payload frames used by the RT
   // megakernel.  Unlike RT Local SRAM accesses, these are normal vector LSU
   // transactions.  Keep this elaboration-time gated so ordinary RTL builds
   // and timing are unaffected.  Lane 0 is sufficient for the 1x1 regression
   // and keeps full-app logs tractable.
-  if (sys.env.get("VENTUS_PDS_TRACE").contains("1")) {
+  if (PDS_TRACE) {
+    // A compact decoder witness.  Keep it before the VLS12-specific filters:
+    // if a custom private-frame instruction is being decoded as an ordinary
+    // LSU operation, the missing `is_vls12` bit is itself the diagnosis.
+    when(state === s_save && io.to_mshr.fire && reg_save.mask(0)) {
+      printf(p"[PDS trace] any pc=0x${Hexadecimal(reg_save.ctrl.pc)}" +
+        p" vls12=${Decimal(reg_save.ctrl.is_vls12)}" +
+        p" private=${Decimal(reg_save.ctrl.disable_mask)}" +
+        p" vec=${Decimal(reg_save.ctrl.isvec)}" +
+        p" cmd=${Decimal(reg_save.ctrl.mem_cmd)}" +
+        p" base=0x${Hexadecimal(reg_save.in1(0))}" +
+        p" off=0x${Hexadecimal(reg_save.in2(0))}" +
+        p" data=0x${Hexadecimal(reg_save.in3(0))}" +
+        p" paddr=0x${Hexadecimal(addr(0))}\n")
+    }
+    // VLS12 carries the RT megakernel's explicitly addressed private-frame
+    // loads/stores.  It bypasses the ordinary PDS address transform, so trace
+    // its resolved address directly rather than applying the offset filter
+    // below.
+    when(state === s_save && io.to_mshr.fire && reg_save.ctrl.isvec &&
+         reg_save.ctrl.is_vls12 && reg_save.mask(0)) {
+      when(reg_save.ctrl.mem_cmd === IDecode.M_XRD) {
+        printf(p"[PDS trace] vls12-r pc=0x${Hexadecimal(reg_save.ctrl.pc)}" +
+          p" paddr=0x${Hexadecimal(addr(0))}\n")
+      }.elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XWR) {
+        printf(p"[PDS trace] vls12-w pc=0x${Hexadecimal(reg_save.ctrl.pc)}" +
+          p" data=0x${Hexadecimal(reg_save.in3(0))} paddr=0x${Hexadecimal(addr(0))}\n")
+      }
+    }
     when(state === s_save && io.to_mshr.fire && reg_save.ctrl.isvec &&
          reg_save.ctrl.disable_mask && !reg_save.ctrl.is_vls12 &&
          reg_save.mask(0)) {
@@ -489,7 +518,6 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
       }
     }
   }
-}
 
 //   if (SPIKE_OUTPUT){
 //     when( state===s_save && io.to_mshr.fire && reg_save.ctrl.mem/*&&reg_save.ctrl.wid===wid_to_check.U*/){

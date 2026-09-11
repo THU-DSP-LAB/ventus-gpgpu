@@ -10,12 +10,16 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   var num_warp = 8
   var num_thread = 32
   val SINGLE_INST: Boolean = false
-  val SPIKE_OUTPUT: Boolean = true
+  val SPIKE_OUTPUT: Boolean = false
   val INST_CNT: Boolean = true
   val INST_CNT_2: Boolean = false
   val PMU_PIPELINE: Boolean = true
   val PMU_INST_CLASS: Boolean = true
   val GVM_ENABLED: Boolean = sys.env.getOrElse("RTL_GVM_ENABLED", "false").toBoolean
+  // Per-transaction traces are elaboration-time diagnostics.  Keep them out
+  // of the normal release model: stdout traffic dominates larger RTL runs.
+  val L1C_TRACE: Boolean = sys.env.getOrElse("VENTUS_RTL_L1C_TRACE", "false").toBoolean
+  val PDS_TRACE: Boolean = sys.env.getOrElse("VENTUS_RTL_PDS_TRACE", "false").toBoolean
   val MMU_ENABLED: Boolean = false
   val DCACHE_DEBUG: Boolean = false
   def MMU_ASID_WIDTH = mmu.SV32.asidLen

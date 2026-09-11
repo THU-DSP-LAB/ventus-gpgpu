@@ -159,7 +159,7 @@ class RtCoreScheduler extends Module {
   local.io.resume.valid := io.command.valid && resumeCommand
   local.io.resume.bits.activeMask := io.command.bits.activeMask
   val restartStackClearRequest = io.command.valid && restartCommand && local.io.restart.ready
-  io.command.ready := Mux(freshCommand,
+  io.command.ready := commandAllowed && Mux(freshCommand,
     local.io.admission.ready, Mux(resumeCommand, local.io.resume.ready,
       local.io.restart.ready && stack.io.clear.ready))
   when(io.command.fire) {
@@ -184,8 +184,8 @@ class RtCoreScheduler extends Module {
         }
       }
     }.elsewhen(restartCommand) {
-      assert(io.command.bits.activeMask === activeMask(warp),
-        "nested traversal must cover the resident RT session mask")
+      assert((io.command.bits.activeMask & ~activeMask(warp)) === 0.U,
+        "nested traversal mask must be a subset of the resident RT session")
       completionPublished(warp) := false.B
       for (lane <- 0 until num_thread) {
         when(io.command.bits.activeMask(lane)) {
@@ -820,7 +820,6 @@ class RtCoreScheduler extends Module {
   // already decided that every originally active lane is terminal; the mask
   // is retained solely to catch ABI/control-flow mistakes at this boundary.
   val releasePending = RegInit(false.B)
-  val releaseBits = Reg(new RtReleaseCommand)
   val releaseStackCleared = RegInit(false.B)
   val releaseLanesInvalidated = RegInit(false.B)
   val releaseAllowed = sessionActive(0) && completionPublished(0) && !completionPending &&
@@ -828,7 +827,6 @@ class RtCoreScheduler extends Module {
   io.release.ready := releaseAllowed && !releasePending && !finalRetirePending
   when(io.release.fire) {
     releasePending := true.B
-    releaseBits := io.release.bits
     releaseStackCleared := false.B
     releaseLanesInvalidated := false.B
   }

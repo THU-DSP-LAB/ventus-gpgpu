@@ -129,6 +129,14 @@ class Scoreboard extends Module{
   val OpColRegV=new ScoreboardUtil(1)
   val OpColRegX=new ScoreboardUtil(1)
   val fenceReg=new ScoreboardUtil(1) // after LSU rebuild, this could be cancelled.
+  if (sys.env.get("VENTUS_SCOREBOARD_TRACE").contains("1")) {
+    when(io.if_fire && io.if_ctrl.wxd && io.if_ctrl.reg_idxw === 13.U) {
+      printf(p"[SCOREBOARD a3] set pc=0x${Hexadecimal(io.if_ctrl.pc)} inst=0x${Hexadecimal(io.if_ctrl.inst)}\n")
+    }
+    when(io.wb_x_fire && io.wb_x_ctrl.wxd && io.wb_x_ctrl.reg_idxw === 13.U) {
+      printf(p"[SCOREBOARD a3] clear warp=${Decimal(io.wb_x_ctrl.warp_id)}\n")
+    }
+  }
   // TODO: CSR operation may cause unexpected situation.
   vectorReg.set(io.if_fire & io.if_ctrl.wvd,io.if_ctrl.reg_idxw)
   vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wvd,io.wb_v_ctrl.reg_idxw)
