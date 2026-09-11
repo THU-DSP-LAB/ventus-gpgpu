@@ -2,7 +2,6 @@ package rtcore
 
 import chisel3._
 import chisel3.util._
-import hardfloat._
 
 /** Final IEEE divisions for an accepted triangle hit. */
 class RtTriangleResolveResult extends Bundle {
@@ -19,9 +18,6 @@ class RtTriangleResolveResult extends Bundle {
   * path instead of by every Triangle IU.
   */
 class RtTriangleResolve extends Module {
-  private val rounding = consts.round_near_even
-  private val tininess = consts.tininess_beforeRounding
-
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new RtTriangleIntersectionOutput))
     val out = Decoupled(new RtTriangleResolveResult)
@@ -33,16 +29,14 @@ class RtTriangleResolve extends Module {
   val outBits = Reg(new RtTriangleResolveResult)
   val divisionBits = Reg(Vec(3, UInt(32.W)))
   val divisionReturned = RegInit(0.U(3.W))
-  val dividers = Seq.fill(3)(Module(new DivSqrtRecFN_small(8, 24, 0)))
-  val dividerReady = dividers.map(_.io.inReady).reduce(_ && _)
+  val dividers = Seq.fill(3)(Module(new RtFpDiv))
+  val dividerReady = dividers.map(_.io.in.ready).reduce(_ && _)
   val numerators = Seq(io.in.bits.uNum, io.in.bits.vNum, io.in.bits.tNum)
   dividers.zip(numerators).foreach { case (divider, numerator) =>
-    divider.io.inValid := io.in.fire
-    divider.io.sqrtOp := false.B
-    divider.io.a := recFNFromFN(8, 24, numerator)
-    divider.io.b := recFNFromFN(8, 24, io.in.bits.tDenom)
-    divider.io.roundingMode := rounding
-    divider.io.detectTininess := tininess
+    divider.io.in.valid := io.in.fire
+    divider.io.in.bits.a := numerator
+    divider.io.in.bits.b := io.in.bits.tDenom
+    divider.io.out.ready := true.B
   }
 
   io.in.ready := !busy && !outValid && dividerReady
@@ -56,8 +50,8 @@ class RtTriangleResolve extends Module {
     divisionReturned := 0.U
   }
 
-  val resultValid = VecInit(dividers.map(_.io.outValid_div)).asUInt
-  val result = dividers.map(divider => fNFromRecFN(8, 24, divider.io.out))
+  val resultValid = VecInit(dividers.map(_.io.out.valid)).asUInt
+  val result = dividers.map(_.io.out.bits)
   when(busy && resultValid.orR) {
     divisionReturned := divisionReturned | resultValid
   }

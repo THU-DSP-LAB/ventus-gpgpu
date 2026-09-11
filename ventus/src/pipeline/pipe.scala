@@ -15,6 +15,7 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 import gvm._
+import rtcore._
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
@@ -94,7 +95,17 @@ class pipe() extends Module{
   val mul=Module(new vMULv2(num_thread,num_lane))
   val tensorcore=Module(new vTCexe)
   val lsu2wb=Module(new LSU2WB)
-  val wb=Module(new Writeback(6,7))
+  val wb=Module(new Writeback(6,9))
+  val rtcore = Module(new RtCore)
+  val rtLocalSram = Module(new RtLocalSram)
+  val rtWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
+  val rtLocalWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
+  val rtInFlight = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtIssueId = RegInit(VecInit(Seq.fill(num_warp)(0.U(RtCorePortParameters.issueIdWidth.W))))
+  val rtCompletionAwaitingWb = RegInit(false.B)
+  val rtCompletionWarp = Reg(UInt(depth_warp.W))
+  val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
+  val rtReleaseSent = RegInit(false.B)
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
@@ -147,6 +158,7 @@ class pipe() extends Module{
   io.externalFlushPipe.bits:=Mux(warp_sche.io.flush.valid,warp_sche.io.flush.bits,warp_sche.io.flushCache.bits)
 
   csrfile.io.lsu_wid:=lsu.io.csr_wid
+  csrfile.io.rt_wid := issueV.io.out_RT.bits.ctrl.wid
   lsu.io.csr_pds:=csrfile.io.lsu_pds
   lsu.io.csr_tid:=csrfile.io.lsu_tid
   lsu.io.csr_numw:=csrfile.io.lsu_numw
@@ -416,6 +428,7 @@ class pipe() extends Module{
   issueX.io.out_TC.ready := false.B
   issueV.io.out_vFPU<>fpu.io.in
   issueX.io.out_vFPU.ready := false.B
+  issueX.io.out_RT.ready := false.B
   issueX.io.out_warpscheduler <> warp_sche.io.warp_control
   issueV.io.out_warpscheduler.ready := false.B
 
@@ -431,12 +444,100 @@ class pipe() extends Module{
   lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
   lsu.io.shared_rsp<>io.shared_rsp
   lsu.io.shared_req<>io.shared_req
-  // RT dispatch is integrated separately from the cacheline interconnect.
-  // Keep the generic cacheline-client port quiescent until that control-plane
-  // owner instantiates RtCoreScheduler and connects its lsuRequest/lsuResponse.
-  lsu.io.cachelineClientReq.valid := false.B
-  lsu.io.cachelineClientReq.bits := 0.U.asTypeOf(new _root_.lsu.LsuClientRequest)
-  lsu.io.cachelineClientRsp.ready := true.B
+  // RTcore is the generic cacheline client; its private MSHR remains behind
+  // this single LSU boundary.
+  lsu.io.cachelineClientReq <> rtcore.io.lsuRequest
+  rtcore.io.lsuResponse <> lsu.io.cachelineClientRsp
+  val rtLocalResponseToCore = RegInit(false.B)
+  val rtLocalReadWarp = Reg(UInt(depth_warp.W))
+  val rtLocalReadDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
+  val rtLocalReadMask = Reg(UInt(num_thread.W))
+
+  val rtIssue = issueV.io.out_RT.bits
+  val rtIsTraverse = rtIssue.ctrl.rtOp === RtOp.traverse
+  val rtIsRelease = rtIssue.ctrl.rtOp === RtOp.release
+  val rtIsLocalLoad = rtIssue.ctrl.rtOp === RtOp.localLoad
+  val rtIsLocalStore = rtIssue.ctrl.rtOp === RtOp.localStore
+  val softwareLocalRequest = Wire(Decoupled(new RtLocalSramRequest))
+  softwareLocalRequest.valid := issueV.io.out_RT.valid && (rtIsLocalLoad || rtIsLocalStore) &&
+    !rtInFlight(rtIssue.ctrl.wid)
+  softwareLocalRequest.bits := 0.U.asTypeOf(new RtLocalSramRequest)
+  softwareLocalRequest.bits.warpId := rtIssue.ctrl.wid
+  softwareLocalRequest.bits.fieldId := rtIssue.ctrl.inst(31, 26)
+  softwareLocalRequest.bits.write := rtIsLocalStore
+  softwareLocalRequest.bits.laneMask := rtIssue.mask.asUInt
+  softwareLocalRequest.bits.writeData := rtIssue.in2
+
+  rtLocalSram.io.request.valid := rtcore.io.localRequest.valid || softwareLocalRequest.valid
+  rtLocalSram.io.request.bits := Mux(rtcore.io.localRequest.valid,
+    rtcore.io.localRequest.bits, softwareLocalRequest.bits)
+  rtcore.io.localRequest.ready := rtLocalSram.io.request.ready
+  softwareLocalRequest.ready := !rtcore.io.localRequest.valid && rtLocalSram.io.request.ready
+  when(rtLocalSram.io.request.fire && !rtLocalSram.io.request.bits.write) {
+    rtLocalResponseToCore := rtcore.io.localRequest.valid
+    when(!rtcore.io.localRequest.valid) {
+      rtLocalReadWarp := rtIssue.ctrl.wid
+      rtLocalReadDestination := rtIssue.ctrl.reg_idxw
+      rtLocalReadMask := rtIssue.mask.asUInt
+    }
+  }
+  rtcore.io.localResponse.valid := rtLocalSram.io.response.valid && rtLocalResponseToCore
+  rtcore.io.localResponse.bits := rtLocalSram.io.response.bits
+  rtLocalWriteback.io.enq.valid := rtLocalSram.io.response.valid && !rtLocalResponseToCore
+  rtLocalWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
+  rtLocalWriteback.io.enq.bits.warp_id := rtLocalReadWarp
+  rtLocalWriteback.io.enq.bits.reg_idxw := rtLocalReadDestination
+  rtLocalWriteback.io.enq.bits.wvd := true.B
+  rtLocalWriteback.io.enq.bits.wvd_mask := rtLocalReadMask.asBools
+  rtLocalWriteback.io.enq.bits.wb_wvd_rd := rtLocalSram.io.response.bits.readData
+  if (SPIKE_OUTPUT) { rtLocalWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
+  rtLocalSram.io.response.ready := Mux(rtLocalResponseToCore,
+    rtcore.io.localResponse.ready, rtLocalWriteback.io.enq.ready)
+  // release is a lifecycle barrier: software TERMINATED stores for this warp
+  // must complete through the legacy LSU before RTcore may reclaim its state.
+  val rtReleaseStoreDrained = lsu.io.fence_end(rtIssue.ctrl.wid)
+  rtcore.io.command.valid := issueV.io.out_RT.valid && rtIsTraverse &&
+    !rtInFlight(rtIssue.ctrl.wid)
+  rtcore.io.command.bits.warpId := rtIssue.ctrl.wid
+  rtcore.io.command.bits.issueId := rtIssueId(rtIssue.ctrl.wid)
+  rtcore.io.command.bits.destinationVd := rtIssue.ctrl.reg_idxw
+  rtcore.io.command.bits.activeMask := rtIssue.mask.asUInt
+
+  // A release must not retire before the RTcore has actually reclaimed its
+  // retained context.  Hold the issue entry after its one-time submission.
+  rtcore.io.release.valid := issueV.io.out_RT.valid && rtIsRelease &&
+    !rtReleaseSent && !rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained
+  rtcore.io.release.bits.warpId := rtIssue.ctrl.wid
+  rtcore.io.release.bits.activeMask := rtIssue.mask.asUInt
+  rtcore.io.releaseAck.ready := rtReleaseSent && issueV.io.out_RT.valid && rtIsRelease
+  issueV.io.out_RT.ready := Mux(rtIsTraverse,
+    !rtInFlight(rtIssue.ctrl.wid) && rtcore.io.command.ready,
+    Mux(rtIsRelease, rtReleaseSent && rtcore.io.releaseAck.valid,
+      Mux(rtIsLocalLoad || rtIsLocalStore, softwareLocalRequest.ready, false.B)))
+  when(rtcore.io.command.fire) {
+    val wid = rtcore.io.command.bits.warpId
+    rtInFlight(wid) := true.B
+    rtIssueId(wid) := rtIssueId(wid) + 1.U
+  }
+  when(rtcore.io.release.fire) {
+    rtReleaseSent := true.B
+  }
+  when(rtcore.io.releaseAck.fire) { rtReleaseSent := false.B }
+
+  rtWriteback.io.enq.valid := rtcore.io.completion.valid && !rtCompletionAwaitingWb
+  rtWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
+  rtWriteback.io.enq.bits.warp_id := rtcore.io.completion.bits.warpId
+  rtWriteback.io.enq.bits.reg_idxw := rtcore.io.completion.bits.destinationVd
+  rtWriteback.io.enq.bits.wvd := true.B
+  rtWriteback.io.enq.bits.wvd_mask := rtcore.io.completion.bits.completionMask.asBools
+  rtWriteback.io.enq.bits.wb_wvd_rd := rtcore.io.completion.bits.laneStatus
+  if (SPIKE_OUTPUT) { rtWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
+  rtcore.io.completion.ready := rtWriteback.io.enq.ready && !rtCompletionAwaitingWb
+  when(rtcore.io.completion.fire) {
+    rtCompletionAwaitingWb := true.B
+    rtCompletionWarp := rtcore.io.completion.bits.warpId
+    rtCompletionDestination := rtcore.io.completion.bits.destinationVd
+  }
 
   wb.io.in_x(0)<>alu.io.out
   wb.io.in_x(1)<>fpu.io.out_x
@@ -451,6 +552,14 @@ class pipe() extends Module{
   wb.io.in_v(4)<>mul.io.out_v
   wb.io.in_v(5)<>tensorcore.io.out_v
   wb.io.in_v(6)<>csrfile.io.out_v
+  wb.io.in_v(7)<>rtWriteback.io.deq
+  wb.io.in_v(8)<>rtLocalWriteback.io.deq
+  when(wb.io.out_v.fire && rtCompletionAwaitingWb &&
+    wb.io.out_v.bits.warp_id === rtCompletionWarp &&
+    wb.io.out_v.bits.reg_idxw === rtCompletionDestination) {
+    rtInFlight(rtCompletionWarp) := false.B
+    rtCompletionAwaitingWb := false.B
+  }
 
   val activeCycles = RegInit(0.U(64.W))
   val totalScalarIssued = RegInit(0.U(64.W))

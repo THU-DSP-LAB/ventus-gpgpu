@@ -15,6 +15,15 @@ import chisel3.util.{Decoupled, DecoupledIO, MuxLookup, Queue, UIntToOH}
 import top.parameters._
 import IDecode._
 
+object RtOp {
+  val width = 3
+  val none = 0.U(width.W)
+  val traverse = 1.U(width.W)
+  val release = 2.U(width.W)
+  val localLoad = 3.U(width.W)
+  val localStore = 4.U(width.W)
+}
+
 
 class CtrlSigs extends Bundle {
   val inst = UInt(32.W)
@@ -40,6 +49,10 @@ class CtrlSigs extends Bundle {
   val mem = Bool()
   val mul = Bool()
   val tc = Bool()
+  // RT control operations use the custom instruction opcode but are neither
+  // ALU nor LSU operations.  Keep their semantic opcode explicit rather than
+  // overloading a legacy custom signal.
+  val rtOp = UInt(RtOp.width.W)
   val disable_mask = Bool()
   val custom_signal_0 = Bool()
   val mem_cmd = UInt(2.W)

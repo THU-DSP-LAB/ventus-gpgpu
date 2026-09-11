@@ -1,10 +1,68 @@
 package rtcore
 
 import chisel3._
+import chisel3.util._
 import chiseltest._
+import hardfloat._
 import org.scalatest.freespec.AnyFreeSpec
+import top.parameters._
 
 import scala.util.Random
+
+/** Test-only lockstep result collector for the retired HardFloat RT divider. */
+class RtFpDivReferenceHarness extends Module {
+  val io = IO(new Bundle {
+    val in = Flipped(Decoupled(new Bundle {
+      val a = UInt(32.W)
+      val b = UInt(32.W)
+    }))
+    val out = Decoupled(new Bundle {
+      val result = UInt(32.W)
+      val reference = UInt(32.W)
+      val matches = Bool()
+    })
+  })
+
+  val divider = Module(new RtFpDiv)
+  val reference = Module(new DivSqrtRecFN_small(8, 24, 0))
+  val pending = RegInit(false.B)
+  val dividerSeen = RegInit(false.B)
+  val referenceSeen = RegInit(false.B)
+  val dividerResult = Reg(UInt(32.W))
+  val referenceResult = Reg(UInt(32.W))
+
+  io.in.ready := !pending && divider.io.in.ready && reference.io.inReady
+  divider.io.in.valid := io.in.fire
+  divider.io.in.bits.a := io.in.bits.a
+  divider.io.in.bits.b := io.in.bits.b
+  divider.io.out.ready := true.B
+  reference.io.inValid := io.in.fire
+  reference.io.sqrtOp := false.B
+  reference.io.a := recFNFromFN(8, 24, io.in.bits.a)
+  reference.io.b := recFNFromFN(8, 24, io.in.bits.b)
+  reference.io.roundingMode := consts.round_near_even
+  reference.io.detectTininess := consts.tininess_beforeRounding
+
+  when(io.in.fire) {
+    pending := true.B
+    dividerSeen := false.B
+    referenceSeen := false.B
+  }
+  when(divider.io.out.valid) {
+    dividerResult := divider.io.out.bits
+    dividerSeen := true.B
+  }
+  when(reference.io.outValid_div) {
+    referenceResult := fNFromRecFN(8, 24, reference.io.out)
+    referenceSeen := true.B
+  }
+
+  io.out.valid := pending && dividerSeen && referenceSeen
+  io.out.bits.result := dividerResult
+  io.out.bits.reference := referenceResult
+  io.out.bits.matches := dividerResult === referenceResult
+  when(io.out.fire) { pending := false.B }
+}
 
 class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
   private def raw(value: Float): BigInt =
@@ -20,6 +78,45 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
       remaining -= 1
     }
     assert(condition, s"condition did not become true within $limit cycles")
+  }
+
+  "RtFpDiv matches the retired HardFloat divider" in {
+    test(new RtFpDivReferenceHarness).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      dut.reset.poke(true.B)
+      dut.clock.step(2)
+      dut.reset.poke(false.B)
+      dut.io.in.valid.poke(false.B)
+      dut.io.out.ready.poke(true.B)
+      val directed = Seq(
+        ("3f800000", "3f800000"), ("3f800000", "40800000"),
+        ("c0600000", "40000000"), ("7f7fffff", "3f000000"),
+        ("00800000", "40000000"), ("00000001", "3f800000"),
+        ("00000000", "3f800000"), ("3f800000", "00000000"),
+        ("00000000", "00000000"), ("7f800000", "3f800000"),
+        ("3f800000", "7f800000"), ("7f800000", "7f800000"),
+        ("7fc12345", "3f800000"), ("3f800000", "7fc12345")
+      )
+      val random = new Random(0x5eedf00dL)
+      val randomCases = (0 until 256).map { _ =>
+        def finiteNormal(): Int = {
+          val sign = if (random.nextBoolean()) 0x80000000 else 0
+          val exponent = 1 + random.nextInt(254)
+          sign | (exponent << 23) | random.nextInt(1 << 23)
+        }
+        (f"${finiteNormal()}%08x", f"${finiteNormal()}%08x")
+      }
+      (directed ++ randomCases).foreach { case (a, b) =>
+        dut.io.in.bits.a.poke(BigInt(a, 16).U)
+        dut.io.in.bits.b.poke(BigInt(b, 16).U)
+        dut.io.in.valid.poke(true.B)
+        waitUntil(4)(dut.io.in.ready.peek().litToBoolean)(dut.clock.step())
+        dut.clock.step()
+        dut.io.in.valid.poke(false.B)
+        waitUntil(300)(dut.io.out.valid.peek().litToBoolean)(dut.clock.step())
+        dut.io.out.bits.matches.expect(true.B)
+        dut.clock.step()
+      }
+    }
   }
 
   private def reset(dut: RtRaySetup): Unit = {

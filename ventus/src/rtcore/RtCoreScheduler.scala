@@ -27,11 +27,12 @@ private[rtcore] class RtTriangleDispatchMeta extends Bundle {
 /**
   * Warp/lane traversal controller.
   *
-  * It is the RTcore control boundary: commands admit PDS read/write state,
-  * table-ready notifications feed setup and traversal, and only this module
+  * It is the RTcore control boundary: commands start RT Local SRAM gather,
+  * local-ready notifications feed setup and traversal, and only this module
   * chooses an IU destination.  RtMemTable remains the sole LSU client.  This
-  * baseline intentionally traverses BLAS Box4/Triangle nodes only; status and
-  * control PDS fields are not read or written here.
+  * baseline intentionally traverses BLAS Box4/Triangle nodes only.  It does
+  * not access software lifecycle status, but re-reads callback control when
+  * a retained candidate is resumed.
   */
 class RtCoreScheduler extends Module {
   import RtCoreSchedulerParameters._
@@ -46,27 +47,40 @@ class RtCoreScheduler extends Module {
   val triangleResult = IO(Flipped(Vec(triangleUnitCount, Decoupled(new RtTriangleIntersectionOutput))))
 
   val table = Module(new RtMemTable)
+  val local = Module(new RtLocalRayState)
   val stack = Module(new RtTraversalStack)
   val raySetup = Module(new RtRaySetup)
   val triangleResolve = Module(new RtTriangleResolve)
   io.lsuRequest <> table.io.lsuRequest
   table.io.lsuResponse <> io.lsuResponse
+  io.localRequest <> local.io.request
+  local.io.response <> io.localResponse
 
-  val Seq(sIdle, sPdsRead, sHeaderRequest, sHeaderPending, sStackReady,
-    sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal) = Enum(10)
+  val Seq(sIdle, sRayLoad, sHeaderRequest, sHeaderPending, sStackReady,
+    sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal,
+    sResumePending) = Enum(11)
   val laneState = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(sIdle)))))
   val laneStatus = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   val committedValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
   val activeMask = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(num_thread.W))))
+  // `activeMask` is the session ownership mask.  A completion only reports
+  // the command mask, so a subset of retained candidate lanes may resume.
+  val commandMask = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(num_thread.W))))
   val warpIssueId = Reg(Vec(residentWarpCount, UInt(RtCorePortParameters.issueIdWidth.W)))
   val warpDestination = Reg(Vec(residentWarpCount, UInt(RtCorePortParameters.regidx_totalwidth.W)))
-  val warpBusy = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
+  val sessionActive = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
   val finishIssued = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
+  // Completion has been handed to pipe, but the retained RT session still
+  // owns its RT Local buffer/stack state until resume or final release.
+  val completionPublished = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
   val boxChildRefs = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(4, UInt(32.W)))))
   val boxDeferredRefs = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(4, UInt(32.W)))))
   val boxDeferredCount = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(3.W))))
   val boxPushedCount = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(3.W))))
   val triangleMeta = Reg(Vec(residentWarpCount, Vec(num_thread, new RtTriangleDispatchMeta)))
+  val candidateValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
+  val candidateData = Reg(Vec(residentWarpCount, Vec(num_thread,
+    Vec(RtMemTableParameters.hitRecordStorageWordCount, UInt(xLen.W)))))
   val residentOwnerWarpId = Reg(UInt(depth_warp.W))
 
   private def requestId(warp: UInt, lane: UInt): UInt =
@@ -87,67 +101,100 @@ class RtCoreScheduler extends Module {
   val nextBoxResult = RegInit(0.U(log2Ceil(boxUnitCount).W))
   val nextTriangleResult = RegInit(0.U(log2Ceil(triangleUnitCount).W))
 
-  // Command admission is intentionally fresh-only for this baseline.  A lane
-  // cannot be reused until its PDS records have drained and read context retires.
+  // A new command either creates a physical session or resumes retained
+  // candidate lanes.  RT Local control is the callback authority on resume.
   val commandSlot = 0.U(residentWarpIdWidth.W)
-  val commandAllowed = io.command.bits.activeMask.orR && !warpBusy(commandSlot)
-  table.io.pdsReadAdmission.valid := io.command.valid && commandAllowed
-  table.io.pdsReadAdmission.bits.warpId := commandSlot
-  table.io.pdsReadAdmission.bits.pds := io.command.bits.pds
-  table.io.pdsReadAdmission.bits.activeMask := io.command.bits.activeMask
-  table.io.pdsWriteAdmission.valid := io.command.valid && commandAllowed
-  table.io.pdsWriteAdmission.bits.warpId := commandSlot
-  table.io.pdsWriteAdmission.bits.pds := io.command.bits.pds
-  table.io.pdsWriteAdmission.bits.activeMask := io.command.bits.activeMask
-  io.command.ready := commandAllowed && table.io.pdsReadAdmission.ready && table.io.pdsWriteAdmission.ready
+  val freshCommand = io.command.bits.activeMask.orR && !sessionActive(commandSlot)
+  val resumeCommand = io.command.bits.activeMask.orR && sessionActive(commandSlot) && completionPublished(commandSlot)
+  val commandAllowed = freshCommand || resumeCommand
+  local.io.admission.valid := io.command.valid && freshCommand
+  local.io.admission.bits.warpId := io.command.bits.warpId
+  local.io.admission.bits.activeMask := io.command.bits.activeMask
+  local.io.resume.valid := io.command.valid && resumeCommand
+  local.io.resume.bits.activeMask := io.command.bits.activeMask
+  io.command.ready := Mux(freshCommand,
+    local.io.admission.ready, local.io.resume.ready)
   when(io.command.fire) {
     val warp = commandSlot
-    warpBusy(warp) := true.B
     residentOwnerWarpId := io.command.bits.warpId
-    activeMask(warp) := io.command.bits.activeMask
+    commandMask(warp) := io.command.bits.activeMask
     warpIssueId(warp) := io.command.bits.issueId
     warpDestination(warp) := io.command.bits.destinationVd
     finishIssued(warp) := false.B
-    for (lane <- 0 until num_thread) {
-      when(io.command.bits.activeMask(lane)) {
-        laneState(warp)(lane) := sPdsRead
-        laneStatus(warp)(lane) := RtAbiLayout.TraversalCompleteMiss.U
-        committedValid(warp)(lane) := false.B
-      }.otherwise {
-        laneState(warp)(lane) := sIdle
+    when(freshCommand) {
+      sessionActive(warp) := true.B
+      completionPublished(warp) := false.B
+      activeMask(warp) := io.command.bits.activeMask
+      for (lane <- 0 until num_thread) {
+        when(io.command.bits.activeMask(lane)) {
+          laneState(warp)(lane) := sRayLoad
+          laneStatus(warp)(lane) := RtAbiLayout.TraversalCompleteMiss.U
+          committedValid(warp)(lane) := false.B
+          candidateValid(warp)(lane) := false.B
+        }.otherwise {
+          laneState(warp)(lane) := sIdle
+        }
+      }
+    }.otherwise {
+      completionPublished(warp) := false.B
+      for (lane <- 0 until num_thread) {
+        when(io.command.bits.activeMask(lane)) {
+          assert(candidateValid(warp)(lane), "resume may select only retained candidate lanes")
+          assert(laneState(warp)(lane) === sTerminal,
+            "resume lane must be terminal after a published candidate completion")
+          laneState(warp)(lane) := sResumePending
+        }
       }
     }
   }
 
-  // A PDS read row is the input transaction of RaySetup.  The table releases
-  // neither its data nor context at this point; retirement happens after write
-  // drain/completion so the lane remains an owned traversal context.
-  raySetup.io.in.valid := table.io.pdsReadLane.valid
-  raySetup.io.in.bits.warpId := table.io.pdsReadLane.bits.warpId
-  raySetup.io.in.bits.laneId := table.io.pdsReadLane.bits.laneId
-  raySetup.io.in.bits.accelLo := table.io.pdsReadLane.bits.data(0)
-  raySetup.io.in.bits.accelHi := table.io.pdsReadLane.bits.data(1)
-  raySetup.io.in.bits.traceMeta0 := table.io.pdsReadLane.bits.data(2)
-  raySetup.io.in.bits.traceMeta1 := table.io.pdsReadLane.bits.data(3)
-  raySetup.io.in.bits.rayState.origin.x := table.io.pdsReadLane.bits.data(4)
-  raySetup.io.in.bits.rayState.origin.y := table.io.pdsReadLane.bits.data(5)
-  raySetup.io.in.bits.rayState.origin.z := table.io.pdsReadLane.bits.data(6)
-  raySetup.io.in.bits.rayState.tmin := table.io.pdsReadLane.bits.data(7)
-  raySetup.io.in.bits.rayState.dir.x := table.io.pdsReadLane.bits.data(8)
-  raySetup.io.in.bits.rayState.dir.y := table.io.pdsReadLane.bits.data(9)
-  raySetup.io.in.bits.rayState.dir.z := table.io.pdsReadLane.bits.data(10)
-  raySetup.io.in.bits.rayState.tmax := table.io.pdsReadLane.bits.data(11)
-  table.io.pdsReadLane.ready := raySetup.io.in.ready
-  when(table.io.pdsReadLane.fire) {
-    assert(laneState(0)(table.io.pdsReadLane.bits.laneId) === sPdsRead)
+  // Resume reloads only the software callback decision.  Ray-state tmax is
+  // immutable for a session; accepting a candidate narrows the private bound
+  // to that candidate's hitT, while ignoring one leaves the bound unchanged.
+  // Candidate acceptance updates the same local hit-record buffer as an IU hit.  It
+  // receives priority because the software callback is the explicit resume
+  // boundary; Triangle output remains back-pressured for that one cycle.
+  val resumeCommit = local.io.resumeOut.valid &&
+    local.io.resumeOut.bits.callbackDecision === RtAbiLayout.CallbackAccept.U
+  local.io.resumeOut.ready := !resumeCommit ||
+    (local.io.hitUpdate.ready && local.io.rayTmaxUpdate.ready)
+  val resumeLane = local.io.resumeOut.bits.laneId
+  val resumeDecision = local.io.resumeOut.bits.callbackDecision
+  val resumeAccept = resumeDecision === RtAbiLayout.CallbackAccept.U
+  val resumeIgnore = resumeDecision === RtAbiLayout.CallbackIgnore.U
+  val resumeTerminate = resumeDecision === RtAbiLayout.CallbackTerminate.U
+  when(local.io.resumeOut.fire) {
+    assert(laneState(0)(resumeLane) === sResumePending)
+    assert(resumeAccept || resumeIgnore || resumeTerminate,
+      "candidate resume requires ACCEPT, IGNORE, or TERMINATE control decision")
+    when(resumeAccept || resumeIgnore) {
+      laneState(0)(resumeLane) := sStackReady
+    }.otherwise {
+      laneState(0)(resumeLane) := sTerminal
+      laneStatus(0)(resumeLane) := RtAbiLayout.TraversalTerminated.U
+    }
+    when(resumeAccept || resumeTerminate) { candidateValid(0)(resumeLane) := false.B }
   }
 
-  table.io.pdsFault.ready := true.B
-  when(table.io.pdsFault.fire) {
-    val fault = table.io.pdsFault.bits
-    laneState(0)(fault.laneId) := sTerminal
-    laneStatus(0)(fault.laneId) := RtAbiLayout.TraversalTerminated.U
-  }
+  // A gathered local row is the input transaction of RaySetup.  Retirement
+  // happens only after the final local writeback/completion boundary.
+  raySetup.io.in.valid := local.io.laneOut.valid
+  raySetup.io.in.bits.warpId := 0.U
+  raySetup.io.in.bits.laneId := local.io.laneOut.bits.laneId
+  raySetup.io.in.bits.accelLo := local.io.laneOut.bits.data(0)
+  raySetup.io.in.bits.accelHi := local.io.laneOut.bits.data(1)
+  raySetup.io.in.bits.traceMeta0 := local.io.laneOut.bits.data(2)
+  raySetup.io.in.bits.traceMeta1 := local.io.laneOut.bits.data(3)
+  raySetup.io.in.bits.rayState.origin.x := local.io.laneOut.bits.data(4)
+  raySetup.io.in.bits.rayState.origin.y := local.io.laneOut.bits.data(5)
+  raySetup.io.in.bits.rayState.origin.z := local.io.laneOut.bits.data(6)
+  raySetup.io.in.bits.rayState.tmin := local.io.laneOut.bits.data(7)
+  raySetup.io.in.bits.rayState.dir.x := local.io.laneOut.bits.data(8)
+  raySetup.io.in.bits.rayState.dir.y := local.io.laneOut.bits.data(9)
+  raySetup.io.in.bits.rayState.dir.z := local.io.laneOut.bits.data(10)
+  raySetup.io.in.bits.rayState.tmax := local.io.laneOut.bits.data(11)
+  local.io.laneOut.ready := raySetup.io.in.ready
+  when(local.io.laneOut.fire) { assert(laneState(0)(local.io.laneOut.bits.laneId) === sRayLoad) }
 
   // Stack operation defaults.  Header initialisation, deferred Box4 pushes,
   // and node pop are ordered by the stack module; scheduler only offers one
@@ -161,9 +208,9 @@ class RtCoreScheduler extends Module {
   stack.io.clear.valid := false.B
   stack.io.clear.bits := 0.U.asTypeOf(new RtTraversalStackClear)
 
-  // RaySetup writes the derived ray into the PDS read context.  Thereafter the
-  // table, rather than scheduler registers, supplies the ray to AS/IU paths.
-  table.io.pdsRaySetup <> raySetup.io.out
+  // RaySetup writes the derived ray into the local prepared-ray buffer.  It
+  // then supplies the ray to AS/IU paths without further SRAM accesses.
+  local.io.raySetup <> raySetup.io.out
   when(raySetup.io.out.fire) {
     laneState(0)(raySetup.io.out.bits.laneId) := sHeaderRequest
   }
@@ -201,23 +248,22 @@ class RtCoreScheduler extends Module {
   // Stack writes/initialisation are serialized ahead of a pop.  In
   // particular, never let an AS acquire consume a node unless the matching pop
   // can fire in the same cycle.
-  table.io.nodeRayLookup.warpId := Mux(hasHeaderRequest, headerWarp, popWarp)
-  table.io.nodeRayLookup.laneId := Mux(hasHeaderRequest, headerLane, popLane)
-  val headerAcquire = hasHeaderRequest && table.io.nodeRay.valid
+  local.io.nodeRayLookup.laneId := Mux(hasHeaderRequest, headerLane, popLane)
+  val headerAcquire = hasHeaderRequest && local.io.nodeRay.valid
   val popMayFire = !headerAcquire && !anyBoxPush && !headerLineActive
   val nodeAcquire = popMayFire && popNeedsAs
 
   table.io.asAcquire.valid := headerAcquire || nodeAcquire
   table.io.asAcquire.bits := 0.U.asTypeOf(new RtAsTableAcquire)
   when(headerAcquire) {
-    table.io.asAcquire.bits.lineAddress := table.io.nodeRay.asBase
+    table.io.asAcquire.bits.lineAddress := local.io.nodeRay.asBase
     table.io.asAcquire.bits.wordMask := Fill(RtMemTableParameters.lineWordCount, 1.U(1.W))
     table.io.asAcquire.bits.is64B := false.B
     table.io.asAcquire.bits.waiter.warpId := headerWarp
     table.io.asAcquire.bits.waiter.laneId := headerLane
     table.io.asAcquire.bits.waiter.nodeKind := RtVtasNodeKind.header
   }.elsewhen(nodeAcquire) {
-    table.io.asAcquire.bits.lineAddress := table.io.nodeRay.asBase + nodeOffset(selectedNodeRef)
+    table.io.asAcquire.bits.lineAddress := local.io.nodeRay.asBase + nodeOffset(selectedNodeRef)
     table.io.asAcquire.bits.wordMask := Mux(selectedNodeType === RtVtasLayout.NodeTriangle.U,
       Cat(0.U(16.W), Fill(16, 1.U(1.W))), Fill(32, 1.U(1.W)))
     table.io.asAcquire.bits.is64B := selectedNodeType === RtVtasLayout.NodeTriangle.U
@@ -260,8 +306,7 @@ class RtCoreScheduler extends Module {
   val boxSelect = roundRobin(boxReadyMask, nextBoxIssue, boxUnitCount)
   val triangleSelect = roundRobin(triangleReadyMask, nextTriangleIssue, triangleUnitCount)
   val asReady = table.io.asReadyLine
-  table.io.issueRayLookup.warpId := asReady.bits.waiter.warpId
-  table.io.issueRayLookup.laneId := asReady.bits.waiter.laneId
+  local.io.issueRayLookup.laneId := asReady.bits.waiter.laneId
   val headerRoot = asReady.bits.data((RtVtasLayout.AsHeaderRootNodeRef / 4).toInt)
   val headerInvalid = headerRoot === RtVtasLayout.InvalidNodeRef.U(32.W)
   val asIsHeader = asReady.bits.waiter.nodeKind === RtVtasNodeKind.header
@@ -273,10 +318,10 @@ class RtCoreScheduler extends Module {
     stack.io.init.bits.rootNodeRef(lane) := headerRoot
   }
   for (unit <- 0 until boxUnitCount) {
-    boxIssue(unit).valid := asReady.valid && asIsBox && table.io.issueRay.valid && boxReadyMask.orR && boxSelect === unit.U
+    boxIssue(unit).valid := asReady.valid && asIsBox && local.io.issueRay.valid && boxReadyMask.orR && boxSelect === unit.U
     boxIssue(unit).bits := 0.U.asTypeOf(new RtBox4IntersectionInput)
     boxIssue(unit).bits.requestId := requestId(asReady.bits.waiter.warpId, asReady.bits.waiter.laneId)
-    boxIssue(unit).bits.ray := table.io.issueRay.ray
+    boxIssue(unit).bits.ray := local.io.issueRay.ray
     for (child <- 0 until 4) {
       boxIssue(unit).bits.aabb(child).x_min := asReady.bits.data((RtVtasLayout.Box4MinX / 4).toInt + child)
       boxIssue(unit).bits.aabb(child).y_min := asReady.bits.data((RtVtasLayout.Box4MinY / 4).toInt + child)
@@ -287,10 +332,10 @@ class RtCoreScheduler extends Module {
     }
   }
   for (unit <- 0 until triangleUnitCount) {
-    triangleIssue(unit).valid := asReady.valid && asIsTriangle && table.io.issueRay.valid && triangleReadyMask.orR && triangleSelect === unit.U
+    triangleIssue(unit).valid := asReady.valid && asIsTriangle && local.io.issueRay.valid && triangleReadyMask.orR && triangleSelect === unit.U
     triangleIssue(unit).bits := 0.U.asTypeOf(new RtTriangleIntersectionInput)
     triangleIssue(unit).bits.requestId := requestId(asReady.bits.waiter.warpId, asReady.bits.waiter.laneId)
-    triangleIssue(unit).bits.ray := table.io.issueRay.ray
+    triangleIssue(unit).bits.ray := local.io.issueRay.ray
     triangleIssue(unit).bits.triangle.A.x := asReady.bits.data((RtVtasLayout.TriangleV0 / 4).toInt)
     triangleIssue(unit).bits.triangle.A.y := asReady.bits.data((RtVtasLayout.TriangleV0 / 4 + 1).toInt)
     triangleIssue(unit).bits.triangle.A.z := asReady.bits.data((RtVtasLayout.TriangleV0 / 4 + 2).toInt)
@@ -302,8 +347,8 @@ class RtCoreScheduler extends Module {
     triangleIssue(unit).bits.triangle.C.z := asReady.bits.data((RtVtasLayout.TriangleV2 / 4 + 2).toInt)
   }
   val asHeaderReady = asReady.valid && asIsHeader && (headerInvalid || stack.io.init.ready)
-  val asBoxReady = asReady.valid && asIsBox && table.io.issueRay.valid && boxReadyMask.orR && boxIssue(boxSelect).ready
-  val asTriangleReady = asReady.valid && asIsTriangle && table.io.issueRay.valid && triangleReadyMask.orR && triangleIssue(triangleSelect).ready
+  val asBoxReady = asReady.valid && asIsBox && local.io.issueRay.valid && boxReadyMask.orR && boxIssue(boxSelect).ready
+  val asTriangleReady = asReady.valid && asIsTriangle && local.io.issueRay.valid && triangleReadyMask.orR && triangleIssue(triangleSelect).ready
   table.io.asReadyLine.ready := asHeaderReady || asBoxReady || asTriangleReady ||
     (asReady.valid && !asIsHeader && !asIsBox && !asIsTriangle)
   when(asReady.fire) {
@@ -389,15 +434,14 @@ class RtCoreScheduler extends Module {
     (triangleResultSelect === unit.U) -> triangleResult(unit).bits))
   val selectedTriangleWarp = requestWarp(selectedTriangleResult.requestId)
   val selectedTriangleLane = requestLane(selectedTriangleResult.requestId)
-  table.io.resultRayLookup.warpId := selectedTriangleWarp
-  table.io.resultRayLookup.laneId := selectedTriangleLane
+  local.io.resultRayLookup.laneId := selectedTriangleLane
   val tBoundProduct = Module(new MulRecFN(8, 24))
-  tBoundProduct.io.a := recFNFromFN(8, 24, table.io.resultRay.currentTmax)
+  tBoundProduct.io.a := recFNFromFN(8, 24, local.io.resultRay.currentTmax)
   tBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
   tBoundProduct.io.roundingMode := consts.round_near_even
   tBoundProduct.io.detectTininess := consts.tininess_beforeRounding
   val tMinBoundProduct = Module(new MulRecFN(8, 24))
-  tMinBoundProduct.io.a := recFNFromFN(8, 24, table.io.resultRay.ray.originalTmin)
+  tMinBoundProduct.io.a := recFNFromFN(8, 24, local.io.resultRay.ray.originalTmin)
   tMinBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
   tMinBoundProduct.io.roundingMode := consts.round_near_even
   tMinBoundProduct.io.detectTininess := consts.tininess_beforeRounding
@@ -413,7 +457,7 @@ class RtCoreScheduler extends Module {
   aboveOriginalTmin.io.a := recFNFromFN(8, 24, selectedTriangleResult.tNum)
   aboveOriginalTmin.io.b := tMinBoundProduct.io.out
   aboveOriginalTmin.io.signaling := false.B
-  val acceptedTriangleResult = selectedTriangleResult.hit && table.io.resultRay.valid &&
+  val acceptedTriangleResult = selectedTriangleResult.hit && local.io.resultRay.valid &&
     denominatorPositive.io.gt &&
     (aboveOriginalTmin.io.gt || aboveOriginalTmin.io.eq) && withinCurrentTmax.io.lt
   when(triangleResultMask.orR && selectedTriangleResult.hit) {
@@ -425,7 +469,7 @@ class RtCoreScheduler extends Module {
   for (unit <- 0 until triangleUnitCount) {
     val selected = triangleResultMask.orR && triangleResultSelect === unit.U
     triangleResult(unit).ready := selected && (!selectedTriangleResult.hit ||
-      (table.io.resultRay.valid && (!acceptedTriangleResult || triangleResolve.io.in.ready)))
+      (local.io.resultRay.valid && (!acceptedTriangleResult || triangleResolve.io.in.ready)))
   }
   when(triangleResultMask.orR && triangleResult(triangleResultSelect).fire) {
     nextTriangleResult := triangleResultSelect + 1.U
@@ -437,29 +481,41 @@ class RtCoreScheduler extends Module {
   val resultWarp = requestWarp(triangleResolve.io.out.bits.requestId)
   val resultLane = requestLane(triangleResolve.io.out.bits.requestId)
   val triangleIsOpaque = triangleMeta(resultWarp)(resultLane).opaque
-  table.io.pdsHitUpdate.valid := triangleResolve.io.out.valid
-  table.io.pdsHitUpdate.bits := 0.U.asTypeOf(new RtPdsHitRecordUpdate)
-  table.io.pdsHitUpdate.bits.warpId := resultWarp
-  table.io.pdsHitUpdate.bits.laneId := resultLane
-  table.io.pdsHitUpdate.bits.committed := triangleIsOpaque
-  table.io.pdsHitUpdate.bits.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordMeta0) :=
+  val triangleHitUpdate = Wire(new RtLocalHitRecordUpdate)
+  triangleHitUpdate := 0.U.asTypeOf(new RtLocalHitRecordUpdate)
+  triangleHitUpdate.laneId := resultLane
+  triangleHitUpdate.committed := triangleIsOpaque
+  triangleHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
+  triangleHitUpdate.data(RtAbiLayout.HitRecordMeta0) :=
     (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U |
       (triangleIsOpaque.asUInt << RtAbiLayout.HitRecordMeta0OpaqueShift)
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordMeta1) := triangleMeta(resultWarp)(resultLane).sbtRecordOffset
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordHitT) := triangleResolve.io.out.bits.t
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordBarycentricsX) := triangleResolve.io.out.bits.u
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordBarycentricsY) := triangleResolve.io.out.bits.v
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordPrimitiveId) := triangleMeta(resultWarp)(resultLane).primitiveId
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordInstanceId) := 0.U
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordGeometryId) := triangleMeta(resultWarp)(resultLane).geometryId
-  table.io.pdsHitUpdate.bits.data(RtAbiLayout.HitRecordHitKind) := "hfe".U
-  table.io.pdsRayTmaxUpdate.valid := triangleResolve.io.out.valid && triangleIsOpaque
-  table.io.pdsRayTmaxUpdate.bits.warpId := resultWarp
-  table.io.pdsRayTmaxUpdate.bits.laneId := resultLane
-  table.io.pdsRayTmaxUpdate.bits.tmax := triangleResolve.io.out.bits.t
-  triangleResolve.io.out.ready := table.io.pdsHitUpdate.ready &&
-    (!triangleIsOpaque || table.io.pdsRayTmaxUpdate.ready)
+  triangleHitUpdate.data(RtAbiLayout.HitRecordMeta1) := triangleMeta(resultWarp)(resultLane).sbtRecordOffset
+  triangleHitUpdate.data(RtAbiLayout.HitRecordHitT) := triangleResolve.io.out.bits.t
+  triangleHitUpdate.data(RtAbiLayout.HitRecordBarycentricsX) := triangleResolve.io.out.bits.u
+  triangleHitUpdate.data(RtAbiLayout.HitRecordBarycentricsY) := triangleResolve.io.out.bits.v
+  triangleHitUpdate.data(RtAbiLayout.HitRecordPrimitiveId) := triangleMeta(resultWarp)(resultLane).primitiveId
+  triangleHitUpdate.data(RtAbiLayout.HitRecordInstanceId) := 0.U
+  triangleHitUpdate.data(RtAbiLayout.HitRecordGeometryId) := triangleMeta(resultWarp)(resultLane).geometryId
+  triangleHitUpdate.data(RtAbiLayout.HitRecordHitKind) := "hfe".U
+  val resumeHitUpdate = Wire(new RtLocalHitRecordUpdate)
+  resumeHitUpdate := 0.U.asTypeOf(new RtLocalHitRecordUpdate)
+  resumeHitUpdate.laneId := resumeLane
+  resumeHitUpdate.committed := true.B
+  resumeHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
+  resumeHitUpdate.data := candidateData(0)(resumeLane)
+  local.io.hitUpdate.valid := resumeCommit || triangleResolve.io.out.valid
+  local.io.hitUpdate.bits := Mux(resumeCommit, resumeHitUpdate, triangleHitUpdate)
+  val triangleTmaxUpdate = Wire(new RtLocalRayTmaxUpdate)
+  triangleTmaxUpdate.laneId := resultLane
+  triangleTmaxUpdate.tmax := triangleResolve.io.out.bits.t
+  val resumeTmaxUpdate = Wire(new RtLocalRayTmaxUpdate)
+  resumeTmaxUpdate.laneId := resumeLane
+  resumeTmaxUpdate.tmax := candidateData(0)(resumeLane)(RtAbiLayout.HitRecordHitT)
+  local.io.rayTmaxUpdate.valid := resumeCommit ||
+    (triangleResolve.io.out.valid && triangleIsOpaque)
+  local.io.rayTmaxUpdate.bits := Mux(resumeCommit, resumeTmaxUpdate, triangleTmaxUpdate)
+  triangleResolve.io.out.ready := !resumeCommit && local.io.hitUpdate.ready &&
+    (!triangleIsOpaque || local.io.rayTmaxUpdate.ready)
   when(triangleResolve.io.out.fire) {
     when(triangleIsOpaque) {
       committedValid(resultWarp)(resultLane) := true.B
@@ -467,6 +523,8 @@ class RtCoreScheduler extends Module {
     }.otherwise {
       laneState(resultWarp)(resultLane) := sTerminal
       laneStatus(resultWarp)(resultLane) := RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U
+      candidateValid(resultWarp)(resultLane) := true.B
+      candidateData(resultWarp)(resultLane) := triangleHitUpdate.data
     }
   }
 
@@ -478,43 +536,90 @@ class RtCoreScheduler extends Module {
       laneState(warp)(lane) === sTerminal)).asUInt
   }
   val finishMasks = VecInit((0 until residentWarpCount).map { warp =>
-    warpBusy(warp) && !finishIssued(warp) &&
+    sessionActive(warp) && !completionPublished(warp) && !finishIssued(warp) &&
       (terminalMasks(warp) & activeMask(warp)) === activeMask(warp)
   }).asUInt
   val finishWarp = PriorityEncoder(finishMasks)
-  table.io.pdsWriteFinish.valid := finishMasks.orR
-  table.io.pdsWriteFinish.bits.warpId := finishWarp
-  table.io.pdsWriteFinish.bits.terminalMask := activeMask(finishWarp)
-  when(table.io.pdsWriteFinish.fire) { finishIssued(finishWarp) := true.B }
+  local.io.finish.valid := finishMasks.orR
+  local.io.finish.bits.terminalMask := activeMask(finishWarp)
+  when(local.io.finish.fire) { finishIssued(finishWarp) := true.B }
 
   val completionPending = RegInit(false.B)
   val completionBits = Reg(new RtWarpCompletion)
-  val retirePending = RegInit(false.B)
-  val retireWarp = Reg(UInt(residentWarpIdWidth.W))
-  table.io.pdsWriteDrained.ready := !completionPending && !retirePending
-  when(table.io.pdsWriteDrained.fire) {
+  val finalRetirePending = RegInit(false.B)
+  local.io.drained.ready := !completionPending && !finalRetirePending
+  when(local.io.drained.fire) {
     completionBits.warpId := residentOwnerWarpId
     completionBits.issueId := warpIssueId(0)
     completionBits.destinationVd := warpDestination(0)
-    completionBits.completionMask := activeMask(0)
+    completionBits.completionMask := commandMask(0)
     completionBits.laneStatus := laneStatus(0)
     completionPending := true.B
   }
   io.completion.valid := completionPending
   io.completion.bits := completionBits
   when(io.completion.fire) {
-    retirePending := true.B
-    retireWarp := 0.U
     completionPending := false.B
-  }
-  table.io.pdsReadRetire.valid := retirePending && stack.io.clear.ready
-  table.io.pdsReadRetire.bits.warpId := retireWarp
-  stack.io.clear.valid := retirePending && table.io.pdsReadRetire.ready
-  stack.io.clear.bits.laneMask := activeMask(0)
-  when(table.io.pdsReadRetire.fire && stack.io.clear.fire) {
-    warpBusy(0) := false.B
+    completionPublished(0) := true.B
     finishIssued(0) := false.B
-    retirePending := false.B
+  }
+
+  // `release` always destroys the whole retained session.  The software has
+  // already decided that every originally active lane is terminal; the mask
+  // is retained solely to catch ABI/control-flow mistakes at this boundary.
+  val releasePending = RegInit(false.B)
+  val releaseBits = Reg(new RtReleaseCommand)
+  val releaseStackCleared = RegInit(false.B)
+  val releaseLanesInvalidated = RegInit(false.B)
+  val releaseAllowed = sessionActive(0) && completionPublished(0) && !completionPending &&
+    io.release.bits.activeMask === activeMask(0)
+  io.release.ready := releaseAllowed && !releasePending && !finalRetirePending
+  when(io.release.fire) {
+    releasePending := true.B
+    releaseBits := io.release.bits
+    releaseStackCleared := false.B
+    releaseLanesInvalidated := false.B
+  }
+  when(io.release.fire) {
+    assert(io.release.bits.warpId === residentOwnerWarpId,
+      "release warp must match the resident RT session")
+    assert(io.release.bits.activeMask === activeMask(0),
+      "release must cover the complete original RT session mask")
+    for (lane <- 0 until num_thread) when(activeMask(0)(lane)) {
+      assert(laneState(0)(lane) === sTerminal,
+        "release may retire only a completed retained lane")
+    }
+  }
+  stack.io.clear.valid := releasePending && !releaseStackCleared
+  stack.io.clear.bits.laneMask := activeMask(0)
+  when(stack.io.clear.fire) { releaseStackCleared := true.B }
+  when(releasePending && releaseStackCleared && !releaseLanesInvalidated) {
+    releaseLanesInvalidated := true.B
+    finalRetirePending := true.B
+    for (lane <- 0 until num_thread) when(activeMask(0)(lane)) {
+      laneState(0)(lane) := sIdle
+      candidateValid(0)(lane) := false.B
+      committedValid(0)(lane) := false.B
+      laneStatus(0)(lane) := 0.U
+      boxDeferredCount(0)(lane) := 0.U
+      boxPushedCount(0)(lane) := 0.U
+    }
+  }
+  local.io.retire.valid := finalRetirePending
+  local.io.retire.bits := residentOwnerWarpId
+  io.releaseAck.valid := finalRetirePending && local.io.retire.ready && table.io.quiescent
+  io.releaseAck.bits.warpId := residentOwnerWarpId
+  io.releaseAck.bits.releasedMask := activeMask(0)
+  when(io.releaseAck.fire) {
+    releasePending := false.B
+    releaseStackCleared := false.B
+    releaseLanesInvalidated := false.B
+    sessionActive(0) := false.B
+    finishIssued(0) := false.B
+    completionPublished(0) := false.B
+    activeMask(0) := 0.U
+    commandMask(0) := 0.U
+    finalRetirePending := false.B
     for (lane <- 0 until num_thread) { laneState(0)(lane) := sIdle }
   }
 }

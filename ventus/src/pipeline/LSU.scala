@@ -16,6 +16,7 @@ import chisel3.util._
 import IDecode._
 import lsu.{LsuClientId, LsuClientRequest, LsuClientResponse}
 import mmu.SV32.asidLen
+import rtcore.RtAbiLayout
 import top.cache_spike_info
 
 class toShared extends Bundle{
@@ -220,7 +221,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   io.to_mshr.bits.tag.wfd:=reg_save.ctrl.wvd
   io.to_mshr.bits.tag.unsigned := reg_save.ctrl.mem_unsigned
   io.to_mshr.bits.tag.wordOffset1H := wordOffset1H
-  io.to_mshr.valid := state===s_save & (reg_save.ctrl.mem_cmd.orR)
+  io.to_mshr.valid := state===s_save && reg_save.ctrl.mem_cmd.orR
   io.to_mshr.bits.tag.isWrite := reg_save.ctrl.mem_cmd(1)
   if(SPIKE_OUTPUT){
     io.to_mshr.bits.tag.spike_info.get:=reg_save.ctrl.spike_info.get

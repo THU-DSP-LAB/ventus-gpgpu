@@ -5,7 +5,7 @@ import chisel3.util._
 import hardfloat._
 import top.parameters._
 
-/** Raw per-lane state consumed from the twelve RT PDS ray-state fields. */
+/** Raw per-lane state consumed from the twelve RT Local SRAM ray-state fields. */
 class RtRaySetupInput extends Bundle {
   val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
@@ -16,7 +16,7 @@ class RtRaySetupInput extends Bundle {
   val rayState = new RtRayState(recorded_float = false)
 }
 
-/** RayFlex-compatible ray parameters derived once for a PDS ray-state row. */
+/** RayFlex-compatible ray parameters derived once for an RT Local SRAM row. */
 class RtRaySetupOutput extends Bundle {
   val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
@@ -28,7 +28,7 @@ class RtRaySetupOutput extends Bundle {
 }
 
 /**
-  * Converts raw PDS ray state into the prepared ray consumed by the two
+  * Converts raw RT Local SRAM ray state into the prepared ray consumed by the two
   * intersection pipelines.  The three reciprocal operations share one input
   * transaction; their independently returned results are accumulated before
   * the remaining axis selection and shear multiplies are evaluated.
@@ -36,7 +36,6 @@ class RtRaySetupOutput extends Bundle {
 class RtRaySetup extends Module {
   private val rounding = consts.round_near_even
   private val tininess = consts.tininess_beforeRounding
-  private val one = recFNFromFN(8, 24, "h3f800000".U(32.W))
 
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new RtRaySetupInput))
@@ -50,16 +49,14 @@ class RtRaySetup extends Module {
   val reciprocalBits = Reg(Vec(3, UInt(32.W)))
   val reciprocalReturned = RegInit(0.U(3.W))
 
-  val dividers = Seq.fill(3)(Module(new DivSqrtRecFN_small(8, 24, 0)))
-  val dividerReady = dividers.map(_.io.inReady).reduce(_ && _)
+  val dividers = Seq.fill(3)(Module(new RtFpDiv))
+  val dividerReady = dividers.map(_.io.in.ready).reduce(_ && _)
   dividers.zip(Seq(io.in.bits.rayState.dir.x, io.in.bits.rayState.dir.y,
     io.in.bits.rayState.dir.z)).foreach { case (divider, direction) =>
-    divider.io.inValid := io.in.fire
-    divider.io.sqrtOp := false.B
-    divider.io.a := one
-    divider.io.b := recFNFromFN(8, 24, direction)
-    divider.io.roundingMode := rounding
-    divider.io.detectTininess := tininess
+    divider.io.in.valid := io.in.fire
+    divider.io.in.bits.a := "h3f800000".U
+    divider.io.in.bits.b := direction
+    divider.io.out.ready := true.B
   }
 
   io.in.ready := !busy && !outValid && dividerReady
@@ -72,8 +69,8 @@ class RtRaySetup extends Module {
     reciprocalReturned := 0.U
   }
 
-  val reciprocalValid = VecInit(dividers.map(_.io.outValid_div)).asUInt
-  val reciprocal = dividers.map(divider => fNFromRecFN(8, 24, divider.io.out))
+  val reciprocalValid = VecInit(dividers.map(_.io.out.valid)).asUInt
+  val reciprocal = dividers.map(_.io.out.bits)
   when(busy && reciprocalValid.orR) {
     reciprocalReturned := reciprocalReturned | reciprocalValid
   }

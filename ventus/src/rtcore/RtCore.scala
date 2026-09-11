@@ -25,6 +25,8 @@ class RtCore extends Module {
 
   scheduler.io.command <> io.command
   io.completion <> scheduler.io.completion
+  scheduler.io.release <> io.release
+  io.releaseAck <> scheduler.io.releaseAck
   io.lsuRequest <> scheduler.io.lsuRequest
   scheduler.io.lsuResponse <> io.lsuResponse
 
