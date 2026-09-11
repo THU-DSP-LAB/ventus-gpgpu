@@ -100,4 +100,48 @@ class FpuRtzConversionTest extends AnyFreeSpec with ChiselScalatestTester {
     }
   }
 
+  "vector FPU performs sampler interpolation adds and subtracts per active lane" in {
+    test(new FPUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      val left = Vector(0.0f, 1.0f / 255.0f, 0.25f, 0.5f, 0.75f, 1.0f,
+        -0.25f, 3.5f, 17.0f, 85.0f / 255.0f, 0.9f, -1.0f, 4.0f, 32.0f, 0.125f, 2.0f)
+      val right = Vector(1.0f, 2.0f / 255.0f, 0.125f, 0.25f, 0.5f, 0.75f,
+        0.25f, -1.5f, 3.0f, 34.0f / 255.0f, 0.1f, 2.0f, -4.0f, 16.0f, 0.5f, -2.0f)
+      val active = Set(0, 1, 3, 4, 6, 7, 9, 10, 12, 14, 15)
+
+      def execute(op: UInt, expected: (Float, Float) => Float): Unit = {
+        zero(dut.io.in.bits)
+        dut.io.in.valid.poke(false.B)
+        dut.io.rm.poke(0.U)
+        dut.io.out_v.ready.poke(true.B)
+        dut.io.out_x.ready.poke(true.B)
+        dut.clock.step(2)
+        left.indices.foreach { lane =>
+          dut.io.in.bits.in1(lane).poke(raw(left(lane)).U)
+          dut.io.in.bits.in2(lane).poke(raw(right(lane)).U)
+          dut.io.in.bits.mask(lane).poke(active.contains(lane).B)
+        }
+        dut.io.in.bits.ctrl.fp.poke(true.B)
+        dut.io.in.bits.ctrl.isvec.poke(true.B)
+        dut.io.in.bits.ctrl.wvd.poke(true.B)
+        dut.io.in.bits.ctrl.alu_fn.poke(op)
+        dut.io.in.valid.poke(true.B)
+        dut.io.in.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.in.valid.poke(false.B)
+        var cycles = 0
+        while (!dut.io.out_v.valid.peek().litToBoolean && cycles < 100) {
+          dut.clock.step(); cycles += 1
+        }
+        assert(cycles < 100, s"vector FPU op $op did not complete")
+        active.foreach { lane =>
+          dut.io.out_v.bits.wb_wvd_rd(lane).expect(raw(expected(left(lane), right(lane))).U)
+        }
+        dut.clock.step()
+      }
+
+      execute(IDecode.FN_FSUB, _ - _)
+      execute(IDecode.FN_FADD, _ + _)
+    }
+  }
+
 }
