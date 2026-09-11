@@ -165,4 +165,117 @@ class LsuDcacheScatterLoadTest extends AnyFreeSpec with ChiselScalatestTester {
       }
     }
   }
+
+  "real LSU preserves two sparse reads waiting on one cache-line fill" in {
+    test(new LsuDcacheScatterHarness).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      val base = BigInt("90009000", 16)
+      val first = Map(0 -> 1, 3 -> 7, 8 -> 19, 15 -> 30)
+      val second = Map(1 -> 2, 3 -> 11, 12 -> 23, 31 -> 31)
+
+      def driveLoad(reg: Int, lanes: Map[Int, Int]): Unit = {
+        zero(dut.io.req.bits)
+        lanes.foreach { case (lane, word) =>
+          dut.io.req.bits.in1(lane).poke((base + word * 4).U)
+          dut.io.req.bits.mask(lane).poke(true.B)
+        }
+        dut.io.req.bits.ctrl.isvec.poke(true.B)
+        dut.io.req.bits.ctrl.mem_cmd.poke(1.U)
+        dut.io.req.bits.ctrl.mem_whb.poke(3.U)
+        dut.io.req.bits.ctrl.mem_unsigned.poke(true.B)
+        dut.io.req.bits.ctrl.mop.poke(1.U)
+        dut.io.req.bits.ctrl.reg_idxw.poke(reg.U)
+      }
+
+      def sendLoad(reg: Int, lanes: Map[Int, Int]): Unit = {
+        driveLoad(reg, lanes)
+        dut.io.req.valid.poke(true.B)
+        var cycles = 0
+        while (!dut.io.req.ready.peek().litToBoolean && cycles < 100) {
+          dut.clock.step()
+          cycles += 1
+        }
+        assert(cycles < 100, s"LSU did not accept vector load v$reg")
+        dut.clock.step()
+        dut.io.req.valid.poke(false.B)
+      }
+
+      def expectResponse(reg: Int, lanes: Map[Int, Int]): Unit = {
+        dut.io.rsp.bits.tag.reg_idxw.expect(reg.U)
+        for (lane <- 0 until num_thread) {
+          dut.io.rsp.bits.tag.mask(lane).expect(lanes.contains(lane).B)
+          lanes.get(lane).foreach { word =>
+            dut.io.rsp.bits.data(lane).expect((BigInt("5a000000", 16) + word).U)
+          }
+        }
+      }
+
+      zero(dut.io.req.bits)
+      dut.io.req.valid.poke(false.B)
+      dut.io.rsp.ready.poke(true.B)
+      dut.io.memReq.ready.poke(true.B)
+      driveMemoryIdle(dut)
+      dut.clock.setTimeout(0)
+      dut.clock.step(2)
+
+      sendLoad(6, first)
+
+      // Send the miss to memory, but deliberately hold its response.  The
+      // next filtering-tap load has a distinct LSU MSHR tag while it
+      // attaches to this same DCache line fill.
+      var cycles = 0
+      while (!dut.io.memReq.valid.peek().litToBoolean && cycles < 300) {
+        dut.clock.step()
+        cycles += 1
+      }
+      assert(cycles < 300, "first sparse LSU load never issued a line fill")
+      val source = dut.io.memReq.bits.a_source.peek().litValue
+      dut.io.memReq.bits.a_addr.get.expect(base.U)
+      dut.clock.step()
+
+      sendLoad(7, second)
+      var dcacheRequests = 0
+      cycles = 0
+      while (dcacheRequests == 0 && cycles < 300) {
+        if (dut.io.lsuDcacheFire.peek().litToBoolean) dcacheRequests += 1
+        dut.clock.step()
+        cycles += 1
+      }
+      assert(dcacheRequests == 1,
+        "secondary sparse LSU load was not accepted by DCache before its fill")
+
+      dut.io.memRsp.bits.d_opcode.poke(1.U)
+      dut.io.memRsp.bits.d_param.poke(0.U)
+      dut.io.memRsp.bits.d_source.poke(source.U)
+      dut.io.memRsp.bits.d_addr.poke(base.U)
+      dut.io.memRsp.bits.d_data.zipWithIndex.foreach { case (word, index) =>
+        word.poke((BigInt("5a000000", 16) + index).U)
+      }
+      dut.io.memRsp.valid.poke(true.B)
+      cycles = 0
+      while (!dut.io.memRsp.ready.peek().litToBoolean && cycles < 100) {
+        dut.clock.step()
+        cycles += 1
+      }
+      assert(cycles < 100, "DCache did not accept its deferred line fill")
+      dut.clock.step()
+      driveMemoryIdle(dut)
+
+      var seen = Set.empty[BigInt]
+      cycles = 0
+      while (seen.size < 2 && cycles < 500) {
+        if (dut.io.rsp.valid.peek().litToBoolean) {
+          dut.io.rsp.bits.tag.reg_idxw.peek().litValue match {
+            case tag if tag == 6 => expectResponse(6, first)
+            case tag if tag == 7 => expectResponse(7, second)
+            case tag => fail(s"unexpected sparse LSU completion v$tag")
+          }
+          seen += dut.io.rsp.bits.tag.reg_idxw.peek().litValue
+        }
+        dut.clock.step()
+        cycles += 1
+      }
+      assert(seen == Set(BigInt(6), BigInt(7)),
+        s"same-line LSU fill completed only $seen after $cycles cycles")
+    }
+  }
 }

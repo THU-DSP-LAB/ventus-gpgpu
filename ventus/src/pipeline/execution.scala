@@ -902,7 +902,10 @@ class SFUexe extends Module{
     is(s_idle){
       when(io.in.fire){
         state:=s_busy
-        mask:=io.in.bits.mask.asUInt
+        // Scalar DIV/REM/FP operations share issueV and may arrive with lane
+        // zero masked off by SIMT. Like the LSU, execute scalars on lane zero
+        // independently of the vector mask; otherwise the dummy 1/1 wins.
+        mask:=Mux(io.in.bits.ctrl.isvec, io.in.bits.mask.asUInt, 1.U(num_thread.W))
         i_valid:=true.B
       }
     }
@@ -943,4 +946,3 @@ class SFUexe extends Module{
   io.out_v<>result_v.io.deq
   io.out_x<>result_x.io.deq
 }
-

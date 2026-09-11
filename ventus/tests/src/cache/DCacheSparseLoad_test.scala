@@ -200,6 +200,51 @@ class DCacheSparseLoadTest extends AnyFreeSpec with ChiselScalatestTester {
     }
   }
 
+  "DCache preserves each sparse request behind one same-line fill" in {
+    test(new DataCachev2(None)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      val firstLanes = Map(0 -> 1, 4 -> 9, 7 -> 17)
+      val secondLanes = Map(1 -> 2, 4 -> 10, 12 -> 31)
+      dut.io.coreReq.valid.poke(false.B)
+      dut.io.coreRsp.ready.poke(true.B)
+      dut.io.memReq.get.ready.poke(true.B)
+      driveMemoryIdle(dut)
+      dut.clock.step(2)
+
+      val source = sendRequestAndCaptureMiss(dut, 1, lineBase, firstLanes)
+
+      // Texture filtering immediately loads neighbouring texels.  The
+      // second request must attach to the first line fill, rather than borrow
+      // its lane mask or wait for an unrelated cache request.
+      driveRequest(dut, 2, lineBase, secondLanes)
+      dut.io.coreReq.valid.poke(true.B)
+      waitFor(dut, dut.io.coreReq.ready.peek().litToBoolean,
+        "same-line secondary request acceptance before fill")
+      dut.clock.step()
+      dut.io.coreReq.valid.poke(false.B)
+
+      returnMiss(dut, source, lineBase, BigInt("51000000", 16))
+      var seen = Set.empty[BigInt]
+      var cycles = 0
+      while (seen.size < 2 && cycles < 200) {
+        if (dut.io.coreRsp.valid.peek().litToBoolean) {
+          val instrId = dut.io.coreRsp.bits.instrId.peek().litValue
+          if (instrId == BigInt(1)) {
+            expectSparseResponse(dut, 1, firstLanes, BigInt("51000000", 16))
+          } else if (instrId == BigInt(2)) {
+            expectSparseResponse(dut, 2, secondLanes, BigInt("51000000", 16))
+          } else {
+            fail(s"unexpected same-line response instrId=$instrId")
+          }
+          seen += instrId
+        }
+        dut.clock.step()
+        cycles += 1
+      }
+      assert(seen == Set(BigInt(1), BigInt(2)),
+        s"same-line fill completed only requests $seen after $cycles cycles")
+    }
+  }
+
   "DCache keeps four sampled-load masks with their out-of-order cache-line replies" in {
     test(new DataCachev2(None)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       val requests = Seq(
