@@ -262,6 +262,51 @@ class LsuCachelineClientTest extends AnyFreeSpec with ChiselScalatestTester {
     }
   }
 
+  "LSU merges a vector load split over eight cache lines with out-of-order replies" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+
+      // A texture gather can spread lanes over many 128-byte lines.  Use all
+      // lanes here, retain a distinct word offset per lane, and deliberately
+      // return line fills in an order unrelated to issue order.
+      val addresses = (0 until 32).map { lane =>
+        val line = lane / 4
+        val word = (lane * 7 + 3) % 32
+        lane -> (BigInt("90008000", 16) + line * 128 + word * 4)
+      }.toMap
+      driveSparsePipeLoad(dut, addresses)
+      dut.io.lsu_req.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.lsu_req.valid.poke(false.B)
+
+      val requests = (0 until 8).map { line =>
+        val (instrId, mask) = acceptDcache(dut)
+        val expectedMask = (0 until 32).filter(_ / 4 == line)
+          .foldLeft(BigInt(0))((bits, lane) => bits | (BigInt(1) << lane))
+        assert(mask == expectedMask,
+          s"line $line mask 0x${mask.toString(16)} != 0x${expectedMask.toString(16)}")
+        (line, instrId, mask)
+      }
+
+      Seq(5, 1, 7, 0, 6, 2, 4, 3).foreach { replyLine =>
+        val (_, instrId, mask) = requests(replyLine)
+        returnDcache(dut, instrId, mask, 0x1000 + replyLine * 0x100)
+      }
+
+      dut.io.lsu_rsp.valid.expect(true.B)
+      dut.io.lsu_rsp.bits.tag.mask.foreach(_.expect(true.B))
+      addresses.foreach { case (lane, _) =>
+        val line = lane / 4
+        // returnDcache encodes the source lane in the synthetic payload.  A
+        // response arriving under another line's mask would therefore be
+        // immediately visible here.
+        dut.io.lsu_rsp.bits.data(lane).expect((0x1000 + line * 0x100 + lane).U)
+      }
+      dut.clock.step()
+    }
+  }
+
   "LSU accepts a zero-mask reply and a new cacheline request in one cycle" in {
     test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       driveIdle(dut)
