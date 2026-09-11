@@ -73,6 +73,22 @@ class LsuCachelineClientTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.lsu_req.valid.poke(true.B)
   }
 
+  /** Indexed vector load: each enabled lane supplies its full address. */
+  private def driveSparsePipeLoad(dut: LSUexe, addresses: Map[Int, BigInt]): Unit = {
+    zero(dut.io.lsu_req.bits)
+    addresses.foreach { case (lane, address) =>
+      dut.io.lsu_req.bits.in1(lane).poke(address.U)
+      dut.io.lsu_req.bits.mask(lane).poke(true.B)
+    }
+    dut.io.lsu_req.bits.ctrl.isvec.poke(true.B)
+    dut.io.lsu_req.bits.ctrl.mem_cmd.poke(1.U) // M_XRD
+    dut.io.lsu_req.bits.ctrl.mem_whb.poke(3.U) // MEM_W
+    dut.io.lsu_req.bits.ctrl.mem_unsigned.poke(true.B)
+    // AddrCalculate uses in1 + in2 for mop=1; in2 remains zero above.
+    dut.io.lsu_req.bits.ctrl.mop.poke(1.U)
+    dut.io.lsu_req.valid.poke(true.B)
+  }
+
   private def acceptDcache(dut: LSUexe): (BigInt, BigInt) = {
     dut.io.dcache_req.ready.poke(false.B)
     var waitCycles = 0
@@ -397,6 +413,44 @@ class LsuCachelineClientTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cachelineClientRsp.bits.coverageMask.expect(2.U)
       dut.io.cachelineClientRsp.bits.data(1).expect(0x701.U)
       dut.io.cachelineClientRsp.ready.poke(true.B)
+      dut.clock.step()
+    }
+  }
+
+  "PIPE preserves sparse lane data while one vector load is split across cache lines" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+
+      // Lanes 1/3 share one 128-byte line; lanes 5/12 share the next.  This
+      // exercises AddrCalculate's request split and MSHRv2's response merge.
+      driveSparsePipeLoad(dut, Map(
+        1 -> BigInt("90001000", 16),
+        3 -> BigInt("9000101c", 16),
+        5 -> BigInt("90001080", 16),
+        12 -> BigInt("900010fc", 16)))
+      dut.io.lsu_req.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.lsu_req.valid.poke(false.B)
+
+      val requests = Seq(acceptDcache(dut), acceptDcache(dut))
+      val lowerLine = requests.find(_._2 == BigInt("0000000a", 16))
+        .getOrElse(fail(s"missing lanes 1/3 DCache request: $requests"))
+      val upperLine = requests.find(_._2 == BigInt("00001020", 16))
+        .getOrElse(fail(s"missing lanes 5/12 DCache request: $requests"))
+
+      // DCache data is lane-indexed at this boundary.  Returning the upper
+      // line first proves the pending mask retains both partial responses.
+      returnDcache(dut, upperLine._1, upperLine._2, 0x2000)
+      dut.io.lsu_rsp.valid.expect(false.B)
+      returnDcache(dut, lowerLine._1, lowerLine._2, 0x1000)
+      dut.io.lsu_rsp.valid.expect(true.B)
+      dut.io.lsu_rsp.bits.tag.clientId.expect(LsuClientId.Pipe)
+      Seq(1, 3, 5, 12).foreach(lane => dut.io.lsu_rsp.bits.tag.mask(lane).expect(true.B))
+      dut.io.lsu_rsp.bits.data(1).expect(0x1001.U)
+      dut.io.lsu_rsp.bits.data(3).expect(0x1003.U)
+      dut.io.lsu_rsp.bits.data(5).expect(0x2005.U)
+      dut.io.lsu_rsp.bits.data(12).expect(0x200c.U)
       dut.clock.step()
     }
   }
