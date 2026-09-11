@@ -106,6 +106,9 @@ class pipe() extends Module{
   val rtCompletionWarp = Reg(UInt(depth_warp.W))
   val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
   val rtReleaseSent = RegInit(false.B)
+  // Reserve before operand collection: a foreign traverse in the shared
+  // execution FIFO would otherwise block the owner's eventual release.
+  val rtReservation = Module(new RtSessionReservation)
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
@@ -249,11 +252,13 @@ class pipe() extends Module{
   warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
+    val rtAdmissionAllowed = ibuffer.io.out(i).bits.rtOp =/= RtOp.traverse ||
+      rtReservation.io.allowed(i)
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
-    ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i)
-    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
-    if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
-      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
+    ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
+    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
+    if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay & rtAdmissionAllowed
+      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay & rtAdmissionAllowed}
     val ctrl=ibuffer.io.out(i).bits
     /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
@@ -284,6 +289,16 @@ class pipe() extends Module{
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
   }
   val op_colV_in_wid = Wire(UInt(depth_warp.W))
+  // These ownership boundaries are RTcore handshakes, not vector-issue
+  // retirement.  In particular, a release instruction retires only after its
+  // acknowledgement; reserving at that later point lets another warp reach a
+  // release while the original session is still being reclaimed.
+  rtReservation.io.issued.valid := rtcore.io.command.fire
+  rtReservation.io.issued.bits := rtcore.io.command.bits.warpId
+  rtReservation.io.releaseIssued.valid := rtcore.io.release.fire
+  rtReservation.io.releaseIssued.bits := rtcore.io.release.bits.warpId
+  rtReservation.io.released.valid := rtcore.io.releaseAck.fire
+  rtReservation.io.released.bits := rtcore.io.releaseAck.bits.warpId
   val op_colV_out_wid = Wire(UInt(depth_warp.W))
   val op_colX_in_wid = Wire(UInt(depth_warp.W))
   val op_colX_out_wid = Wire(UInt(depth_warp.W))
@@ -314,7 +329,6 @@ class pipe() extends Module{
            p"UNDEFINED INSTRUCTION @ SM ${sm_id} warp ${Decimal(ctrl.wid)} " + 
            p"PC 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}")
   }
-
   operand_collector.io.controlV<>ibuffer2issue.io.out_v//ibuffer2issue.io.out.bits
   operand_collector.io.controlX<>ibuffer2issue.io.out_x//ibuffer2issue.io.out.bits
   operand_collector.io.writeVecCtrl<>wb.io.out_v
@@ -457,6 +471,18 @@ class pipe() extends Module{
   val rtIsRelease = rtIssue.ctrl.rtOp === RtOp.release
   val rtIsLocalLoad = rtIssue.ctrl.rtOp === RtOp.localLoad
   val rtIsLocalStore = rtIssue.ctrl.rtOp === RtOp.localStore
+  // RT instructions remain in the scalar instruction stream even when SIMT
+  // control has disabled every lane.  They have no RT-local side effect in
+  // that case: in particular, do not create (or try to retire) a session.
+  val rtIssueMask = rtIssue.mask.asUInt
+  val rtTraverseEmpty = rtIsTraverse && !rtIssueMask.orR
+  val rtReleaseEmpty = rtIsRelease && !rtIssueMask.orR
+  // A reconverged release can have live lanes even though its matching
+  // traverse was empty and therefore deliberately never opened a session.
+  // Releasing that non-existent session would hold the RT issue entry forever:
+  // RTcore correctly refuses an acknowledgement without an owner.
+  val rtReleaseNoSession = rtIsRelease && !rtReservation.io.reserved
+  val rtReleaseSkipped = rtReleaseEmpty || rtReleaseNoSession
   val softwareLocalRequest = Wire(Decoupled(new RtLocalSramRequest))
   softwareLocalRequest.valid := issueV.io.out_RT.valid && (rtIsLocalLoad || rtIsLocalStore) &&
     !rtInFlight(rtIssue.ctrl.wid)
@@ -510,7 +536,7 @@ class pipe() extends Module{
   // must complete through the legacy LSU before RTcore may reclaim its state.
   val rtReleaseStoreDrained = lsu.io.fence_end(rtIssue.ctrl.wid)
   rtcore.io.command.valid := issueV.io.out_RT.valid && rtIsTraverse &&
-    !rtInFlight(rtIssue.ctrl.wid)
+    !rtTraverseEmpty && !rtInFlight(rtIssue.ctrl.wid)
   rtcore.io.command.bits.warpId := rtIssue.ctrl.wid
   rtcore.io.command.bits.issueId := rtIssueId(rtIssue.ctrl.wid)
   rtcore.io.command.bits.destinationVd := rtIssue.ctrl.reg_idxw
@@ -519,13 +545,14 @@ class pipe() extends Module{
   // A release must not retire before the RTcore has actually reclaimed its
   // retained context.  Hold the issue entry after its one-time submission.
   rtcore.io.release.valid := issueV.io.out_RT.valid && rtIsRelease &&
-    !rtReleaseSent && !rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained
+    !rtReleaseSkipped && !rtReleaseSent && !rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained
   rtcore.io.release.bits.warpId := rtIssue.ctrl.wid
   rtcore.io.release.bits.activeMask := rtIssue.mask.asUInt
   rtcore.io.releaseAck.ready := rtReleaseSent && issueV.io.out_RT.valid && rtIsRelease
   issueV.io.out_RT.ready := Mux(rtIsTraverse,
-    !rtInFlight(rtIssue.ctrl.wid) && rtcore.io.command.ready,
-    Mux(rtIsRelease, rtReleaseSent && rtcore.io.releaseAck.valid,
+    rtTraverseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtcore.io.command.ready),
+    Mux(rtIsRelease, Mux(rtReleaseSkipped, true.B,
+      rtReleaseSent && rtcore.io.releaseAck.valid),
       Mux(rtIsLocalLoad || rtIsLocalStore, softwareLocalRequest.ready, false.B)))
   when(rtcore.io.command.fire) {
     val wid = rtcore.io.command.bits.warpId
@@ -535,7 +562,11 @@ class pipe() extends Module{
   when(rtcore.io.release.fire) {
     rtReleaseSent := true.B
   }
-  when(rtcore.io.releaseAck.fire) { rtReleaseSent := false.B }
+  when(rtcore.io.releaseAck.fire) {
+    assert(rtcore.io.releaseAck.bits.warpId === rtIssue.ctrl.wid,
+      "RT release acknowledgement must retire the reserved issue warp")
+    rtReleaseSent := false.B
+  }
 
   rtWriteback.io.enq.valid := rtcore.io.completion.valid && !rtCompletionAwaitingWb
   rtWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)

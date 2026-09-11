@@ -14,6 +14,34 @@ import top.parameters._
   * completion becomes visible.
   */
 class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
+  "nested gather cannot steal a resident warp or expand its mask" in {
+    test(new RtLocalRayState) { dut =>
+      idle(dut)
+      admit(dut, restart = false, mask = 3)
+      dut.io.restart.valid.poke(true.B)
+      dut.io.restart.bits.warpId.poke(4.U)
+      dut.io.restart.bits.activeMask.poke(3.U)
+      dut.io.restart.ready.expect(false.B)
+      dut.clock.step(5)
+      dut.io.restart.bits.warpId.poke(3.U)
+      dut.io.restart.bits.activeMask.poke(7.U)
+      dut.io.restart.ready.expect(false.B)
+      dut.clock.step(5)
+      dut.io.restart.bits.activeMask.poke(1.U)
+      dut.io.restart.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.restart.valid.poke(false.B)
+      dut.io.request.bits.warpId.expect(3.U)
+      dut.io.laneOut.ready.poke(false.B)
+      completeRayGather(dut)
+      dut.io.laneOut.valid.expect(true.B)
+      dut.io.laneOut.bits.laneId.expect(0.U)
+      dut.io.laneOut.ready.poke(true.B)
+      dut.clock.step()
+      dut.io.laneOut.valid.expect(false.B)
+    }
+  }
+
   private val activeLane0 = 1
   private val hitWords = RtAbiLayout.HitRecordWordCount
   private val candidateBase = RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes

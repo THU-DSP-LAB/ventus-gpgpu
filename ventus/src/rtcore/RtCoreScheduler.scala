@@ -143,11 +143,14 @@ class RtCoreScheduler extends Module {
   // candidate lanes, or starts a nested traversal after an opaque/miss
   // completion.  RT Local control is the callback authority only on resume.
   val commandSlot = 0.U(residentWarpIdWidth.W)
-  val freshCommand = io.command.bits.activeMask.orR && !sessionActive(commandSlot)
+  val retiring = Wire(Bool())
+  val freshCommand = !retiring && io.command.bits.activeMask.orR && !sessionActive(commandSlot)
   val retainedCandidateMask = candidateValid(commandSlot).asUInt & io.command.bits.activeMask
-  val resumeCommand = io.command.bits.activeMask.orR && sessionActive(commandSlot) &&
+  val ownedCommand = !retiring && io.command.bits.warpId === residentOwnerWarpId &&
+    (io.command.bits.activeMask & ~activeMask(commandSlot)) === 0.U
+  val resumeCommand = ownedCommand && io.command.bits.activeMask.orR && sessionActive(commandSlot) &&
     completionPublished(commandSlot) && retainedCandidateMask.orR
-  val restartCommand = io.command.bits.activeMask.orR && sessionActive(commandSlot) &&
+  val restartCommand = ownedCommand && io.command.bits.activeMask.orR && sessionActive(commandSlot) &&
     completionPublished(commandSlot) && !retainedCandidateMask.orR
   val commandAllowed = freshCommand || resumeCommand || restartCommand
   local.io.admission.valid := io.command.valid && freshCommand
@@ -164,7 +167,11 @@ class RtCoreScheduler extends Module {
       local.io.restart.ready && stack.io.clear.ready))
   when(io.command.fire) {
     val warp = commandSlot
-    residentOwnerWarpId := io.command.bits.warpId
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      printf(p"[RTCORE trace] command warp=${Decimal(io.command.bits.warpId)}" +
+        p" issue=${Decimal(io.command.bits.issueId)} mask=0x${Hexadecimal(io.command.bits.activeMask)}\\n")
+    }
+    when(freshCommand) { residentOwnerWarpId := io.command.bits.warpId }
     commandMask(warp) := io.command.bits.activeMask
     warpIssueId(warp) := io.command.bits.issueId
     warpDestination(warp) := io.command.bits.destinationVd
@@ -236,6 +243,10 @@ class RtCoreScheduler extends Module {
       laneState(0)(resumeLane) := sTerminal
       laneStatus(0)(resumeLane) := RtAbiLayout.TraversalTerminated.U
     }
+    // A software callback's ACCEPT makes its retained candidate the closest
+    // committed hit.  The later empty-stack path consults this bit to choose
+    // HIT rather than overwriting the callback result with MISS.
+    when(resumeAccept) { committedValid(0)(resumeLane) := true.B }
     when(resumeAccept || resumeTerminate) { candidateValid(0)(resumeLane) := false.B }
   }
 
@@ -310,6 +321,17 @@ class RtCoreScheduler extends Module {
     dst.kx := objectRaySetup.io.out.bits.ray.kx
     dst.ky := objectRaySetup.io.out.bits.ray.ky
     dst.kz := objectRaySetup.io.out.bits.ray.kz
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      when(lane < 4.U || lane >= 12.U) {
+        val ray = objectRaySetup.io.out.bits.ray
+        printf(p"[RTCORE trace] object-ray lane=${Decimal(lane)}" +
+          p" base=0x${Hexadecimal(objectBase(0)(lane))}" +
+          p" o=[${Hexadecimal(ray.origin.x)},${Hexadecimal(ray.origin.y)},${Hexadecimal(ray.origin.z)}]" +
+          p" d=[${Hexadecimal(ray.dir.x)},${Hexadecimal(ray.dir.y)},${Hexadecimal(ray.dir.z)}]" +
+          p" inv=[${Hexadecimal(ray.inv.x)},${Hexadecimal(ray.inv.y)},${Hexadecimal(ray.inv.z)}]" +
+          p" tmin=${Hexadecimal(ray.originalTmin)} tmax=${Hexadecimal(ray.extent)}\\n")
+      }
+    }
     laneState(0)(lane) := sBlasHeaderRequest
   }
 
@@ -390,6 +412,12 @@ class RtCoreScheduler extends Module {
     table.io.asAcquire.bits.waiter.objectRay := selectedObjectRay
   }
   when(table.io.asAcquire.fire && headerAcquire) {
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      when(headerLane < 4.U || headerLane >= 12.U) {
+        printf(p"[RTCORE trace] header-req lane=${Decimal(headerLane)}" +
+          p" object=${Decimal(headerObject)} base=0x${Hexadecimal(headerBase)}\\n")
+      }
+    }
     laneState(headerWarp)(headerLane) := Mux(headerObject, sBlasHeaderPending, sHeaderPending)
   }
 
@@ -405,6 +433,14 @@ class RtCoreScheduler extends Module {
     (selectedInvalid || selectedUnsupported || table.io.asAcquire.ready)
   stack.io.pop.bits.laneMask := UIntToOH(popLane, num_thread)
   when(stack.io.pop.fire) {
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      when(popLane < 4.U || popLane >= 12.U) {
+        printf(p"[RTCORE trace] pop lane=${Decimal(popLane)}" +
+          p" ref=0x${Hexadecimal(selectedNodeRef)} type=${Decimal(selectedNodeType)}" +
+          p" object=${Decimal(selectedObjectRay)} invalid=${Decimal(selectedInvalid)}" +
+          p" unsupported=${Decimal(selectedUnsupported)}\\n")
+      }
+    }
     nextStackLane(popWarp) := popLane + 1.U
     when(selectedInvalid || selectedUnsupported) {
       laneState(popWarp)(popLane) := sStackReady
@@ -519,6 +555,38 @@ class RtCoreScheduler extends Module {
     (asReady.valid && !asIsHeader && !asIsBlasHeader && !asIsBox && !asIsTriangle && !asIsInstance && !asIsAabb)
   when(asReady.fire) {
     val waiter = asReady.bits.waiter
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      // The 4x4 mismatch is confined to lanes 12--15.  Once Box4 input has
+      // been validated, node kinds and refs explain the remaining control
+      // flow far more compactly than repeating all four AABBs.
+      when(waiter.laneId < 4.U || waiter.laneId >= 12.U) {
+        printf(p"[RTCORE trace] as lane=${Decimal(waiter.laneId)}" +
+          p" kind=${Decimal(waiter.nodeKind)} object=${Decimal(waiter.objectRay)}" +
+          p" data=[${Hexadecimal(asReady.bits.data(0))},${Hexadecimal(asReady.bits.data(1))}," +
+          p"${Hexadecimal(asReady.bits.data(2))},${Hexadecimal(asReady.bits.data(3))}]\\n")
+        when(asIsHeader || asIsBlasHeader) {
+          printf(p"[RTCORE trace] header-rsp lane=${Decimal(waiter.laneId)}" +
+            p" object=${Decimal(waiter.objectRay)} root=0x${Hexadecimal(headerRoot)}" +
+            p" nodes=${Decimal(asReady.bits.data((RtVtasLayout.AsHeaderNodeCount / 4).toInt))}\\n")
+        }
+        when(asIsBox && waiter.objectRay) {
+          printf(p"[RTCORE trace] box-bounds lane=${Decimal(waiter.laneId)}" +
+            p" minX=[${Hexadecimal(asReady.bits.data(4))},${Hexadecimal(asReady.bits.data(5))},${Hexadecimal(asReady.bits.data(6))},${Hexadecimal(asReady.bits.data(7))}]" +
+            p" minY=[${Hexadecimal(asReady.bits.data(8))},${Hexadecimal(asReady.bits.data(9))},${Hexadecimal(asReady.bits.data(10))},${Hexadecimal(asReady.bits.data(11))}]" +
+            p" minZ=[${Hexadecimal(asReady.bits.data(12))},${Hexadecimal(asReady.bits.data(13))},${Hexadecimal(asReady.bits.data(14))},${Hexadecimal(asReady.bits.data(15))}]\\n")
+          printf(p"[RTCORE trace] box-bounds lane=${Decimal(waiter.laneId)}" +
+            p" maxX=[${Hexadecimal(asReady.bits.data(16))},${Hexadecimal(asReady.bits.data(17))},${Hexadecimal(asReady.bits.data(18))},${Hexadecimal(asReady.bits.data(19))}]" +
+            p" maxY=[${Hexadecimal(asReady.bits.data(20))},${Hexadecimal(asReady.bits.data(21))},${Hexadecimal(asReady.bits.data(22))},${Hexadecimal(asReady.bits.data(23))}]" +
+            p" maxZ=[${Hexadecimal(asReady.bits.data(24))},${Hexadecimal(asReady.bits.data(25))},${Hexadecimal(asReady.bits.data(26))},${Hexadecimal(asReady.bits.data(27))}]\\n")
+        }
+        when(asIsInstance) {
+          printf(p"[RTCORE trace] instance lane=${Decimal(waiter.laneId)}" +
+            p" w2o=[${Hexadecimal(asReady.bits.data(20))},${Hexadecimal(asReady.bits.data(21))},${Hexadecimal(asReady.bits.data(22))},${Hexadecimal(asReady.bits.data(23))};" +
+            p"${Hexadecimal(asReady.bits.data(24))},${Hexadecimal(asReady.bits.data(25))},${Hexadecimal(asReady.bits.data(26))},${Hexadecimal(asReady.bits.data(27))};" +
+            p"${Hexadecimal(asReady.bits.data(28))},${Hexadecimal(asReady.bits.data(29))},${Hexadecimal(asReady.bits.data(30))},${Hexadecimal(asReady.bits.data(31))}]\\n")
+        }
+      }
+    }
     when(asIsHeader || asIsBlasHeader) {
       when(headerInvalid) {
         laneState(0)(waiter.laneId) := sTerminal
@@ -585,6 +653,13 @@ class RtCoreScheduler extends Module {
     val result = boxResult(boxResultSelect).bits
     val warp = requestWarp(result.requestId)
     val lane = requestLane(result.requestId)
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      when(lane < 4.U || lane >= 12.U) {
+        printf(p"[RTCORE trace] box lane=${Decimal(lane)} intersect=0x${Hexadecimal(result.isIntersect.asUInt)}" +
+          p" tmin=[${Hexadecimal(result.tmin(0))},${Hexadecimal(result.tmin(1))}," +
+          p"${Hexadecimal(result.tmin(2))},${Hexadecimal(result.tmin(3))}]\\n")
+      }
+    }
     val count = PopCount(result.isIntersect)
     when(boxIsAabb(warp)(lane)) {
       when(count === 0.U) {
@@ -699,6 +774,14 @@ class RtCoreScheduler extends Module {
   }
   when(triangleResultMask.orR && triangleResult(triangleResultSelect).fire) {
     nextTriangleResult := triangleResultSelect + 1.U
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      when(selectedTriangleLane < 4.U || selectedTriangleLane >= 12.U) {
+        printf(p"[RTCORE trace] triangle lane=${Decimal(selectedTriangleLane)}" +
+          p" hit=${Decimal(selectedTriangleResult.hit)}" +
+          p" tnum=0x${Hexadecimal(selectedTriangleResult.tNum)}" +
+          p" tden=0x${Hexadecimal(selectedTriangleResult.tDenom)}\\n")
+      }
+    }
     when(!acceptedTriangleResult) {
       laneState(selectedTriangleWarp)(selectedTriangleLane) := sStackReady
     }
@@ -804,8 +887,17 @@ class RtCoreScheduler extends Module {
   // later shader callback/control-flow error without perturbing normal RTL.
   if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
     when(local.io.drained.fire) {
-      printf(p"[RTCORE trace] drain warp=${Decimal(residentOwnerWarpId)} status0=${Decimal(laneStatus(0)(0))}" +
-        p" committed0=${committedValid(0)(0)} candidate0=${candidateValid(0)(0)}\\n")
+      printf(p"[RTCORE trace] drain warp=${Decimal(residentOwnerWarpId)}" +
+        p" mask=0x${Hexadecimal(commandMask(0))} status0=${Decimal(laneStatus(0)(0))}" +
+        p" committed0=${committedValid(0)(0)} candidate0=${candidateValid(0)(0)}" +
+        p" status=[${Decimal(laneStatus(0)(0))},${Decimal(laneStatus(0)(1))}," +
+        p"${Decimal(laneStatus(0)(2))},${Decimal(laneStatus(0)(3))}," +
+        p"${Decimal(laneStatus(0)(4))},${Decimal(laneStatus(0)(5))}," +
+        p"${Decimal(laneStatus(0)(6))},${Decimal(laneStatus(0)(7))}," +
+        p"${Decimal(laneStatus(0)(8))},${Decimal(laneStatus(0)(9))}," +
+        p"${Decimal(laneStatus(0)(10))},${Decimal(laneStatus(0)(11))}," +
+        p"${Decimal(laneStatus(0)(12))},${Decimal(laneStatus(0)(13))}," +
+        p"${Decimal(laneStatus(0)(14))},${Decimal(laneStatus(0)(15))}]\\n")
     }
   }
   io.completion.valid := completionPending
@@ -822,7 +914,9 @@ class RtCoreScheduler extends Module {
   val releasePending = RegInit(false.B)
   val releaseStackCleared = RegInit(false.B)
   val releaseLanesInvalidated = RegInit(false.B)
+  retiring := releasePending || finalRetirePending || io.release.valid
   val releaseAllowed = sessionActive(0) && completionPublished(0) && !completionPending &&
+    io.release.bits.warpId === residentOwnerWarpId &&
     io.release.bits.activeMask === activeMask(0)
   io.release.ready := releaseAllowed && !releasePending && !finalRetirePending
   when(io.release.fire) {

@@ -215,8 +215,9 @@ class RtIntersectionUnitParallelTest
               dut.boxOut.bits.isIntersect.foreach(_.expect(true.B))
               negativeDirectionSeen = true
             case requestId if requestId == BigInt(32) =>
-              dut.boxOut.bits.tmin.foreach(_.expect(positiveInfinity))
-              dut.boxOut.bits.isIntersect.foreach(_.expect(false.B))
+              // A closed slab may touch the ray's inclusive extent.
+              dut.boxOut.bits.tmin.foreach(_.expect(one))
+              dut.boxOut.bits.isIntersect.foreach(_.expect(true.B))
               extentBoundarySeen = true
             case requestId if requestId == BigInt(33) =>
               dut.boxOut.bits.tmin.foreach(_.expect(onePointFive))
@@ -230,6 +231,97 @@ class RtIntersectionUnitParallelTest
       assert(negativeDirectionSeen)
       assert(extentBoundarySeen)
       assert(tminSeen)
+    }
+  }
+
+  "box4 accepts the failing lane-13 object ray against a containing BLAS bound" in {
+    test(new RtIntersectionUnit) { dut =>
+      initialize(dut)
+      dut.boxIn.bits.requestId.poke(61.U)
+      // Exact IEEE32 ray fields traced from raytracingshadows lane 13 after
+      // its identity world-to-object transform.  The four boxes deliberately
+      // contain the large BLAS root AABB, so this isolates IU slab arithmetic
+      // from VTAS child layout and scheduler state.
+      pokeFloat3(dut.boxIn.bits.ray.origin, zero, "hc0400000".U, "h41200000".U)
+      pokeFloat3(dut.boxIn.bits.ray.dir, "hbe067533".U, "h3ec9afcc".U, "hbf68e341".U)
+      pokeFloat3(dut.boxIn.bits.ray.inv, "hc0f3b467".U, "h40227845".U, "hbf8cb3f8".U)
+      pokeFloat3(dut.boxIn.bits.ray.shear, zero, zero, one)
+      dut.boxIn.bits.ray.originalTmin.poke(zero)
+      dut.boxIn.bits.ray.extent.poke(positiveInfinity)
+      dut.boxIn.bits.ray.kx.poke(0.U)
+      dut.boxIn.bits.ray.ky.poke(1.U)
+      dut.boxIn.bits.ray.kz.poke(2.U)
+      dut.boxIn.bits.aabb.foreach { box =>
+        box.x_min.poke("hc0400000".U) // -3
+        box.y_min.poke("hc0c00000".U) // -6
+        box.z_min.poke("hc0000000".U) // -2
+        box.x_max.poke("h40400000".U) // 3
+        box.y_max.poke(one)
+        box.z_max.poke("h40400000".U) // 3
+      }
+      dut.boxIn.valid.poke(true.B)
+      dut.boxIn.ready.expect(true.B)
+      dut.clock.step()
+      dut.boxIn.valid.poke(false.B)
+
+      var seen = false
+      for (_ <- 0 until 20) {
+        if (dut.boxOut.valid.peek().litToBoolean) {
+          dut.boxOut.bits.requestId.expect(61.U)
+          dut.boxOut.bits.isIntersect.foreach(_.expect(true.B))
+          seen = true
+        }
+        dut.clock.step()
+      }
+      assert(seen, "lane-13 Box4 input did not complete")
+    }
+  }
+
+  "box4 reproduces the lane-13 large-BLAS root miss" in {
+    test(new RtIntersectionUnit) { dut =>
+      initialize(dut)
+      dut.boxIn.bits.requestId.poke(62.U)
+      // Exact trace from raytracingshadows 4x4: lane 13, object BLAS root
+      // 0x0028ac01.  Child refs 2/3 are invalid; their zero bounds are still
+      // presented to the IU by the current scheduler and must not create a hit.
+      pokeFloat3(dut.boxIn.bits.ray.origin, zero, "hc0400000".U, "h41200000".U)
+      pokeFloat3(dut.boxIn.bits.ray.dir, "hbe067533".U, "h3ec9afcc".U, "hbf68e341".U)
+      pokeFloat3(dut.boxIn.bits.ray.inv, "hc0f3b467".U, "h40227845".U, "hbf8cb3f8".U)
+      pokeFloat3(dut.boxIn.bits.ray.shear, zero, zero, one)
+      dut.boxIn.bits.ray.originalTmin.poke("h3a83126f".U)
+      dut.boxIn.bits.ray.extent.poke("h461c4000".U)
+      dut.boxIn.bits.ray.kx.poke(0.U)
+      dut.boxIn.bits.ray.ky.poke(1.U)
+      dut.boxIn.bits.ray.kz.poke(2.U)
+      val minX = Seq("hc0193082".U, "hbffd4287".U, zero, zero)
+      val minY = Seq("hc0a2b58d".U, "hc0a2c700".U, zero, zero)
+      val minZ = Seq("hbfe3365d".U, "h3eacd87c".U, zero, zero)
+      val maxX = Seq("h400b7d96".U, "h3fc2ae67".U, zero, zero)
+      val maxY = Seq("h3ede3ccc".U, "h3e3f3890".U, zero, zero)
+      val maxZ = Seq("h3fcb096e".U, "h4026a524".U, zero, zero)
+      for (index <- 0 until 4) {
+        dut.boxIn.bits.aabb(index).x_min.poke(minX(index))
+        dut.boxIn.bits.aabb(index).y_min.poke(minY(index))
+        dut.boxIn.bits.aabb(index).z_min.poke(minZ(index))
+        dut.boxIn.bits.aabb(index).x_max.poke(maxX(index))
+        dut.boxIn.bits.aabb(index).y_max.poke(maxY(index))
+        dut.boxIn.bits.aabb(index).z_max.poke(maxZ(index))
+      }
+      dut.boxIn.valid.poke(true.B)
+      dut.boxIn.ready.expect(true.B)
+      dut.clock.step()
+      dut.boxIn.valid.poke(false.B)
+
+      var seen = false
+      for (_ <- 0 until 20) {
+        if (dut.boxOut.valid.peek().litToBoolean) {
+          dut.boxOut.bits.requestId.expect(62.U)
+          dut.boxOut.bits.isIntersect.foreach(_.expect(false.B))
+          seen = true
+        }
+        dut.clock.step()
+      }
+      assert(seen, "lane-13 large-BLAS root input did not complete")
     }
   }
 
@@ -263,6 +355,13 @@ class RtIntersectionUnitParallelTest
             dut.triangleOut.bits.tDenom.peek().litValue,
             dut.triangleOut.bits.hit.peek().litToBoolean
           ))
+          if (dut.triangleOut.bits.requestId.peek().litValue == 41) {
+            // At the origin-facing interior point of this right triangle,
+            // RayFlex's B and C weights are both 1/3.  The RT ABI exports
+            // exactly those two weights as hitAttributeEXT.xy (not A/B).
+            dut.triangleOut.bits.uNum.expect(three)
+            dut.triangleOut.bits.vNum.expect(three)
+          }
         }
         dut.clock.step()
       }
@@ -352,6 +451,76 @@ class RtIntersectionUnitParallelTest
         }
         dut.clock.step()
       }
+    }
+  }
+
+  "box4 accepts the actual lanes 12 to 15 platform top and bottom faces" in {
+    test(new RtIntersectionUnit) { dut =>
+      initialize(dut)
+      driveRay(dut.boxIn.bits.ray)
+      pokeFloat3(dut.boxIn.bits.ray.origin, zero, "hc0400000".U, "h41200000".U)
+      dut.boxIn.bits.ray.originalTmin.poke("h3a83126f".U)
+      dut.boxIn.bits.ray.extent.poke("h461c4000".U)
+      for (i <- 0 until 4) {
+        val box = dut.boxIn.bits.aabb(i)
+        box.x_min.poke("hc0efc2d7".U)
+        box.x_max.poke("h40f03d29".U)
+        val y = if (i < 2) "h3f0cfe02".U else "h3c8c64b0".U
+        box.y_min.poke(y)
+        box.y_max.poke(y)
+        box.z_min.poke("hc0f4cd01".U)
+        box.z_max.poke("h40eb32ff".U)
+      }
+      val rays = Seq(
+        Seq("bebd118d", "3ebd118d", "bf5a514a", "c02d5013", "402d5013", "bf9617e3"),
+        Seq("be067533", "3ec9afcc", "bf68e341", "c0f3b467", "40227845", "bf8cb3f8"),
+        Seq("3e067533", "3ec9afcc", "bf68e341", "40f3b467", "40227845", "bf8cb3f8"),
+        Seq("3ebd118d", "3ebd118d", "bf5a514a", "402d5013", "402d5013", "bf9617e3"))
+      for ((ray, index) <- rays.zipWithIndex) {
+        val words = ray.map(word => BigInt(word, 16).U)
+        dut.boxIn.bits.requestId.poke((64 + index).U)
+        pokeFloat3(dut.boxIn.bits.ray.dir, words(0), words(1), words(2))
+        pokeFloat3(dut.boxIn.bits.ray.inv, words(3), words(4), words(5))
+        dut.boxIn.valid.poke(true.B)
+        dut.boxIn.ready.expect(true.B)
+        dut.clock.step()
+        dut.boxIn.valid.poke(false.B)
+        var remaining = 24
+        while (!dut.boxOut.valid.peek().litToBoolean && remaining > 0) {
+          dut.clock.step()
+          remaining -= 1
+        }
+        assert(remaining > 0)
+        dut.boxOut.bits.requestId.expect((64 + index).U)
+        dut.boxOut.bits.isIntersect.foreach(_.expect(true.B))
+        dut.clock.step()
+      }
+    }
+  }
+
+  "box4 accepts a closed-interval tangent AABB" in {
+    test(new RtIntersectionUnit) { dut =>
+      initialize(dut)
+      dut.boxIn.bits.requestId.poke(63.U)
+      driveRay(dut.boxIn.bits.ray)
+      // Each axis produces the singleton interval t = 1.  This is the
+      // boundary case used by thin triangle BVH boxes: tmin == tmax must be
+      // accepted, matching Spike's `tmin > tmax` rejection rule.
+      dut.boxIn.bits.aabb.foreach(box => driveBox(box, one, one))
+      dut.boxIn.valid.poke(true.B)
+      dut.boxIn.ready.expect(true.B)
+      dut.clock.step()
+      dut.boxIn.valid.poke(false.B)
+
+      var remaining = 24
+      while (!dut.boxOut.valid.peek().litToBoolean && remaining > 0) {
+        dut.clock.step()
+        remaining -= 1
+      }
+      assert(remaining > 0, "tangent Box4 request did not complete")
+      dut.boxOut.bits.requestId.expect(63.U)
+      dut.boxOut.bits.isIntersect.foreach(_.expect(true.B))
+      dut.boxOut.bits.tmin.foreach(_.expect(one))
     }
   }
 }

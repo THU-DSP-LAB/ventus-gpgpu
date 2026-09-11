@@ -167,7 +167,10 @@ verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
+# See sim-verilator/verilate.mk: keep the Verilator archive directly stale
+# when Scala changes, rather than requiring a second make invocation after
+# dut.v is regenerated.
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_SRC_SCALA)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 

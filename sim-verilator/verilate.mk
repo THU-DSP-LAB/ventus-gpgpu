@@ -179,7 +179,11 @@ verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
+# Depend on Scala directly as well as dut.v.  With grouped generated outputs,
+# GNU make otherwise decides whether libVdut.a is stale before the dut.v
+# recipe advances its timestamp, requiring a second invocation after every
+# Chisel change.
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC) $(VLIB_SRC_SCALA)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 

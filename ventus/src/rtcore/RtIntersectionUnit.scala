@@ -200,8 +200,12 @@ class RtBox4Pipeline extends Module {
         comparisons(index).io.a := tmin(index)
         comparisons(index).io.b := tmax(index)
         comparisons(index).io.signaling := true.B
-        emit.isIntersect(index) := comparisons(index).io.lt
-        emit.tmin(index) := Mux(comparisons(index).io.lt, tmin(index), positiveInfinity)
+        // BVH AABBs are closed intervals.  A ray may touch a thin primitive's
+        // bounding box at exactly one t; Spike accepts that case (`tmin >
+        // tmax` is the miss predicate), so RTL must accept equality as well.
+        val intersects = comparisons(index).io.lt || comparisons(index).io.eq
+        emit.isIntersect(index) := intersects
+        emit.tmin(index) := Mux(intersects, tmin(index), positiveInfinity)
       }
       emit
     })

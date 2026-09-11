@@ -71,13 +71,15 @@ class RtLocalRayState extends Module {
   }
 
   io.admission.ready := !valid
-  io.restart.ready := valid && !flushing && !readOutstanding && !resumeActive && !drainPending
+  io.restart.ready := valid && io.restart.bits.warpId === ownerWarp &&
+    (io.restart.bits.activeMask & ~activeMask) === 0.U &&
+    !flushing && !readOutstanding && !resumeActive && !drainPending
   val startSession = io.admission.fire || io.restart.fire
   val startBits = Wire(new RtLocalAdmission)
   startBits := Mux(io.admission.fire, io.admission.bits, io.restart.bits)
   when(startSession) {
-    valid := true.B; ownerWarp := startBits.warpId; gatherMask := startBits.activeMask
-    when(io.admission.fire) { activeMask := startBits.activeMask }
+    valid := true.B; gatherMask := startBits.activeMask
+    when(io.admission.fire) { ownerWarp := startBits.warpId; activeMask := startBits.activeMask }
     loadIndex := 0.U; loaded := false.B; delivered := 0.U; readOutstanding := false.B
     resumeActive := false.B; controlLoaded := false.B; flushing := false.B; drainPending := false.B
     for (lane <- 0 until num_thread) {
