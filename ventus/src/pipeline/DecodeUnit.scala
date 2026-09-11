@@ -189,7 +189,7 @@ object IDecodeLUT_IMF{
     // CSRRSV is issued by the scalar CSR pipe, but rd denotes a VGPR.  Keep
     // `isvec` clear (there is no vector CSR issue port), while advertising its
     // vector writeback to the scoreboard so consumers wait for the CSR result.
-    CSRRSV-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,Y,N,N,N,N),
+    CSRRSV-> List(N,N,N,B_N,N,N,CSR.S,N,A3_X,A2_X,A1_RS1,IMM_X,MEM_X,FN_ADD,N,M_X,N,N,N,Y,N,N,N,N,N,N,N),
 
     FENCE->  List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_X,A1_X,IMM_I,MEM_X,FN_ADD,N,M_X,N,Y,N,N,N,N,Y,N,N,N,N),
     LW->     List(N,N,N,B_N,N,N,CSR.N,N,A3_X,A2_IMM,A1_RS1,IMM_I,MEM_W,FN_ADD,N,M_XRD,N,N,N,N,N,N,Y,N,N,N,N),
