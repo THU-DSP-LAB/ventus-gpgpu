@@ -67,6 +67,7 @@ class RtReleaseAck extends Bundle {
   * with the generic pipeline LSU.
   */
 class RtCorePerfEvents extends Bundle {
+  val detailed = if (PMU_DETAILED) Some(new RtDetailedSignals) else None
   val localSramReadRequest = Bool()
   val localSramWriteRequest = Bool()
   val localSramReadResponse = Bool()

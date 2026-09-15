@@ -1,0 +1,57 @@
+package rtcore
+
+import chisel3._
+import top.parameters._
+
+/** Simulation-only observation ports. No counters or feedback into control. */
+class RtAsObservation extends Bundle {
+  val occupied = UInt(6.W)
+  val returned = UInt(6.W)
+  val readyEntries = UInt(6.W)
+  val acquire = Bool()
+  val allocate = Bool()
+  val acquireEntry = UInt(5.W)
+  val address = UInt(memReqLen.W)
+  val is64B = Bool()
+  val acquireLane = UInt(5.W)
+  val refill = Bool()
+  val refillEntry = UInt(5.W)
+  val injection = Bool()
+  val injectionEntry = UInt(5.W)
+  val serve = Bool()
+  val serveEntry = UInt(5.W)
+  val serveLane = UInt(5.W)
+  val retire = Bool()
+}
+
+class RtUnitObservation extends Bundle {
+  val inValid = Bool()
+  val inReady = Bool()
+  val outValid = Bool()
+  val outReady = Bool()
+}
+
+class RtDetailedSignals extends Bundle {
+  val enabled = Bool()
+  val clear = Bool()
+  val session = Bool()
+  val activeMask = UInt(num_thread.W)
+  val command = Bool()
+  val commandMask = UInt(num_thread.W)
+  val commandKind = UInt(2.W) // fresh=0, resume=1, restart=2
+  val release = Bool()
+  val laneState = Vec(num_thread, UInt(4.W))
+  val stackReady = UInt(6.W)
+  val stackSelected = Bool()
+  val popBlockedHeader = Bool()
+  val popBlockedPush = Bool()
+  val popBlockedHeaderLine = Bool()
+  val asBlocked = Bool()
+  val readyBlockedRay = Bool()
+  val readyBlockedBox = Bool()
+  val readyBlockedTriangle = Bool()
+  val lsu = new RtUnitObservation // request on input, response on output
+  val units = Vec(RtCoreSchedulerParameters.boxUnitCount +
+    RtCoreSchedulerParameters.triangleUnitCount + 1, new RtUnitObservation)
+  val asTable = new RtAsObservation
+}

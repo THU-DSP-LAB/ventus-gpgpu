@@ -407,6 +407,13 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   val l1dTotalMiss = l1dReadMiss + l1dWriteMiss
   val l1dTotalHit = l1dTotalReq - l1dTotalMiss
 
+  if (PMU_DETAILED) {
+    for (i <- 0 until NL2Cache) {
+      io.pmu.l2.get(i) := l2cache(i).observation.get
+      io.pmu.l2.get(i).enabled := sm_wrapper(0).perfEnable
+      io.pmu.l2.get(i).clear := sm_wrapper(0).perfReset || reset.asBool
+    }
+  }
   val pmuActiveCycles = sumPipelinePerfCounter(_.activeCycles)
   val pmuTotalScalarIssued = sumPipelinePerfCounter(_.totalScalarIssued)
   val pmuTotalVectorIssued = sumPipelinePerfCounter(_.totalVectorIssued)

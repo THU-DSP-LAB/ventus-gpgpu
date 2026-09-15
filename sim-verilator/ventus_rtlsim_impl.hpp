@@ -4,6 +4,7 @@
 #include "cta_sche_wrapper.hpp"
 #include "physical_mem.hpp"
 #include "ventus_rtlsim.h"
+#include "rt_detailed_pmu.hpp"
 #include <deque>
 #include <memory>
 #include <string>
@@ -43,6 +44,8 @@ extern "C" struct ventus_rtlsim_t {
     ventus_rtlsim_config_t config;
     ventus_rtlsim_step_result_t step_status;
     ventus_rtlsim_pmu_storage_t pmu_snapshot;
+    std::vector<RtDetailedPmu> detailed_pmu;
+    std::vector<RtPmuStatistics> l2_pmu;
     uint32_t pmu_num_sm = 0;
     uint64_t last_pmu_progress_time = 0;
     uint64_t last_pmu_progress_value = 0;
@@ -63,6 +66,8 @@ extern "C" struct ventus_rtlsim_t {
     void sample_pmu_snapshot();
     void update_pmu_watchdog();
     void copy_pmu_counters_from_dut();
+    void sample_detailed_pmu();
+    int dump_extended_pmu(FILE* stream) const;
 
     void waveform_dump() const;
     void snapshot_fork();

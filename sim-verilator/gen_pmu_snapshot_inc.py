@@ -150,6 +150,71 @@ def main() -> int:
     lines.append("}")
     lines.append("")
 
+    lines.append("void ventus_rtlsim_t::sample_detailed_pmu() {")
+    if pmu_mode == "detailed":
+        lines.append(f"    if (detailed_pmu.empty()) detailed_pmu.resize({num_sm});")
+        scalar_fields = "enabled clear session activeMask command commandMask commandKind release stackReady stackSelected popBlockedHeader popBlockedPush popBlockedHeaderLine asBlocked readyBlockedRay readyBlockedBox readyBlockedTriangle".split()
+        as_fields = "occupied returned readyEntries acquire allocate acquireEntry address is64B acquireLane refill refillEntry injection injectionEntry serve serveEntry serveLane retire".split()
+        unit_fields = "inValid inReady outValid outReady".split()
+        for sm in range(num_sm):
+            prefix = f"dut->io_pmu_rtcore_{sm}_detailed_"
+            lines.extend(["    {", "        RtDetailedSample s;"])
+            for field in scalar_fields:
+                lines.append(f"        s.{field} = {prefix}{field};")
+            for lane in range(32):
+                lines.append(f"        s.laneState[{lane}] = {prefix}laneState_{lane};")
+            for field in as_fields:
+                lines.append(f"        s.asTable.{field} = {prefix}asTable_{field};")
+            for field in unit_fields:
+                lines.append(f"        s.lsu.{field} = {prefix}lsu_{field};")
+                for unit in range(11):
+                    lines.append(f"        s.units[{unit}].{field} = {prefix}units_{unit}_{field};")
+            lines.extend([f"        detailed_pmu[{sm}].sample(s);", "    }"])
+        num_l2 = parameter_u32(parameters, "num_l2cache")
+        lines.append(f"    if (l2_pmu.empty()) l2_pmu.resize({num_l2});")
+        l2_fields = "request requestBlocked response responseBlocked memoryRequest memoryRequestBlocked memoryResponse memoryResponseBlocked directoryHit directoryMiss directoryBlocked".split()
+        for cache in range(num_l2):
+            prefix = f"dut->io_pmu_l2_{cache}_"
+            lines.append(f"    if ({prefix}clear) l2_pmu[{cache}] = RtPmuStatistics{{}};")
+            lines.append(f"    else if ({prefix}enabled) {{")
+            lines.append(f'        l2_pmu[{cache}].count("sampled_cycles");')
+            for field in l2_fields:
+                lines.append(f'        l2_pmu[{cache}].count("{field}", {prefix}{field});')
+            lines.append("    }")
+    lines.append("}")
+    lines.append("int ventus_rtlsim_t::dump_extended_pmu(FILE* stream) const {")
+    def put(value: str) -> None:
+        lines.append(f"    std::fputs({json.dumps(value)}, stream);")
+    put('{"schema_version":1,"mode":"' + pmu_mode + '","sm":[')
+    for sm in range(num_sm):
+        put(("," if sm else "") + '{"id":' + str(sm))
+        for group, fields in (("pipeline", PIPELINE_FIELDS), ("inst_class", INST_CLASS_FIELDS), ("dcache", DCACHE_FIELDS)):
+            if pmu_mode == "off":
+                put(',"' + group + '":null')
+                continue
+            put(',"' + group + '":{')
+            for index, (field, _) in enumerate(fields):
+                fmt = ("," if index else "") + '"' + field + '":%llu'
+                lines.append(f"    std::fprintf(stream, {json.dumps(fmt)}, static_cast<unsigned long long>(pmu_snapshot.{group}[{sm}].{field}));")
+            put('}')
+        put(',"rt_detailed":')
+        if pmu_mode == "detailed":
+            lines.append(f'    if (detailed_pmu.size() > {sm}) detailed_pmu[{sm}].dump(stream); else std::fputs("null", stream);')
+        else:
+            put('null')
+        put('}')
+    put('],"l2":')
+    if pmu_mode == "detailed":
+        put('[')
+        lines.extend(['    for (size_t i = 0; i < l2_pmu.size(); ++i) {',
+                      "        if (i) std::fputc(',', stream);",
+                      '        l2_pmu[i].dump(stream);', '    }'])
+        put(']')
+    else:
+        put('null')
+    put('}')
+    lines.extend(["    return std::ferror(stream) ? -1 : 0;", "}", ""])
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(lines), encoding="utf-8")
     return 0

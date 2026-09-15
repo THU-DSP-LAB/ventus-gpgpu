@@ -32,6 +32,7 @@ class RtAsTable extends Module {
     val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtAsInjection)); val idle = Output(Bool())
     val residentHit = Output(Bool()); val pendingMerge = Output(Bool()); val miss = Output(Bool())
     val refill = Output(Bool()); val eviction = Output(Bool())
+    val detailed = if (PMU_DETAILED) Some(Output(new RtAsObservation)) else None
   })
   val entries = RegInit(VecInit(Seq.fill(p.asEntryCount)(0.U.asTypeOf(new RtAsEntry))))
   val merge = VecInit(entries.map(e => e.valid && !e.sent && e.lineAddress === io.acquire.bits.lineAddress && e.is64B === io.acquire.bits.is64B && !e.waiterValid.asUInt.andR)).asUInt
@@ -62,6 +63,27 @@ class RtAsTable extends Module {
   when(io.readyLine.valid) { io.readyLine.bits.waiter := entries(entry).waiters(waiter); io.readyLine.bits.data := entries(entry).data }
   when(io.readyLine.fire) { val left = entries(entry).waiterValid.asUInt & (~UIntToOH(waiter, p.maxAsWaitersPerEntry)).asUInt; entries(entry).waiterValid(waiter) := false.B; when(left === 0.U) { entries(entry).valid := false.B } }
   io.idle := !VecInit(entries.map(_.valid)).asUInt.orR
+  if (PMU_DETAILED) {
+    require(p.asEntryCount == 32 && num_thread == 32, "Update detailed observation index widths")
+    val d = io.detailed.get
+    d.occupied := PopCount(entries.map(_.valid))
+    d.returned := PopCount(entries.map(e => e.valid && e.returned))
+    d.readyEntries := PopCount(ready)
+    d.acquire := io.acquire.fire
+    d.allocate := io.miss
+    d.acquireEntry := place
+    d.address := io.acquire.bits.lineAddress
+    d.is64B := io.acquire.bits.is64B
+    d.acquireLane := io.acquire.bits.waiter.laneId
+    d.refill := io.candidate.fire
+    d.refillEntry := request
+    d.injection := io.injection.fire
+    d.injectionEntry := io.injection.bits.entry
+    d.serve := io.readyLine.fire
+    d.serveEntry := entry
+    d.serveLane := io.readyLine.bits.waiter.laneId
+    d.retire := io.readyLine.fire && PopCount(entries(entry).waiterValid) === 1.U
+  }
 }
 
 class RtMemTable extends Module {
@@ -71,6 +93,7 @@ class RtMemTable extends Module {
     val asCacheResidentHit = Output(Bool()); val asCachePendingMerge = Output(Bool()); val asCacheMiss = Output(Bool())
     val asCacheRefill = Output(Bool()); val asCacheEviction = Output(Bool())
     val lsuRequest = Decoupled(new LsuClientRequest); val lsuResponse = Flipped(Decoupled(new LsuClientResponse))
+    val detailed = if (PMU_DETAILED) Some(Output(new RtAsObservation)) else None
   })
   val as = Module(new RtAsTable); val mshr = Module(new RtLsuMshr)
   as.io.acquire <> io.asAcquire; io.asReadyLine <> as.io.readyLine
@@ -82,4 +105,5 @@ class RtMemTable extends Module {
   io.asCacheMiss := as.io.miss
   io.asCacheRefill := as.io.refill
   io.asCacheEviction := as.io.eviction
+  if (PMU_DETAILED) { io.detailed.get := as.io.detailed.get }
 }

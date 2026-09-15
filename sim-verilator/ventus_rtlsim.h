@@ -14,6 +14,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 typedef struct ventus_rtlsim_t ventus_rtlsim_t;
 typedef uint64_t paddr_t;
@@ -213,6 +214,8 @@ DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 DLL_PUBLIC ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim);
 // Optional RTcore PMU extension.  Older and no-cache backends may not export it.
 DLL_PUBLIC ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_get_rtcore_pmu(const ventus_rtlsim_t* sim);
+/** Optional additive diagnostics API; preserves existing snapshot struct ABI. */
+DLL_PUBLIC int ventus_rtlsim_dump_extended_pmu(const ventus_rtlsim_t* sim, FILE* stream);
 
 // Calculate 1 unit-time of simulation.
 // Return the result of this step: ok, error, time_exceed, or idle.

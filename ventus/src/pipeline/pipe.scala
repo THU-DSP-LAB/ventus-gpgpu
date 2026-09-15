@@ -911,6 +911,11 @@ class pipe() extends Module{
   io.perf_rtcore.triangleResolveResults := rtTriangleResolveResults
   io.perf_rtcore.stackPushes := rtStackPushes
   io.perf_rtcore.stackPops := rtStackPops
+  if (PMU_DETAILED) {
+    io.perf_rtcore.detailed.get := rtcore.io.perf.detailed.get
+    io.perf_rtcore.detailed.get.enabled := io.perfEnable
+    io.perf_rtcore.detailed.get.clear := io.perfReset || reset.asBool
+  }
 
   io.perf_pipeline.foreach { perf =>
     perf.activeCycles := activeCycles

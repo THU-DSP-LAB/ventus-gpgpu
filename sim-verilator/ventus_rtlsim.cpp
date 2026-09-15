@@ -75,6 +75,10 @@ extern "C" ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_get_rtcore_pmu(const ve
     return sim->rtcore_pmu_view();
 }
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
+extern "C" int ventus_rtlsim_dump_extended_pmu(const ventus_rtlsim_t* sim, FILE* stream) {
+    if (!sim || !stream) return -1;
+    return sim->dump_extended_pmu(stream);
+}
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
 extern "C" uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim) { return sim->contextp->time(); }
 extern "C" bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim) { return sim->cta->is_idle(); }

@@ -268,6 +268,9 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     //
     // clock step
     //
+    // Observe settled low-phase ready/valid BEFORE the rising-edge evaluation.
+    // Sampling after eval can observe the next transaction instead of the one consumed.
+    if (dut->clock == 0) sample_detailed_pmu();
     contextp->timeInc(HALF_CYCLE_TIME);
     dut->clock = !dut->clock;
 

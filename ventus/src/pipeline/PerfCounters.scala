@@ -35,6 +35,7 @@ class InstClassPerfCounters extends Bundle {
 
 /** RTcore command-boundary and internal-work counters. */
 class RtCorePerfCounters extends Bundle {
+  val detailed = if (top.parameters.PMU_DETAILED) Some(new rtcore.RtDetailedSignals) else None
   val traverseIssued = UInt(64.W)
   val traverseActiveLanes = UInt(64.W)
   val completionCount = UInt(64.W)

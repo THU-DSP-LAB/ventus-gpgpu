@@ -1007,4 +1007,36 @@ class RtCoreScheduler extends Module {
   io.perf.triangleResolveResult := triangleResolve.io.out.fire
   io.perf.stackPush := stack.io.push.fire
   io.perf.stackPop := stack.io.pop.fire
+  if (PMU_DETAILED) {
+    require(residentWarpCount == 1 && num_thread == 32)
+    val d = io.perf.detailed.get
+    d.enabled := false.B // parent applies the common PMU window
+    d.clear := reset.asBool
+    d.session := sessionActive(0)
+    d.activeMask := activeMask(0)
+    d.command := io.command.fire
+    d.commandMask := io.command.bits.activeMask
+    d.commandKind := Mux(freshCommand, 0.U, Mux(resumeCommand, 1.U, 2.U))
+    d.release := io.releaseAck.fire
+    d.laneState := laneState(0)
+    d.stackReady := PopCount(readyMasks(0))
+    d.stackSelected := stack.io.pop.fire
+    // Overlapping blockers, not an additive partition of stall cycles.
+    d.popBlockedHeader := hasStackReady && headerAcquire
+    d.popBlockedPush := hasStackReady && anyBoxPush
+    d.popBlockedHeaderLine := hasStackReady && headerLineActive
+    d.asBlocked := table.io.asAcquire.valid && !table.io.asAcquire.ready
+    d.readyBlockedRay := asReady.valid && (asIsBox || asIsAabb || asIsTriangle) && !selectedIssueRayValid
+    d.readyBlockedBox := asReady.valid && (asIsBox || asIsAabb) && !boxReadyMask.orR
+    d.readyBlockedTriangle := asReady.valid && asIsTriangle && !triangleReadyMask.orR
+    d.asTable := table.io.detailed.get
+    def observe(dst: RtUnitObservation, in: DecoupledIO[_], out: DecoupledIO[_]): Unit = {
+      dst.inValid := in.valid; dst.inReady := in.ready
+      dst.outValid := out.valid; dst.outReady := out.ready
+    }
+    observe(d.lsu, io.lsuRequest, io.lsuResponse)
+    for (i <- 0 until boxUnitCount) observe(d.units(i), boxIssue(i), boxResult(i))
+    for (i <- 0 until triangleUnitCount) observe(d.units(boxUnitCount + i), triangleIssue(i), triangleResult(i))
+    observe(d.units(boxUnitCount + triangleUnitCount), triangleResolve.io.in, triangleResolve.io.out)
+  }
 }
