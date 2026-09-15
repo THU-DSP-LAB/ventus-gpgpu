@@ -193,4 +193,60 @@ class SfuRemainderTest extends AnyFreeSpec with ChiselScalatestTester {
       }
     }
   }
+
+  "SFU normalizes reflection-like vectors across sparse lane groups" in {
+    test(new SFUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      // These values exercise the same sqrt followed by three divide pattern
+      // emitted by the reflection shader.  Keep inactive lanes deliberately
+      // interspersed so the four-lane SFU grouping is covered as well.
+      val x = Vector(0.30f, -0.71f, 0.00f, 0.90f, -0.20f, 0.40f, -0.95f, 0.10f,
+        0.72f, -0.31f, 0.55f, -0.80f, 0.12f, 0.66f, -0.44f, 0.99f)
+      val y = Vector(-0.40f, 0.20f, 1.00f, -0.10f, 0.70f, -0.60f, 0.05f, 0.98f,
+        -0.33f, 0.88f, -0.12f, 0.42f, -0.91f, 0.18f, 0.81f, -0.02f)
+      val z = Vector(0.50f, 0.67f, 0.00f, 0.30f, -0.68f, 0.69f, 0.31f, -0.17f,
+        0.61f, 0.36f, -0.83f, 0.43f, 0.39f, -0.73f, -0.38f, 0.11f)
+      val active = Set(0, 1, 3, 4, 6, 7, 8, 10, 11, 13, 14, 15)
+      val length2 = x.indices.map(i => x(i) * x(i) + y(i) * y(i) + z(i) * z(i)).toVector
+
+      def issue(op: UInt, a: Vector[Float], b: Vector[Float], expected: Vector[Float]): Unit = {
+        zero(dut.io.in.bits)
+        dut.io.in.valid.poke(false.B)
+        dut.io.rm.poke(0.U)
+        dut.io.out_v.ready.poke(true.B)
+        dut.io.out_x.ready.poke(true.B)
+        dut.clock.step(2)
+        a.indices.foreach { lane =>
+          dut.io.in.bits.in1(lane).poke(raw(a(lane)).U)
+          dut.io.in.bits.in2(lane).poke(raw(b(lane)).U)
+          dut.io.in.bits.mask(lane).poke(active.contains(lane).B)
+        }
+        dut.io.in.bits.ctrl.fp.poke(true.B)
+        dut.io.in.bits.ctrl.isvec.poke(true.B)
+        dut.io.in.bits.ctrl.sfu.poke(true.B)
+        dut.io.in.bits.ctrl.wvd.poke(true.B)
+        dut.io.in.bits.ctrl.alu_fn.poke(op)
+        dut.io.in.valid.poke(true.B)
+        dut.io.in.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.in.valid.poke(false.B)
+        var cycles = 0
+        while (!dut.io.out_v.valid.peek().litToBoolean && cycles < 500) {
+          dut.clock.step(); cycles += 1
+        }
+        assert(cycles < 500, s"SFU FP op $op did not complete")
+        active.foreach { lane =>
+          dut.io.out_v.bits.wvd_mask(lane).expect(true.B)
+          dut.io.out_v.bits.wb_wvd_rd(lane).expect(raw(expected(lane)).U)
+        }
+        dut.clock.step()
+      }
+
+      val zeroes = Vector.fill(num_thread)(0.0f)
+      val lengths = length2.map(value => math.sqrt(value.toDouble).toFloat)
+      issue(IDecode.FN_FSQRT, length2, zeroes, lengths)
+      issue(IDecode.FN_FDIV, x, lengths, x.indices.map(i => x(i) / lengths(i)).toVector)
+      issue(IDecode.FN_FDIV, y, lengths, y.indices.map(i => y(i) / lengths(i)).toVector)
+      issue(IDecode.FN_FDIV, z, lengths, z.indices.map(i => z(i) / lengths(i)).toVector)
+    }
+  }
 }

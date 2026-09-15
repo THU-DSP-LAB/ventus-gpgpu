@@ -132,6 +132,9 @@ class RtTriangleIntersectionOutput(recorded_float: Boolean = false)
   val tNum = Bits(if (recorded_float) 33.W else 32.W)
   val tDenom = Bits(if (recorded_float) 33.W else 32.W)
   val hit = Bool()
+  // Winding before denominator normalization.  This becomes the Vulkan
+  // HitKind front-face bit in the scheduler's hit record.
+  val frontFace = Bool()
 }
 
 // Conversion circuits between 32-bit IEEE float and 33-bit recorded float

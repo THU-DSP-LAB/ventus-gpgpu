@@ -36,23 +36,27 @@ class RtLocalRayState extends Module {
   })
 
   val valid = RegInit(false.B)
-  val ownerWarp = Reg(UInt(depth_warp.W))
+  // Keep session-control state deterministic across reset.  The ray and hit
+  // record payload arrays intentionally remain resetless and are protected by
+  // `valid`/`loaded`/`resumeActive`; resetting those arrays would create a
+  // disproportionate reset network.
+  val ownerWarp = RegInit(0.U(depth_warp.W))
   // Session ownership survives nested traces so final hit-record flush and
   // release still cover the original warp.  A restart may gather only the
   // divergent lanes which actually issued the child trace.
-  val activeMask = Reg(UInt(num_thread.W))
-  val gatherMask = Reg(UInt(num_thread.W))
+  val activeMask = RegInit(0.U(num_thread.W))
+  val gatherMask = RegInit(0.U(num_thread.W))
   val rows = Reg(Vec(rayFieldCount, Vec(num_thread, UInt(xLen.W))))
   val prepared = RegInit(VecInit(Seq.fill(num_thread)(0.U.asTypeOf(new RtPreparedRay))))
   val recordData = Reg(Vec(num_thread, Vec(2, Vec(hitWords, UInt(xLen.W)))))
   val dirty = RegInit(VecInit(Seq.fill(num_thread)(VecInit(Seq.fill(2)(VecInit(Seq.fill(hitWords)(false.B)))))))
-  val readField = Reg(UInt(6.W))
+  val readField = RegInit(0.U(6.W))
   val readOutstanding = RegInit(false.B)
   val loadIndex = RegInit(0.U(log2Ceil(rayFieldCount).W))
   val loaded = RegInit(false.B)
   val delivered = RegInit(0.U(num_thread.W))
   val resumeActive = RegInit(false.B)
-  val resumeMask = Reg(UInt(num_thread.W))
+  val resumeMask = RegInit(0.U(num_thread.W))
   val resumeDelivered = RegInit(0.U(num_thread.W))
   val controlLoaded = RegInit(false.B)
   val control = Reg(Vec(num_thread, UInt(xLen.W)))

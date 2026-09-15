@@ -106,8 +106,8 @@ class pipe() extends Module{
   val rtCompletionWarp = Reg(UInt(depth_warp.W))
   val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
   val rtReleaseSent = RegInit(false.B)
-  // Reserve before operand collection: a foreign traverse in the shared
-  // execution FIFO would otherwise block the owner's eventual release.
+  // Reserve at operand-collector admission. A foreign traversal admitted
+  // before this reservation is visible can later block the owner's RT path.
   val rtReservation = Module(new RtSessionReservation)
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
@@ -289,12 +289,12 @@ class pipe() extends Module{
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
   }
   val op_colV_in_wid = Wire(UInt(depth_warp.W))
-  // These ownership boundaries are RTcore handshakes, not vector-issue
-  // retirement.  In particular, a release instruction retires only after its
-  // acknowledgement; reserving at that later point lets another warp reach a
-  // release while the original session is still being reclaimed.
-  rtReservation.io.issued.valid := rtcore.io.command.fire
-  rtReservation.io.issued.bits := rtcore.io.command.bits.warpId
+  // This boundary is intentionally before operand collection: issuing into
+  // Issue is too late, because a foreign traversal can already be buffered
+  // upstream. The lane mask is resolved at RT issue below.
+  rtReservation.io.issued.valid := ibuffer2issue.io.out_v.fire &&
+    ibuffer2issue.io.out_v.bits.rtOp === RtOp.traverse
+  rtReservation.io.issued.bits := ibuffer2issue.io.out_v.bits.wid
   rtReservation.io.releaseIssued.valid := rtcore.io.release.fire
   rtReservation.io.releaseIssued.bits := rtcore.io.release.bits.warpId
   rtReservation.io.released.valid := rtcore.io.releaseAck.fire
@@ -483,6 +483,9 @@ class pipe() extends Module{
   // RTcore correctly refuses an acknowledgement without an owner.
   val rtReleaseNoSession = rtIsRelease && !rtReservation.io.reserved
   val rtReleaseSkipped = rtReleaseEmpty || rtReleaseNoSession
+  rtReservation.io.traverseResolved.valid := issueV.io.out_RT.fire && rtIsTraverse
+  rtReservation.io.traverseResolved.bits.warpId := rtIssue.ctrl.wid
+  rtReservation.io.traverseResolved.bits.wasEmpty := rtTraverseEmpty
   val softwareLocalRequest = Wire(Decoupled(new RtLocalSramRequest))
   softwareLocalRequest.valid := issueV.io.out_RT.valid && (rtIsLocalLoad || rtIsLocalStore) &&
     !rtInFlight(rtIssue.ctrl.wid)
@@ -524,7 +527,21 @@ class pipe() extends Module{
         p" warp=${Decimal(rtLocalSram.io.request.bits.warpId)}" +
         p" field=${Decimal(rtLocalSram.io.request.bits.fieldId)}" +
         p" write=${Decimal(rtLocalSram.io.request.bits.write)}" +
+        p" mask=0x${Hexadecimal(rtLocalSram.io.request.bits.laneMask)}" +
         p" lane0=0x${Hexadecimal(rtLocalSram.io.request.bits.writeData(0))}\n")
+      // Reflections diverges only after a sparse recursive ray rewrites its
+      // ray-state.  Keep this diagnostic narrow: record the actual values of
+      // active image lanes, not every 32-lane transaction or RTcore flush.
+      when(!rtcore.io.localRequest.valid && rtLocalSram.io.request.bits.write &&
+        rtLocalSram.io.request.bits.fieldId >= 5.U && rtLocalSram.io.request.bits.fieldId <= 15.U) {
+        for (lane <- 1 until 16) {
+          when(rtLocalSram.io.request.bits.laneMask(lane)) {
+            printf(p"[RTLOCAL ray-write] warp=${Decimal(rtLocalSram.io.request.bits.warpId)}" +
+              p" field=${Decimal(rtLocalSram.io.request.bits.fieldId)} lane=${Decimal(lane.U)}" +
+              p" value=0x${Hexadecimal(rtLocalSram.io.request.bits.writeData(lane))}\n")
+          }
+        }
+      }
     }
     when(rtLocalSram.io.response.fire) {
       printf(p"[RTLOCAL trace] response core=${Decimal(rtLocalResponseToCore)}" +
@@ -556,6 +573,12 @@ class pipe() extends Module{
       Mux(rtIsLocalLoad || rtIsLocalStore, softwareLocalRequest.ready, false.B)))
   when(rtcore.io.command.fire) {
     val wid = rtcore.io.command.bits.warpId
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      printf(p"[RTCORE trace] command sm=${Decimal(sm_id)} warp=${Decimal(wid)}" +
+        p" issue=${Decimal(rtcore.io.command.bits.issueId)}" +
+        p" vd=${Decimal(rtcore.io.command.bits.destinationVd)}" +
+        p" mask=0x${Hexadecimal(rtcore.io.command.bits.activeMask)}\n")
+    }
     rtInFlight(wid) := true.B
     rtIssueId(wid) := rtIssueId(wid) + 1.U
   }
@@ -578,6 +601,23 @@ class pipe() extends Module{
   if (SPIKE_OUTPUT) { rtWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
   rtcore.io.completion.ready := rtWriteback.io.enq.ready && !rtCompletionAwaitingWb
   when(rtcore.io.completion.fire) {
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      val hitMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCompleteHit.U)).asUInt
+      val nonOpaqueMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U)).asUInt
+      val proceduralMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCandidateProceduralAabb.U)).asUInt
+      val terminatedMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalTerminated.U)).asUInt
+      printf(p"[RTCORE trace] completion sm=${Decimal(sm_id)}" +
+        p" warp=${Decimal(rtcore.io.completion.bits.warpId)}" +
+        p" issue=${Decimal(rtcore.io.completion.bits.issueId)}" +
+        p" vd=${Decimal(rtcore.io.completion.bits.destinationVd)}" +
+        p" mask=0x${Hexadecimal(rtcore.io.completion.bits.completionMask)}" +
+        p" hit=0x${Hexadecimal(hitMask)} nonopaque=0x${Hexadecimal(nonOpaqueMask)}" +
+        p" procedural=0x${Hexadecimal(proceduralMask)} terminated=0x${Hexadecimal(terminatedMask)}\n")
+    }
     if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
       printf(p"[RTLOCAL trace] completion warp=${Decimal(rtcore.io.completion.bits.warpId)}" +
         p" vd=${Decimal(rtcore.io.completion.bits.destinationVd)}" +
@@ -616,6 +656,10 @@ class pipe() extends Module{
     rtCompletionAwaitingWb := false.B
   }
 
+  // PMU is an elaboration-time option.  Keep this collector in one structural
+  // branch so an `off` build has neither its counters nor their increment
+  // cones; the always-present ABI output is driven to zero in that mode.
+  if (PMU_ENABLED) {
   val activeCycles = RegInit(0.U(64.W))
   val totalScalarIssued = RegInit(0.U(64.W))
   val totalVectorIssued = RegInit(0.U(64.W))
@@ -649,6 +693,11 @@ class pipe() extends Module{
   val rtAsLineAcquires = RegInit(0.U(64.W))
   val rtAsLineReady = RegInit(0.U(64.W))
   val rtAsAcquireBackpressureCycles = RegInit(0.U(64.W))
+  val rtAsCacheResidentHits = RegInit(0.U(64.W))
+  val rtAsCachePendingMerges = RegInit(0.U(64.W))
+  val rtAsCacheMisses = RegInit(0.U(64.W))
+  val rtAsCacheRefills = RegInit(0.U(64.W))
+  val rtAsCacheEvictions = RegInit(0.U(64.W))
   val rtBox4Issued = RegInit(0.U(64.W))
   val rtBox4Results = RegInit(0.U(64.W))
   val rtTriangleIssued = RegInit(0.U(64.W))
@@ -723,6 +772,11 @@ class pipe() extends Module{
     rtAsLineAcquires := 0.U
     rtAsLineReady := 0.U
     rtAsAcquireBackpressureCycles := 0.U
+    rtAsCacheResidentHits := 0.U
+    rtAsCachePendingMerges := 0.U
+    rtAsCacheMisses := 0.U
+    rtAsCacheRefills := 0.U
+    rtAsCacheEvictions := 0.U
     rtBox4Issued := 0.U
     rtBox4Results := 0.U
     rtTriangleIssued := 0.U
@@ -812,6 +866,11 @@ class pipe() extends Module{
     when(rtcore.io.perf.asLineAcquire) { rtAsLineAcquires := rtAsLineAcquires + 1.U }
     when(rtcore.io.perf.asLineReady) { rtAsLineReady := rtAsLineReady + 1.U }
     when(rtcore.io.perf.asAcquireBackpressure) { rtAsAcquireBackpressureCycles := rtAsAcquireBackpressureCycles + 1.U }
+    when(rtcore.io.perf.asCacheResidentHit) { rtAsCacheResidentHits := rtAsCacheResidentHits + 1.U }
+    when(rtcore.io.perf.asCachePendingMerge) { rtAsCachePendingMerges := rtAsCachePendingMerges + 1.U }
+    when(rtcore.io.perf.asCacheMiss) { rtAsCacheMisses := rtAsCacheMisses + 1.U }
+    when(rtcore.io.perf.asCacheRefill) { rtAsCacheRefills := rtAsCacheRefills + 1.U }
+    when(rtcore.io.perf.asCacheEviction) { rtAsCacheEvictions := rtAsCacheEvictions + 1.U }
     when(rtcore.io.perf.box4Issue) { rtBox4Issued := rtBox4Issued + 1.U }
     when(rtcore.io.perf.box4Result) { rtBox4Results := rtBox4Results + 1.U }
     when(rtcore.io.perf.triangleIssue) { rtTriangleIssued := rtTriangleIssued + 1.U }
@@ -839,6 +898,11 @@ class pipe() extends Module{
   io.perf_rtcore.asLineAcquires := rtAsLineAcquires
   io.perf_rtcore.asLineReady := rtAsLineReady
   io.perf_rtcore.asAcquireBackpressureCycles := rtAsAcquireBackpressureCycles
+  io.perf_rtcore.asCacheResidentHits := rtAsCacheResidentHits
+  io.perf_rtcore.asCachePendingMerges := rtAsCachePendingMerges
+  io.perf_rtcore.asCacheMisses := rtAsCacheMisses
+  io.perf_rtcore.asCacheRefills := rtAsCacheRefills
+  io.perf_rtcore.asCacheEvictions := rtAsCacheEvictions
   io.perf_rtcore.box4Issued := rtBox4Issued
   io.perf_rtcore.box4Results := rtBox4Results
   io.perf_rtcore.triangleIssued := rtTriangleIssued
@@ -866,6 +930,9 @@ class pipe() extends Module{
     perf.computeIssued := computeIssued
     perf.memIssued := memIssued
     perf.ctrlIssued := ctrlIssued
+  }
+  } else {
+    io.perf_rtcore := 0.U.asTypeOf(new RtCorePerfCounters)
   }
 
   issue_stall:=(~issueX.io.in.ready).asBool | (~issueV.io.in.ready).asBool//scoreb.io.delay | issue.io.in.ready

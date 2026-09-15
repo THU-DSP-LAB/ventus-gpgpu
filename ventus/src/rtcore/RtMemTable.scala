@@ -27,11 +27,23 @@ private[rtcore] class RtAsEntry extends Bundle { val valid = Bool(); val sent = 
 
 class RtAsTable extends Module {
   private val p = RtMemTableParameters
-  val io = IO(new Bundle { val acquire = Flipped(Decoupled(new RtAsTableAcquire)); val readyLine = Decoupled(new RtAsTableReadyLine); val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtAsInjection)); val idle = Output(Bool()) })
+  val io = IO(new Bundle {
+    val acquire = Flipped(Decoupled(new RtAsTableAcquire)); val readyLine = Decoupled(new RtAsTableReadyLine)
+    val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtAsInjection)); val idle = Output(Bool())
+    val residentHit = Output(Bool()); val pendingMerge = Output(Bool()); val miss = Output(Bool())
+    val refill = Output(Bool()); val eviction = Output(Bool())
+  })
   val entries = RegInit(VecInit(Seq.fill(p.asEntryCount)(0.U.asTypeOf(new RtAsEntry))))
   val merge = VecInit(entries.map(e => e.valid && !e.sent && e.lineAddress === io.acquire.bits.lineAddress && e.is64B === io.acquire.bits.is64B && !e.waiterValid.asUInt.andR)).asUInt
   val free = VecInit(entries.map(!_.valid)).asUInt
   val hasMerge = merge.orR; val place = Mux(hasMerge, PriorityEncoder(merge), PriorityEncoder(free)); io.acquire.ready := hasMerge || free.orR
+  // The baseline table is one-shot: returned lines are never resident, and
+  // entries are freed after their final waiter.  Keep cache event definitions
+  // identical to the retained-cache implementation for before/after reports.
+  io.residentHit := false.B
+  io.pendingMerge := io.acquire.fire && hasMerge
+  io.miss := io.acquire.fire && !hasMerge
+  io.eviction := false.B
   when(io.acquire.fire) {
     assert(Mux(io.acquire.bits.is64B, io.acquire.bits.lineAddress(5, 0) === 0.U, io.acquire.bits.lineAddress(6, 0) === 0.U))
     val e = entries(place)
@@ -42,6 +54,7 @@ class RtAsTable extends Module {
   io.candidate.valid := unsent.orR; io.candidate.bits := 0.U.asTypeOf(new RtLsuCandidate)
   when(io.candidate.valid) { io.candidate.bits.source := RtLsuSource.as; io.candidate.bits.cacheLineAddress := entries(request).lineAddress; io.candidate.bits.is64B := entries(request).is64B; io.candidate.bits.wordMask := entries(request).wordMask; io.candidate.bits.locator.tableLocation := request }
   when(io.candidate.fire) { entries(request).sent := true.B }
+  io.refill := io.candidate.fire
   val response = entries(io.injection.bits.entry); io.injection.ready := response.valid && response.sent && !response.returned
   when(io.injection.fire) { assert(!io.injection.bits.fault); response.returned := true.B; response.data := io.injection.bits.data }
   val ready = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid.asUInt.orR)).asUInt; val entry = PriorityEncoder(ready); val waiter = PriorityEncoder(entries(entry).waiterValid.asUInt)
@@ -55,6 +68,8 @@ class RtMemTable extends Module {
   val io = IO(new Bundle {
     val asAcquire = Flipped(Decoupled(new RtAsTableAcquire)); val asReadyLine = Decoupled(new RtAsTableReadyLine)
     val quiescent = Output(Bool())
+    val asCacheResidentHit = Output(Bool()); val asCachePendingMerge = Output(Bool()); val asCacheMiss = Output(Bool())
+    val asCacheRefill = Output(Bool()); val asCacheEviction = Output(Bool())
     val lsuRequest = Decoupled(new LsuClientRequest); val lsuResponse = Flipped(Decoupled(new LsuClientResponse))
   })
   val as = Module(new RtAsTable); val mshr = Module(new RtLsuMshr)
@@ -62,4 +77,9 @@ class RtMemTable extends Module {
   mshr.io.as <> as.io.candidate; as.io.injection <> mshr.io.asInjection
   io.lsuRequest <> mshr.io.request; mshr.io.response <> io.lsuResponse
   io.quiescent := as.io.idle && mshr.io.idle
+  io.asCacheResidentHit := as.io.residentHit
+  io.asCachePendingMerge := as.io.pendingMerge
+  io.asCacheMiss := as.io.miss
+  io.asCacheRefill := as.io.refill
+  io.asCacheEviction := as.io.eviction
 }

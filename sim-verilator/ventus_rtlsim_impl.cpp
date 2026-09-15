@@ -450,6 +450,30 @@ void ventus_rtlsim_t::update_pmu_watchdog() {
         "l1d_req={}",
         idle_time, contextp->time(), issued, mem_issued, dcache_req
     );
+    for (uint32_t i = 0; i < pmu_snapshot.num_sm; i++) {
+        const auto& pipe = pmu_snapshot.pipeline[i];
+        const auto& inst = pmu_snapshot.inst_class[i];
+        const auto& l1d = pmu_snapshot.dcache[i];
+        const auto& rt = pmu_snapshot.rtcore[i];
+        logger->critical(
+            "PMU watchdog SM{}: pipe={{active={}, scalar={}, vector={}, data_dep_stall={}, barrier_stall={}, "
+            "frontend_stall={}, lsu_backpressure={}, ibuffer_full={}}} "
+            "inst={{compute={}, mem={}, ctrl={}}} "
+            "l1d={{req={}, read_miss={}, write_miss={}, primary_full={}, secondary_full={}, mshr_full_cycles={}, "
+            "rtab_replays={}, bank_conflict_cycles={}}} "
+            "rt={{traverse={}/{}, completion={}/{}, release={}, active_session_cycles={}, command_backpressure={}}}",
+            i,
+            pipe.active_cycles, pipe.total_scalar_issued, pipe.total_vector_issued,
+            pipe.data_dep_stall_cycles, pipe.barrier_stall_cycles, pipe.frontend_stall_cycles,
+            pipe.lsu_backpressure_cycles, pipe.ibuffer_full_cycles,
+            inst.compute_issued, inst.mem_issued, inst.ctrl_issued,
+            l1d.total_req, l1d.read_miss, l1d.write_miss, l1d.read_primary_full_miss,
+            l1d.read_secondary_full_miss, l1d.mshr_full_cycles, l1d.rtab_replays,
+            l1d.bank_conflict_cycles,
+            rt.traverse_issued, rt.traverse_active_lanes, rt.completion_count, rt.completion_lanes,
+            rt.release_issued, rt.active_session_cycles, rt.command_backpressure_cycles
+        );
+    }
 }
 
 void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {

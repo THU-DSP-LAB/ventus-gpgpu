@@ -13,8 +13,13 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   val SPIKE_OUTPUT: Boolean = false
   val INST_CNT: Boolean = true
   val INST_CNT_2: Boolean = false
-  val PMU_PIPELINE: Boolean = true
-  val PMU_INST_CLASS: Boolean = true
+  val PMU_MODE: String = sys.env.getOrElse("VENTUS_PMU_MODE", "off")
+  require(Set("off", "basic", "detailed").contains(PMU_MODE),
+    s"VENTUS_PMU_MODE must be off, basic, or detailed (got $PMU_MODE)")
+  val PMU_ENABLED: Boolean = PMU_MODE != "off"
+  val PMU_DETAILED: Boolean = PMU_MODE == "detailed"
+  val PMU_PIPELINE: Boolean = PMU_ENABLED
+  val PMU_INST_CLASS: Boolean = PMU_ENABLED
   val GVM_ENABLED: Boolean = sys.env.getOrElse("RTL_GVM_ENABLED", "false").toBoolean
   // Per-transaction traces are elaboration-time diagnostics.  Keep them out
   // of the normal release model: stdout traffic dominates larger RTL runs.

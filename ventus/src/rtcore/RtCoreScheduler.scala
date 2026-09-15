@@ -116,7 +116,10 @@ class RtCoreScheduler extends Module {
   val objectSbtRecordOffset = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
   val objectFlags = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   val traceMeta0 = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(32.W))))
-  val residentOwnerWarpId = Reg(UInt(depth_warp.W))
+  // This is control state, unlike the lane payload arrays above.  It gates
+  // retained-session resume/release admission, so its reset value must be
+  // defined even while `sessionActive` is false.
+  val residentOwnerWarpId = RegInit(0.U(depth_warp.W))
 
   val instanceTransform = Module(new RtInstanceTransform)
   val objectRaySetup = Module(new RtRaySetup)
@@ -167,7 +170,8 @@ class RtCoreScheduler extends Module {
       local.io.restart.ready && stack.io.clear.ready))
   when(io.command.fire) {
     val warp = commandSlot
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1") ||
+        sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
       printf(p"[RTCORE trace] command warp=${Decimal(io.command.bits.warpId)}" +
         p" issue=${Decimal(io.command.bits.issueId)} mask=0x${Hexadecimal(io.command.bits.activeMask)}\\n")
     }
@@ -265,6 +269,20 @@ class RtCoreScheduler extends Module {
   raySetup.io.in.bits.rayState.inv.z := local.io.laneOut.bits.data(14)
   local.io.laneOut.ready := raySetup.io.in.ready
   when(local.io.laneOut.fire) { assert(laneState(0)(local.io.laneOut.bits.laneId) === sRayLoad) }
+  if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1") ||
+      sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
+    when(local.io.laneOut.fire) {
+      val row = local.io.laneOut.bits.data
+      printf(p"[RTCORE deep] world-ray lane=${Decimal(local.io.laneOut.bits.laneId)}" +
+        p" accel=[${Hexadecimal(row(0))},${Hexadecimal(row(1))}]" +
+        p" meta=[${Hexadecimal(row(2))},${Hexadecimal(row(3))}]" +
+        p" o=[${Hexadecimal(row(4))},${Hexadecimal(row(5))},${Hexadecimal(row(6))}]" +
+        p" tmin=${Hexadecimal(row(7))}" +
+        p" d=[${Hexadecimal(row(8))},${Hexadecimal(row(9))},${Hexadecimal(row(10))}]" +
+        p" tmax=${Hexadecimal(row(11))}" +
+        p" inv=[${Hexadecimal(row(12))},${Hexadecimal(row(13))},${Hexadecimal(row(14))}]\\n")
+    }
+  }
 
   // Stack operation defaults.  Header initialisation, deferred Box4 pushes,
   // and node pop are ordered by the stack module; scheduler only offers one
@@ -314,8 +332,9 @@ class RtCoreScheduler extends Module {
     dst.kx := objectRaySetup.io.out.bits.ray.kx
     dst.ky := objectRaySetup.io.out.bits.ray.ky
     dst.kz := objectRaySetup.io.out.bits.ray.kz
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
-      when(lane < 4.U || lane >= 12.U) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1") ||
+        sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
+      when(sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1").B || lane < 4.U || lane >= 12.U) {
         val ray = objectRaySetup.io.out.bits.ray
         printf(p"[RTCORE trace] object-ray lane=${Decimal(lane)}" +
           p" base=0x${Hexadecimal(objectBase(0)(lane))}" +
@@ -405,7 +424,7 @@ class RtCoreScheduler extends Module {
     table.io.asAcquire.bits.waiter.objectRay := selectedObjectRay
   }
   when(table.io.asAcquire.fire && headerAcquire) {
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
       when(headerLane < 4.U || headerLane >= 12.U) {
         printf(p"[RTCORE trace] header-req lane=${Decimal(headerLane)}" +
           p" object=${Decimal(headerObject)} base=0x${Hexadecimal(headerBase)}\\n")
@@ -426,7 +445,7 @@ class RtCoreScheduler extends Module {
     (selectedInvalid || selectedUnsupported || table.io.asAcquire.ready)
   stack.io.pop.bits.laneMask := UIntToOH(popLane, num_thread)
   when(stack.io.pop.fire) {
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
       when(popLane < 4.U || popLane >= 12.U) {
         printf(p"[RTCORE trace] pop lane=${Decimal(popLane)}" +
           p" ref=0x${Hexadecimal(selectedNodeRef)} type=${Decimal(selectedNodeType)}" +
@@ -548,7 +567,7 @@ class RtCoreScheduler extends Module {
     (asReady.valid && !asIsHeader && !asIsBlasHeader && !asIsBox && !asIsTriangle && !asIsInstance && !asIsAabb)
   when(asReady.fire) {
     val waiter = asReady.bits.waiter
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
       // The 4x4 mismatch is confined to lanes 12--15.  Once Box4 input has
       // been validated, node kinds and refs explain the remaining control
       // flow far more compactly than repeating all four AABBs.
@@ -646,7 +665,7 @@ class RtCoreScheduler extends Module {
     val result = boxResult(boxResultSelect).bits
     val warp = requestWarp(result.requestId)
     val lane = requestLane(result.requestId)
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
       when(lane < 4.U || lane >= 12.U) {
         printf(p"[RTCORE trace] box lane=${Decimal(lane)} intersect=0x${Hexadecimal(result.isIntersect.asUInt)}" +
           p" tmin=[${Hexadecimal(result.tmin(0))},${Hexadecimal(result.tmin(1))}," +
@@ -767,7 +786,7 @@ class RtCoreScheduler extends Module {
   }
   when(triangleResultMask.orR && triangleResult(triangleResultSelect).fire) {
     nextTriangleResult := triangleResultSelect + 1.U
-    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
       when(selectedTriangleLane < 4.U || selectedTriangleLane >= 12.U) {
         printf(p"[RTCORE trace] triangle lane=${Decimal(selectedTriangleLane)}" +
           p" hit=${Decimal(selectedTriangleResult.hit)}" +
@@ -790,6 +809,7 @@ class RtCoreScheduler extends Module {
   triangleHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
   triangleHitUpdate.data(RtAbiLayout.HitRecordMeta0) :=
     (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U |
+      (triangleResolve.io.out.bits.frontFace.asUInt << RtAbiLayout.HitRecordMeta0FrontFaceShift) |
       (triangleIsOpaque.asUInt << RtAbiLayout.HitRecordMeta0OpaqueShift) |
       (triangleMeta(resultWarp)(resultLane).instanceCustomIndex <<
         RtAbiLayout.HitRecordMeta0InstanceCustomIndexShift)
@@ -813,6 +833,17 @@ class RtCoreScheduler extends Module {
   aabbHitUpdate.data := candidateData(0)(aabbCandidateLane)
   local.io.hitUpdate.valid := aabbCandidateMask.orR || triangleResolve.io.out.valid
   local.io.hitUpdate.bits := Mux(aabbCandidateMask.orR, aabbHitUpdate, triangleHitUpdate)
+  if (sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
+    when(local.io.hitUpdate.fire) {
+      val update = local.io.hitUpdate.bits
+      printf(p"[RTCORE record] lane=${Decimal(update.laneId)} committed=${Decimal(update.committed)}" +
+        p" dirty=0x${Hexadecimal(update.dirty)} data=[${Hexadecimal(update.data(0))}," +
+        p"${Hexadecimal(update.data(1))},${Hexadecimal(update.data(2))}," +
+        p"${Hexadecimal(update.data(3))},${Hexadecimal(update.data(4))}," +
+        p"${Hexadecimal(update.data(5))},${Hexadecimal(update.data(6))}," +
+        p"${Hexadecimal(update.data(7))},${Hexadecimal(update.data(8))}]\n")
+    }
+  }
   val triangleTmaxUpdate = Wire(new RtLocalRayTmaxUpdate)
   triangleTmaxUpdate.laneId := resultLane
   triangleTmaxUpdate.tmax := triangleResolve.io.out.bits.t
@@ -868,17 +899,18 @@ class RtCoreScheduler extends Module {
   // later shader callback/control-flow error without perturbing normal RTL.
   if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
     when(local.io.drained.fire) {
+      val hitMask = VecInit((0 until num_thread).map(lane =>
+        laneStatus(0)(lane) === RtAbiLayout.TraversalCompleteHit.U)).asUInt
+      val nonOpaqueMask = VecInit((0 until num_thread).map(lane =>
+        laneStatus(0)(lane) === RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U)).asUInt
+      val proceduralMask = VecInit((0 until num_thread).map(lane =>
+        laneStatus(0)(lane) === RtAbiLayout.TraversalCandidateProceduralAabb.U)).asUInt
+      val terminatedMask = VecInit((0 until num_thread).map(lane =>
+        laneStatus(0)(lane) === RtAbiLayout.TraversalTerminated.U)).asUInt
       printf(p"[RTCORE trace] drain warp=${Decimal(residentOwnerWarpId)}" +
-        p" mask=0x${Hexadecimal(commandMask(0))} status0=${Decimal(laneStatus(0)(0))}" +
-        p" committed0=${committedValid(0)(0)} candidate0=${candidateValid(0)(0)}" +
-        p" status=[${Decimal(laneStatus(0)(0))},${Decimal(laneStatus(0)(1))}," +
-        p"${Decimal(laneStatus(0)(2))},${Decimal(laneStatus(0)(3))}," +
-        p"${Decimal(laneStatus(0)(4))},${Decimal(laneStatus(0)(5))}," +
-        p"${Decimal(laneStatus(0)(6))},${Decimal(laneStatus(0)(7))}," +
-        p"${Decimal(laneStatus(0)(8))},${Decimal(laneStatus(0)(9))}," +
-        p"${Decimal(laneStatus(0)(10))},${Decimal(laneStatus(0)(11))}," +
-        p"${Decimal(laneStatus(0)(12))},${Decimal(laneStatus(0)(13))}," +
-        p"${Decimal(laneStatus(0)(14))},${Decimal(laneStatus(0)(15))}]\\n")
+        p" mask=0x${Hexadecimal(commandMask(0))}" +
+        p" hit=0x${Hexadecimal(hitMask)} nonopaque=0x${Hexadecimal(nonOpaqueMask)}" +
+        p" procedural=0x${Hexadecimal(proceduralMask)} terminated=0x${Hexadecimal(terminatedMask)}\n")
     }
   }
   io.completion.valid := completionPending
@@ -962,6 +994,11 @@ class RtCoreScheduler extends Module {
   io.perf.asLineAcquire := table.io.asAcquire.fire
   io.perf.asLineReady := table.io.asReadyLine.fire
   io.perf.asAcquireBackpressure := table.io.asAcquire.valid && !table.io.asAcquire.ready
+  io.perf.asCacheResidentHit := table.io.asCacheResidentHit
+  io.perf.asCachePendingMerge := table.io.asCachePendingMerge
+  io.perf.asCacheMiss := table.io.asCacheMiss
+  io.perf.asCacheRefill := table.io.asCacheRefill
+  io.perf.asCacheEviction := table.io.asCacheEviction
   io.perf.box4Issue := boxIssue.map(_.fire).reduce(_ || _)
   io.perf.box4Result := boxResult.map(_.fire).reduce(_ || _)
   io.perf.triangleIssue := triangleIssue.map(_.fire).reduce(_ || _)

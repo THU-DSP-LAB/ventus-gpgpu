@@ -149,6 +149,11 @@ typedef struct {
     uint64_t as_line_acquires;
     uint64_t as_line_ready;
     uint64_t as_acquire_backpressure_cycles;
+    uint64_t as_cache_resident_hits;
+    uint64_t as_cache_pending_merges;
+    uint64_t as_cache_misses;
+    uint64_t as_cache_refills;
+    uint64_t as_cache_evictions;
     uint64_t box4_issued;
     uint64_t box4_results;
     uint64_t triangle_issued;

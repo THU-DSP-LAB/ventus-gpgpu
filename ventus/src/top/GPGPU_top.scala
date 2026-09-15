@@ -75,6 +75,17 @@ class CTAinterface extends Module{
   val cta_sche = Module(new cta_scheduler_top)
   cta_sche.io.host_wg_new.valid <> io.host2CTA.valid
   cta_sche.io.host_wg_new.ready <> io.host2CTA.ready
+  // Register-file addressing discards the bank bits of the allocation base.
+  // Reject unpadded host allocations before they can alias another WG.
+  when(io.host2CTA.fire) {
+    val req = io.host2CTA.bits
+    assert(req.host_sgpr_size_per_wf % num_bank.U === 0.U, "SGPR stride must be bank aligned")
+    assert(req.host_vgpr_size_per_wf % num_bank.U === 0.U, "VGPR stride must be bank aligned")
+    assert(req.host_sgpr_size_total === req.host_sgpr_size_per_wf * req.host_num_wf,
+      "SGPR total must equal padded stride times warp count")
+    assert(req.host_vgpr_size_total === req.host_vgpr_size_per_wf * req.host_num_wf,
+      "VGPR total must equal padded stride times warp count")
+  }
   cta_sche.io.host_wg_new.bits.wg_id              := io.host2CTA.bits.host_wg_id
   cta_sche.io.host_wg_new.bits.num_wf             := io.host2CTA.bits.host_num_wf
   cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wf_size

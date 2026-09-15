@@ -9,6 +9,7 @@ class RtTriangleResolveResult extends Bundle {
   val u = UInt(32.W)
   val v = UInt(32.W)
   val t = UInt(32.W)
+  val frontFace = Bool()
 }
 
 /**
@@ -70,6 +71,7 @@ class RtTriangleResolve extends Module {
     outBits.u := completedDivision(0)
     outBits.v := completedDivision(1)
     outBits.t := completedDivision(2)
+    outBits.frontFace := saved.frontFace
     busy := false.B
     outValid := true.B
   }

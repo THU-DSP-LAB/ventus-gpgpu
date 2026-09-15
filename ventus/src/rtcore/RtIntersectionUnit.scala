@@ -47,6 +47,7 @@ private[rtcore] class RtTrianglePipelineState extends Bundle {
   val tDenom = Bits(33.W)
   val tNum = Bits(33.W)
   val hit = Bool()
+  val frontFace = Bool()
 }
 
 /** Dedicated four-box pipeline. Box4 skips triangle-only stages. */
@@ -495,6 +496,10 @@ class RtTrianglePipeline extends Module {
         comparisons(2).io.gt || comparisons(4).io.gt)
       emit.hit := !comparisons(3).io.eq && Mux(negativeWinding,
         negativeInside, positiveInside)
+      // tDenom is normalized below so all downstream range checks can use a
+      // positive denominator.  Preserve its original winding separately for
+      // the shader-visible front-face bit.
+      emit.frontFace := negativeWinding
       when(negativeWinding) {
         emit.U := FNFlipSign(intake.U)
         emit.V := FNFlipSign(intake.V)
@@ -521,6 +526,7 @@ class RtTrianglePipeline extends Module {
         emit.tNum := fNFromRecFN(8, 24, intake.tNum)
         emit.tDenom := fNFromRecFN(8, 24, intake.tDenom)
         emit.hit := intake.hit
+        emit.frontFace := intake.frontFace
         emit
       }
     )
