@@ -927,6 +927,7 @@ class RtCoreScheduler extends Module {
   val releasePending = RegInit(false.B)
   val releaseStackCleared = RegInit(false.B)
   val releaseLanesInvalidated = RegInit(false.B)
+  val releaseTableCleared = RegInit(false.B)
   retiring := releasePending || finalRetirePending || io.release.valid
   val releaseAllowed = sessionActive(0) && completionPublished(0) && !completionPending &&
     io.release.bits.warpId === residentOwnerWarpId &&
@@ -966,12 +967,18 @@ class RtCoreScheduler extends Module {
       boxPushedCount(0)(lane) := 0.U
     }
   }
-  local.io.retire.valid := finalRetirePending
+  // Retire local ownership on the same edge as the release acknowledgement;
+  // otherwise its ready drops before the retained AS table finishes clearing.
+  local.io.retire.valid := finalRetirePending && releaseTableCleared && table.io.quiescent && io.releaseAck.ready
   local.io.retire.bits := residentOwnerWarpId
-  io.releaseAck.valid := finalRetirePending && local.io.retire.ready && table.io.quiescent
+  table.io.clear.valid := finalRetirePending && !releaseTableCleared
+  table.io.clear.bits := true.B
+  when(table.io.clear.fire) { releaseTableCleared := true.B }
+  io.releaseAck.valid := finalRetirePending && releaseTableCleared && local.io.retire.ready && table.io.quiescent
   io.releaseAck.bits.warpId := residentOwnerWarpId
   io.releaseAck.bits.releasedMask := activeMask(0)
   when(io.releaseAck.fire) {
+    releaseTableCleared := false.B
     releasePending := false.B
     releaseStackCleared := false.B
     releaseLanesInvalidated := false.B

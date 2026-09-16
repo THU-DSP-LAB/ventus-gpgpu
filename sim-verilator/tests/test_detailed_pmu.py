@@ -17,7 +17,8 @@ class DetailedPmuTest(unittest.TestCase):
             output = subprocess.check_output([str(binary)], text=True)
         first, second = map(json.loads, output.splitlines())
         self.assertEqual(first, second)
-        self.assertIsNone(first["post_eviction_reaccess"])
+        self.assertEqual(first["post_eviction_reaccess"], 0)
+        self.assertEqual(first["as_policy"], "retained_reverse_replace")
         unit = first["units"][0]["statistics"]
         self.assertEqual(unit["counters"]["issues"], 2)
         self.assertEqual(unit["counters"]["results"], 1)

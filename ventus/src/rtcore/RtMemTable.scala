@@ -10,7 +10,7 @@ import top.parameters._
 object RtMemTableParameters {
   val hitRecordStorageWordCount = RtAbiLayout.HitRecordWordCount
   val asEntryCount = 32
-  val maxAsWaitersPerEntry = 2
+  val maxAsWaitersPerEntry = num_thread
   val lineWordCount = RtCorePortParameters.lineWordCount
   require(lineWordCount == num_thread)
 }
@@ -30,24 +30,36 @@ class RtAsTable extends Module {
   val io = IO(new Bundle {
     val acquire = Flipped(Decoupled(new RtAsTableAcquire)); val readyLine = Decoupled(new RtAsTableReadyLine)
     val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtAsInjection)); val idle = Output(Bool())
+    val clear = Flipped(Decoupled(Bool()))
     val residentHit = Output(Bool()); val pendingMerge = Output(Bool()); val miss = Output(Bool())
     val refill = Output(Bool()); val eviction = Output(Bool())
     val detailed = if (PMU_DETAILED) Some(Output(new RtAsObservation)) else None
   })
   val entries = RegInit(VecInit(Seq.fill(p.asEntryCount)(0.U.asTypeOf(new RtAsEntry))))
-  val merge = VecInit(entries.map(e => e.valid && !e.sent && e.lineAddress === io.acquire.bits.lineAddress && e.is64B === io.acquire.bits.is64B && !e.waiterValid.asUInt.andR)).asUInt
+  private val indexWidth = log2Ceil(p.asEntryCount)
+  require(isPow2(p.asEntryCount), "Reverse replacement wraps at table size")
+  val victimCursor = RegInit((p.asEntryCount - 1).U(indexWidth.W))
+  val matching = VecInit(entries.map(e => e.valid && e.lineAddress === io.acquire.bits.lineAddress &&
+    e.is64B === io.acquire.bits.is64B)).asUInt
+  val merge = matching & VecInit(entries.map(e => !e.waiterValid.asUInt.andR)).asUInt
   val free = VecInit(entries.map(!_.valid)).asUInt
-  val hasMerge = merge.orR; val place = Mux(hasMerge, PriorityEncoder(merge), PriorityEncoder(free)); io.acquire.ready := hasMerge || free.orR
-  // The baseline table is one-shot: returned lines are never resident, and
-  // entries are freed after their final waiter.  Keep cache event definitions
-  // identical to the retained-cache implementation for before/after reports.
-  io.residentHit := false.B
-  io.pendingMerge := io.acquire.fire && hasMerge
+  val evictable = VecInit(entries.map(e => e.valid && e.returned && !e.waiterValid.asUInt.orR)).asUInt
+  val reverseEligible = VecInit((0 until p.asEntryCount).map { offset =>
+    evictable((victimCursor - offset.U)(indexWidth - 1, 0))
+  }).asUInt
+  val victim = (victimCursor - PriorityEncoder(reverseEligible))(indexWidth - 1, 0)
+  val hasMerge = merge.orR
+  val place = Mux(hasMerge, PriorityEncoder(merge), Mux(free.orR, PriorityEncoder(free), victim))
+  // Never duplicate a full matching entry, and never evict a pending refill or waiter.
+  io.acquire.ready := !io.clear.valid && (hasMerge || (!matching.orR && (free.orR || reverseEligible.orR)))
+  io.residentHit := io.acquire.fire && hasMerge && entries(place).returned
+  io.pendingMerge := io.acquire.fire && hasMerge && !entries(place).returned
   io.miss := io.acquire.fire && !hasMerge
-  io.eviction := false.B
+  io.eviction := io.miss && !free.orR
   when(io.acquire.fire) {
     assert(Mux(io.acquire.bits.is64B, io.acquire.bits.lineAddress(5, 0) === 0.U, io.acquire.bits.lineAddress(6, 0) === 0.U))
     val e = entries(place)
+    when(io.eviction) { victimCursor := victim - 1.U }
     when(!hasMerge) { e.valid := true.B; e.sent := false.B; e.returned := false.B; e.lineAddress := io.acquire.bits.lineAddress; e.wordMask := io.acquire.bits.wordMask; e.is64B := io.acquire.bits.is64B; e.waiterValid.foreach(_ := false.B) }.otherwise { e.wordMask := e.wordMask | io.acquire.bits.wordMask }
     val w = PriorityEncoder((~e.waiterValid.asUInt).asUInt); e.waiterValid(w) := true.B; e.waiters(w) := io.acquire.bits.waiter
   }
@@ -61,7 +73,15 @@ class RtAsTable extends Module {
   val ready = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid.asUInt.orR)).asUInt; val entry = PriorityEncoder(ready); val waiter = PriorityEncoder(entries(entry).waiterValid.asUInt)
   io.readyLine.valid := ready.orR; io.readyLine.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
   when(io.readyLine.valid) { io.readyLine.bits.waiter := entries(entry).waiters(waiter); io.readyLine.bits.data := entries(entry).data }
-  when(io.readyLine.fire) { val left = entries(entry).waiterValid.asUInt & (~UIntToOH(waiter, p.maxAsWaitersPerEntry)).asUInt; entries(entry).waiterValid(waiter) := false.B; when(left === 0.U) { entries(entry).valid := false.B } }
+  // Acquire chooses a pre-edge free slot, so simultaneous serve/acquire cannot
+  // clobber one another even when they target the same resident line.
+  when(io.readyLine.fire) { entries(entry).waiterValid(waiter) := false.B }
+  val busy = entries.map(e => e.valid && (!e.returned || e.waiterValid.asUInt.orR)).reduce(_ || _)
+  io.clear.ready := !busy
+  when(io.clear.fire) {
+    entries.foreach(_.valid := false.B)
+    victimCursor := (p.asEntryCount - 1).U
+  }
   io.idle := !VecInit(entries.map(_.valid)).asUInt.orR
   if (PMU_DETAILED) {
     require(p.asEntryCount == 32 && num_thread == 32, "Update detailed observation index widths")
@@ -82,13 +102,16 @@ class RtAsTable extends Module {
     d.serve := io.readyLine.fire
     d.serveEntry := entry
     d.serveLane := io.readyLine.bits.waiter.laneId
-    d.retire := io.readyLine.fire && PopCount(entries(entry).waiterValid) === 1.U
+    d.retire := false.B
+    d.eviction := io.eviction
+    d.clear := io.clear.fire
   }
 }
 
 class RtMemTable extends Module {
   val io = IO(new Bundle {
     val asAcquire = Flipped(Decoupled(new RtAsTableAcquire)); val asReadyLine = Decoupled(new RtAsTableReadyLine)
+    val clear = Flipped(Decoupled(Bool()))
     val quiescent = Output(Bool())
     val asCacheResidentHit = Output(Bool()); val asCachePendingMerge = Output(Bool()); val asCacheMiss = Output(Bool())
     val asCacheRefill = Output(Bool()); val asCacheEviction = Output(Bool())
@@ -97,6 +120,7 @@ class RtMemTable extends Module {
   })
   val as = Module(new RtAsTable); val mshr = Module(new RtLsuMshr)
   as.io.acquire <> io.asAcquire; io.asReadyLine <> as.io.readyLine
+  as.io.clear <> io.clear
   mshr.io.as <> as.io.candidate; as.io.injection <> mshr.io.asInjection
   io.lsuRequest <> mshr.io.request; mshr.io.response <> io.lsuResponse
   io.quiescent := as.io.idle && mshr.io.idle

@@ -17,6 +17,7 @@ struct RtAsSample {
     bool acquire = false, allocate = false, is64B = false;
     uint32_t acquireEntry = 0, address = 0, acquireLane = 0;
     bool refill = false, injection = false, serve = false, retire = false;
+    bool eviction = false, clear = false;
     uint32_t refillEntry = 0, injectionEntry = 0, serveEntry = 0, serveLane = 0;
 };
 struct RtDetailedSample {
@@ -90,7 +91,7 @@ class RtDetailedPmu {
     };
     struct Entry {
         bool live = false, sent = false;
-        uint64_t uses = 0, acquired = 0, refill = 0;
+        uint64_t uses = 0, acquired = 0, refill = 0, key = 0;
         uint32_t laneMask = 0;
     };
     uint64_t cycle = 0;
@@ -100,10 +101,18 @@ class RtDetailedPmu {
     std::array<std::deque<uint64_t>, 32> laneAcquires;
     // Address + line size, scoped to a session (not reused virtual addresses in another kernel).
     std::map<uint64_t, uint64_t> fetches;
+    std::set<uint64_t> evicted;
+    void close_entry(Entry& e) {
+        if (!e.live) return;
+        stats.bin("as_completed_entry_uses", e.uses);
+        stats.bin("as_completed_entry_unique_lanes", __builtin_popcount(e.laneMask));
+        e = Entry{};
+    }
     std::array<std::map<uint64_t, uint64_t>, 32> laneUses;
     void close_session() {
         for (const auto& kv : fetches) stats.bin("as_fetches_per_address_per_session", kv.second);
         fetches.clear();
+        evicted.clear();
         for (unsigned i = 0; i < laneUses.size(); ++i) {
             auto& lane = laneUses[i];
             for (const auto& kv : lane) {
@@ -176,8 +185,15 @@ public:
             const uint64_t key = (uint64_t(a.address) << 1) | a.is64B;
             auto& e = entries.at(a.acquireEntry);
             if (a.allocate) {
+                if (a.eviction) {
+                    if (!e.live) stats.count("unmatched_evictions");
+                    else evicted.insert(e.key);
+                    close_entry(e);
+                    stats.count("as_evictions");
+                }
                 if (e.live) stats.count("unexpected_live_entry_allocation");
-                e = Entry{}; e.live = true; e.acquired = cycle;
+                e = Entry{}; e.live = true; e.acquired = cycle; e.key = key;
+                stats.count("as_post_eviction_reaccesses", evicted.count(key) != 0);
                 auto& seen = fetches[key];
                 stats.count("as_repeat_allocations_in_session", seen != 0);
                 ++seen;
@@ -202,11 +218,10 @@ public:
             if (pending.empty()) stats.count("unmatched_as_serves");
             else { stats.bin("as_acquire_to_serve_cycles", cycle - pending.front()); pending.pop_front(); }
             if (a.retire) {
-                stats.bin("as_completed_entry_uses", e.uses);
-                stats.bin("as_completed_entry_unique_lanes", __builtin_popcount(e.laneMask));
-                e = Entry{};
+                close_entry(e);
             }
         }
+        if (a.clear) for (auto& e : entries) close_entry(e);
         if (s.release) close_session();
         ++cycle;
     }
@@ -221,7 +236,9 @@ public:
         snapshot.counters["as_unserved_acquires_at_snapshot"] = unserved;
         // Incomplete session histories must not be counted as completed distributions.
         snapshot.counters["as_open_session_unique_addresses"] = fetches.size();
-        std::fputs("{\"as_policy\":\"one_shot_unsent_merge\",\"post_eviction_reaccess\":null,\"statistics\":", f);
+        const auto reaccess = stats.counters.find("as_post_eviction_reaccesses");
+        std::fprintf(f, "{\"as_policy\":\"retained_reverse_replace\",\"post_eviction_reaccess\":%llu,\"statistics\":",
+                     static_cast<unsigned long long>(reaccess == stats.counters.end() ? 0 : reaccess->second));
         snapshot.dump(f);
         std::fputs(",\"lsu\":", f); lsu.dump(f);
         std::fputs(",\"units\":[", f);

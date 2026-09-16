@@ -22,6 +22,8 @@ class RtAsObservation extends Bundle {
   val serveEntry = UInt(5.W)
   val serveLane = UInt(5.W)
   val retire = Bool()
+  val eviction = Bool()
+  val clear = Bool()
 }
 
 class RtUnitObservation extends Bundle {

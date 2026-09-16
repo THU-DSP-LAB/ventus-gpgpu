@@ -9,6 +9,9 @@ class RtSessionReservationTest extends AnyFreeSpec with ChiselScalatestTester {
   "foreign traversals wait outside the shared queue until release acknowledgement" in {
     test(new RtSessionReservation) { dut =>
       dut.io.issued.valid.poke(false.B)
+      dut.io.traverseResolved.valid.poke(false.B)
+      dut.io.traverseResolved.bits.warpId.poke(0.U)
+      dut.io.traverseResolved.bits.wasEmpty.poke(false.B)
       dut.io.released.valid.poke(false.B)
       dut.io.releaseIssued.valid.poke(false.B)
       dut.io.releaseIssued.bits.poke(0.U)
@@ -20,6 +23,12 @@ class RtSessionReservationTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.io.issued.valid.poke(true.B)
         dut.clock.step()
         dut.io.issued.valid.poke(false.B)
+        // Admission is provisional until RT issue resolves the effective mask.
+        dut.io.allowed.foreach(_.expect(false.B))
+        dut.io.traverseResolved.bits.warpId.poke(owner.U)
+        dut.io.traverseResolved.valid.poke(true.B)
+        dut.clock.step()
+        dut.io.traverseResolved.valid.poke(false.B)
         // Completion and callback latency must not release the reservation.
         for (_ <- 0 until 20) {
           for (warp <- 0 until num_warp) dut.io.allowed(warp).expect((warp == owner).B)

@@ -6,6 +6,34 @@ int main() {
     RtDetailedSample s;
     pmu.sample(s); // disabled cycles must not be counted
     assert(pmu.stats.counters.empty());
+    // A retained residency ends on eviction/clear, not on its last waiter.
+    RtDetailedPmu retained;
+    s = RtDetailedSample{}; s.enabled = true;
+    s.asTable.acquire = s.asTable.allocate = true; s.asTable.address = 128;
+    retained.sample(s);
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true;
+    retained.sample(s);
+    assert(retained.stats.histograms["as_completed_entry_uses"].empty());
+    s = RtDetailedSample{}; s.enabled = true;
+    s.asTable.acquire = s.asTable.allocate = s.asTable.eviction = true;
+    s.asTable.address = 256;
+    retained.sample(s);
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true;
+    retained.sample(s);
+    s = RtDetailedSample{}; s.enabled = true;
+    s.asTable.acquire = s.asTable.allocate = s.asTable.eviction = true;
+    s.asTable.address = 128;
+    retained.sample(s);
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true;
+    retained.sample(s);
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.clear = true;
+    retained.sample(s);
+    assert(retained.stats.histograms["as_completed_entry_uses"][1] == 3);
+    assert(retained.stats.counters["as_post_eviction_reaccesses"] == 1);
+    assert(retained.stats.counters["as_evictions"] == 2);
+    assert(retained.stats.counters["unexpected_live_entry_allocation"] == 0);
+    assert(retained.stats.counters["unmatched_as_serves"] == 0);
+    s = RtDetailedSample{};
     s.enabled = true; s.session = true; s.activeMask = 3;
     s.command = true; s.commandMask = 3;
     s.laneState[0] = 4; s.laneState[1] = 5;
