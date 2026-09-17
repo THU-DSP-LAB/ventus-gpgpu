@@ -91,6 +91,7 @@ class MshrTag extends Bundle{  // AddrCalculate向MSHR添加记录并获取Tag�
   // The physical DCache instrId is allocated by MSHRv2.  client metadata is
   // retained here so completion can be routed without exposing that tag.
   val clientId = UInt(LsuClientId.width.W)
+  val clientTag = UInt(lsu.LsuClientTag.width.W)
   val lineBase = UInt(memReqLen.W)
   val coverageMask = UInt(dcache_BlockWords.W)
   val warp_id = UInt(depth_warp.W)
@@ -213,6 +214,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   //val vld_toMSHR = Reg(Bool())
   io.to_mshr.bits.tag.mask := reg_save.mask
   io.to_mshr.bits.tag.clientId := LsuClientId.Pipe
+  io.to_mshr.bits.tag.clientTag := 0.U
   io.to_mshr.bits.tag.lineBase := Cat(addr_wire(memReqLen - 1, 7), 0.U(7.W))
   io.to_mshr.bits.tag.coverageMask := reg_save.mask.asUInt
   io.to_mshr.bits.tag.reg_idxw := reg_save.ctrl.reg_idxw
@@ -653,6 +655,7 @@ class LSUexe() extends Module{
   addrArbiter.io.in(0) <> AddrCalc.io.to_mshr
   addrArbiter.io.in(1).bits := 0.U.asTypeOf(AddrCalc.io.to_mshr.bits.cloneType)
   addrArbiter.io.in(1).bits.tag.clientId := io.cachelineClientReq.bits.clientId
+  addrArbiter.io.in(1).bits.tag.clientTag := io.cachelineClientReq.bits.clientTag
   addrArbiter.io.in(1).bits.tag.lineBase := io.cachelineClientReq.bits.lineBase
   addrArbiter.io.in(1).bits.tag.coverageMask := io.cachelineClientReq.bits.coverageMask
   addrArbiter.io.in(1).bits.tag.mask := VecInit(io.cachelineClientReq.bits.coverageMask.asBools)
@@ -711,6 +714,7 @@ class LSUexe() extends Module{
   io.cachelineClientRsp.valid := complete.valid && completeIsCachelineClient
   io.cachelineClientRsp.bits := 0.U.asTypeOf(new LsuClientResponse)
   io.cachelineClientRsp.bits.clientId := complete.bits.tag.clientId
+  io.cachelineClientRsp.bits.clientTag := complete.bits.tag.clientTag
   io.cachelineClientRsp.bits.lineBase := complete.bits.tag.lineBase
   io.cachelineClientRsp.bits.coverageMask := complete.bits.tag.coverageMask
   io.cachelineClientRsp.bits.data := complete.bits.data

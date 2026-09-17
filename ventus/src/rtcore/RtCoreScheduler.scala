@@ -110,7 +110,6 @@ class RtCoreScheduler extends Module {
   val objectPrepared = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(
     Seq.fill(num_thread)(0.U.asTypeOf(new RtPreparedRay))))))
   val objectBase = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(memReqLen.W))))
-  val objectMatrix = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(12, UInt(32.W)))))
   val objectInstanceId = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   val objectCustomIndex = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
   val objectSbtRecordOffset = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
@@ -644,8 +643,6 @@ class RtCoreScheduler extends Module {
         objectCustomIndex(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceCustomIndex / 4).toInt)(23, 0)
         objectSbtRecordOffset(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceSbtRecordOffset / 4).toInt)(23, 0)
         objectFlags(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceFlags / 4).toInt)
-        for (word <- 0 until 12)
-          objectMatrix(0)(waiter.laneId)(word) := asReady.bits.data((RtVtasLayout.InstanceWorldToObject / 4).toInt + word)
         laneState(0)(waiter.laneId) := sInstanceTransform
       }
     }.otherwise {
@@ -1042,6 +1039,8 @@ class RtCoreScheduler extends Module {
       dst.outValid := out.valid; dst.outReady := out.ready
     }
     observe(d.lsu, io.lsuRequest, io.lsuResponse)
+    d.lsuRequestTag := io.lsuRequest.bits.clientTag
+    d.lsuResponseTag := io.lsuResponse.bits.clientTag
     for (i <- 0 until boxUnitCount) observe(d.units(i), boxIssue(i), boxResult(i))
     for (i <- 0 until triangleUnitCount) observe(d.units(boxUnitCount + i), triangleIssue(i), triangleResult(i))
     observe(d.units(boxUnitCount + triangleUnitCount), triangleResolve.io.in, triangleResolve.io.out)

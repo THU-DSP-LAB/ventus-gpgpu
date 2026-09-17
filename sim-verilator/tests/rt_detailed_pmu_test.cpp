@@ -6,6 +6,20 @@ int main() {
     RtDetailedSample s;
     pmu.sample(s); // disabled cycles must not be counted
     assert(pmu.stats.counters.empty());
+    RtDetailedPmu tagged;
+    s = RtDetailedSample{}; s.enabled = true;
+    s.lsu = {true, true, false, true}; s.lsuRequestTag = 7;
+    tagged.sample(s); // 0: A
+    s.lsuRequestTag = 23; tagged.sample(s); // 1: B
+    s.lsu = {false, true, true, false}; s.lsuResponseTag = 23;
+    tagged.sample(s); // 2: B blocked
+    s.lsu.outReady = true; tagged.sample(s); // 3: B latency 2
+    s.lsu = {true, true, true, true};
+    s.lsuRequestTag = 12; s.lsuResponseTag = 7;
+    tagged.sample(s); // 4: A latency 4; C accepted simultaneously
+    s.lsu = {false, true, true, true}; s.lsuResponseTag = 12;
+    tagged.sample(s); // 5: C latency 1
+    tagged.dump(stdout); std::fputc('\n', stdout);
     // A retained residency ends on eviction/clear, not on its last waiter.
     RtDetailedPmu retained;
     s = RtDetailedSample{}; s.enabled = true;
@@ -61,11 +75,14 @@ int main() {
     s = RtDetailedSample{}; s.enabled = true;
     s.asTable.serve = true;
     pmu.sample(s); // cycle 4: waiter 0
-    s.asTable.serveLane = 1; s.asTable.retire = true;
-    pmu.sample(s); // cycle 5: waiter 1, retire
+    s.asTable.serveLane = 1;
+    pmu.sample(s); // cycle 5: waiter 1, residency remains live
+    assert(pmu.stats.histograms["as_completed_entry_uses"].empty());
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.clear = true;
+    pmu.sample(s); // cycle 6: table clear closes the residency
     s = RtDetailedSample{}; s.enabled = true;
     s.asTable.acquire = s.asTable.allocate = true; s.asTable.address = 128;
-    pmu.sample(s); // cycle 6: same address fetched again (not eviction)
+    pmu.sample(s); // cycle 7: same address fetched again (not eviction)
     assert(pmu.stats.histograms["as_completed_entry_uses"][2] == 1);
     assert(pmu.stats.histograms["as_completed_entry_unique_lanes"][2] == 1);
     assert(pmu.stats.histograms["as_acquire_to_serve_cycles"][4] == 1);

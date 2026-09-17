@@ -2,6 +2,7 @@
 
 // Host-only observers: sampled once before the active clock edge. Never drive DUT inputs.
 #include <array>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -16,7 +17,7 @@ struct RtAsSample {
     uint32_t occupied = 0, returned = 0, readyEntries = 0;
     bool acquire = false, allocate = false, is64B = false;
     uint32_t acquireEntry = 0, address = 0, acquireLane = 0;
-    bool refill = false, injection = false, serve = false, retire = false;
+    bool refill = false, injection = false, serve = false;
     bool eviction = false, clear = false;
     uint32_t refillEntry = 0, injectionEntry = 0, serveEntry = 0, serveLane = 0;
 };
@@ -29,6 +30,7 @@ struct RtDetailedSample {
     bool popBlockedHeaderLine = false, asBlocked = false;
     bool readyBlockedRay = false, readyBlockedBox = false, readyBlockedTriangle = false;
     RtUnitSample lsu;
+    uint32_t lsuRequestTag = 0, lsuResponseTag = 0;
     std::array<RtUnitSample, 11> units{}; // 8 Box4, 2 Triangle, 1 resolve
     RtAsSample asTable;
 };
@@ -66,9 +68,10 @@ struct RtPmuStatistics {
 
 class RtDetailedPmu {
     struct Unit {
-        std::deque<uint64_t> accepted;
+        std::deque<std::pair<uint32_t, uint64_t>> accepted;
         RtPmuStatistics stats;
-        void sample(const RtUnitSample& s, uint64_t cycle) {
+        void sample(const RtUnitSample& s, uint64_t cycle, bool tagged = false,
+                    uint32_t requestTag = 0, uint32_t responseTag = 0) {
             stats.count("sampled_cycles");
             stats.count("busy_cycles", !accepted.empty());
             stats.count("ready_without_dispatch_cycles", s.inReady && !s.inValid);
@@ -76,11 +79,18 @@ class RtDetailedPmu {
             stats.count("input_blocked_cycles", s.inValid && !s.inReady);
             stats.count("output_blocked_cycles", s.outValid && !s.outReady);
             stats.bin("outstanding", accepted.size());
-            if (s.inValid && s.inReady) { accepted.push_back(cycle); stats.count("issues"); }
+            if (s.inValid && s.inReady) {
+                if (tagged && std::any_of(accepted.begin(), accepted.end(),
+                    [requestTag](const auto& p) { return p.first == requestTag; }))
+                    stats.count("duplicate_request_tags");
+                accepted.emplace_back(requestTag, cycle); stats.count("issues");
+            }
             if (s.outValid && s.outReady) {
                 stats.count("results");
-                if (accepted.empty()) stats.count("unmatched_results");
-                else { stats.bin("latency_cycles", cycle - accepted.front()); accepted.pop_front(); }
+                const auto it = tagged ? std::find_if(accepted.begin(), accepted.end(),
+                    [responseTag](const auto& p) { return p.first == responseTag; }) : accepted.begin();
+                if (it == accepted.end()) stats.count("unmatched_results");
+                else { stats.bin("latency_cycles", cycle - it->second); accepted.erase(it); }
             }
         }
         void dump(FILE* f) const {
@@ -168,7 +178,7 @@ public:
         }
         stats.bin("iu_issues_per_cycle", issues);
         stats.bin("iu_ready_inputs_per_cycle", inputReady);
-        lsu.sample(s.lsu, cycle);
+        lsu.sample(s.lsu, cycle, true, s.lsuRequestTag, s.lsuResponseTag);
         const auto& a = s.asTable;
         stats.count("as_acquires", a.acquire);
         stats.count("as_allocations", a.allocate);
@@ -217,9 +227,6 @@ public:
             auto& pending = laneAcquires.at(a.serveLane);
             if (pending.empty()) stats.count("unmatched_as_serves");
             else { stats.bin("as_acquire_to_serve_cycles", cycle - pending.front()); pending.pop_front(); }
-            if (a.retire) {
-                close_entry(e);
-            }
         }
         if (a.clear) for (auto& e : entries) close_entry(e);
         if (s.release) close_session();

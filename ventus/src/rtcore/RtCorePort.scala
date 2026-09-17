@@ -95,7 +95,7 @@ class RtCorePerfEvents extends Bundle {
  * All externally visible RTcore ports.
  *
  * RtLsu is the sole RTcore-to-LSU boundary.  It is a cacheline client: DCache
- * tags and RtLsuMshr entry IDs are both private to their respective modules.
+ * tags remain LSU-private; opaque client tags identify AS entries on return.
  */
 class RtCoreIO extends Bundle {
   val command = Flipped(Decoupled(new RtWarpCommand))

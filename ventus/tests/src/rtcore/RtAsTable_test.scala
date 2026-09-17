@@ -36,7 +36,7 @@ class RtAsTableTest extends AnyFreeSpec with ChiselScalatestTester {
       }
       def dispatch(index: Int): Unit = {
         dut.io.candidate.valid.expect(true.B)
-        dut.io.candidate.bits.locator.tableLocation.expect(index.U)
+        dut.io.candidate.bits.entryId.expect(index.U)
         dut.io.candidate.ready.poke(true.B)
         dut.clock.step()
         dut.io.candidate.ready.poke(false.B)
@@ -127,7 +127,7 @@ class RtAsTableTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.clear.ready.expect(false.B)
       dut.io.acquire.valid.poke(false.B)
       for (index <- 0 until 32) {
-        dut.io.candidate.bits.locator.tableLocation.expect(index.U)
+        dut.io.candidate.bits.entryId.expect(index.U)
         dut.io.candidate.ready.poke(true.B)
         dut.clock.step()
         dut.io.candidate.ready.poke(false.B)

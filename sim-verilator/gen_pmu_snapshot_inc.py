@@ -153,8 +153,8 @@ def main() -> int:
     lines.append("void ventus_rtlsim_t::sample_detailed_pmu() {")
     if pmu_mode == "detailed":
         lines.append(f"    if (detailed_pmu.empty()) detailed_pmu.resize({num_sm});")
-        scalar_fields = "enabled clear session activeMask command commandMask commandKind release stackReady stackSelected popBlockedHeader popBlockedPush popBlockedHeaderLine asBlocked readyBlockedRay readyBlockedBox readyBlockedTriangle".split()
-        as_fields = "occupied returned readyEntries acquire allocate acquireEntry address is64B acquireLane refill refillEntry injection injectionEntry serve serveEntry serveLane retire eviction clear".split()
+        scalar_fields = "enabled clear session activeMask command commandMask commandKind release stackReady stackSelected popBlockedHeader popBlockedPush popBlockedHeaderLine asBlocked readyBlockedRay readyBlockedBox readyBlockedTriangle lsuRequestTag lsuResponseTag".split()
+        as_fields = "occupied returned readyEntries acquire allocate acquireEntry address is64B acquireLane refill refillEntry injection injectionEntry serve serveEntry serveLane eviction clear".split()
         unit_fields = "inValid inReady outValid outReady".split()
         for sm in range(num_sm):
             prefix = f"dut->io_pmu_rtcore_{sm}_detailed_"

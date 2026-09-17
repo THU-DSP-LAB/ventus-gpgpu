@@ -1,6 +1,7 @@
 package rtcore
 
 import chisel3._
+import lsu.LsuClientTag
 import top.parameters._
 
 /** Simulation-only observation ports. No counters or feedback into control. */
@@ -21,7 +22,6 @@ class RtAsObservation extends Bundle {
   val serve = Bool()
   val serveEntry = UInt(5.W)
   val serveLane = UInt(5.W)
-  val retire = Bool()
   val eviction = Bool()
   val clear = Bool()
 }
@@ -53,6 +53,8 @@ class RtDetailedSignals extends Bundle {
   val readyBlockedBox = Bool()
   val readyBlockedTriangle = Bool()
   val lsu = new RtUnitObservation // request on input, response on output
+  val lsuRequestTag = UInt(LsuClientTag.width.W)
+  val lsuResponseTag = UInt(LsuClientTag.width.W)
   val units = Vec(RtCoreSchedulerParameters.boxUnitCount +
     RtCoreSchedulerParameters.triangleUnitCount + 1, new RtUnitObservation)
   val asTable = new RtAsObservation

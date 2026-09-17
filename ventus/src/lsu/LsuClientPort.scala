@@ -16,8 +16,12 @@ object LsuClientId {
   val RtCore = 1.U(width.W)
 }
 
+/** Opaque client transaction identity, independent of the physical DCache tag. */
+object LsuClientTag { val width = 5 }
+
 class LsuClientRequest extends Bundle {
   val clientId = UInt(LsuClientId.width.W)
+  val clientTag = UInt(LsuClientTag.width.W)
   val lineBase = UInt(memReqLen.W)
   val coverageMask = UInt(dcache_BlockWords.W)
   val write = Bool()
@@ -26,6 +30,7 @@ class LsuClientRequest extends Bundle {
 
 class LsuClientResponse extends Bundle {
   val clientId = UInt(LsuClientId.width.W)
+  val clientTag = UInt(LsuClientTag.width.W)
   val lineBase = UInt(memReqLen.W)
   val coverageMask = UInt(dcache_BlockWords.W)
   val data = Vec(dcache_BlockWords, UInt(xLen.W))

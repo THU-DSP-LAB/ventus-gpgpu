@@ -15,7 +15,11 @@ class DetailedPmuTest(unittest.TestCase):
                             "-I", str(root), str(root / "tests/rt_detailed_pmu_test.cpp"),
                             "-o", str(binary)], check=True)
             output = subprocess.check_output([str(binary)], text=True)
-        first, second = map(json.loads, output.splitlines())
+        tagged, first, second = map(json.loads, output.splitlines())
+        self.assertEqual(tagged["lsu"]["histograms"]["latency_cycles"], {"1": 1, "2": 1, "4": 1})
+        self.assertEqual(tagged["lsu"]["counters"]["outstanding_at_snapshot"], 0)
+        self.assertEqual(tagged["lsu"]["counters"]["busy_cycles"], 5)
+        self.assertEqual(tagged["lsu"]["counters"].get("unmatched_results", 0), 0)
         self.assertEqual(first, second)
         self.assertEqual(first["post_eviction_reaccess"], 0)
         self.assertEqual(first["as_policy"], "retained_reverse_replace")

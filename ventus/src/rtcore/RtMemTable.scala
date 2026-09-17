@@ -65,11 +65,24 @@ class RtAsTable extends Module {
   }
   val unsent = VecInit(entries.map(e => e.valid && !e.sent)).asUInt; val request = PriorityEncoder(unsent)
   io.candidate.valid := unsent.orR; io.candidate.bits := 0.U.asTypeOf(new RtLsuCandidate)
-  when(io.candidate.valid) { io.candidate.bits.source := RtLsuSource.as; io.candidate.bits.cacheLineAddress := entries(request).lineAddress; io.candidate.bits.is64B := entries(request).is64B; io.candidate.bits.wordMask := entries(request).wordMask; io.candidate.bits.locator.tableLocation := request }
+  when(io.candidate.valid) { io.candidate.bits.cacheLineAddress := entries(request).lineAddress; io.candidate.bits.is64B := entries(request).is64B; io.candidate.bits.wordMask := entries(request).wordMask; io.candidate.bits.entryId := request }
   when(io.candidate.fire) { entries(request).sent := true.B }
   io.refill := io.candidate.fire
   val response = entries(io.injection.bits.entry); io.injection.ready := response.valid && response.sent && !response.returned
-  when(io.injection.fire) { assert(!io.injection.bits.fault); response.returned := true.B; response.data := io.injection.bits.data }
+  // The tagged entry retains format metadata until its reply arrives. Normalize
+  // only the requested half; LSU words outside coverageMask need not be valid.
+  when(io.injection.fire) {
+    assert(!io.injection.bits.fault)
+    response.returned := true.B
+    for (word <- 0 until p.lineWordCount) {
+      if (word < p.lineWordCount / 2) {
+        response.data(word) := Mux(response.is64B && response.lineAddress(6),
+          io.injection.bits.data(word + p.lineWordCount / 2), io.injection.bits.data(word))
+      } else {
+        response.data(word) := Mux(response.is64B, 0.U, io.injection.bits.data(word))
+      }
+    }
+  }
   val ready = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid.asUInt.orR)).asUInt; val entry = PriorityEncoder(ready); val waiter = PriorityEncoder(entries(entry).waiterValid.asUInt)
   io.readyLine.valid := ready.orR; io.readyLine.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
   when(io.readyLine.valid) { io.readyLine.bits.waiter := entries(entry).waiters(waiter); io.readyLine.bits.data := entries(entry).data }
@@ -102,7 +115,6 @@ class RtAsTable extends Module {
     d.serve := io.readyLine.fire
     d.serveEntry := entry
     d.serveLane := io.readyLine.bits.waiter.laneId
-    d.retire := false.B
     d.eviction := io.eviction
     d.clear := io.clear.fire
   }
@@ -118,12 +130,13 @@ class RtMemTable extends Module {
     val lsuRequest = Decoupled(new LsuClientRequest); val lsuResponse = Flipped(Decoupled(new LsuClientResponse))
     val detailed = if (PMU_DETAILED) Some(Output(new RtAsObservation)) else None
   })
-  val as = Module(new RtAsTable); val mshr = Module(new RtLsuMshr)
+  val as = Module(new RtAsTable); val adapter = Module(new RtLsuAdapter)
   as.io.acquire <> io.asAcquire; io.asReadyLine <> as.io.readyLine
   as.io.clear <> io.clear
-  mshr.io.as <> as.io.candidate; as.io.injection <> mshr.io.asInjection
-  io.lsuRequest <> mshr.io.request; mshr.io.response <> io.lsuResponse
-  io.quiescent := as.io.idle && mshr.io.idle
+  adapter.io.as <> as.io.candidate; as.io.injection <> adapter.io.asInjection
+  io.lsuRequest <> adapter.io.request; adapter.io.response <> io.lsuResponse
+  // Pending transactions keep their AS entry valid and prevent clear.
+  io.quiescent := as.io.idle
   io.asCacheResidentHit := as.io.residentHit
   io.asCachePendingMerge := as.io.pendingMerge
   io.asCacheMiss := as.io.miss

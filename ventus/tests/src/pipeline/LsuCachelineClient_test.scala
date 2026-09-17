@@ -35,8 +35,9 @@ class LsuCachelineClientTest extends AnyFreeSpec with ChiselScalatestTester {
   }
 
   private def driveClientRequest(dut: LSUexe, clientId: Int, lineBase: Int,
-      mask: BigInt, write: Boolean = false, dataBase: Int = 0): Unit = {
+      mask: BigInt, write: Boolean = false, dataBase: Int = 0, clientTag: Int = 0): Unit = {
     dut.io.cachelineClientReq.bits.clientId.poke(clientId.U)
+    dut.io.cachelineClientReq.bits.clientTag.poke(clientTag.U)
     dut.io.cachelineClientReq.bits.lineBase.poke(lineBase.U)
     dut.io.cachelineClientReq.bits.coverageMask.poke(mask.U)
     dut.io.cachelineClientReq.bits.write.poke(write.B)
@@ -415,6 +416,75 @@ class LsuCachelineClientTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.cachelineClientRsp.bits.lineBase.expect(0x2800.U)
       dut.io.cachelineClientRsp.bits.coverageMask.expect("hffffffff".U)
       dut.clock.step()
+    }
+  }
+
+  "same-client same-line requests retain opaque tags across reversed replies" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+      val masks = Seq(BigInt("0000ffff", 16), BigInt("ffff0000", 16))
+      val tags = Seq(7, 23)
+      val physical = tags.indices.map { i =>
+        driveClientRequest(dut, clientId = 1, lineBase = 0x6000, mask = masks(i), clientTag = tags(i))
+        dut.io.cachelineClientReq.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.cachelineClientReq.valid.poke(false.B)
+        acceptDcache(dut)._1
+      }
+      assert(physical.distinct.size == 2)
+      for (i <- Seq(1, 0)) {
+        dut.io.cachelineClientRsp.ready.poke(false.B)
+        returnDcache(dut, physical(i), masks(i), 0x900 + i * 256)
+        dut.io.cachelineClientRsp.valid.expect(true.B)
+        dut.io.cachelineClientRsp.bits.clientTag.expect(tags(i).U)
+        dut.io.cachelineClientRsp.bits.lineBase.expect(0x6000.U)
+        dut.clock.step(2)
+        dut.io.cachelineClientRsp.bits.clientTag.expect(tags(i).U)
+        dut.io.cachelineClientRsp.ready.poke(true.B)
+        dut.clock.step()
+      }
+    }
+  }
+
+  "shared MSHR capacity backpressures RT and resumes after a tagged completion" in {
+    test(new LSUexe).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      dut.clock.step()
+      val count = top.parameters.lsu_nMshrEntry
+      val physical = (0 until count).map { i =>
+        driveClientRequest(dut, clientId = 1, lineBase = 0x8000 + i * 128,
+          mask = BigInt("ffffffff", 16), clientTag = i)
+        dut.io.cachelineClientReq.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.cachelineClientReq.valid.poke(false.B)
+        acceptDcache(dut)._1
+      }
+      assert(physical.distinct.size == count)
+      driveClientRequest(dut, clientId = 1, lineBase = 0xa000,
+        mask = BigInt("ffffffff", 16), clientTag = 31)
+      dut.io.cachelineClientReq.ready.expect(false.B)
+      dut.clock.step(2)
+      dut.io.cachelineClientReq.ready.expect(false.B)
+      returnDcache(dut, physical.last, BigInt("ffffffff", 16), 0x1000)
+      dut.io.cachelineClientRsp.valid.expect(true.B)
+      dut.io.cachelineClientRsp.bits.clientTag.expect((count - 1).U)
+      dut.io.cachelineClientReq.ready.expect(false.B)
+      dut.clock.step()
+      dut.io.cachelineClientReq.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.cachelineClientReq.valid.poke(false.B)
+      val replacement = acceptDcache(dut)._1
+      assert(replacement == physical.last)
+      returnDcache(dut, replacement, BigInt("ffffffff", 16), 0x2000)
+      dut.io.cachelineClientRsp.bits.clientTag.expect(31.U)
+      dut.clock.step()
+      for (i <- (0 until count - 1).reverse) {
+        returnDcache(dut, physical(i), BigInt("ffffffff", 16), 0x3000 + i * 128)
+        dut.io.cachelineClientRsp.valid.expect(true.B)
+        dut.io.cachelineClientRsp.bits.clientTag.expect(i.U)
+        dut.clock.step()
+      }
     }
   }
 
