@@ -1129,6 +1129,16 @@ class RtCoreScheduler extends Module {
     // reclamation. The basic software-release counter remains separate.
     d.release := local.io.retire.fire
     d.laneState := laneState(0)
+    // Observe only valid node pops (not empty-stack termination or headers).
+    d.nodePopLanes := VecInit((0 until num_thread).map { lane =>
+      val ref = stack.io.popNodeRef(lane)
+      val kind = nodeType(ref)
+      stack.io.pop.fire && popMask(lane) && ref =/= RtVtasLayout.InvalidNodeRef.U &&
+        (kind === RtVtasLayout.NodeBox4.U || kind === RtVtasLayout.NodeTriangle.U ||
+          kind === RtVtasLayout.NodeInstance.U || kind === RtVtasLayout.NodeAabb.U)
+    }).asUInt
+    for (lane <- 0 until num_thread) d.nodePopKinds(lane) := nodeType(stack.io.popNodeRef(lane))
+    d.nodeAcquire := table.io.asAcquire.fire && nodeAcquire
     d.stackReady := PopCount(readyMasks(0))
     d.stackSelected := stack.io.pop.fire
     // Overlapping blockers, not an additive partition of stall cycles.

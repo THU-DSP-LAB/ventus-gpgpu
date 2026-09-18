@@ -2,6 +2,51 @@
 #include <cassert>
 
 int main() {
+    // Three node visits share an entry: miss, pending merge, resident hit.
+    // First-ready is independent of consumption; two lanes may serve together.
+    {
+        RtDetailedPmu nodes;
+        auto sample = [] { RtDetailedSample s; s.enabled = true; return s; };
+        auto s = sample(); s.nodePopLanes = 7;
+        s.nodePopKinds[0] = 1; s.nodePopKinds[1] = 2; s.nodePopKinds[2] = 3;
+        nodes.sample(s); // 0
+        s = sample(); s.nodeAcquire = s.asTable.acquire = s.asTable.allocate = true;
+        s.asTable.acquireEntry = 5; s.asTable.address = 128;
+        nodes.sample(s); // 1: miss lane0
+        s = sample(); s.nodeAcquire = s.asTable.acquire = true;
+        s.asTable.acquireLane = 1; s.asTable.acquireEntry = 5; s.asTable.address = 128;
+        nodes.sample(s); // 2: merge lane1
+        s = sample(); s.asTable.injection = true; s.asTable.injectionEntry = 5;
+        nodes.sample(s); // 3: injection alone is not ready metadata
+        s = sample(); s.nodeAcquire = s.asTable.acquire = s.asTable.residentHit = true;
+        s.asTable.acquireLane = 2; s.asTable.acquireEntry = 5; s.asTable.address = 128;
+        s.asTable.readyLanes = 3; s.asTable.serveLanes = 2;
+        s.asTable.serveEntries[0] = s.asTable.serveEntries[1] = 5;
+        nodes.sample(s); // 4: lane1 ready and consumed, lane2 resident acquire
+        s = sample(); s.asTable.readyLanes = 5;
+        s.asTable.serveEntries[0] = s.asTable.serveEntries[2] = 5;
+        nodes.sample(s); // 5: lane2 first-ready
+        s.asTable.serveLanes = 5;
+        nodes.sample(s); // 6: consume lane0 and lane2 simultaneously
+        const auto& c = nodes.stats.counters;
+        assert(c.at("node_completed") == 3);
+        assert(c.at("node_pop_to_acquire_lane_cycles") == 7);
+        assert(c.at("node_acquire_to_ready_lane_cycles") == 6);
+        assert(c.at("node_ready_to_serve_lane_cycles") == 3);
+        assert(c.at("node_total_lane_cycles") == 16);
+        assert(nodes.stats.histograms["node_path_miss_ready_to_serve_cycles"][2] == 1);
+        assert(nodes.stats.histograms["node_path_merge_ready_to_serve_cycles"][0] == 1);
+        assert(nodes.stats.histograms["node_path_resident_acquire_to_ready_cycles"][1] == 1);
+        assert(nodes.stats.counters["node_kind_3_path_resident_completed"] == 1);
+        assert(nodes.stats.counters["node_unmatched_serves"] == 0);
+        // New use of the same lane must not inherit the prior visit's timestamps.
+        s = sample(); s.nodePopLanes = 1; s.nodePopKinds[0] = 4; nodes.sample(s);
+        s = sample(); s.release = true; nodes.sample(s);
+        assert(nodes.stats.counters["node_unfinished_at_release"] == 1);
+        assert(nodes.stats.counters["node_completed"] == 3);
+        s = sample(); s.clear = true; nodes.sample(s);
+        assert(nodes.stats.counters.empty());
+    }
     RtDetailedPmu pmu;
     RtDetailedSample s;
     pmu.sample(s); // disabled cycles must not be counted

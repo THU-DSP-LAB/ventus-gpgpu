@@ -152,6 +152,8 @@ class RtAsTable extends Module {
     d.readyEntries := PopCount(ready)
     d.acquire := io.acquire.fire
     d.allocate := io.miss
+    d.residentHit := io.residentHit
+    d.readyLanes := laneReady.asUInt
     d.acquireEntry := place
     d.address := io.acquire.bits.lineAddress
     d.is64B := io.acquire.bits.is64B

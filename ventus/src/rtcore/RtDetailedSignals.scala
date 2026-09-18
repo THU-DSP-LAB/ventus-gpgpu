@@ -11,6 +11,8 @@ class RtAsObservation extends Bundle {
   val readyEntries = UInt(6.W)
   val acquire = Bool()
   val allocate = Bool()
+  val residentHit = Bool()
+  val readyLanes = UInt(num_thread.W)
   val acquireEntry = UInt(5.W)
   val address = UInt(memReqLen.W)
   val is64B = Bool()
@@ -48,6 +50,9 @@ class RtDetailedSignals extends Bundle {
   val commandKind = UInt(2.W) // fresh=0, resume=1, restart=2
   val release = Bool() // physical context retirement, not software session count
   val laneState = Vec(num_thread, UInt(4.W))
+  val nodePopLanes = UInt(num_thread.W)
+  val nodePopKinds = Vec(num_thread, UInt(3.W))
+  val nodeAcquire = Bool()
   val stackReady = UInt(6.W)
   val stackSelected = Bool()
   val popBlockedHeader = Bool()

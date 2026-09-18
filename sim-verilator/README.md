@@ -117,6 +117,24 @@ Run with `--help` to view all options. Commonly used ones include:
 
 In `ventus_args.txt`, parameters such as `--kernel`, `--sim-time-max`, and `--dump-mem` are commonly used. Refer to existing examples in the repository for guidance.
 
+### RT detailed PMU node phases
+
+Detailed PMU also tracks each valid node visit by lane from stack pop through
+AS acquire, first ready metadata, and table consumption. Histograms are
+`node_{pop_to_acquire,acquire_to_ready,ready_to_serve,total}_cycles`; matching
+`*_lane_cycles` counters are their weighted sums. The phases partition
+`state_5_lane_cycles` at a drained snapshot. `node_path_{resident,merge,miss}`,
+`node_kind_{1,2,3,4}` (Box4, Triangle, Instance, AABB), and combined prefixes
+provide the same breakdown. Headers are excluded. Ready means the first
+cycle the lane can see the returned line, not the injection edge; a resident
+hit normally takes one cycle from acquire to ready. Consume is IU admission
+for Box4/Triangle, not IU result completion. Unmatched and unfinished counters
+must be checked before interpreting completed-request distributions.
+
+These observers exist only in detailed mode and never drive DUT inputs.
+Run `python3 sim-verilator/tests/test_detailed_pmu.py` from the gpgpu repository
+to check the host collector without rebuilding the full model.
+
 ### RT Local SRAM backpressure regression
 
 Run `python3 sim-verilator/tests/test_rt_local_sram.py --rtl sim-verilator/build/generated/rtl-detailed/dut.v` from the gpgpu repository (substitute the actual elaboration flavor).
