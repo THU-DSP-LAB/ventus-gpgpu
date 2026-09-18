@@ -22,6 +22,11 @@ class RtAsObservation extends Bundle {
   val serve = Bool()
   val serveEntry = UInt(5.W)
   val serveLane = UInt(5.W)
+  // Multiple fixed IU ports may consume returned lines in one cycle.  Keep
+  // the old scalar fields as a representative for simple timeline readers,
+  // and export the complete per-lane mapping for the detailed host observer.
+  val serveLanes = UInt(num_thread.W)
+  val serveEntries = Vec(num_thread, UInt(5.W))
   val eviction = Bool()
   val clear = Bool()
 }

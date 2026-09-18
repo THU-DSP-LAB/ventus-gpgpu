@@ -10,7 +10,8 @@ import top.parameters._
 object RtMemTableParameters {
   val hitRecordStorageWordCount = RtAbiLayout.HitRecordWordCount
   val asEntryCount = 32
-  val maxAsWaitersPerEntry = num_thread
+  val asEntryIndexWidth = log2Ceil(asEntryCount)
+  val asReadPortCount = 1 + RtCoreSchedulerParameters.boxUnitCount + RtCoreSchedulerParameters.triangleUnitCount
   val lineWordCount = RtCorePortParameters.lineWordCount
   require(lineWordCount == num_thread)
 }
@@ -23,12 +24,31 @@ class RtAsLineWaiter extends Bundle {
 }
 class RtAsTableAcquire extends Bundle { val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiter = new RtAsLineWaiter }
 class RtAsTableReadyLine extends Bundle { val waiter = new RtAsLineWaiter; val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)) }
-private[rtcore] class RtAsEntry extends Bundle { val valid = Bool(); val sent = Bool(); val returned = Bool(); val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool(); val waiterValid = Vec(RtMemTableParameters.maxAsWaitersPerEntry, Bool()); val waiters = Vec(RtMemTableParameters.maxAsWaitersPerEntry, new RtAsLineWaiter); val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)) }
+private[rtcore] class RtAsWaiterMeta extends Bundle { val nodeKind = UInt(3.W); val objectRay = Bool() }
+private[rtcore] class RtAsReadyMeta extends Bundle { val entryId = UInt(RtMemTableParameters.asEntryIndexWidth.W); val nodeKind = UInt(3.W); val objectRay = Bool() }
+private[rtcore] class RtAsLineReadPort extends Bundle {
+  val entryId = Input(UInt(RtMemTableParameters.asEntryIndexWidth.W))
+  val data = Output(Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W)))
+}
+private[rtcore] class RtAsEntry extends Bundle {
+  val valid = Bool(); val sent = Bool(); val returned = Bool()
+  val lineAddress = UInt(memReqLen.W); val wordMask = UInt(RtMemTableParameters.lineWordCount.W); val is64B = Bool()
+  // Slot i belongs permanently to lane i.  The scheduler permits at most one
+  // unconsumed AS request per lane, so this is a bitmap rather than a CAM.
+  val waiterValid = UInt(num_thread.W)
+  val waiterMeta = Vec(num_thread, new RtAsWaiterMeta)
+  val data = Vec(RtMemTableParameters.lineWordCount, UInt(xLen.W))
+}
 
 class RtAsTable extends Module {
   private val p = RtMemTableParameters
   val io = IO(new Bundle {
-    val acquire = Flipped(Decoupled(new RtAsTableAcquire)); val readyLine = Decoupled(new RtAsTableReadyLine)
+    val acquire = Flipped(Decoupled(new RtAsTableAcquire))
+    // One small readiness record per lane.  Full cacheline data is read only
+    // by a selected IU/scalar consumer through lineRead below.
+    val readyMeta = Output(Vec(num_thread, Valid(new RtAsReadyMeta)))
+    val lineRead = Vec(p.asReadPortCount, new RtAsLineReadPort)
+    val consumeLanes = Input(UInt(num_thread.W))
     val candidate = Decoupled(new RtLsuCandidate); val injection = Flipped(Decoupled(new RtAsInjection)); val idle = Output(Bool())
     val clear = Flipped(Decoupled(Bool()))
     val residentHit = Output(Bool()); val pendingMerge = Output(Bool()); val miss = Output(Bool())
@@ -36,14 +56,14 @@ class RtAsTable extends Module {
     val detailed = if (PMU_DETAILED) Some(Output(new RtAsObservation)) else None
   })
   val entries = RegInit(VecInit(Seq.fill(p.asEntryCount)(0.U.asTypeOf(new RtAsEntry))))
-  private val indexWidth = log2Ceil(p.asEntryCount)
+  private val indexWidth = p.asEntryIndexWidth
   require(isPow2(p.asEntryCount), "Reverse replacement wraps at table size")
   val victimCursor = RegInit((p.asEntryCount - 1).U(indexWidth.W))
   val matching = VecInit(entries.map(e => e.valid && e.lineAddress === io.acquire.bits.lineAddress &&
     e.is64B === io.acquire.bits.is64B)).asUInt
-  val merge = matching & VecInit(entries.map(e => !e.waiterValid.asUInt.andR)).asUInt
+  val merge = matching & VecInit(entries.map(e => !e.waiterValid(io.acquire.bits.waiter.laneId))).asUInt
   val free = VecInit(entries.map(!_.valid)).asUInt
-  val evictable = VecInit(entries.map(e => e.valid && e.returned && !e.waiterValid.asUInt.orR)).asUInt
+  val evictable = VecInit(entries.map(e => e.valid && e.returned && !e.waiterValid.orR)).asUInt
   val reverseEligible = VecInit((0 until p.asEntryCount).map { offset =>
     evictable((victimCursor - offset.U)(indexWidth - 1, 0))
   }).asUInt
@@ -60,8 +80,9 @@ class RtAsTable extends Module {
     assert(Mux(io.acquire.bits.is64B, io.acquire.bits.lineAddress(5, 0) === 0.U, io.acquire.bits.lineAddress(6, 0) === 0.U))
     val e = entries(place)
     when(io.eviction) { victimCursor := victim - 1.U }
-    when(!hasMerge) { e.valid := true.B; e.sent := false.B; e.returned := false.B; e.lineAddress := io.acquire.bits.lineAddress; e.wordMask := io.acquire.bits.wordMask; e.is64B := io.acquire.bits.is64B; e.waiterValid.foreach(_ := false.B) }.otherwise { e.wordMask := e.wordMask | io.acquire.bits.wordMask }
-    val w = PriorityEncoder((~e.waiterValid.asUInt).asUInt); e.waiterValid(w) := true.B; e.waiters(w) := io.acquire.bits.waiter
+    when(!hasMerge) { e.valid := true.B; e.sent := false.B; e.returned := false.B; e.lineAddress := io.acquire.bits.lineAddress; e.wordMask := io.acquire.bits.wordMask; e.is64B := io.acquire.bits.is64B }.otherwise { e.wordMask := e.wordMask | io.acquire.bits.wordMask }
+    e.waiterMeta(io.acquire.bits.waiter.laneId).nodeKind := io.acquire.bits.waiter.nodeKind
+    e.waiterMeta(io.acquire.bits.waiter.laneId).objectRay := io.acquire.bits.waiter.objectRay
   }
   val unsent = VecInit(entries.map(e => e.valid && !e.sent)).asUInt; val request = PriorityEncoder(unsent)
   io.candidate.valid := unsent.orR; io.candidate.bits := 0.U.asTypeOf(new RtLsuCandidate)
@@ -83,13 +104,40 @@ class RtAsTable extends Module {
       }
     }
   }
-  val ready = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid.asUInt.orR)).asUInt; val entry = PriorityEncoder(ready); val waiter = PriorityEncoder(entries(entry).waiterValid.asUInt)
-  io.readyLine.valid := ready.orR; io.readyLine.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
-  when(io.readyLine.valid) { io.readyLine.bits.waiter := entries(entry).waiters(waiter); io.readyLine.bits.data := entries(entry).data }
-  // Acquire chooses a pre-edge free slot, so simultaneous serve/acquire cannot
-  // clobber one another even when they target the same resident line.
-  when(io.readyLine.fire) { entries(entry).waiterValid(waiter) := false.B }
-  val busy = entries.map(e => e.valid && (!e.returned || e.waiterValid.asUInt.orR)).reduce(_ || _)
+  val ready = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid.orR)).asUInt
+  val laneReady = Wire(Vec(num_thread, Bool()))
+  val laneEntry = Wire(Vec(num_thread, UInt(indexWidth.W)))
+  for (lane <- 0 until num_thread) {
+    val matchingWaiter = VecInit(entries.map(e => e.valid && e.returned && e.waiterValid(lane))).asUInt
+    val selectedEntry = PriorityEncoder(matchingWaiter)
+    laneReady(lane) := matchingWaiter.orR
+    laneEntry(lane) := selectedEntry
+    io.readyMeta(lane).valid := matchingWaiter.orR
+    io.readyMeta(lane).bits := 0.U.asTypeOf(new RtAsReadyMeta)
+    when(matchingWaiter.orR) {
+      io.readyMeta(lane).bits.entryId := selectedEntry
+      io.readyMeta(lane).bits.nodeKind := entries(selectedEntry).waiterMeta(lane).nodeKind
+      io.readyMeta(lane).bits.objectRay := entries(selectedEntry).waiterMeta(lane).objectRay
+    }
+  }
+  for (port <- 0 until p.asReadPortCount)
+    io.lineRead(port).data := entries(io.lineRead(port).entryId).data
+  // Each entry owns one lane bitmap update, so several lanes can consume one
+  // returned line in the same cycle without dynamic indexed register writes.
+  for (entry <- 0 until p.asEntryCount) {
+    val consumeMask = VecInit((0 until num_thread).map { lane =>
+      io.consumeLanes(lane) && laneReady(lane) && laneEntry(lane) === entry.U
+    }).asUInt
+    val acquireHere = io.acquire.fire && place === entry.U
+    val acquireMask = UIntToOH(io.acquire.bits.waiter.laneId, num_thread)
+    when(acquireHere) {
+      entries(entry).waiterValid := Mux(hasMerge,
+        (entries(entry).waiterValid & ~consumeMask) | acquireMask, acquireMask)
+    }.elsewhen(consumeMask.orR) {
+      entries(entry).waiterValid := entries(entry).waiterValid & ~consumeMask
+    }
+  }
+  val busy = entries.map(e => e.valid && (!e.returned || e.waiterValid.orR)).reduce(_ || _)
   io.clear.ready := !busy
   when(io.clear.fire) {
     entries.foreach(_.valid := false.B)
@@ -112,17 +160,23 @@ class RtAsTable extends Module {
     d.refillEntry := request
     d.injection := io.injection.fire
     d.injectionEntry := io.injection.bits.entry
-    d.serve := io.readyLine.fire
-    d.serveEntry := entry
-    d.serveLane := io.readyLine.bits.waiter.laneId
+    d.serve := io.consumeLanes.orR
+    d.serveEntry := PriorityEncoder(ready)
+    d.serveLane := PriorityEncoder(io.consumeLanes)
+    d.serveLanes := io.consumeLanes
+    for (lane <- 0 until num_thread) d.serveEntries(lane) := laneEntry(lane)
     d.eviction := io.eviction
     d.clear := io.clear.fire
   }
 }
 
 class RtMemTable extends Module {
+  private val p = RtMemTableParameters
   val io = IO(new Bundle {
-    val asAcquire = Flipped(Decoupled(new RtAsTableAcquire)); val asReadyLine = Decoupled(new RtAsTableReadyLine)
+    val asAcquire = Flipped(Decoupled(new RtAsTableAcquire))
+    val asReadyMeta = Output(Vec(num_thread, Valid(new RtAsReadyMeta)))
+    val asLineRead = Vec(p.asReadPortCount, new RtAsLineReadPort)
+    val asConsumeLanes = Input(UInt(num_thread.W))
     val clear = Flipped(Decoupled(Bool()))
     val quiescent = Output(Bool())
     val asCacheResidentHit = Output(Bool()); val asCachePendingMerge = Output(Bool()); val asCacheMiss = Output(Bool())
@@ -131,7 +185,10 @@ class RtMemTable extends Module {
     val detailed = if (PMU_DETAILED) Some(Output(new RtAsObservation)) else None
   })
   val as = Module(new RtAsTable); val adapter = Module(new RtLsuAdapter)
-  as.io.acquire <> io.asAcquire; io.asReadyLine <> as.io.readyLine
+  as.io.acquire <> io.asAcquire
+  io.asReadyMeta := as.io.readyMeta
+  io.asLineRead <> as.io.lineRead
+  as.io.consumeLanes := io.asConsumeLanes
   as.io.clear <> io.clear
   adapter.io.as <> as.io.candidate; as.io.injection <> adapter.io.asInjection
   io.lsuRequest <> adapter.io.request; adapter.io.response <> io.lsuResponse

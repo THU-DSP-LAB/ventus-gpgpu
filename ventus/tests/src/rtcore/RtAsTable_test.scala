@@ -16,7 +16,8 @@ class RtAsTableTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.acquire.bits.waiter.nodeKind.poke(RtVtasNodeKind.box4)
       dut.io.acquire.bits.waiter.objectRay.poke(false.B)
       dut.io.candidate.ready.poke(false.B)
-      dut.io.readyLine.ready.poke(false.B)
+      dut.io.lineRead.foreach(_.entryId.poke(0.U))
+      dut.io.consumeLanes.poke(0.U)
       dut.io.injection.valid.poke(false.B)
       dut.io.injection.bits.entry.poke(0.U)
       dut.io.injection.bits.fault.poke(false.B)
@@ -51,12 +52,13 @@ class RtAsTableTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.io.injection.valid.poke(false.B)
       }
       def serve(lane: Int): Unit = {
-        dut.io.readyLine.valid.expect(true.B)
-        dut.io.readyLine.bits.waiter.laneId.expect(lane.U)
-        dut.io.readyLine.bits.data.head.expect("h1000".U)
-        dut.io.readyLine.ready.poke(true.B)
+        dut.io.readyMeta(lane).valid.expect(true.B)
+        dut.io.readyMeta(lane).bits.nodeKind.expect(RtVtasNodeKind.box4)
+        dut.io.lineRead(0).entryId.poke(dut.io.readyMeta(lane).bits.entryId.peek())
+        dut.io.lineRead(0).data.head.expect("h1000".U)
+        dut.io.consumeLanes.poke((BigInt(1) << lane).U)
         dut.clock.step()
-        dut.io.readyLine.ready.poke(false.B)
+        dut.io.consumeLanes.poke(0.U)
       }
       def clear(): Unit = {
         dut.io.clear.valid.poke(true.B)
@@ -75,14 +77,25 @@ class RtAsTableTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.acquire.ready.expect(false.B) // full matching line cannot be duplicated
       dut.io.acquire.valid.poke(false.B)
       inject(0)
-      for (lane <- 0 until 32) serve(lane)
-      dut.io.readyLine.valid.expect(false.B)
+      // The scheduler may dispatch multiple fixed IU groups from the same
+      // returned line.  Both waiter slots must clear together, not just the
+      // last dynamically-indexed write in the lane loop.
+      dut.io.readyMeta(0).valid.expect(true.B)
+      dut.io.readyMeta(0).bits.nodeKind.expect(RtVtasNodeKind.box4)
+      dut.io.readyMeta(17).valid.expect(true.B)
+      dut.io.readyMeta(17).bits.nodeKind.expect(RtVtasNodeKind.box4)
+      dut.io.consumeLanes.poke((BigInt(1) << 0 | BigInt(1) << 17).U)
+      dut.clock.step()
+      dut.io.consumeLanes.poke(0.U)
+      dut.io.readyMeta(0).valid.expect(false.B)
+      dut.io.readyMeta(17).valid.expect(false.B)
+      for (lane <- (1 until 32).filter(_ != 17)) serve(lane)
       dut.io.idle.expect(false.B) // retained, but safe to clear
       acquire(0x100, 0, hit = true)
       // Same-cycle acquire and last waiter service preserve the new waiter.
-      dut.io.readyLine.ready.poke(true.B)
+      dut.io.consumeLanes.poke(1.U)
       acquire(0x100, 1, hit = true)
-      dut.io.readyLine.ready.poke(false.B)
+      dut.io.consumeLanes.poke(0.U)
       serve(1)
       dut.io.candidate.valid.expect(false.B)
       clear()

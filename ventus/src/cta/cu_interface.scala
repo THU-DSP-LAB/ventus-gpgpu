@@ -81,6 +81,10 @@ class cu_interface extends Module {
   val splitter_num_thread = Reg(UInt(log2Ceil(NUM_THREAD_PER_WG_MAX+1).W))  // number of active thread left in this WG
   fifo.io.deq.ready := (splitter_cnt === 1.U) && wf_sent
   assert(splitter_cnt === 0.U || fifo.io.deq.valid)
+  when(splitter_load_new) {
+    assert(fifo.io.deq.bits.start_pc =/= 0.U,
+      "CTA splitter received a workgroup with an invalid start PC")
+  }
   if(DEBUG) { // It's required that since fifo.deq.valid, fifo.deq will not change until fire
     val fifo_deq = Reg(fifo.io.deq.bits.cloneType)
     val fifo_deq_no_data = RegInit(true.B)
@@ -255,6 +259,7 @@ class cu_interface extends Module {
         p" wg=${Decimal(fifo.io.deq.bits.wg_id)} slot=${Decimal(fifo.io.deq.bits.wg_slot_id)}" +
         p" slot_linear=${Decimal(wg_slot_linear)}" +
         p" pds=0x${Hexadecimal(fifo.io.deq.bits.pds_base + wg_slot_linear * pds_bytes_per_wg)}" +
+        p" csr_knl=0x${Hexadecimal(fifo.io.deq.bits.csr_kernel)}" +
         p" pds_wg_bytes=0x${Hexadecimal(pds_bytes_per_wg)}\n")
     }
   }

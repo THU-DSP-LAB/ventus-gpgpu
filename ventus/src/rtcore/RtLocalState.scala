@@ -23,8 +23,13 @@ class RtLocalRayState extends Module {
     val rayTmaxUpdate = Flipped(Decoupled(new RtLocalRayTmaxUpdate))
     val nodeRayLookup = Input(new RtLocalRayLookup)
     val nodeRay = Output(new RtLocalRayLookupResult)
-    val issueRayLookup = Input(new RtLocalRayLookup)
-    val issueRay = Output(new RtLocalRayLookupResult)
+    // One combinational read per potential IU issue.  The backing storage is
+    // lane-major registers, so widening this lookup does not add a new SRAM
+    // request path.
+    val issueRayLookup = Vec(RtCoreSchedulerParameters.boxUnitCount +
+      RtCoreSchedulerParameters.triangleUnitCount + 1, Input(new RtLocalRayLookup))
+    val issueRay = Vec(RtCoreSchedulerParameters.boxUnitCount +
+      RtCoreSchedulerParameters.triangleUnitCount + 1, Output(new RtLocalRayLookupResult))
     val resultRayLookup = Input(new RtLocalRayLookup)
     val resultRay = Output(new RtLocalRayLookupResult)
     val hitUpdate = Flipped(Decoupled(new RtLocalHitRecordUpdate))
@@ -198,7 +203,9 @@ class RtLocalRayState extends Module {
     out.ray.inv := source.inv; out.ray.shear := source.shear; out.ray.originalTmin := source.originalTmin
     out.ray.extent := source.currentTmax; out.ray.kx := source.kx; out.ray.ky := source.ky; out.ray.kz := source.kz
   }
-  lookup(io.nodeRayLookup, io.nodeRay); lookup(io.issueRayLookup, io.issueRay); lookup(io.resultRayLookup, io.resultRay)
+  lookup(io.nodeRayLookup, io.nodeRay)
+  for (port <- io.issueRayLookup.indices) lookup(io.issueRayLookup(port), io.issueRay(port))
+  lookup(io.resultRayLookup, io.resultRay)
 
   io.hitUpdate.ready := valid && !flushing && activeMask(io.hitUpdate.bits.laneId)
   when(io.hitUpdate.fire) {

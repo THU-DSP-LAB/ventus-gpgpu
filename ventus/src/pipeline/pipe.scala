@@ -864,21 +864,21 @@ class pipe() extends Module{
     when(rtcore.io.perf.localSramBackpressure) { rtLocalSramBackpressureCycles := rtLocalSramBackpressureCycles + 1.U }
     when(rtcore.io.perf.raySetupOutput) { rtRaySetupOutputs := rtRaySetupOutputs + 1.U }
     when(rtcore.io.perf.asLineAcquire) { rtAsLineAcquires := rtAsLineAcquires + 1.U }
-    when(rtcore.io.perf.asLineReady) { rtAsLineReady := rtAsLineReady + 1.U }
+    rtAsLineReady := rtAsLineReady + rtcore.io.perf.asLineReady
     when(rtcore.io.perf.asAcquireBackpressure) { rtAsAcquireBackpressureCycles := rtAsAcquireBackpressureCycles + 1.U }
     when(rtcore.io.perf.asCacheResidentHit) { rtAsCacheResidentHits := rtAsCacheResidentHits + 1.U }
     when(rtcore.io.perf.asCachePendingMerge) { rtAsCachePendingMerges := rtAsCachePendingMerges + 1.U }
     when(rtcore.io.perf.asCacheMiss) { rtAsCacheMisses := rtAsCacheMisses + 1.U }
     when(rtcore.io.perf.asCacheRefill) { rtAsCacheRefills := rtAsCacheRefills + 1.U }
     when(rtcore.io.perf.asCacheEviction) { rtAsCacheEvictions := rtAsCacheEvictions + 1.U }
-    when(rtcore.io.perf.box4Issue) { rtBox4Issued := rtBox4Issued + 1.U }
-    when(rtcore.io.perf.box4Result) { rtBox4Results := rtBox4Results + 1.U }
-    when(rtcore.io.perf.triangleIssue) { rtTriangleIssued := rtTriangleIssued + 1.U }
-    when(rtcore.io.perf.triangleResult) { rtTriangleResults := rtTriangleResults + 1.U }
+    rtBox4Issued := rtBox4Issued + rtcore.io.perf.box4Issue
+    rtBox4Results := rtBox4Results + rtcore.io.perf.box4Result
+    rtTriangleIssued := rtTriangleIssued + rtcore.io.perf.triangleIssue
+    rtTriangleResults := rtTriangleResults + rtcore.io.perf.triangleResult
     when(rtcore.io.perf.triangleResolveIssue) { rtTriangleResolveIssued := rtTriangleResolveIssued + 1.U }
     when(rtcore.io.perf.triangleResolveResult) { rtTriangleResolveResults := rtTriangleResolveResults + 1.U }
-    when(rtcore.io.perf.stackPush) { rtStackPushes := rtStackPushes + 1.U }
-    when(rtcore.io.perf.stackPop) { rtStackPops := rtStackPops + 1.U }
+    rtStackPushes := rtStackPushes + rtcore.io.perf.stackPush
+    rtStackPops := rtStackPops + rtcore.io.perf.stackPop
   }
 
   io.perf_rtcore.traverseIssued := rtTraverseIssued

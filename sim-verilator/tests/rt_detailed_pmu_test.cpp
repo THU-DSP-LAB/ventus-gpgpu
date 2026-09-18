@@ -25,20 +25,20 @@ int main() {
     s = RtDetailedSample{}; s.enabled = true;
     s.asTable.acquire = s.asTable.allocate = true; s.asTable.address = 128;
     retained.sample(s);
-    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true;
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true; s.asTable.serveLanes = 1;
     retained.sample(s);
     assert(retained.stats.histograms["as_completed_entry_uses"].empty());
     s = RtDetailedSample{}; s.enabled = true;
     s.asTable.acquire = s.asTable.allocate = s.asTable.eviction = true;
     s.asTable.address = 256;
     retained.sample(s);
-    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true;
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true; s.asTable.serveLanes = 1;
     retained.sample(s);
     s = RtDetailedSample{}; s.enabled = true;
     s.asTable.acquire = s.asTable.allocate = s.asTable.eviction = true;
     s.asTable.address = 128;
     retained.sample(s);
-    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true;
+    s = RtDetailedSample{}; s.enabled = true; s.asTable.serve = true; s.asTable.serveLanes = 1;
     retained.sample(s);
     s = RtDetailedSample{}; s.enabled = true; s.asTable.clear = true;
     retained.sample(s);
@@ -73,9 +73,9 @@ int main() {
     s.asTable.injection = true;
     pmu.sample(s); // cycle 3
     s = RtDetailedSample{}; s.enabled = true;
-    s.asTable.serve = true;
+    s.asTable.serve = true; s.asTable.serveLanes = 1;
     pmu.sample(s); // cycle 4: waiter 0
-    s.asTable.serveLane = 1;
+    s.asTable.serveLane = 1; s.asTable.serveLanes = 2; s.asTable.serveEntries[1] = 0;
     pmu.sample(s); // cycle 5: waiter 1, residency remains live
     assert(pmu.stats.histograms["as_completed_entry_uses"].empty());
     s = RtDetailedSample{}; s.enabled = true; s.asTable.clear = true;

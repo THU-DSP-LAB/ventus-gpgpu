@@ -20,6 +20,8 @@ struct RtAsSample {
     bool refill = false, injection = false, serve = false;
     bool eviction = false, clear = false;
     uint32_t refillEntry = 0, injectionEntry = 0, serveEntry = 0, serveLane = 0;
+    uint32_t serveLanes = 0;
+    std::array<uint32_t, 32> serveEntries{};
 };
 struct RtDetailedSample {
     bool enabled = false, clear = false, session = false, command = false, release = false;
@@ -183,7 +185,7 @@ public:
         stats.count("as_acquires", a.acquire);
         stats.count("as_allocations", a.allocate);
         stats.count("as_refills", a.refill);
-        stats.count("as_serves", a.serve);
+        stats.count("as_serves", __builtin_popcount(a.serveLanes));
         stats.bin("as_occupied_entries", a.occupied);
         stats.bin("as_returned_entries", a.returned);
         stats.bin("as_unreturned_entries", a.occupied - a.returned);
@@ -221,10 +223,10 @@ public:
             if (e.live && e.sent) stats.bin("as_refill_to_injection_cycles", cycle - e.refill);
             else stats.count("unmatched_injections");
         }
-        if (a.serve) {
-            auto& e = entries.at(a.serveEntry);
-            ++e.uses; e.laneMask |= uint32_t(1) << a.serveLane;
-            auto& pending = laneAcquires.at(a.serveLane);
+        for (unsigned lane = 0; lane < 32; ++lane) if (a.serveLanes & (uint32_t(1) << lane)) {
+            auto& e = entries.at(a.serveEntries[lane]);
+            ++e.uses; e.laneMask |= uint32_t(1) << lane;
+            auto& pending = laneAcquires.at(lane);
             if (pending.empty()) stats.count("unmatched_as_serves");
             else { stats.bin("as_acquire_to_serve_cycles", cycle - pending.front()); pending.pop_front(); }
         }

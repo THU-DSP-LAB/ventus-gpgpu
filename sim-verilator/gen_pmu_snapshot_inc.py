@@ -154,7 +154,7 @@ def main() -> int:
     if pmu_mode == "detailed":
         lines.append(f"    if (detailed_pmu.empty()) detailed_pmu.resize({num_sm});")
         scalar_fields = "enabled clear session activeMask command commandMask commandKind release stackReady stackSelected popBlockedHeader popBlockedPush popBlockedHeaderLine asBlocked readyBlockedRay readyBlockedBox readyBlockedTriangle lsuRequestTag lsuResponseTag".split()
-        as_fields = "occupied returned readyEntries acquire allocate acquireEntry address is64B acquireLane refill refillEntry injection injectionEntry serve serveEntry serveLane eviction clear".split()
+        as_fields = "occupied returned readyEntries acquire allocate acquireEntry address is64B acquireLane refill refillEntry injection injectionEntry serve serveEntry serveLane serveLanes eviction clear".split()
         unit_fields = "inValid inReady outValid outReady".split()
         for sm in range(num_sm):
             prefix = f"dut->io_pmu_rtcore_{sm}_detailed_"
@@ -165,6 +165,8 @@ def main() -> int:
                 lines.append(f"        s.laneState[{lane}] = {prefix}laneState_{lane};")
             for field in as_fields:
                 lines.append(f"        s.asTable.{field} = {prefix}asTable_{field};")
+            for lane in range(32):
+                lines.append(f"        s.asTable.serveEntries[{lane}] = {prefix}asTable_serveEntries_{lane};")
             for field in unit_fields:
                 lines.append(f"        s.lsu.{field} = {prefix}lsu_{field};")
                 for unit in range(11):

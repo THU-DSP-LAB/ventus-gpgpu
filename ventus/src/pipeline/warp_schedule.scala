@@ -217,6 +217,37 @@ class warp_scheduler extends Module{
     pcControl(io.warpReq.bits.wid).New_PC:=io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch
   }
 
+  if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    val newWarpFireD = RegNext(io.warpReq.fire, false.B)
+    val newWarpIdD = RegEnable(io.warpReq.bits.wid, io.warpReq.fire)
+    val newWarpPcD = RegEnable(io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch, io.warpReq.fire)
+    val sawWarp0 = RegInit(false.B)
+    val traceWarp0Reuse = RegInit(false.B)
+    when(io.warpReq.fire && io.warpReq.bits.wid === 0.U) {
+      traceWarp0Reuse := traceWarp0Reuse || sawWarp0
+      sawWarp0 := true.B
+    }
+    when(io.warpReq.fire) {
+      printf(p"[RTCORE trace] warp-new wid=${Decimal(io.warpReq.bits.wid)}" +
+        p" pc=0x${Hexadecimal(io.warpReq.bits.CTAdata.dispatch2cu_start_pc_dispatch)}\n")
+    }
+    when(newWarpFireD) {
+      printf(p"[RTCORE trace] warp-pc-installed wid=${Decimal(newWarpIdD)}" +
+        p" expected=0x${Hexadecimal(newWarpPcD)}" +
+        p" actual=0x${Hexadecimal(pcControl(newWarpIdD).PC_next)}\n")
+    }
+    when(io.pc_req.fire && io.pc_req.bits.addr === 0.U) {
+      printf(p"[RTCORE trace] zero-pc-fetch wid=${Decimal(io.pc_req.bits.warpid)}\n")
+    }
+    when(traceWarp0Reuse && io.pc_rsp.valid && io.pc_rsp.bits.status(0) && io.pc_rsp.bits.warpid === 0.U) {
+      printf(p"[RTCORE trace] reused-warp0 icache-replay addr=0x${Hexadecimal(io.pc_rsp.bits.addr)}" +
+        p" mask=0x${Hexadecimal(io.pc_rsp.bits.mask)}\n")
+    }
+    when(traceWarp0Reuse && io.branch.fire && io.branch.bits.wid === 0.U && io.branch.bits.jump) {
+      printf(p"[RTCORE trace] reused-warp0 branch-target=0x${Hexadecimal(io.branch.bits.new_pc)}\n")
+    }
+  }
+
 
   when(io.pc_reset){
     pcControl.zipWithIndex.foreach{case(x,b)=>{x.PC_src:=1.U;x.New_PC:=warp_init_addr(b);x.PC_replay:=false.B} }

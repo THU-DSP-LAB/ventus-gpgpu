@@ -17,7 +17,8 @@ class RtLsuAdapterTest extends AnyFreeSpec with ChiselScalatestTester {
       zero(dut.io.asAcquire.bits)
       zero(dut.io.lsuResponse.bits)
       dut.io.asAcquire.valid.poke(false.B)
-      dut.io.asReadyLine.ready.poke(false.B)
+      dut.io.asLineRead.foreach(_.entryId.poke(0.U))
+      dut.io.asConsumeLanes.poke(0.U)
       dut.io.lsuRequest.ready.poke(false.B)
       dut.io.lsuResponse.valid.poke(false.B)
       dut.io.clear.valid.poke(false.B)
@@ -57,17 +58,17 @@ class RtLsuAdapterTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.io.lsuResponse.ready.expect(true.B)
         dut.clock.step()
         dut.io.lsuResponse.valid.poke(false.B)
-        dut.io.asReadyLine.valid.expect(true.B)
-        dut.io.asReadyLine.bits.waiter.laneId.expect(i.U)
+        dut.io.asReadyMeta(i).valid.expect(true.B)
+        dut.io.asLineRead(0).entryId.poke(dut.io.asReadyMeta(i).bits.entryId.peek())
         for (n <- 0 until 32) {
           val expected = if (i < 2 && n >= 16) 0 else 0x1000 + i * 256 + n + (if (i == 1) 16 else 0)
-          dut.io.asReadyLine.bits.data(n).expect(expected.U)
+          dut.io.asLineRead(0).data(n).expect(expected.U)
         }
         dut.clock.step(2) // hold a ready node under consumer backpressure
-        dut.io.asReadyLine.bits.waiter.laneId.expect(i.U)
-        dut.io.asReadyLine.ready.poke(true.B)
+        dut.io.asReadyMeta(i).valid.expect(true.B)
+        dut.io.asConsumeLanes.poke((BigInt(1) << i).U)
         dut.clock.step()
-        dut.io.asReadyLine.ready.poke(false.B)
+        dut.io.asConsumeLanes.poke(0.U)
       }
       dut.io.clear.valid.poke(true.B)
       dut.io.clear.ready.expect(true.B)

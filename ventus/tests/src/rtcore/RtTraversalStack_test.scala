@@ -123,6 +123,30 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
     }
   }
 
+  "independent lanes can push and pop in the same cycle" in {
+    test(new RtTraversalStack(stackDepth = 4)) { dut =>
+      driveIdle(dut)
+      init(dut, BigInt(3), Map(0 -> 0x10, 1 -> 0x20))
+      dut.io.push.bits.laneMask.poke(1.U)
+      dut.io.push.bits.nodeRef(0).poke(0x11.U)
+      dut.io.pop.bits.laneMask.poke(2.U)
+      dut.io.push.valid.poke(true.B)
+      dut.io.pop.valid.poke(true.B)
+      dut.io.push.ready.expect(true.B)
+      dut.io.pop.ready.expect(true.B)
+      dut.io.popNodeRef(1).expect(0x20.U)
+      dut.clock.step()
+      dut.io.push.valid.poke(false.B)
+      dut.io.pop.valid.poke(false.B)
+      dut.io.push.bits.laneMask.poke(0.U)
+      dut.io.pop.bits.laneMask.poke(1.U)
+      dut.io.pop.valid.poke(true.B)
+      dut.io.pop.ready.expect(true.B)
+      dut.io.popNodeRef(0).expect(0x11.U)
+      dut.clock.step()
+    }
+  }
+
   "Box4 deferred children are pushed far-to-near and later popped near-to-far" in {
     test(new RtTraversalStack(stackDepth = 4)) { dut =>
       driveIdle(dut)

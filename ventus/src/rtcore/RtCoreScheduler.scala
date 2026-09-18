@@ -70,6 +70,11 @@ class RtCoreScheduler extends Module {
   val stack = Module(new RtTraversalStack)
   val raySetup = Module(new RtRaySetup)
   val triangleResolve = Module(new RtTriangleResolve)
+  for (port <- 0 until RtMemTableParameters.asReadPortCount)
+    table.io.asLineRead(port).entryId := 0.U
+  for (port <- 1 until (boxUnitCount + triangleUnitCount + 1)) {
+    local.io.issueRayLookup(port).laneId := 0.U
+  }
   io.lsuRequest <> table.io.lsuRequest
   table.io.lsuResponse <> io.lsuResponse
   io.localRequest <> local.io.request
@@ -104,6 +109,12 @@ class RtCoreScheduler extends Module {
   val candidateValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
   val candidateData = Reg(Vec(residentWarpCount, Vec(num_thread,
     Vec(RtMemTableParameters.hitRecordStorageWordCount, UInt(xLen.W)))))
+  // A lane keeps its popped continuation here until the shared AS acquire
+  // port accepts it.  This decouples independent stack pops from single-port
+  // AS admission without duplicating AS cacheline data.
+  val pendingNodeValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
+  val pendingNodeRef = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(32.W))) )
+  val pendingNodeObjectRay = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
   // One private object context per lane is sufficient for VTAS's TLAS->BLAS
   // nesting.  Object-tagged descendants are exhausted before DFS returns to
   // another world-tagged Instance, at which point this entry may be replaced.
@@ -134,11 +145,6 @@ class RtCoreScheduler extends Module {
     val rotated = (Cat(mask, mask) >> start)(count - 1, 0)
     (start + PriorityEncoder(rotated))(log2Ceil(count) - 1, 0)
   }
-  val nextStackLane = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(log2Ceil(num_thread).W))))
-  val nextPushLane = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(log2Ceil(num_thread).W))))
-  val nextBoxIssue = RegInit(0.U(log2Ceil(boxUnitCount).W))
-  val nextTriangleIssue = RegInit(0.U(log2Ceil(triangleUnitCount).W))
-  val nextBoxResult = RegInit(0.U(log2Ceil(boxUnitCount).W))
   val nextTriangleResult = RegInit(0.U(log2Ceil(triangleUnitCount).W))
 
   // A new command either creates a physical session, resumes retained
@@ -189,6 +195,7 @@ class RtCoreScheduler extends Module {
           laneStatus(warp)(lane) := RtAbiLayout.TraversalCompleteMiss.U
           committedValid(warp)(lane) := false.B
           candidateValid(warp)(lane) := false.B
+          pendingNodeValid(warp)(lane) := false.B
         }.otherwise {
           laneState(warp)(lane) := sIdle
         }
@@ -206,6 +213,7 @@ class RtCoreScheduler extends Module {
           boxDeferredCount(warp)(lane) := 0.U
           boxPushedCount(warp)(lane) := 0.U
           boxObjectRay(warp)(lane) := false.B
+          pendingNodeValid(warp)(lane) := false.B
         }
       }
     }.otherwise {
@@ -364,35 +372,44 @@ class RtCoreScheduler extends Module {
   }
   val hasStackReady = readyMasks.map(_.orR).reduce(_ || _)
   val popWarp = 0.U(residentWarpIdWidth.W)
-  val popLane = roundRobin(readyMasks(popWarp), nextStackLane(popWarp), num_thread)
-  val selectedEmpty = stack.io.laneEmpty(popLane)
-  val selectedNodeRef = stack.io.popNodeRef(popLane)
-  val selectedObjectRay = stack.io.popObjectRay(popLane)
-  val selectedNodeType = nodeType(selectedNodeRef)
-  val selectedUnsupported = selectedNodeType =/= RtVtasLayout.NodeBox4.U &&
-    selectedNodeType =/= RtVtasLayout.NodeTriangle.U &&
-    selectedNodeType =/= RtVtasLayout.NodeInstance.U &&
-    selectedNodeType =/= RtVtasLayout.NodeAabb.U
-  val selectedInvalid = selectedNodeRef === RtVtasLayout.InvalidNodeRef.U(32.W)
-  val anyBoxPush = (0 until residentWarpCount).map { warp =>
-    (0 until num_thread).map(lane => laneState(warp)(lane) === sBoxPush).reduce(_ || _)
-  }.reduce(_ || _)
-  val headerLineActive = table.io.asReadyLine.valid &&
-    (table.io.asReadyLine.bits.waiter.nodeKind === RtVtasNodeKind.header ||
-      table.io.asReadyLine.bits.waiter.nodeKind === RtVtasNodeKind.blasHeader)
-  val popNeedsAs = hasStackReady && !selectedEmpty && !selectedInvalid && !selectedUnsupported
+  val popEligibleMask = readyMasks(popWarp) & ~pendingNodeValid(popWarp).asUInt
+  val dispatchLineMask = VecInit((0 until num_thread).map { lane =>
+    val kind = table.io.asReadyMeta(lane).bits.nodeKind
+    table.io.asReadyMeta(lane).valid && (kind === RtVtasNodeKind.box4 ||
+      kind === RtVtasNodeKind.aabb || kind === RtVtasNodeKind.triangle)
+  }).asUInt
+  // Header/instance handling remains scalar in this phase; Box/Triangle lines
+  // are consumed by their fixed IU groups below.
+  val asReadyLaneMask = VecInit((0 until num_thread).map { lane =>
+    table.io.asReadyMeta(lane).valid && !dispatchLineMask(lane)
+  }).asUInt
+  val asReadyLane = PriorityEncoder(asReadyLaneMask)
+  val selectedAsMeta = table.io.asReadyMeta(asReadyLane)
+  val headerLineActive = selectedAsMeta.valid &&
+    (selectedAsMeta.bits.nodeKind === RtVtasNodeKind.header ||
+      selectedAsMeta.bits.nodeKind === RtVtasNodeKind.blasHeader)
+  val pendingMask = pendingNodeValid(popWarp).asUInt
+  val pendingLane = PriorityEncoder(pendingMask)
+  val pendingRef = pendingNodeRef(popWarp)(pendingLane)
+  val pendingObjectRay = pendingNodeObjectRay(popWarp)(pendingLane)
+  val pendingType = nodeType(pendingRef)
   // Stack writes/initialisation are serialized ahead of a pop.  In
   // particular, never let an AS acquire consume a node unless the matching pop
   // can fire in the same cycle.
-  local.io.nodeRayLookup.laneId := Mux(hasHeaderRequest, headerLane, popLane)
+  local.io.nodeRayLookup.laneId := Mux(hasHeaderRequest, headerLane, pendingLane)
   val headerObject = laneState(headerWarp)(headerLane) === sBlasHeaderRequest
   val headerBase = Mux(headerObject, objectBase(headerWarp)(headerLane), local.io.nodeRay.asBase)
   val headerValid = Mux(headerObject, objectPrepared(headerWarp)(headerLane).valid,
     local.io.nodeRay.valid)
-  val nodeBase = Mux(selectedObjectRay, objectBase(popWarp)(popLane), local.io.nodeRay.asBase)
+  val nodeBase = Mux(pendingObjectRay, objectBase(popWarp)(pendingLane), local.io.nodeRay.asBase)
   val headerAcquire = hasHeaderRequest && headerValid
-  val popMayFire = !headerAcquire && !anyBoxPush && !headerLineActive
-  val nodeAcquire = popMayFire && popNeedsAs
+  // A Box child push belongs to its own lane.  It may proceed alongside a
+  // different lane's pop; only headers and an active returned header line
+  // retain global priority.
+  // Header acquires own the shared AS port, not the lane stacks.  Other lanes
+  // may still pop into their pending request slots in the same cycle.
+  val popMayFire = !headerLineActive
+  val nodeAcquire = !headerAcquire && pendingMask.orR
 
   table.io.asAcquire.valid := headerAcquire || nodeAcquire
   table.io.asAcquire.bits := 0.U.asTypeOf(new RtAsTableAcquire)
@@ -406,21 +423,21 @@ class RtCoreScheduler extends Module {
       RtVtasNodeKind.blasHeader, RtVtasNodeKind.header)
     table.io.asAcquire.bits.waiter.objectRay := headerObject
   }.elsewhen(nodeAcquire) {
-    table.io.asAcquire.bits.lineAddress := nodeBase + nodeOffset(selectedNodeRef)
-    table.io.asAcquire.bits.wordMask := Mux(selectedNodeType === RtVtasLayout.NodeTriangle.U ||
-      selectedNodeType === RtVtasLayout.NodeAabb.U,
+    table.io.asAcquire.bits.lineAddress := nodeBase + nodeOffset(pendingRef)
+    table.io.asAcquire.bits.wordMask := Mux(pendingType === RtVtasLayout.NodeTriangle.U ||
+      pendingType === RtVtasLayout.NodeAabb.U,
       Cat(0.U(16.W), Fill(16, 1.U(1.W))), Fill(32, 1.U(1.W)))
-    table.io.asAcquire.bits.is64B := selectedNodeType === RtVtasLayout.NodeTriangle.U ||
-      selectedNodeType === RtVtasLayout.NodeAabb.U
+    table.io.asAcquire.bits.is64B := pendingType === RtVtasLayout.NodeTriangle.U ||
+      pendingType === RtVtasLayout.NodeAabb.U
     table.io.asAcquire.bits.waiter.warpId := popWarp
-    table.io.asAcquire.bits.waiter.laneId := popLane
-    table.io.asAcquire.bits.waiter.nodeKind := MuxLookup(selectedNodeType,
+    table.io.asAcquire.bits.waiter.laneId := pendingLane
+    table.io.asAcquire.bits.waiter.nodeKind := MuxLookup(pendingType,
       RtVtasNodeKind.box4)(Seq(
         RtVtasLayout.NodeBox4.U -> RtVtasNodeKind.box4,
         RtVtasLayout.NodeTriangle.U -> RtVtasNodeKind.triangle,
         RtVtasLayout.NodeInstance.U -> RtVtasNodeKind.instance,
         RtVtasLayout.NodeAabb.U -> RtVtasNodeKind.aabb))
-    table.io.asAcquire.bits.waiter.objectRay := selectedObjectRay
+    table.io.asAcquire.bits.waiter.objectRay := pendingObjectRay
   }
   when(table.io.asAcquire.fire && headerAcquire) {
     if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
@@ -431,70 +448,68 @@ class RtCoreScheduler extends Module {
     }
     laneState(headerWarp)(headerLane) := Mux(headerObject, sBlasHeaderPending, sHeaderPending)
   }
+  when(table.io.asAcquire.fire && nodeAcquire) {
+    pendingNodeValid(popWarp)(pendingLane) := false.B
+  }
 
   // An empty stack terminates a lane without an LSU request.  Corrupt/unknown
   // refs are skipped like the software reference, not treated as a traversal
   // failure that hides an already discovered sibling hit.
-  when(popMayFire && hasStackReady && selectedEmpty) {
-    laneState(popWarp)(popLane) := sTerminal
-    laneStatus(popWarp)(popLane) := Mux(committedValid(popWarp)(popLane),
-      RtAbiLayout.TraversalCompleteHit.U, RtAbiLayout.TraversalCompleteMiss.U)
-  }
-  stack.io.pop.valid := popMayFire && hasStackReady && !selectedEmpty &&
-    (selectedInvalid || selectedUnsupported || table.io.asAcquire.ready)
-  stack.io.pop.bits.laneMask := UIntToOH(popLane, num_thread)
-  when(stack.io.pop.fire) {
-    if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
-      when(popLane < 4.U || popLane >= 12.U) {
-        printf(p"[RTCORE trace] pop lane=${Decimal(popLane)}" +
-          p" ref=0x${Hexadecimal(selectedNodeRef)} type=${Decimal(selectedNodeType)}" +
-          p" object=${Decimal(selectedObjectRay)} invalid=${Decimal(selectedInvalid)}" +
-          p" unsupported=${Decimal(selectedUnsupported)}\\n")
-      }
+  when(popMayFire) {
+    for (lane <- 0 until num_thread) when(popEligibleMask(lane) && stack.io.laneEmpty(lane)) {
+      laneState(popWarp)(lane) := sTerminal
+      laneStatus(popWarp)(lane) := Mux(committedValid(popWarp)(lane),
+        RtAbiLayout.TraversalCompleteHit.U, RtAbiLayout.TraversalCompleteMiss.U)
     }
-    nextStackLane(popWarp) := popLane + 1.U
-    when(selectedInvalid || selectedUnsupported) {
-      laneState(popWarp)(popLane) := sStackReady
-    }.otherwise {
-      laneState(popWarp)(popLane) := sNodePending
+  }
+  val popMask = VecInit((0 until num_thread).map { lane =>
+    popEligibleMask(lane) && !stack.io.laneEmpty(lane)
+  }).asUInt
+  stack.io.pop.valid := popMayFire && popMask.orR
+  stack.io.pop.bits.laneMask := popMask
+  when(stack.io.pop.fire) {
+    for (lane <- 0 until num_thread) when(popMask(lane)) {
+      val ref = stack.io.popNodeRef(lane)
+      val kind = nodeType(ref)
+      val unsupported = kind =/= RtVtasLayout.NodeBox4.U && kind =/= RtVtasLayout.NodeTriangle.U &&
+        kind =/= RtVtasLayout.NodeInstance.U && kind =/= RtVtasLayout.NodeAabb.U
+      when(ref === RtVtasLayout.InvalidNodeRef.U || unsupported) {
+        laneState(popWarp)(lane) := sStackReady
+      }.otherwise {
+        pendingNodeValid(popWarp)(lane) := true.B
+        pendingNodeRef(popWarp)(lane) := ref
+        pendingNodeObjectRay(popWarp)(lane) := stack.io.popObjectRay(lane)
+        laneState(popWarp)(lane) := sNodePending
+      }
     }
   }
 
   // AS ready-line fan-out: header -> stack, Box4 -> any ready Box IU,
   // Triangle -> any ready Triangle IU.  The table owns response lifetime until
   // this handshake, so only the selected IU can backpressure its line.
-  val boxReadyMask = VecInit(boxIssue.map(_.ready)).asUInt
-  val triangleReadyMask = VecInit(triangleIssue.map(_.ready)).asUInt
-  val boxSelect = roundRobin(boxReadyMask, nextBoxIssue, boxUnitCount)
-  val triangleSelect = roundRobin(triangleReadyMask, nextTriangleIssue, triangleUnitCount)
-  val asReady = table.io.asReadyLine
-  local.io.issueRayLookup.laneId := asReady.bits.waiter.laneId
+  // Only the scalar path materializes a full cacheline here.  Box/Triangle
+  // paths below use their own selected table read ports.
+  val asReady = Wire(Decoupled(new RtAsTableReadyLine))
+  // `asReadyLane` falls back to lane zero when no scalar-compatible line
+  // exists.  Do not let that fallback consume a Box/Triangle waiter through
+  // the legacy scalar path; only the fixed IU groups may consume those.
+  asReady.valid := asReadyLaneMask.orR
+  asReady.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
+  asReady.bits.waiter.warpId := 0.U
+  asReady.bits.waiter.laneId := asReadyLane
+  asReady.bits.waiter.nodeKind := selectedAsMeta.bits.nodeKind
+  asReady.bits.waiter.objectRay := selectedAsMeta.bits.objectRay
+  table.io.asLineRead(0).entryId := selectedAsMeta.bits.entryId
+  asReady.bits.data := table.io.asLineRead(0).data
+  val asConsumedLanes = WireDefault(0.U(num_thread.W))
+  table.io.asConsumeLanes := asConsumedLanes
+  local.io.issueRayLookup(0).laneId := asReady.bits.waiter.laneId
   val asUsesObjectRay = asReady.bits.waiter.objectRay
-  val selectedIssueRay = Wire(new Ray(recorded_float = false))
-  selectedIssueRay := local.io.issueRay.ray
-  when(asUsesObjectRay) {
-    selectedIssueRay.origin := objectPrepared(0)(asReady.bits.waiter.laneId).origin
-    selectedIssueRay.dir := objectPrepared(0)(asReady.bits.waiter.laneId).dir
-    selectedIssueRay.inv := objectPrepared(0)(asReady.bits.waiter.laneId).inv
-    selectedIssueRay.shear := objectPrepared(0)(asReady.bits.waiter.laneId).shear
-    selectedIssueRay.originalTmin := objectPrepared(0)(asReady.bits.waiter.laneId).originalTmin
-    // tmax is world-ray traversal state even while the IU works in object
-    // space; an accepted hit must constrain both spaces identically.
-    selectedIssueRay.extent := local.io.issueRay.currentTmax
-    selectedIssueRay.kx := objectPrepared(0)(asReady.bits.waiter.laneId).kx
-    selectedIssueRay.ky := objectPrepared(0)(asReady.bits.waiter.laneId).ky
-    selectedIssueRay.kz := objectPrepared(0)(asReady.bits.waiter.laneId).kz
-  }
-  val selectedIssueRayValid = local.io.issueRay.valid &&
-    (!asUsesObjectRay || objectPrepared(0)(asReady.bits.waiter.laneId).valid)
   val headerRoot = asReady.bits.data((RtVtasLayout.AsHeaderRootNodeRef / 4).toInt)
   val headerInvalid = headerRoot === RtVtasLayout.InvalidNodeRef.U(32.W)
   val asIsHeader = asReady.bits.waiter.nodeKind === RtVtasNodeKind.header
   val asIsBlasHeader = asReady.bits.waiter.nodeKind === RtVtasNodeKind.blasHeader
-  val asIsBox = asReady.bits.waiter.nodeKind === RtVtasNodeKind.box4
-  val asIsTriangle = asReady.bits.waiter.nodeKind === RtVtasNodeKind.triangle
   val asIsInstance = asReady.bits.waiter.nodeKind === RtVtasNodeKind.instance
-  val asIsAabb = asReady.bits.waiter.nodeKind === RtVtasNodeKind.aabb
   // The command-AS header starts a new lane stack.  A BLAS header arrives
   // while that same lane still owns its TLAS DFS continuation, so replacing
   // the stack here would either deadlock on `live` or discard siblings.  Push
@@ -505,65 +520,159 @@ class RtCoreScheduler extends Module {
     stack.io.init.bits.rootNodeRef(lane) := headerRoot
     stack.io.init.bits.objectRay(lane) := false.B
   }
+  val boxConsumed = Wire(Vec(boxUnitCount, Bool()))
   for (unit <- 0 until boxUnitCount) {
-    boxIssue(unit).valid := asReady.valid && (asIsBox || asIsAabb) && selectedIssueRayValid && boxReadyMask.orR && boxSelect === unit.U
+    val groupMask = VecInit((0 until num_thread).map { lane =>
+      (if (lane % boxUnitCount == unit) dispatchLineMask(lane) &&
+        (table.io.asReadyMeta(lane).bits.nodeKind === RtVtasNodeKind.box4 ||
+          table.io.asReadyMeta(lane).bits.nodeKind === RtVtasNodeKind.aabb) else false.B)
+    }).asUInt
+    val lane = PriorityEncoder(groupMask)
+    val port = unit + 1
+    val meta = table.io.asReadyMeta(lane)
+    table.io.asLineRead(port).entryId := meta.bits.entryId
+    val line = Wire(Valid(new RtAsTableReadyLine))
+    line.valid := groupMask.orR
+    line.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
+    line.bits.waiter.warpId := 0.U
+    line.bits.waiter.laneId := lane
+    line.bits.waiter.nodeKind := meta.bits.nodeKind
+    line.bits.waiter.objectRay := meta.bits.objectRay
+    line.bits.data := table.io.asLineRead(port).data
+    local.io.issueRayLookup(port).laneId := lane
+    val ray = Wire(new Ray(recorded_float = false))
+    ray := local.io.issueRay(port).ray
+    when(line.bits.waiter.objectRay) {
+      ray.origin := objectPrepared(0)(lane).origin
+      ray.dir := objectPrepared(0)(lane).dir
+      ray.inv := objectPrepared(0)(lane).inv
+      ray.shear := objectPrepared(0)(lane).shear
+      ray.originalTmin := objectPrepared(0)(lane).originalTmin
+      ray.extent := local.io.issueRay(port).currentTmax
+      ray.kx := objectPrepared(0)(lane).kx; ray.ky := objectPrepared(0)(lane).ky; ray.kz := objectPrepared(0)(lane).kz
+    }
+    val rayValid = local.io.issueRay(port).valid &&
+      (!line.bits.waiter.objectRay || objectPrepared(0)(lane).valid)
+    val isAabb = line.bits.waiter.nodeKind === RtVtasNodeKind.aabb
+    boxIssue(unit).valid := groupMask.orR && rayValid
     boxIssue(unit).bits := 0.U.asTypeOf(new RtBox4IntersectionInput)
-    boxIssue(unit).bits.requestId := requestId(asReady.bits.waiter.warpId, asReady.bits.waiter.laneId)
-    boxIssue(unit).bits.ray := selectedIssueRay
+    boxIssue(unit).bits.requestId := requestId(line.bits.waiter.warpId, lane)
+    boxIssue(unit).bits.ray := ray
     for (child <- 0 until 4) {
-      boxIssue(unit).bits.aabb(child).x_min := Mux(asIsAabb,
-        asReady.bits.data((RtVtasLayout.AabbMin / 4).toInt),
-        asReady.bits.data((RtVtasLayout.Box4MinX / 4).toInt + child))
-      boxIssue(unit).bits.aabb(child).y_min := Mux(asIsAabb,
-        asReady.bits.data((RtVtasLayout.AabbMin / 4 + 1).toInt),
-        asReady.bits.data((RtVtasLayout.Box4MinY / 4).toInt + child))
-      boxIssue(unit).bits.aabb(child).z_min := Mux(asIsAabb,
-        asReady.bits.data((RtVtasLayout.AabbMin / 4 + 2).toInt),
-        asReady.bits.data((RtVtasLayout.Box4MinZ / 4).toInt + child))
-      boxIssue(unit).bits.aabb(child).x_max := Mux(asIsAabb,
-        asReady.bits.data((RtVtasLayout.AabbMax / 4).toInt),
-        asReady.bits.data((RtVtasLayout.Box4MaxX / 4).toInt + child))
-      boxIssue(unit).bits.aabb(child).y_max := Mux(asIsAabb,
-        asReady.bits.data((RtVtasLayout.AabbMax / 4 + 1).toInt),
-        asReady.bits.data((RtVtasLayout.Box4MaxY / 4).toInt + child))
-      boxIssue(unit).bits.aabb(child).z_max := Mux(asIsAabb,
-        asReady.bits.data((RtVtasLayout.AabbMax / 4 + 2).toInt),
-        asReady.bits.data((RtVtasLayout.Box4MaxZ / 4).toInt + child))
+      boxIssue(unit).bits.aabb(child).x_min := Mux(isAabb,
+        line.bits.data((RtVtasLayout.AabbMin / 4).toInt), line.bits.data((RtVtasLayout.Box4MinX / 4).toInt + child))
+      boxIssue(unit).bits.aabb(child).y_min := Mux(isAabb,
+        line.bits.data((RtVtasLayout.AabbMin / 4 + 1).toInt), line.bits.data((RtVtasLayout.Box4MinY / 4).toInt + child))
+      boxIssue(unit).bits.aabb(child).z_min := Mux(isAabb,
+        line.bits.data((RtVtasLayout.AabbMin / 4 + 2).toInt), line.bits.data((RtVtasLayout.Box4MinZ / 4).toInt + child))
+      boxIssue(unit).bits.aabb(child).x_max := Mux(isAabb,
+        line.bits.data((RtVtasLayout.AabbMax / 4).toInt), line.bits.data((RtVtasLayout.Box4MaxX / 4).toInt + child))
+      boxIssue(unit).bits.aabb(child).y_max := Mux(isAabb,
+        line.bits.data((RtVtasLayout.AabbMax / 4 + 1).toInt), line.bits.data((RtVtasLayout.Box4MaxY / 4).toInt + child))
+      boxIssue(unit).bits.aabb(child).z_max := Mux(isAabb,
+        line.bits.data((RtVtasLayout.AabbMax / 4 + 2).toInt), line.bits.data((RtVtasLayout.Box4MaxZ / 4).toInt + child))
+    }
+    boxConsumed(unit) := boxIssue(unit).fire
+    when(boxIssue(unit).fire) {
+      laneState(0)(lane) := sBoxInflight
+      for (child <- 0 until 4) boxChildRefs(0)(lane)(child) := line.bits.data(child)
+      boxObjectRay(0)(lane) := line.bits.waiter.objectRay
+      boxIsAabb(0)(lane) := isAabb
+      when(isAabb) {
+        aabbMeta(0)(lane).primitiveId := line.bits.data((RtVtasLayout.AabbPrimitiveId / 4).toInt)
+        aabbMeta(0)(lane).geometryId := line.bits.data((RtVtasLayout.AabbGeometryId / 4).toInt)
+        aabbMeta(0)(lane).sbtRecordOffset := line.bits.data((RtVtasLayout.AabbSbtRecordOffset / 4).toInt)
+        aabbMeta(0)(lane).hitKind := line.bits.data((RtVtasLayout.AabbHitKind / 4).toInt)
+        aabbMeta(0)(lane).instanceId := objectInstanceId(0)(lane)
+        aabbMeta(0)(lane).instanceCustomIndex := objectCustomIndex(0)(lane)
+        aabbMeta(0)(lane).instanceSbtRecordOffset := objectSbtRecordOffset(0)(lane)
+        aabbMeta(0)(lane).instanceFlags := objectFlags(0)(lane)
+      }
     }
   }
+  val triangleConsumed = Wire(Vec(triangleUnitCount, Bool()))
   for (unit <- 0 until triangleUnitCount) {
-    triangleIssue(unit).valid := asReady.valid && asIsTriangle && selectedIssueRayValid && triangleReadyMask.orR && triangleSelect === unit.U
+    val groupMask = VecInit((0 until num_thread).map { lane =>
+      if (lane % triangleUnitCount == unit) dispatchLineMask(lane) &&
+        table.io.asReadyMeta(lane).bits.nodeKind === RtVtasNodeKind.triangle else false.B
+    }).asUInt
+    val lane = PriorityEncoder(groupMask)
+    val port = boxUnitCount + unit + 1
+    val meta = table.io.asReadyMeta(lane)
+    table.io.asLineRead(port).entryId := meta.bits.entryId
+    val line = Wire(Valid(new RtAsTableReadyLine))
+    line.valid := groupMask.orR
+    line.bits := 0.U.asTypeOf(new RtAsTableReadyLine)
+    line.bits.waiter.warpId := 0.U
+    line.bits.waiter.laneId := lane
+    line.bits.waiter.nodeKind := meta.bits.nodeKind
+    line.bits.waiter.objectRay := meta.bits.objectRay
+    line.bits.data := table.io.asLineRead(port).data
+    local.io.issueRayLookup(port).laneId := lane
+    val ray = Wire(new Ray(recorded_float = false))
+    ray := local.io.issueRay(port).ray
+    when(line.bits.waiter.objectRay) {
+      ray.origin := objectPrepared(0)(lane).origin; ray.dir := objectPrepared(0)(lane).dir
+      ray.inv := objectPrepared(0)(lane).inv; ray.shear := objectPrepared(0)(lane).shear
+      ray.originalTmin := objectPrepared(0)(lane).originalTmin; ray.extent := local.io.issueRay(port).currentTmax
+      ray.kx := objectPrepared(0)(lane).kx; ray.ky := objectPrepared(0)(lane).ky; ray.kz := objectPrepared(0)(lane).kz
+    }
+    val rayValid = local.io.issueRay(port).valid &&
+      (!line.bits.waiter.objectRay || objectPrepared(0)(lane).valid)
+    triangleIssue(unit).valid := groupMask.orR && rayValid
     triangleIssue(unit).bits := 0.U.asTypeOf(new RtTriangleIntersectionInput)
-    triangleIssue(unit).bits.requestId := requestId(asReady.bits.waiter.warpId, asReady.bits.waiter.laneId)
-    triangleIssue(unit).bits.ray := selectedIssueRay
-    triangleIssue(unit).bits.triangle.A.x := asReady.bits.data((RtVtasLayout.TriangleV0 / 4).toInt)
-    triangleIssue(unit).bits.triangle.A.y := asReady.bits.data((RtVtasLayout.TriangleV0 / 4 + 1).toInt)
-    triangleIssue(unit).bits.triangle.A.z := asReady.bits.data((RtVtasLayout.TriangleV0 / 4 + 2).toInt)
-    triangleIssue(unit).bits.triangle.B.x := asReady.bits.data((RtVtasLayout.TriangleV1 / 4).toInt)
-    triangleIssue(unit).bits.triangle.B.y := asReady.bits.data((RtVtasLayout.TriangleV1 / 4 + 1).toInt)
-    triangleIssue(unit).bits.triangle.B.z := asReady.bits.data((RtVtasLayout.TriangleV1 / 4 + 2).toInt)
-    triangleIssue(unit).bits.triangle.C.x := asReady.bits.data((RtVtasLayout.TriangleV2 / 4).toInt)
-    triangleIssue(unit).bits.triangle.C.y := asReady.bits.data((RtVtasLayout.TriangleV2 / 4 + 1).toInt)
-    triangleIssue(unit).bits.triangle.C.z := asReady.bits.data((RtVtasLayout.TriangleV2 / 4 + 2).toInt)
+    triangleIssue(unit).bits.requestId := requestId(line.bits.waiter.warpId, lane)
+    triangleIssue(unit).bits.ray := ray
+    triangleIssue(unit).bits.triangle.A.x := line.bits.data((RtVtasLayout.TriangleV0 / 4).toInt)
+    triangleIssue(unit).bits.triangle.A.y := line.bits.data((RtVtasLayout.TriangleV0 / 4 + 1).toInt)
+    triangleIssue(unit).bits.triangle.A.z := line.bits.data((RtVtasLayout.TriangleV0 / 4 + 2).toInt)
+    triangleIssue(unit).bits.triangle.B.x := line.bits.data((RtVtasLayout.TriangleV1 / 4).toInt)
+    triangleIssue(unit).bits.triangle.B.y := line.bits.data((RtVtasLayout.TriangleV1 / 4 + 1).toInt)
+    triangleIssue(unit).bits.triangle.B.z := line.bits.data((RtVtasLayout.TriangleV1 / 4 + 2).toInt)
+    triangleIssue(unit).bits.triangle.C.x := line.bits.data((RtVtasLayout.TriangleV2 / 4).toInt)
+    triangleIssue(unit).bits.triangle.C.y := line.bits.data((RtVtasLayout.TriangleV2 / 4 + 1).toInt)
+    triangleIssue(unit).bits.triangle.C.z := line.bits.data((RtVtasLayout.TriangleV2 / 4 + 2).toInt)
+    triangleConsumed(unit) := triangleIssue(unit).fire
+    when(triangleIssue(unit).fire) {
+      laneState(0)(lane) := sTriangleInflight
+      triangleMeta(0)(lane).opaque := line.bits.data((RtVtasLayout.TriangleFlags / 4).toInt)(0)
+      triangleMeta(0)(lane).primitiveId := line.bits.data((RtVtasLayout.TrianglePrimitiveId / 4).toInt)
+      triangleMeta(0)(lane).geometryId := line.bits.data((RtVtasLayout.TriangleGeometryId / 4).toInt)
+      triangleMeta(0)(lane).sbtRecordOffset := line.bits.data((RtVtasLayout.TriangleSbtRecordOffset / 4).toInt)
+      triangleMeta(0)(lane).instanceId := objectInstanceId(0)(lane)
+      triangleMeta(0)(lane).instanceCustomIndex := objectCustomIndex(0)(lane)
+      triangleMeta(0)(lane).instanceSbtRecordOffset := objectSbtRecordOffset(0)(lane)
+      triangleMeta(0)(lane).instanceFlags := objectFlags(0)(lane)
+    }
   }
+  val dispatchedLanes = VecInit((0 until num_thread).map { lane =>
+    boxConsumed.zipWithIndex.map { case (fire, unit) => fire && lane.U === PriorityEncoder(VecInit((0 until num_thread).map { candidate =>
+      (if (candidate % boxUnitCount == unit) dispatchLineMask(candidate) &&
+        (table.io.asReadyMeta(candidate).bits.nodeKind === RtVtasNodeKind.box4 ||
+          table.io.asReadyMeta(candidate).bits.nodeKind === RtVtasNodeKind.aabb) else false.B)
+    }).asUInt) }.reduce(_ || _) ||
+      triangleConsumed.zipWithIndex.map { case (fire, unit) => fire && lane.U === PriorityEncoder(VecInit((0 until num_thread).map { candidate =>
+        if (candidate % triangleUnitCount == unit) dispatchLineMask(candidate) &&
+          table.io.asReadyMeta(candidate).bits.nodeKind === RtVtasNodeKind.triangle else false.B
+      }).asUInt) }.reduce(_ || _)
+  }).asUInt
+  asConsumedLanes := Mux(asReady.fire, UIntToOH(asReadyLane, num_thread), 0.U) | dispatchedLanes
   val instanceMaskMatch = traceMeta0(0)(asReady.bits.waiter.laneId)(15, 8) &
     asReady.bits.data((RtVtasLayout.InstanceMask / 4).toInt)(7, 0)
-  instanceTransform.io.in.valid := asReady.valid && asIsInstance && !asUsesObjectRay && local.io.issueRay.valid && instanceMaskMatch.orR
+  instanceTransform.io.in.valid := asReady.valid && asIsInstance && !asUsesObjectRay && local.io.issueRay(0).valid && instanceMaskMatch.orR
   instanceTransform.io.in.bits := 0.U.asTypeOf(new RtInstanceTransformInput)
   instanceTransform.io.in.bits.laneId := asReady.bits.waiter.laneId
-  instanceTransform.io.in.bits.ray := local.io.issueRay.ray
+  instanceTransform.io.in.bits.ray := local.io.issueRay(0).ray
   for (word <- 0 until 12)
     instanceTransform.io.in.bits.matrix(word) := asReady.bits.data((RtVtasLayout.InstanceWorldToObject / 4).toInt + word)
   val asHeaderReady = asReady.valid && asIsHeader && (headerInvalid || stack.io.init.ready)
   val blasHeaderPush = asReady.valid && asIsBlasHeader && !headerInvalid
   val asBlasHeaderReady = asReady.valid && asIsBlasHeader &&
     (headerInvalid || stack.io.push.ready)
-  val asBoxReady = asReady.valid && (asIsBox || asIsAabb) && selectedIssueRayValid && boxReadyMask.orR && boxIssue(boxSelect).ready
-  val asTriangleReady = asReady.valid && asIsTriangle && selectedIssueRayValid && triangleReadyMask.orR && triangleIssue(triangleSelect).ready
   val asInstanceReady = asReady.valid && asIsInstance &&
     (!instanceMaskMatch.orR || instanceTransform.io.in.ready)
-  table.io.asReadyLine.ready := asHeaderReady || asBlasHeaderReady || asBoxReady || asTriangleReady || asInstanceReady ||
-    (asReady.valid && !asIsHeader && !asIsBlasHeader && !asIsBox && !asIsTriangle && !asIsInstance && !asIsAabb)
+  asReady.ready := asHeaderReady || asBlasHeaderReady || asInstanceReady ||
+    (asReady.valid && !asIsHeader && !asIsBlasHeader && !asIsInstance)
   when(asReady.fire) {
     val waiter = asReady.bits.waiter
     if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
@@ -580,16 +689,6 @@ class RtCoreScheduler extends Module {
             p" object=${Decimal(waiter.objectRay)} root=0x${Hexadecimal(headerRoot)}" +
             p" nodes=${Decimal(asReady.bits.data((RtVtasLayout.AsHeaderNodeCount / 4).toInt))}\\n")
         }
-        when(asIsBox && waiter.objectRay) {
-          printf(p"[RTCORE trace] box-bounds lane=${Decimal(waiter.laneId)}" +
-            p" minX=[${Hexadecimal(asReady.bits.data(4))},${Hexadecimal(asReady.bits.data(5))},${Hexadecimal(asReady.bits.data(6))},${Hexadecimal(asReady.bits.data(7))}]" +
-            p" minY=[${Hexadecimal(asReady.bits.data(8))},${Hexadecimal(asReady.bits.data(9))},${Hexadecimal(asReady.bits.data(10))},${Hexadecimal(asReady.bits.data(11))}]" +
-            p" minZ=[${Hexadecimal(asReady.bits.data(12))},${Hexadecimal(asReady.bits.data(13))},${Hexadecimal(asReady.bits.data(14))},${Hexadecimal(asReady.bits.data(15))}]\\n")
-          printf(p"[RTCORE trace] box-bounds lane=${Decimal(waiter.laneId)}" +
-            p" maxX=[${Hexadecimal(asReady.bits.data(16))},${Hexadecimal(asReady.bits.data(17))},${Hexadecimal(asReady.bits.data(18))},${Hexadecimal(asReady.bits.data(19))}]" +
-            p" maxY=[${Hexadecimal(asReady.bits.data(20))},${Hexadecimal(asReady.bits.data(21))},${Hexadecimal(asReady.bits.data(22))},${Hexadecimal(asReady.bits.data(23))}]" +
-            p" maxZ=[${Hexadecimal(asReady.bits.data(24))},${Hexadecimal(asReady.bits.data(25))},${Hexadecimal(asReady.bits.data(26))},${Hexadecimal(asReady.bits.data(27))}]\\n")
-        }
         when(asIsInstance) {
           printf(p"[RTCORE trace] instance lane=${Decimal(waiter.laneId)}" +
             p" w2o=[${Hexadecimal(asReady.bits.data(20))},${Hexadecimal(asReady.bits.data(21))},${Hexadecimal(asReady.bits.data(22))},${Hexadecimal(asReady.bits.data(23))};" +
@@ -605,35 +704,6 @@ class RtCoreScheduler extends Module {
       }.otherwise {
         laneState(0)(waiter.laneId) := sStackReady
       }
-    }.elsewhen(asIsBox || asIsAabb) {
-      nextBoxIssue := boxSelect + 1.U
-      laneState(0)(waiter.laneId) := sBoxInflight
-      for (child <- 0 until 4) {
-        boxChildRefs(0)(waiter.laneId)(child) := asReady.bits.data(child)
-      }
-      boxObjectRay(0)(waiter.laneId) := waiter.objectRay
-      boxIsAabb(0)(waiter.laneId) := asIsAabb
-      when(asIsAabb) {
-        aabbMeta(0)(waiter.laneId).primitiveId := asReady.bits.data((RtVtasLayout.AabbPrimitiveId / 4).toInt)
-        aabbMeta(0)(waiter.laneId).geometryId := asReady.bits.data((RtVtasLayout.AabbGeometryId / 4).toInt)
-        aabbMeta(0)(waiter.laneId).sbtRecordOffset := asReady.bits.data((RtVtasLayout.AabbSbtRecordOffset / 4).toInt)
-        aabbMeta(0)(waiter.laneId).hitKind := asReady.bits.data((RtVtasLayout.AabbHitKind / 4).toInt)
-        aabbMeta(0)(waiter.laneId).instanceId := objectInstanceId(0)(waiter.laneId)
-        aabbMeta(0)(waiter.laneId).instanceCustomIndex := objectCustomIndex(0)(waiter.laneId)
-        aabbMeta(0)(waiter.laneId).instanceSbtRecordOffset := objectSbtRecordOffset(0)(waiter.laneId)
-        aabbMeta(0)(waiter.laneId).instanceFlags := objectFlags(0)(waiter.laneId)
-      }
-    }.elsewhen(asIsTriangle) {
-      nextTriangleIssue := triangleSelect + 1.U
-      laneState(0)(waiter.laneId) := sTriangleInflight
-      triangleMeta(0)(waiter.laneId).opaque := asReady.bits.data((RtVtasLayout.TriangleFlags / 4).toInt)(0)
-      triangleMeta(0)(waiter.laneId).primitiveId := asReady.bits.data((RtVtasLayout.TrianglePrimitiveId / 4).toInt)
-      triangleMeta(0)(waiter.laneId).geometryId := asReady.bits.data((RtVtasLayout.TriangleGeometryId / 4).toInt)
-      triangleMeta(0)(waiter.laneId).sbtRecordOffset := asReady.bits.data((RtVtasLayout.TriangleSbtRecordOffset / 4).toInt)
-      triangleMeta(0)(waiter.laneId).instanceId := objectInstanceId(0)(waiter.laneId)
-      triangleMeta(0)(waiter.laneId).instanceCustomIndex := objectCustomIndex(0)(waiter.laneId)
-      triangleMeta(0)(waiter.laneId).instanceSbtRecordOffset := objectSbtRecordOffset(0)(waiter.laneId)
-      triangleMeta(0)(waiter.laneId).instanceFlags := objectFlags(0)(waiter.laneId)
     }.elsewhen(asIsInstance) {
       when(!instanceMaskMatch.orR) {
         laneState(0)(waiter.laneId) := sStackReady
@@ -651,15 +721,8 @@ class RtCoreScheduler extends Module {
   }
 
   // Box results are sorted near-to-far.  Push them in reverse order so the
-  // subsequent scalar stack pop continues DFS at the nearest child.
-  val boxResultMask = VecInit(boxResult.map(_.valid)).asUInt
-  val boxResultSelect = roundRobin(boxResultMask, nextBoxResult, boxUnitCount)
-  for (unit <- 0 until boxUnitCount) {
-    boxResult(unit).ready := boxResultMask.orR && boxResultSelect === unit.U
-  }
-  when(boxResultMask.orR && boxResult(boxResultSelect).fire) {
-    nextBoxResult := boxResultSelect + 1.U
-    val result = boxResult(boxResultSelect).bits
+  // subsequent lane-local stack push continues DFS at the nearest child.
+  def acceptBoxResult(result: RtBox4IntersectionOutput): Unit = {
     val warp = requestWarp(result.requestId)
     val lane = requestLane(result.requestId)
     if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
@@ -698,6 +761,14 @@ class RtCoreScheduler extends Module {
       }
     }
   }
+  for (unit <- 0 until boxUnitCount) {
+    boxResult(unit).ready := true.B
+    when(boxResult(unit).fire) {
+      assert(requestLane(boxResult(unit).bits.requestId)(log2Ceil(boxUnitCount) - 1, 0) === unit.U,
+        "Box result returned through a unit outside its fixed lane group")
+      acceptBoxResult(boxResult(unit).bits)
+    }
+  }
 
   val pushMasks = Wire(Vec(residentWarpCount, UInt(num_thread.W)))
   for (warp <- 0 until residentWarpCount) {
@@ -706,30 +777,32 @@ class RtCoreScheduler extends Module {
   }
   val hasPush = pushMasks.map(_.orR).reduce(_ || _)
   val pushWarp = 0.U(residentWarpIdWidth.W)
-  val pushLane = roundRobin(pushMasks(pushWarp), nextPushLane(pushWarp), num_thread)
-  val pushIndex = boxDeferredCount(pushWarp)(pushLane) - boxPushedCount(pushWarp)(pushLane) - 1.U
   // A BLAS root is a continuation beneath the already-live TLAS stack.  Give
-  // it priority over deferred Box4 children so the AS response cannot hold the
-  // table while waiting for a later traversal action.
+  // it its own lane slot; deferred Box4 children in other lanes can progress
+  // in the same cycle.
   stack.io.push.valid := blasHeaderPush || hasPush
-  stack.io.push.bits.laneMask := Mux(blasHeaderPush,
-    UIntToOH(asReady.bits.waiter.laneId, num_thread), UIntToOH(pushLane, num_thread))
+  val blasPushMask = Mux(blasHeaderPush, UIntToOH(asReady.bits.waiter.laneId, num_thread), 0.U)
+  val deferredPushMask = pushMasks(pushWarp)
+  stack.io.push.bits.laneMask := blasPushMask | deferredPushMask
   for (lane <- 0 until num_thread) {
-    stack.io.push.bits.nodeRef(lane) := Mux(blasHeaderPush, headerRoot,
-      boxDeferredRefs(pushWarp)(pushLane)(pushIndex(1, 0)))
-    stack.io.push.bits.objectRay(lane) := Mux(blasHeaderPush, true.B,
-      boxObjectRay(pushWarp)(pushLane))
+    val pushIndex = boxDeferredCount(pushWarp)(lane) - boxPushedCount(pushWarp)(lane) - 1.U
+    val isBlasRoot = blasHeaderPush && asReady.bits.waiter.laneId === lane.U
+    stack.io.push.bits.nodeRef(lane) := Mux(isBlasRoot, headerRoot,
+      boxDeferredRefs(pushWarp)(lane)(pushIndex(1, 0)))
+    stack.io.push.bits.objectRay(lane) := Mux(isBlasRoot, true.B,
+      boxObjectRay(pushWarp)(lane))
   }
   when(stack.io.push.fire) {
     assert(!stack.io.pushWouldOverflow, "RtTraversalStack overflow requires spill support")
-    when(blasHeaderPush) {
-      laneState(0)(asReady.bits.waiter.laneId) := sStackReady
-    }.otherwise {
-      nextPushLane(pushWarp) := pushLane + 1.U
-      when(boxPushedCount(pushWarp)(pushLane) + 1.U === boxDeferredCount(pushWarp)(pushLane)) {
-        laneState(pushWarp)(pushLane) := sStackReady
+    for (lane <- 0 until num_thread) when(stack.io.push.bits.laneMask(lane)) {
+      when(blasHeaderPush && asReady.bits.waiter.laneId === lane.U) {
+        laneState(0)(lane) := sStackReady
       }.otherwise {
-        boxPushedCount(pushWarp)(pushLane) := boxPushedCount(pushWarp)(pushLane) + 1.U
+        when(boxPushedCount(pushWarp)(lane) + 1.U === boxDeferredCount(pushWarp)(lane)) {
+          laneState(pushWarp)(lane) := sStackReady
+        }.otherwise {
+          boxPushedCount(pushWarp)(lane) := boxPushedCount(pushWarp)(lane) + 1.U
+        }
       }
     }
   }
@@ -962,6 +1035,7 @@ class RtCoreScheduler extends Module {
       laneStatus(0)(lane) := 0.U
       boxDeferredCount(0)(lane) := 0.U
       boxPushedCount(0)(lane) := 0.U
+      pendingNodeValid(0)(lane) := false.B
     }
   }
   // Retire local ownership on the same edge as the release acknowledgement;
@@ -985,7 +1059,10 @@ class RtCoreScheduler extends Module {
     activeMask(0) := 0.U
     commandMask(0) := 0.U
     finalRetirePending := false.B
-    for (lane <- 0 until num_thread) { laneState(0)(lane) := sIdle }
+    for (lane <- 0 until num_thread) {
+      laneState(0)(lane) := sIdle
+      pendingNodeValid(0)(lane) := false.B
+    }
   }
 
   // Export only physical handshakes.  In particular, local SRAM is private to
@@ -996,21 +1073,21 @@ class RtCoreScheduler extends Module {
   io.perf.localSramBackpressure := io.localRequest.valid && !io.localRequest.ready
   io.perf.raySetupOutput := raySetup.io.out.fire
   io.perf.asLineAcquire := table.io.asAcquire.fire
-  io.perf.asLineReady := table.io.asReadyLine.fire
+  io.perf.asLineReady := PopCount(asConsumedLanes)
   io.perf.asAcquireBackpressure := table.io.asAcquire.valid && !table.io.asAcquire.ready
   io.perf.asCacheResidentHit := table.io.asCacheResidentHit
   io.perf.asCachePendingMerge := table.io.asCachePendingMerge
   io.perf.asCacheMiss := table.io.asCacheMiss
   io.perf.asCacheRefill := table.io.asCacheRefill
   io.perf.asCacheEviction := table.io.asCacheEviction
-  io.perf.box4Issue := boxIssue.map(_.fire).reduce(_ || _)
-  io.perf.box4Result := boxResult.map(_.fire).reduce(_ || _)
-  io.perf.triangleIssue := triangleIssue.map(_.fire).reduce(_ || _)
-  io.perf.triangleResult := triangleResult.map(_.fire).reduce(_ || _)
+  io.perf.box4Issue := PopCount(boxIssue.map(_.fire))
+  io.perf.box4Result := PopCount(boxResult.map(_.fire))
+  io.perf.triangleIssue := PopCount(triangleIssue.map(_.fire))
+  io.perf.triangleResult := PopCount(triangleResult.map(_.fire))
   io.perf.triangleResolveIssue := triangleResolve.io.in.fire
   io.perf.triangleResolveResult := triangleResolve.io.out.fire
-  io.perf.stackPush := stack.io.push.fire
-  io.perf.stackPop := stack.io.pop.fire
+  io.perf.stackPush := Mux(stack.io.push.fire, PopCount(stack.io.push.bits.laneMask), 0.U)
+  io.perf.stackPop := Mux(stack.io.pop.fire, PopCount(stack.io.pop.bits.laneMask), 0.U)
   if (PMU_DETAILED) {
     require(residentWarpCount == 1 && num_thread == 32)
     val d = io.perf.detailed.get
@@ -1027,12 +1104,12 @@ class RtCoreScheduler extends Module {
     d.stackSelected := stack.io.pop.fire
     // Overlapping blockers, not an additive partition of stall cycles.
     d.popBlockedHeader := hasStackReady && headerAcquire
-    d.popBlockedPush := hasStackReady && anyBoxPush
+    d.popBlockedPush := false.B
     d.popBlockedHeaderLine := hasStackReady && headerLineActive
     d.asBlocked := table.io.asAcquire.valid && !table.io.asAcquire.ready
-    d.readyBlockedRay := asReady.valid && (asIsBox || asIsAabb || asIsTriangle) && !selectedIssueRayValid
-    d.readyBlockedBox := asReady.valid && (asIsBox || asIsAabb) && !boxReadyMask.orR
-    d.readyBlockedTriangle := asReady.valid && asIsTriangle && !triangleReadyMask.orR
+    d.readyBlockedRay := false.B
+    d.readyBlockedBox := false.B
+    d.readyBlockedTriangle := false.B
     d.asTable := table.io.detailed.get
     def observe(dst: RtUnitObservation, in: DecoupledIO[_], out: DecoupledIO[_]): Unit = {
       dst.inValid := in.valid; dst.inReady := in.ready

@@ -409,6 +409,16 @@ class CSRexe extends Module {
 
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire
   vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
+  if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    when(io.CTA2csr.valid) {
+      printf(p"[RTCORE trace] csr-load wid=${Decimal(io.CTA2csr.bits.wid)}" +
+        p" knl=0x${Hexadecimal(io.CTA2csr.bits.CTAdata.dispatch2cu_csr_knl_dispatch)}\n")
+    }
+    when(io.in.fire && io.in.bits.ctrl.inst(31, 20) === CSR.knl_base) {
+      printf(p"[RTCORE trace] csr-read-knl wid=${Decimal(io.in.bits.ctrl.wid)}" +
+        p" value=0x${Hexadecimal(vCSR(io.in.bits.ctrl.wid).wb_wxd_rd)}\n")
+    }
+  }
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   result.io.deq<>io.out

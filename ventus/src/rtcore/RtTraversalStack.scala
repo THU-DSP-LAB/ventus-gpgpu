@@ -86,12 +86,16 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
   val pushAllowed = (io.push.bits.laneMask & pushInvalid) === 0.U
   val popAllowed = (io.pop.bits.laneMask & popInvalid) === 0.U
 
-  // One vector operation per cycle.  Invalid higher-priority requests do not
-  // block a valid lower-priority request; their ready remains low.
+  // Init/clear are whole-stack control operations.  Push and pop may proceed
+  // together when they update disjoint lanes.
   val selectInit = io.init.valid && initAllowed
   val selectClear = !selectInit && io.clear.valid
-  val selectPush = !selectInit && !selectClear && io.push.valid && pushAllowed
-  val selectPop = !selectInit && !selectClear && !selectPush && io.pop.valid && popAllowed
+  val controlBlocked = selectInit || selectClear
+  val selectPush = !controlBlocked && io.push.valid && pushAllowed
+  // Push and pop are independent lane operations.  They may be accepted in
+  // the same cycle when their lane masks do not overlap.
+  val selectPop = !controlBlocked && io.pop.valid && popAllowed &&
+    ((io.push.bits.laneMask & io.pop.bits.laneMask) === 0.U)
   io.init.ready := selectInit
   io.clear.ready := selectClear
   io.push.ready := selectPush
@@ -132,7 +136,8 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
         live(lane) := false.B
       }
     }
-  }.elsewhen(io.push.fire) {
+  }
+  when(io.push.fire) {
     for (lane <- 0 until num_thread) {
       when(io.push.bits.laneMask(lane)) {
         val pointer = stackPointer(lane)
@@ -150,7 +155,8 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
         stackPointer(lane) := pointer + 1.U
       }
     }
-  }.elsewhen(io.pop.fire) {
+  }
+  when(io.pop.fire) {
     for (lane <- 0 until num_thread) {
       when(io.pop.bits.laneMask(lane)) {
         stackPointer(lane) := stackPointer(lane) - 1.U
