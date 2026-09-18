@@ -99,7 +99,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 sorts its result and completes before a concurrent triangle" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       driveBoxJob(dut, 1, one, two)
       driveBox(dut.boxIn.bits.aabb(1), three, four)
@@ -151,8 +151,75 @@ class RtIntersectionUnitParallelTest
     }
   }
 
+  "fixed IU pipelines sustain one per cycle and reserve results through long stalls" in {
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      initialize(dut)
+      // Preserve 7/12-cycle interface latency, with no input bubbles after fill.
+      for (cycle <- 0 until 80) {
+        driveBoxJob(dut, cycle % 64, one, two)
+        driveTriangleJob(dut, cycle % 64, (zero, zero, one), (zero, one, one), (one, zero, one))
+        dut.boxIn.valid.poke((cycle < 64).B)
+        dut.triangleIn.valid.poke((cycle < 64).B)
+        if (cycle < 64) {
+          dut.boxIn.ready.expect(true.B)
+          dut.triangleIn.ready.expect(true.B)
+        }
+        dut.boxOut.valid.expect((cycle >= 7 && cycle < 71).B)
+        dut.triangleOut.valid.expect((cycle >= 12 && cycle < 76).B)
+        if (cycle >= 7 && cycle < 71) dut.boxOut.bits.requestId.expect((cycle - 7).U)
+        if (cycle >= 12 && cycle < 76) dut.triangleOut.bits.requestId.expect((cycle - 12).U)
+        dut.clock.step()
+      }
+      val random = new Random(0x147eL)
+      var boxSent = 0; var triSent = 0; var boxReceived = 0; var triReceived = 0
+      for (cycle <- 0 until 450) {
+        val boxReady = cycle >= 40 && (cycle >= 300 || random.nextBoolean())
+        val triReady = cycle >= 55 && (cycle >= 300 || random.nextBoolean())
+        dut.boxOut.ready.poke(boxReady.B)
+        dut.triangleOut.ready.poke(triReady.B)
+        driveBoxJob(dut, boxSent, if (boxSent % 2 == 0) one else two, three)
+        driveTriangleJob(dut, triSent, (zero, zero, one), (zero, one, one), (one, zero, one))
+        dut.boxIn.valid.poke((boxSent < 100).B)
+        dut.triangleIn.valid.poke((triSent < 100).B)
+        if (cycle == 39) {
+          assert(boxSent == 8 && triSent == 16, "requests must reserve result capacity")
+          dut.boxIn.ready.expect(false.B)
+          dut.triangleIn.ready.expect(false.B)
+        }
+        if (dut.boxOut.valid.peek().litToBoolean) {
+          dut.boxOut.bits.requestId.expect(boxReceived.U)
+          dut.boxOut.bits.tmin.foreach(_.expect(if (boxReceived % 2 == 0) one else two))
+          if (boxReady) boxReceived += 1
+        }
+        if (dut.triangleOut.valid.peek().litToBoolean) {
+          dut.triangleOut.bits.requestId.expect(triReceived.U)
+          dut.triangleOut.bits.hit.expect(true.B)
+          dut.triangleOut.bits.tNum.expect(one)
+          dut.triangleOut.bits.tDenom.expect(one)
+          if (triReady) triReceived += 1
+        }
+        if (boxSent < 100 && dut.boxIn.ready.peek().litToBoolean) boxSent += 1
+        if (triSent < 100 && dut.triangleIn.ready.peek().litToBoolean) triSent += 1
+        dut.clock.step()
+      }
+      assert(boxSent == 100 && triSent == 100 && boxReceived == 100 && triReceived == 100)
+      dut.boxOut.valid.expect(false.B)
+      dut.triangleOut.valid.expect(false.B)
+      // Reset must invalidate both in-flight tokens and queued results.
+      dut.boxIn.valid.poke(true.B); dut.triangleIn.valid.poke(true.B)
+      dut.boxOut.ready.poke(false.B); dut.triangleOut.ready.poke(false.B)
+      dut.clock.step(5)
+      dut.reset.poke(true.B); dut.clock.step(2); dut.reset.poke(false.B)
+      initialize(dut)
+      for (_ <- 0 until 20) {
+        dut.boxOut.valid.expect(false.B); dut.triangleOut.valid.expect(false.B)
+        dut.clock.step()
+      }
+    }
+  }
+
   "both pipelines preserve consecutive request order and ownership" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       driveBoxJob(dut, 11, one, two)
       driveTriangleJob(dut, 21, (zero, zero, one), (zero, one, one), (one, zero, one))
@@ -189,7 +256,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 handles negative directions and extent boundaries" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       driveBoxJob(dut, 31, negativeTwo, negativeOne, negativeOne, negativeOne)
       dut.boxIn.valid.poke(true.B)
@@ -235,7 +302,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 accepts the failing lane-13 object ray against a containing BLAS bound" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       dut.boxIn.bits.requestId.poke(61.U)
       // Exact IEEE32 ray fields traced from raytracingshadows lane 13 after
@@ -278,7 +345,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 reproduces the lane-13 large-BLAS root miss" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       dut.boxIn.bits.requestId.poke(62.U)
       // Exact trace from raytracingshadows 4x4: lane 13, object BLAS root
@@ -326,7 +393,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "triangle handles interior, behind-ray, axis-permuted, and degenerate cases" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       driveTriangleJob(dut, 41, (negativeOne, negativeOne, one), (negativeOne, two, one), (two, negativeOne, one))
       dut.triangleIn.valid.poke(true.B)
@@ -375,7 +442,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 output backpressure preserves its result and does not block triangle" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       dut.boxOut.ready.poke(false.B)
       driveBoxJob(dut, 51, one, two)
@@ -417,7 +484,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 fixed-seed finite cases sort all four near distances" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       val random = new Random(0x5eedb0L)
       def finiteInteger(value: Int): UInt =
@@ -455,7 +522,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 accepts the actual lanes 12 to 15 platform top and bottom faces" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       driveRay(dut.boxIn.bits.ray)
       pokeFloat3(dut.boxIn.bits.ray.origin, zero, "hc0400000".U, "h41200000".U)
@@ -499,7 +566,7 @@ class RtIntersectionUnitParallelTest
   }
 
   "box4 accepts a closed-interval tangent AABB" in {
-    test(new RtIntersectionUnit) { dut =>
+    test(new RtIntersectionUnit).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       initialize(dut)
       dut.boxIn.bits.requestId.poke(63.U)
       driveRay(dut.boxIn.bits.ray)

@@ -17,7 +17,7 @@ VLIB_RTCORE_TRACE ?= 0
 # Deep RTCore probes include per-lane ray payloads and node decisions.  They
 # are intentionally separate from the compact command/completion trace.
 VLIB_RTCORE_DEEP_TRACE ?= 0
-# Record trace logs only world-ray handoff and hit-record updates.  It avoids
+# Record trace logs world-ray handoff, node visits and hit-record updates. It avoids
 # per-node Box4 output, keeping recursive-ray differentials practical.
 VLIB_RTCORE_RECORD_TRACE ?= 0
 # SFU floating-point probes are also elaboration-time printf logic. Keep them

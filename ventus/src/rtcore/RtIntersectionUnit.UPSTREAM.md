@@ -7,7 +7,7 @@ implementation, `b835680cf66dae2b332bbe5ab8c2cdf16f2edb45`:
 <https://github.com/purdue-aalp/rayflex>
 
 RayFlex provenance is limited to `RtIntersectionUnit.scala`,
-`RtIntersectionUnitIO.scala`, `RtIntersectionSkidBuffer.scala`,
+`RtIntersectionUnitIO.scala`,
 `RtIntersectionCompareSelect.scala`, `RtIntersectionCompareAndSwap.scala`,
 `RtIntersectionQuadSort.scala`, `RtIntersectionQuadSortWithIndex.scala`, and
 `RtIntersectionFnHelpers.scala`. `RtCorePort.scala`, `RtMemTable.scala`, and
@@ -18,8 +18,13 @@ Imported source was renamed into the `rtcore` package and fixed to the
 baseline disjoint configuration: four AABB candidates and one triangle per
 transaction.  Euclidean and angular-distance operations are not enabled.
 Box and triangle operations select separate private slices of the functional
-unit arrays; no box/triangle FU is shared.  The decoupled skid-buffer stages
-retain backpressure handling for the selected path.
+unit arrays; no box/triangle FU is shared. The original per-stage skid buffers
+have been replaced by Ventus-owned fixed-latency stages in
+`RtIntersectionPipelineStage.scala`. Arithmetic stages never stall; each input
+reserves a slot in a terminal result FIFO (8 Box4 / 16 Triangle). Registered
+outstanding counts gate admission without a downstream-ready chain. The
+interfaces retain 7/12-cycle unstalled latency and one-request-per-cycle
+throughput. Finite result capacity still applies input backpressure when full.
 
 RayFlex's `external/hardfloat` directory is deliberately not imported.  The
 unit resolves `hardfloat` from Ventus's existing

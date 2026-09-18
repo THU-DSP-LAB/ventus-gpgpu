@@ -43,9 +43,21 @@ class RtLocalSram extends Module {
   val readPending = RegInit(false.B)
   val address = io.request.bits.warpId * fieldCount.U + io.request.bits.fieldId
   val readEnable = io.request.fire && !io.request.bits.write
+  // CIRCT's inferred SRAM invalidates rdata after a disabled read cycle.
+  // Keep re-reading the accepted address while its consumer is stalled;
+  // simply blocking new requests does not keep a SyncReadMem result valid.
+  val responseAddress = RegEnable(address, readEnable)
+  val holdRead = readPending && !io.response.ready
+  val bankAddress = Mux(readPending, responseAddress, address)
+  val bankWrite = !readPending && io.request.bits.write
+  val writeEnable = io.request.fire && io.request.bits.write
   val readData = Wire(Vec(num_thread, UInt(xLen.W)))
   for (lane <- 0 until num_thread) {
-    readData(lane) := banks(lane).read(address, readEnable)
+    // Keep an explicit single read/write port rather than relying on
+    // inference to merge separately addressed reads and writes.
+    val enabled = readEnable || holdRead || (writeEnable && io.request.bits.laneMask(lane))
+    readData(lane) := banks(lane).readWrite(bankAddress,
+      io.request.bits.writeData(lane), enabled, bankWrite)
   }
 
   // A SyncReadMem result is exposed directly during the response cycle.
@@ -59,13 +71,7 @@ class RtLocalSram extends Module {
   when(io.request.fire) {
     assert(io.request.bits.warpId < warpCount.U, "RT Local warp index out of range")
     assert(io.request.bits.fieldId < fieldCount.U, "RT Local field index out of range")
-    when(io.request.bits.write) {
-      for (lane <- 0 until num_thread) {
-        when(io.request.bits.laneMask(lane)) {
-          banks(lane).write(address, io.request.bits.writeData(lane))
-        }
-      }
-    }.otherwise {
+    when(!io.request.bits.write) {
       readPending := true.B
     }
   }

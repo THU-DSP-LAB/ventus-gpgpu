@@ -117,6 +117,11 @@ Run with `--help` to view all options. Commonly used ones include:
 
 In `ventus_args.txt`, parameters such as `--kernel`, `--sim-time-max`, and `--dump-mem` are commonly used. Refer to existing examples in the repository for guidance.
 
+### RT Local SRAM backpressure regression
+
+Run `python3 sim-verilator/tests/test_rt_local_sram.py --rtl sim-verilator/build/generated/rtl-detailed/dut.v` from the gpgpu repository (substitute the actual elaboration flavor).
+This compiles only `RtLocalSram` from the full-app RTL and checks stalled read responses and cross-warp isolation. Keep this test in addition to ChiselTest: its legacy memory emitter can preserve disabled-read data where the full-app CIRCT emitter produces an undefined value.
+
 ### Generating New `.metadata` and `.data` Files
 
 When running OpenCL programs with the [full toolchain](https://github.com/THU-DSP-LAB/ventus-env), POCL automatically exports `.metadata` and `.data` files.

@@ -14,6 +14,38 @@ import top.parameters._
   * completion becomes visible.
   */
 class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
+  "retire waits for drained records and allows a different warp to gather" in {
+    test(new RtLocalRayState) { dut =>
+      idle(dut)
+      for ((owner, mask) <- Seq((0, 3), (1, 1), (0, 1))) {
+        dut.io.admission.bits.warpId.poke(owner.U)
+        dut.io.admission.bits.activeMask.poke(mask.U)
+        dut.io.admission.valid.poke(true.B)
+        dut.io.admission.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.admission.valid.poke(false.B)
+        dut.io.request.bits.warpId.expect(owner.U)
+        completeRayGather(dut)
+        dut.clock.step(2)
+        val writes = finishAndCollectWrites(dut, mask = mask, stall = true)
+        assert(writes.size == 2 * hitWords)
+        assert(writes.forall(_._2 == BigInt(mask)))
+        dut.io.retire.bits.poke(owner.U)
+        dut.io.retire.ready.expect(false.B)
+        dut.io.admission.ready.expect(false.B)
+        dut.io.drained.ready.poke(true.B)
+        dut.clock.step()
+        dut.io.drained.ready.poke(false.B)
+        dut.io.retire.valid.poke(true.B)
+        dut.io.retire.ready.expect(true.B)
+        dut.io.request.valid.expect(false.B)
+        dut.clock.step()
+        dut.io.retire.valid.poke(false.B)
+        dut.io.request.valid.expect(false.B)
+      }
+    }
+  }
+
   "nested gather cannot steal a resident warp or expand its mask" in {
     test(new RtLocalRayState) { dut =>
       idle(dut)

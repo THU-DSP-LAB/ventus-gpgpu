@@ -105,6 +105,7 @@ class pipe() extends Module{
   val rtCompletionAwaitingWb = RegInit(false.B)
   val rtCompletionWarp = Reg(UInt(depth_warp.W))
   val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
+  val rtCompletionContextReleased = RegInit(false.B)
   val rtReleaseSent = RegInit(false.B)
   // Reserve at operand-collector admission. A foreign traversal admitted
   // before this reservation is visible can later block the owner's RT path.
@@ -481,7 +482,10 @@ class pipe() extends Module{
   // traverse was empty and therefore deliberately never opened a session.
   // Releasing that non-existent session would hold the RT issue entry forever:
   // RTcore correctly refuses an acknowledgement without an owner.
-  val rtReleaseNoSession = rtIsRelease && !rtReservation.io.reserved
+  // A software session can outlive its physical RT context. Its final release
+  // must not touch another warp's newly reserved/executing context.
+  val rtReleaseNoSession = rtIsRelease &&
+    (!rtReservation.io.reserved || rtReservation.io.owner =/= rtIssue.ctrl.wid)
   val rtReleaseSkipped = rtReleaseEmpty || rtReleaseNoSession
   rtReservation.io.traverseResolved.valid := issueV.io.out_RT.fire && rtIsTraverse
   rtReservation.io.traverseResolved.bits.warpId := rtIssue.ctrl.wid
@@ -568,7 +572,8 @@ class pipe() extends Module{
   rtcore.io.releaseAck.ready := rtReleaseSent && issueV.io.out_RT.valid && rtIsRelease
   issueV.io.out_RT.ready := Mux(rtIsTraverse,
     rtTraverseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtcore.io.command.ready),
-    Mux(rtIsRelease, Mux(rtReleaseSkipped, true.B,
+    Mux(rtIsRelease, Mux(rtReleaseSkipped,
+      rtReleaseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained),
       rtReleaseSent && rtcore.io.releaseAck.valid),
       Mux(rtIsLocalLoad || rtIsLocalStore, softwareLocalRequest.ready, false.B)))
   when(rtcore.io.command.fire) {
@@ -614,6 +619,7 @@ class pipe() extends Module{
         p" warp=${Decimal(rtcore.io.completion.bits.warpId)}" +
         p" issue=${Decimal(rtcore.io.completion.bits.issueId)}" +
         p" vd=${Decimal(rtcore.io.completion.bits.destinationVd)}" +
+        p" contextReleased=${Decimal(rtcore.io.completion.bits.contextReleased)}" +
         p" mask=0x${Hexadecimal(rtcore.io.completion.bits.completionMask)}" +
         p" hit=0x${Hexadecimal(hitMask)} nonopaque=0x${Hexadecimal(nonOpaqueMask)}" +
         p" procedural=0x${Hexadecimal(proceduralMask)} terminated=0x${Hexadecimal(terminatedMask)}\n")
@@ -627,6 +633,7 @@ class pipe() extends Module{
     rtCompletionAwaitingWb := true.B
     rtCompletionWarp := rtcore.io.completion.bits.warpId
     rtCompletionDestination := rtcore.io.completion.bits.destinationVd
+    rtCompletionContextReleased := rtcore.io.completion.bits.contextReleased
   }
 
   wb.io.in_x(0)<>alu.io.out
@@ -644,9 +651,15 @@ class pipe() extends Module{
   wb.io.in_v(6)<>csrfile.io.out_v
   wb.io.in_v(7)<>rtWriteback.io.deq
   wb.io.in_v(8)<>rtLocalWriteback.io.deq
-  when(wb.io.out_v.fire && rtCompletionAwaitingWb &&
-    wb.io.out_v.bits.warp_id === rtCompletionWarp &&
-    wb.io.out_v.bits.reg_idxw === rtCompletionDestination) {
+  // Observe the actual RT writeback input, not a coincidentally matching
+  // destination on another vector writer. No new owner enters before this.
+  val rtCompletionWriteback = rtWriteback.io.deq.fire && rtCompletionAwaitingWb
+  rtReservation.io.completed.valid := rtCompletionWriteback
+  rtReservation.io.completed.bits.warpId := rtCompletionWarp
+  rtReservation.io.completed.bits.contextReleased := rtCompletionContextReleased
+  when(rtCompletionWriteback) {
+    assert(rtWriteback.io.deq.bits.warp_id === rtCompletionWarp &&
+      rtWriteback.io.deq.bits.reg_idxw === rtCompletionDestination)
     if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
       printf(p"[RTLOCAL trace] completion-wb warp=${Decimal(wb.io.out_v.bits.warp_id)}" +
         p" vd=${Decimal(wb.io.out_v.bits.reg_idxw)}" +
@@ -843,7 +856,9 @@ class pipe() extends Module{
       rtCompletionCount := rtCompletionCount + 1.U
       rtCompletionLanes := rtCompletionLanes + PopCount(rtcore.io.completion.bits.completionMask)
     }
-    when(rtcore.io.release.fire) {
+    // Count logical software-session releases even when physical context
+    // reclamation already happened at a terminal traversal completion.
+    when(issueV.io.out_RT.fire && rtIsRelease && !rtReleaseEmpty) {
       rtReleaseIssued := rtReleaseIssued + 1.U
     }
     when(rtInFlight.asUInt.orR || rtCompletionAwaitingWb || rtReleaseSent) {

@@ -46,6 +46,9 @@ class RtWarpCompletion extends Bundle {
   val destinationVd = UInt(regidx_totalwidth.W)
   val completionMask = UInt(num_thread.W)
   val laneStatus = Vec(num_thread, UInt(xLen.W))
+  // Physical traversal state has been drained and reclaimed. This is not
+  // the software session's rt.release; its per-warp Local SRAM remains live.
+  val contextReleased = Bool()
 }
 
 /** A masked end-of-session acknowledgement request from `vt.rt.release`. */

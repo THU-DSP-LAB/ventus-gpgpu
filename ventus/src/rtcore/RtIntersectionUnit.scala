@@ -58,7 +58,7 @@ class RtBox4Pipeline extends Module {
   val out = IO(Decoupled(new RtBox4IntersectionOutput))
 
   val convert = Module(
-    GenerializedSkidBufferStage(
+    RtMappedPipelineStage(
       new RtBox4IntersectionInput,
       new RtBox4PipelineState,
       { input: RtBox4IntersectionInput =>
@@ -74,7 +74,7 @@ class RtBox4Pipeline extends Module {
   ).suggestName("convert")
 
   val translate = Module(
-    SkidBufferStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
+    RtPipelineStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
       val emit = Wire(new RtBox4PipelineState)
       emit := intake
       val units = List.fill(24)(Module(new AddRecFN(8, 24)))
@@ -114,7 +114,7 @@ class RtBox4Pipeline extends Module {
   ).suggestName("translate")
 
   val intervals = Module(
-    SkidBufferStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
+    RtPipelineStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
       val emit = Wire(new RtBox4PipelineState)
       emit := intake
       val units = List.fill(24)(Module(new MulRecFN(8, 24)))
@@ -153,7 +153,7 @@ class RtBox4Pipeline extends Module {
   ).suggestName("intervals")
 
   val reduce = Module(
-    SkidBufferStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
+    RtPipelineStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
       val emit = Wire(new RtBox4PipelineState)
       emit := intake
 
@@ -213,7 +213,7 @@ class RtBox4Pipeline extends Module {
   ).suggestName("reduce")
 
   val sort = Module(
-    SkidBufferStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
+    RtPipelineStage(new RtBox4PipelineState, { intake: RtBox4PipelineState =>
       val emit = Wire(new RtBox4PipelineState)
       emit := intake
       val indexSort = Module(new QuadSortRecFNWithIndex)
@@ -230,7 +230,7 @@ class RtBox4Pipeline extends Module {
   ).suggestName("sort")
 
   val convertOutput = Module(
-    GenerializedSkidBufferStage(
+    RtMappedPipelineStage(
       new RtBox4PipelineState,
       new RtBox4IntersectionOutput,
       { intake: RtBox4PipelineState =>
@@ -243,16 +243,13 @@ class RtBox4Pipeline extends Module {
       }
     )
   ).suggestName("convert_output")
-  val outputBuffer = Module(SkidBufferStage(new RtBox4IntersectionOutput)).suggestName("output")
 
-  convert.intake :<>= in
+  RtPipelineResultCredits.connect(in, convert.intake, convertOutput.emit, out, depth = 8)
   translate.intake :<>= convert.emit
   intervals.intake :<>= translate.emit
   reduce.intake :<>= intervals.emit
   sort.intake :<>= reduce.emit
   convertOutput.intake :<>= sort.emit
-  outputBuffer.intake :<>= convertOutput.emit
-  out :<>= outputBuffer.emit
 }
 
 /** Dedicated triangle pipeline retaining the original ten arithmetic stages. */
@@ -263,7 +260,7 @@ class RtTrianglePipeline extends Module {
   val out = IO(Decoupled(new RtTriangleIntersectionOutput))
 
   val convert = Module(
-    GenerializedSkidBufferStage(
+    RtMappedPipelineStage(
       new RtTriangleIntersectionInput,
       new RtTrianglePipelineState,
       { input: RtTriangleIntersectionInput =>
@@ -277,7 +274,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("convert")
 
   val translate = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(9)(Module(new AddRecFN(8, 24)))
@@ -302,7 +299,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("translate")
 
   val shearScale = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(9)(Module(new MulRecFN(8, 24)))
@@ -326,7 +323,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("shear_scale")
 
   val addShear = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(6)(Module(new AddRecFN(8, 24)))
@@ -354,7 +351,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("add_shear")
 
   val edgeProducts = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(6)(Module(new MulRecFN(8, 24)))
@@ -378,7 +375,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("edge_products")
 
   val edgeSubtract = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(3)(Module(new AddRecFN(8, 24)))
@@ -403,7 +400,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("edge_subtract")
 
   val depthProducts = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(3)(Module(new MulRecFN(8, 24)))
@@ -427,7 +424,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("depth_products")
 
   val partialSums = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(2)(Module(new AddRecFN(8, 24)))
@@ -449,7 +446,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("partial_sums")
 
   val finalSums = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val units = List.fill(2)(Module(new AddRecFN(8, 24)))
@@ -471,7 +468,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("final_sums")
 
   val classify = Module(
-    SkidBufferStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
+    RtPipelineStage(new RtTrianglePipelineState, { intake: RtTrianglePipelineState =>
       val emit = Wire(new RtTrianglePipelineState)
       emit := intake
       val comparisons = Seq.fill(5)(Module(new CompareRecFN(8, 24)))
@@ -512,7 +509,7 @@ class RtTrianglePipeline extends Module {
   ).suggestName("classify")
 
   val convertOutput = Module(
-    GenerializedSkidBufferStage(
+    RtMappedPipelineStage(
       new RtTrianglePipelineState,
       new RtTriangleIntersectionOutput,
       { intake: RtTrianglePipelineState =>
@@ -531,9 +528,8 @@ class RtTrianglePipeline extends Module {
       }
     )
   ).suggestName("convert_output")
-  val outputBuffer = Module(SkidBufferStage(new RtTriangleIntersectionOutput)).suggestName("output")
 
-  convert.intake :<>= in
+  RtPipelineResultCredits.connect(in, convert.intake, convertOutput.emit, out, depth = 16)
   translate.intake :<>= convert.emit
   shearScale.intake :<>= translate.emit
   addShear.intake :<>= shearScale.emit
@@ -544,8 +540,6 @@ class RtTrianglePipeline extends Module {
   finalSums.intake :<>= partialSums.emit
   classify.intake :<>= finalSums.emit
   convertOutput.intake :<>= classify.emit
-  outputBuffer.intake :<>= convertOutput.emit
-  out :<>= outputBuffer.emit
 }
 
 /** Physically independent Box4 and Triangle intersection entry point. */

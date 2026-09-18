@@ -95,7 +95,7 @@ class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDep
   // Push and pop are independent lane operations.  They may be accepted in
   // the same cycle when their lane masks do not overlap.
   val selectPop = !controlBlocked && io.pop.valid && popAllowed &&
-    ((io.push.bits.laneMask & io.pop.bits.laneMask) === 0.U)
+    (!selectPush || (io.push.bits.laneMask & io.pop.bits.laneMask) === 0.U)
   io.init.ready := selectInit
   io.clear.ready := selectClear
   io.push.ready := selectPush

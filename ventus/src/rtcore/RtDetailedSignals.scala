@@ -46,7 +46,7 @@ class RtDetailedSignals extends Bundle {
   val command = Bool()
   val commandMask = UInt(num_thread.W)
   val commandKind = UInt(2.W) // fresh=0, resume=1, restart=2
-  val release = Bool()
+  val release = Bool() // physical context retirement, not software session count
   val laneState = Vec(num_thread, UInt(4.W))
   val stackReady = UInt(6.W)
   val stackSelected = Bool()

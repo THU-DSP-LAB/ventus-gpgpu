@@ -476,6 +476,12 @@ class RtCoreScheduler extends Module {
       when(ref === RtVtasLayout.InvalidNodeRef.U || unsupported) {
         laneState(popWarp)(lane) := sStackReady
       }.otherwise {
+        if (sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
+          printf(p"[RTCORE node] warp=${Decimal(residentOwnerWarpId)}" +
+            p" issue=${Decimal(warpIssueId(popWarp))} lane=${Decimal(lane.U)}" +
+            p" kind=${Decimal(kind)} ref=0x${Hexadecimal(ref)}" +
+            p" object=${Decimal(stack.io.popObjectRay(lane))}\\n")
+        }
         pendingNodeValid(popWarp)(lane) := true.B
         pendingNodeRef(popWarp)(lane) := ref
         pendingNodeObjectRay(popWarp)(lane) := stack.io.popObjectRay(lane)
@@ -956,6 +962,11 @@ class RtCoreScheduler extends Module {
   val completionPending = RegInit(false.B)
   val completionBits = Reg(new RtWarpCompletion)
   val finalRetirePending = RegInit(false.B)
+  val contextRetirePending = RegInit(false.B)
+  val releasePending = RegInit(false.B)
+  val releaseStackCleared = RegInit(false.B)
+  val releaseLanesInvalidated = RegInit(false.B)
+  val releaseTableCleared = RegInit(false.B)
   local.io.drained.ready := !completionPending && !finalRetirePending
   when(local.io.drained.fire) {
     completionBits.warpId := residentOwnerWarpId
@@ -963,7 +974,16 @@ class RtCoreScheduler extends Module {
     completionBits.destinationVd := warpDestination(0)
     completionBits.completionMask := commandMask(0)
     completionBits.laneStatus := laneStatus(0)
+    // Include candidates outside the most recent command's sparse mask.
+    val retainContext = (candidateValid(0).asUInt & activeMask(0)).orR
+    completionBits.contextReleased := !retainContext
     completionPending := true.B
+    when(!retainContext) {
+      contextRetirePending := true.B
+      releaseStackCleared := false.B
+      releaseLanesInvalidated := false.B
+      releaseTableCleared := false.B
+    }
   }
   // Opt-in full-app diagnosis: distinguishes a traversal status error from a
   // later shader callback/control-flow error without perturbing normal RTL.
@@ -983,26 +1003,24 @@ class RtCoreScheduler extends Module {
         p" procedural=0x${Hexadecimal(proceduralMask)} terminated=0x${Hexadecimal(terminatedMask)}\n")
     }
   }
-  io.completion.valid := completionPending
+  // Reclaim before publishing a context-releasing completion. Pipeline holds
+  // the reservation until this completion reaches vector writeback.
+  io.completion.valid := completionPending && !contextRetirePending
   io.completion.bits := completionBits
   when(io.completion.fire) {
     completionPending := false.B
-    completionPublished(0) := true.B
+    completionPublished(0) := !completionBits.contextReleased
     finishIssued(0) := false.B
   }
 
-  // `release` always destroys the whole retained session.  The software has
-  // already decided that every originally active lane is terminal; the mask
-  // is retained solely to catch ABI/control-flow mistakes at this boundary.
-  val releasePending = RegInit(false.B)
-  val releaseStackCleared = RegInit(false.B)
-  val releaseLanesInvalidated = RegInit(false.B)
-  val releaseTableCleared = RegInit(false.B)
-  retiring := releasePending || finalRetirePending || io.release.valid
+  // Software release destroys a retained context. A new sparse child trace
+  // can have a smaller physical mask than the final reconverged release.
+  val retireRequested = releasePending || contextRetirePending
+  retiring := retireRequested || finalRetirePending || completionPending || io.release.valid
   val releaseAllowed = sessionActive(0) && completionPublished(0) && !completionPending &&
     io.release.bits.warpId === residentOwnerWarpId &&
-    io.release.bits.activeMask === activeMask(0)
-  io.release.ready := releaseAllowed && !releasePending && !finalRetirePending
+    (io.release.bits.activeMask & activeMask(0)) === activeMask(0)
+  io.release.ready := releaseAllowed && !retireRequested && !finalRetirePending
   when(io.release.fire) {
     releasePending := true.B
     releaseStackCleared := false.B
@@ -1011,8 +1029,8 @@ class RtCoreScheduler extends Module {
   when(io.release.fire) {
     assert(io.release.bits.warpId === residentOwnerWarpId,
       "release warp must match the resident RT session")
-    assert(io.release.bits.activeMask === activeMask(0),
-      "release must cover the complete original RT session mask")
+    assert((io.release.bits.activeMask & activeMask(0)) === activeMask(0),
+      "release must cover the complete retained RT context mask")
     for (lane <- 0 until num_thread) when(activeMask(0)(lane)) {
       assert(laneState(0)(lane) === sTerminal,
         "release may retire only a completed retained lane")
@@ -1022,10 +1040,10 @@ class RtCoreScheduler extends Module {
   // must not inherit stale DFS entries from the preceding opaque/miss trace.
   // Its Local gather begins in the following cycle, so this same-cycle clear
   // is complete before the new header can initialise a root node.
-  stack.io.clear.valid := (releasePending && !releaseStackCleared) || restartStackClearRequest
-  stack.io.clear.bits.laneMask := Mux(releasePending, activeMask(0), io.command.bits.activeMask)
-  when(stack.io.clear.fire && releasePending) { releaseStackCleared := true.B }
-  when(releasePending && releaseStackCleared && !releaseLanesInvalidated) {
+  stack.io.clear.valid := (retireRequested && !releaseStackCleared) || restartStackClearRequest
+  stack.io.clear.bits.laneMask := Mux(retireRequested, activeMask(0), io.command.bits.activeMask)
+  when(stack.io.clear.fire && retireRequested) { releaseStackCleared := true.B }
+  when(retireRequested && releaseStackCleared && !releaseLanesInvalidated) {
     releaseLanesInvalidated := true.B
     finalRetirePending := true.B
     for (lane <- 0 until num_thread) when(activeMask(0)(lane)) {
@@ -1038,19 +1056,28 @@ class RtCoreScheduler extends Module {
       pendingNodeValid(0)(lane) := false.B
     }
   }
-  // Retire local ownership on the same edge as the release acknowledgement;
-  // otherwise its ready drops before the retained AS table finishes clearing.
-  local.io.retire.valid := finalRetirePending && releaseTableCleared && table.io.quiescent && io.releaseAck.ready
+  // Auto-reclaim never emits a software release acknowledgement. In both
+  // paths, retire local ownership only after pending AS traffic has drained.
+  local.io.retire.valid := finalRetirePending && releaseTableCleared && table.io.quiescent &&
+    (contextRetirePending || io.releaseAck.ready)
   local.io.retire.bits := residentOwnerWarpId
   table.io.clear.valid := finalRetirePending && !releaseTableCleared
   table.io.clear.bits := true.B
   when(table.io.clear.fire) { releaseTableCleared := true.B }
-  io.releaseAck.valid := finalRetirePending && releaseTableCleared && local.io.retire.ready && table.io.quiescent
+  io.releaseAck.valid := releasePending && finalRetirePending && releaseTableCleared &&
+    local.io.retire.ready && table.io.quiescent
   io.releaseAck.bits.warpId := residentOwnerWarpId
   io.releaseAck.bits.releasedMask := activeMask(0)
-  when(io.releaseAck.fire) {
+  when(local.io.retire.fire) {
+    when(contextRetirePending) {
+      assert(completionPending && completionBits.contextReleased,
+        "automatic reclamation must retain its context-releasing completion")
+      assert(!(candidateValid(0).asUInt & activeMask(0)).orR,
+        "automatic reclamation must not discard retained candidates")
+    }
     releaseTableCleared := false.B
     releasePending := false.B
+    contextRetirePending := false.B
     releaseStackCleared := false.B
     releaseLanesInvalidated := false.B
     sessionActive(0) := false.B
@@ -1098,7 +1125,9 @@ class RtCoreScheduler extends Module {
     d.command := io.command.fire
     d.commandMask := io.command.bits.activeMask
     d.commandKind := Mux(freshCommand, 0.U, Mux(resumeCommand, 1.U, 2.U))
-    d.release := io.releaseAck.fire
+    // Detailed reuse windows follow physical ownership, including automatic
+    // reclamation. The basic software-release counter remains separate.
+    d.release := local.io.retire.fire
     d.laneState := laneState(0)
     d.stackReady := PopCount(readyMasks(0))
     d.stackSelected := stack.io.pop.fire
