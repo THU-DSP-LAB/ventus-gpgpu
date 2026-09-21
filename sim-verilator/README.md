@@ -117,6 +117,30 @@ Run with `--help` to view all options. Commonly used ones include:
 
 In `ventus_args.txt`, parameters such as `--kernel`, `--sim-time-max`, and `--dump-mem` are commonly used. Refer to existing examples in the repository for guidance.
 
+### RT traversal overflow stacks
+
+Each RTCore retains 32 private lane stacks of depth32 and shares four overflow
+stacks of depth32. Each entry contains a 32-bit node ref and its object-ray tag
+(528 bytes of additional raw data in total, excluding owner/count logic).
+A lane may own at most one overflow stack: the hard limit is depth64, not160.
+Free banks are assigned to requesting lanes in ascending lane order. The last
+overflow pop releases the bank for allocation on the following cycle; masked
+clear and reset also reclaim ownership. Main-stack data is never shifted.
+
+Push is now partially accepted: `push.fire` means that `pushAcceptedMask`
+identifies the lanes actually written, not that every requested lane succeeded.
+The Scheduler advances deferred-child counters, acknowledges BLAS roots and
+counts PMU pushes only for accepted lanes. A lane waiting for a bank must not
+block other lanes. `pushWouldOverflow` may be true during a partial acceptance.
+The hard capacity remains finite: exhausted lanes stall without dropping nodes;
+this is not an unbounded traversal or a deadlock-proof spill mechanism. Mesa's
+matching traversal-stack budget is 64; its separate Embree topology-depth
+guard remains 32.
+
+From `gpgpu`, run `./mill -i 'ventus[6.4.0].tests.testOnly' rtcore.RtTraversalStackTest`.
+Tests cover tagged LIFO, four-bank contention, partial push, disjoint pop,
+depth64 refusal despite free banks, and reclamation after pop/clear/reset.
+
 ### RT detailed PMU node phases
 
 Detailed PMU also tracks each valid node visit by lane from stack pop through

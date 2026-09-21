@@ -674,7 +674,7 @@ class RtCoreScheduler extends Module {
   val asHeaderReady = asReady.valid && asIsHeader && (headerInvalid || stack.io.init.ready)
   val blasHeaderPush = asReady.valid && asIsBlasHeader && !headerInvalid
   val asBlasHeaderReady = asReady.valid && asIsBlasHeader &&
-    (headerInvalid || stack.io.push.ready)
+    (headerInvalid || stack.io.pushAcceptedMask(asReady.bits.waiter.laneId))
   val asInstanceReady = asReady.valid && asIsInstance &&
     (!instanceMaskMatch.orR || instanceTransform.io.in.ready)
   asReady.ready := asHeaderReady || asBlasHeaderReady || asInstanceReady ||
@@ -746,7 +746,9 @@ class RtCoreScheduler extends Module {
         // AABB overlap is only a procedural candidate.  The shader's later
         // reportIntersection result replaces this broad-phase t/hit-kind.
         candidateData(warp)(lane)(RtAbiLayout.HitRecordMeta0) :=
-          (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U
+          (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U |
+            (aabbMeta(warp)(lane).instanceCustomIndex <<
+              RtAbiLayout.HitRecordMeta0InstanceCustomIndexShift)
         candidateData(warp)(lane)(RtAbiLayout.HitRecordMeta1) :=
           aabbMeta(warp)(lane).instanceSbtRecordOffset
         candidateData(warp)(lane)(RtAbiLayout.HitRecordHitT) := result.tmin(0)
@@ -799,8 +801,7 @@ class RtCoreScheduler extends Module {
       boxObjectRay(pushWarp)(lane))
   }
   when(stack.io.push.fire) {
-    assert(!stack.io.pushWouldOverflow, "RtTraversalStack overflow requires spill support")
-    for (lane <- 0 until num_thread) when(stack.io.push.bits.laneMask(lane)) {
+    for (lane <- 0 until num_thread) when(stack.io.pushAcceptedMask(lane)) {
       when(blasHeaderPush && asReady.bits.waiter.laneId === lane.U) {
         laneState(0)(lane) := sStackReady
       }.otherwise {
@@ -1113,7 +1114,7 @@ class RtCoreScheduler extends Module {
   io.perf.triangleResult := PopCount(triangleResult.map(_.fire))
   io.perf.triangleResolveIssue := triangleResolve.io.in.fire
   io.perf.triangleResolveResult := triangleResolve.io.out.fire
-  io.perf.stackPush := Mux(stack.io.push.fire, PopCount(stack.io.push.bits.laneMask), 0.U)
+  io.perf.stackPush := PopCount(stack.io.pushAcceptedMask)
   io.perf.stackPop := Mux(stack.io.pop.fire, PopCount(stack.io.pop.bits.laneMask), 0.U)
   if (PMU_DETAILED) {
     require(residentWarpCount == 1 && num_thread == 32)
