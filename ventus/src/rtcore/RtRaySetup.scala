@@ -9,10 +9,6 @@ import top.parameters._
 class RtRaySetupInput extends Bundle {
   val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
-  val accelLo = UInt(xLen.W)
-  val accelHi = UInt(xLen.W)
-  val traceMeta0 = UInt(xLen.W)
-  val traceMeta1 = UInt(xLen.W)
   val rayState = new RtRayState(recorded_float = false)
 }
 
@@ -20,10 +16,6 @@ class RtRaySetupInput extends Bundle {
 class RtRaySetupOutput extends Bundle {
   val warpId = UInt(RtCorePortParameters.residentWarpIdWidth.W)
   val laneId = UInt(log2Ceil(num_thread).W)
-  val accelLo = UInt(xLen.W)
-  val accelHi = UInt(xLen.W)
-  val traceMeta0 = UInt(xLen.W)
-  val traceMeta1 = UInt(xLen.W)
   val ray = new Ray(recorded_float = false)
 }
 
@@ -43,16 +35,19 @@ class RtRaySetup extends Module {
   })
 
   val saved = Reg(new RtRaySetupInput)
-  val busy = RegInit(false.B)
+  val savedValid = RegInit(false.B)
   val outValid = RegInit(false.B)
   val outBits = Reg(new RtRaySetupOutput)
-  io.in.ready := !busy && !outValid
+  // `saved` is the arithmetic stage; `outBits` is its elastic writeback
+  // stage.  A vacated writeback slot admits the next lane in the same cycle,
+  // so the unit has a one-cycle initiation interval without duplicating its
+  // two floating-point multipliers.
+  val advance = !outValid || io.out.ready
+  io.in.ready := !savedValid || advance
   io.out.valid := outValid
   io.out.bits := outBits
-  when(io.out.fire) { outValid := false.B }
   when(io.in.fire) {
     saved := io.in.bits
-    busy := true.B
   }
 
   val direction = Wire(Vec(3, UInt(32.W)))
@@ -84,13 +79,15 @@ class RtRaySetup extends Module {
   shearY.io.a := recFNFromFN(8, 24, direction(ky))
   shearY.io.b := recFNFromFN(8, 24, reciprocalVec(kz))
 
-  when(busy) {
+  when(advance) {
+    outValid := savedValid
+    savedValid := io.in.fire
+  }.otherwise {
+    savedValid := savedValid || io.in.fire
+  }
+  when(advance && savedValid) {
     outBits.warpId := saved.warpId
     outBits.laneId := saved.laneId
-    outBits.accelLo := saved.accelLo
-    outBits.accelHi := saved.accelHi
-    outBits.traceMeta0 := saved.traceMeta0
-    outBits.traceMeta1 := saved.traceMeta1
     outBits.ray.origin := saved.rayState.origin
     outBits.ray.dir := saved.rayState.dir
     outBits.ray.inv.x := reciprocalVec(0)
@@ -104,7 +101,5 @@ class RtRaySetup extends Module {
     outBits.ray.shear.x := fNFromRecFN(8, 24, shearX.io.out)
     outBits.ray.shear.y := fNFromRecFN(8, 24, shearY.io.out)
     outBits.ray.shear.z := reciprocalVec(kz)
-    busy := false.B
-    outValid := true.B
   }
 }

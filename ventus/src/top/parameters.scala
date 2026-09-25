@@ -167,6 +167,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   // responses.  It is intentionally explicit so performance artifacts carry
   // a reproducible off-chip-memory assumption.
   def rtl_external_mem_latency: Int = {
+    // This environment knob is sampled during RTL elaboration, not at
+    // simulation runtime; benchmark builds therefore need a fresh elaboration.
     val latency = sys.env.get("VENTUS_RTL_EXTMEM_LATENCY").map(_.toInt).getOrElse(100)
     require(latency >= 0, "VENTUS_RTL_EXTMEM_LATENCY must be non-negative")
     latency

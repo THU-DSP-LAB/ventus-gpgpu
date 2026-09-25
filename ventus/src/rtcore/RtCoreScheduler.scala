@@ -23,6 +23,7 @@ private[rtcore] object RtVtasNodeKind {
 }
 
 private[rtcore] class RtTriangleDispatchMeta extends Bundle {
+  val objectRay = Bool()
   val opaque = Bool()
   val primitiveId = UInt(xLen.W)
   val geometryId = UInt(xLen.W)
@@ -67,18 +68,43 @@ class RtCoreScheduler extends Module {
 
   val table = Module(new RtMemTable)
   val local = Module(new RtLocalRayState)
+  val worldContexts = Module(new RtWorldRayContexts)
   val stack = Module(new RtTraversalStack)
   val raySetup = Module(new RtRaySetup)
+  val directSetupRequest = WireDefault(false.B)
+  val directSetupLane = WireDefault(0.U(log2Ceil(num_thread).W))
+  val directSetupRay = WireDefault(0.U.asTypeOf(new Ray(recorded_float = false)))
   val triangleResolve = Module(new RtTriangleResolve)
   for (port <- 0 until RtMemTableParameters.asReadPortCount)
     table.io.asLineRead(port).entryId := 0.U
-  for (port <- 1 until (boxUnitCount + triangleUnitCount + 1)) {
-    local.io.issueRayLookup(port).laneId := 0.U
-  }
   io.lsuRequest <> table.io.lsuRequest
   table.io.lsuResponse <> io.lsuResponse
   io.localRequest <> local.io.request
   local.io.response <> io.localResponse
+  // World-ray context reads have priority over the legacy local-state narrow
+  // path.  A per-bank ownership bit routes the delayed response without a
+  // crossbar; bank i only ever serves context reader i.
+  val contextReadOutstanding = RegInit(VecInit(Seq.fill(RtLocalSramParameters.corePortCount)(false.B)))
+  for (port <- 0 until RtLocalSramParameters.corePortCount) {
+    val useContext = worldContexts.io.request(port).valid
+    io.localNarrowRequest(port).valid := useContext || local.io.narrowRequest(port).valid
+    io.localNarrowRequest(port).bits := Mux(useContext,
+      worldContexts.io.request(port).bits, local.io.narrowRequest(port).bits)
+    worldContexts.io.request(port).ready := io.localNarrowRequest(port).ready && useContext
+    local.io.narrowRequest(port).ready := io.localNarrowRequest(port).ready && !useContext
+    worldContexts.io.response(port).valid := io.localNarrowResponse(port).valid && contextReadOutstanding(port)
+    worldContexts.io.response(port).bits := io.localNarrowResponse(port).bits
+    local.io.narrowResponse(port).valid := io.localNarrowResponse(port).valid && !contextReadOutstanding(port)
+    local.io.narrowResponse(port).bits := io.localNarrowResponse(port).bits
+    io.localNarrowResponse(port).ready := Mux(contextReadOutstanding(port),
+      worldContexts.io.response(port).ready, local.io.narrowResponse(port).ready)
+    when(io.localNarrowRequest(port).fire && !io.localNarrowRequest(port).bits.write) {
+      contextReadOutstanding(port) := useContext
+    }
+    when(io.localNarrowResponse(port).fire) {
+      contextReadOutstanding(port) := false.B
+    }
+  }
 
   val Seq(sIdle, sRayLoad, sHeaderRequest, sHeaderPending, sStackReady,
     sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal,
@@ -120,12 +146,21 @@ class RtCoreScheduler extends Module {
   // another world-tagged Instance, at which point this entry may be replaced.
   val objectPrepared = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(
     Seq.fill(num_thread)(0.U.asTypeOf(new RtPreparedRay))))))
+  // Direct BLAS roots do not pass an Instance transform, but Triangle IU
+  // still needs RaySetup's shear/kx/ky/kz.  This tiny per-lane fallback is
+  // populated only for an actually returned world-space Triangle line.
+  val directPrepared = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(
+    Seq.fill(num_thread)(0.U.asTypeOf(new RtPreparedRay))))))
+  val directSetupStarted = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(num_thread.W))))
+  // The only world-ray value that survives a BLAS visit is its mutable near
+  // hit bound; world coordinates remain in short-lived on-demand contexts.
+  val worldTmax = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
+  val worldTmaxValid = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(num_thread.W))))
   val objectBase = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(memReqLen.W))))
   val objectInstanceId = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   val objectCustomIndex = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
   val objectSbtRecordOffset = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
   val objectFlags = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
-  val traceMeta0 = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(32.W))))
   // This is control state, unlike the lane payload arrays above.  It gates
   // retained-session resume/release admission, so its reset value must be
   // defined even while `sessionActive` is false.
@@ -133,6 +168,14 @@ class RtCoreScheduler extends Module {
 
   val instanceTransform = Module(new RtInstanceTransform)
   val objectRaySetup = Module(new RtRaySetup)
+  worldContexts.io.warpId := local.io.ownerWarpId
+  worldContexts.io.clear := io.command.fire || io.releaseAck.fire
+  for (unit <- 0 until boxUnitCount) {
+    worldContexts.io.lookupLane(unit) := 0.U
+    worldContexts.io.consume(unit) := false.B
+    worldContexts.io.setupLookupLane(unit) := 0.U
+    worldContexts.io.setupConsume(unit) := false.B
+  }
 
   private def requestId(warp: UInt, lane: UInt): UInt =
     Cat(0.U((RtCorePortParameters.requestIdWidth - log2Ceil(num_thread)).W), lane)
@@ -189,6 +232,8 @@ class RtCoreScheduler extends Module {
       sessionActive(warp) := true.B
       completionPublished(warp) := false.B
       activeMask(warp) := io.command.bits.activeMask
+      worldTmaxValid(warp) := 0.U
+      directSetupStarted(warp) := 0.U
       for (lane <- 0 until num_thread) {
         when(io.command.bits.activeMask(lane)) {
           laneState(warp)(lane) := sRayLoad
@@ -196,6 +241,7 @@ class RtCoreScheduler extends Module {
           committedValid(warp)(lane) := false.B
           candidateValid(warp)(lane) := false.B
           pendingNodeValid(warp)(lane) := false.B
+          directPrepared(warp)(lane).valid := false.B
         }.otherwise {
           laneState(warp)(lane) := sIdle
         }
@@ -204,6 +250,7 @@ class RtCoreScheduler extends Module {
       assert((io.command.bits.activeMask & ~activeMask(warp)) === 0.U,
         "nested traversal mask must be a subset of the resident RT session")
       completionPublished(warp) := false.B
+      worldTmaxValid(warp) := worldTmaxValid(warp) & ~io.command.bits.activeMask
       for (lane <- 0 until num_thread) {
         when(io.command.bits.activeMask(lane)) {
           laneState(warp)(lane) := sRayLoad
@@ -214,8 +261,10 @@ class RtCoreScheduler extends Module {
           boxPushedCount(warp)(lane) := 0.U
           boxObjectRay(warp)(lane) := false.B
           pendingNodeValid(warp)(lane) := false.B
+          directPrepared(warp)(lane).valid := false.B
         }
       }
+      directSetupStarted(warp) := directSetupStarted(warp) & ~io.command.bits.activeMask
     }.otherwise {
       completionPublished(warp) := false.B
       for (lane <- 0 until num_thread) {
@@ -254,42 +303,17 @@ class RtCoreScheduler extends Module {
     candidateValid(0)(resumeLane) := false.B
   }
 
-  // A gathered local row is the input transaction of RaySetup.  Retirement
-  // happens only after the final local writeback/completion boundary.
-  raySetup.io.in.valid := local.io.laneOut.valid
-  raySetup.io.in.bits.warpId := 0.U
-  raySetup.io.in.bits.laneId := local.io.laneOut.bits.laneId
-  raySetup.io.in.bits.accelLo := local.io.laneOut.bits.data(0)
-  raySetup.io.in.bits.accelHi := local.io.laneOut.bits.data(1)
-  raySetup.io.in.bits.traceMeta0 := local.io.laneOut.bits.data(2)
-  raySetup.io.in.bits.traceMeta1 := local.io.laneOut.bits.data(3)
-  raySetup.io.in.bits.rayState.origin.x := local.io.laneOut.bits.data(4)
-  raySetup.io.in.bits.rayState.origin.y := local.io.laneOut.bits.data(5)
-  raySetup.io.in.bits.rayState.origin.z := local.io.laneOut.bits.data(6)
-  raySetup.io.in.bits.rayState.tmin := local.io.laneOut.bits.data(7)
-  raySetup.io.in.bits.rayState.dir.x := local.io.laneOut.bits.data(8)
-  raySetup.io.in.bits.rayState.dir.y := local.io.laneOut.bits.data(9)
-  raySetup.io.in.bits.rayState.dir.z := local.io.laneOut.bits.data(10)
-  raySetup.io.in.bits.rayState.tmax := local.io.laneOut.bits.data(11)
-  raySetup.io.in.bits.rayState.inv.x := local.io.laneOut.bits.data(12)
-  raySetup.io.in.bits.rayState.inv.y := local.io.laneOut.bits.data(13)
-  raySetup.io.in.bits.rayState.inv.z := local.io.laneOut.bits.data(14)
-  local.io.laneOut.ready := raySetup.io.in.ready
-  when(local.io.laneOut.fire) { assert(laneState(0)(local.io.laneOut.bits.laneId) === sRayLoad) }
-  if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1") ||
-      sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
-    when(local.io.laneOut.fire) {
-      val row = local.io.laneOut.bits.data
-      printf(p"[RTCORE deep] world-ray lane=${Decimal(local.io.laneOut.bits.laneId)}" +
-        p" accel=[${Hexadecimal(row(0))},${Hexadecimal(row(1))}]" +
-        p" meta=[${Hexadecimal(row(2))},${Hexadecimal(row(3))}]" +
-        p" o=[${Hexadecimal(row(4))},${Hexadecimal(row(5))},${Hexadecimal(row(6))}]" +
-        p" tmin=${Hexadecimal(row(7))}" +
-        p" d=[${Hexadecimal(row(8))},${Hexadecimal(row(9))},${Hexadecimal(row(10))}]" +
-        p" tmax=${Hexadecimal(row(11))}" +
-        p" inv=[${Hexadecimal(row(12))},${Hexadecimal(row(13))},${Hexadecimal(row(14))}]\\n")
-    }
-  }
+  // World rays no longer traverse an eager LocalState -> RaySetup mirror.
+  // RtWorldRayContexts supplies raw rays to Box/Instance on demand; the
+  // retained setup unit is reserved for the direct-BLAS triangle fallback.
+  raySetup.io.in.valid := directSetupRequest
+  raySetup.io.in.bits := 0.U.asTypeOf(new RtRaySetupInput)
+  raySetup.io.in.bits.laneId := directSetupLane
+  raySetup.io.in.bits.rayState.origin := directSetupRay.origin
+  raySetup.io.in.bits.rayState.tmin := directSetupRay.originalTmin
+  raySetup.io.in.bits.rayState.dir := directSetupRay.dir
+  raySetup.io.in.bits.rayState.tmax := directSetupRay.extent
+  raySetup.io.in.bits.rayState.inv := directSetupRay.inv
 
   // Stack operation defaults.  Header initialisation, deferred Box4 pushes,
   // and node pop are ordered by the stack module; scheduler only offers one
@@ -303,12 +327,28 @@ class RtCoreScheduler extends Module {
   stack.io.clear.valid := false.B
   stack.io.clear.bits := 0.U.asTypeOf(new RtTraversalStackClear)
 
-  // RaySetup writes the derived ray into the local prepared-ray buffer.  It
-  // then supplies the ray to AS/IU paths without further SRAM accesses.
-  local.io.raySetup <> raySetup.io.out
+  raySetup.io.out.ready := true.B
   when(raySetup.io.out.fire) {
-    traceMeta0(0)(raySetup.io.out.bits.laneId) := raySetup.io.out.bits.traceMeta0
-    laneState(0)(raySetup.io.out.bits.laneId) := sHeaderRequest
+    val lane = raySetup.io.out.bits.laneId
+    val dst = directPrepared(0)(lane)
+    dst.valid := true.B
+    dst.currentTmax := raySetup.io.out.bits.ray.extent
+    dst.originalTmin := raySetup.io.out.bits.ray.originalTmin
+    dst.origin := raySetup.io.out.bits.ray.origin
+    dst.dir := raySetup.io.out.bits.ray.dir
+    dst.inv := raySetup.io.out.bits.ray.inv
+    dst.shear := raySetup.io.out.bits.ray.shear
+    dst.kx := raySetup.io.out.bits.ray.kx
+    dst.ky := raySetup.io.out.bits.ray.ky
+    dst.kz := raySetup.io.out.bits.ray.kz
+  }
+  // Several fixed SRAM banks may complete headers in one cycle.  Advance all
+  // of them; a priority-encoded lane would otherwise leave sibling lanes in
+  // RayLoad after their only AccelLo response has already arrived.
+  for (lane <- 0 until num_thread) {
+    when(local.io.worldBaseArrivedMask(lane) && laneState(0)(lane) === sRayLoad) {
+      laneState(0)(lane) := sHeaderRequest
+    }
   }
 
   // The Instance datapath is deliberately separate from the RT Local gather:
@@ -318,8 +358,6 @@ class RtCoreScheduler extends Module {
   objectRaySetup.io.in.bits := 0.U.asTypeOf(new RtRaySetupInput)
   objectRaySetup.io.in.bits.warpId := 0.U
   objectRaySetup.io.in.bits.laneId := instanceTransform.io.out.bits.laneId
-  objectRaySetup.io.in.bits.accelLo := objectBase(0)(instanceTransform.io.out.bits.laneId)
-  objectRaySetup.io.in.bits.accelHi := 0.U
   objectRaySetup.io.in.bits.rayState := instanceTransform.io.out.bits.rayState
   instanceTransform.io.out.ready := objectRaySetup.io.in.ready
   objectRaySetup.io.out.ready := true.B
@@ -327,7 +365,6 @@ class RtCoreScheduler extends Module {
     val lane = objectRaySetup.io.out.bits.laneId
     val dst = objectPrepared(0)(lane)
     dst.valid := true.B
-    dst.asBase := objectBase(0)(lane)
     // tmax remains owned by the world RT Local row; the object copy is only
     // an IU coordinate-space cache.
     dst.currentTmax := objectRaySetup.io.out.bits.ray.extent
@@ -396,12 +433,14 @@ class RtCoreScheduler extends Module {
   // Stack writes/initialisation are serialized ahead of a pop.  In
   // particular, never let an AS acquire consume a node unless the matching pop
   // can fire in the same cycle.
-  local.io.nodeRayLookup.laneId := Mux(hasHeaderRequest, headerLane, pendingLane)
+  local.io.worldBaseLookup.laneId := Mux(hasHeaderRequest, headerLane, pendingLane)
   val headerObject = laneState(headerWarp)(headerLane) === sBlasHeaderRequest
-  val headerBase = Mux(headerObject, objectBase(headerWarp)(headerLane), local.io.nodeRay.asBase)
+  val headerBase = Mux(headerObject, objectBase(headerWarp)(headerLane), local.io.worldBase.asBase)
   val headerValid = Mux(headerObject, objectPrepared(headerWarp)(headerLane).valid,
-    local.io.nodeRay.valid)
-  val nodeBase = Mux(pendingObjectRay, objectBase(popWarp)(pendingLane), local.io.nodeRay.asBase)
+    local.io.worldBase.valid)
+  val nodeBase = Mux(pendingObjectRay, objectBase(popWarp)(pendingLane), local.io.worldBase.asBase)
+  val nodeBaseValid = Mux(pendingObjectRay, objectPrepared(popWarp)(pendingLane).valid,
+    local.io.worldBase.valid)
   val headerAcquire = hasHeaderRequest && headerValid
   // A Box child push belongs to its own lane.  It may proceed alongside a
   // different lane's pop; only headers and an active returned header line
@@ -409,7 +448,16 @@ class RtCoreScheduler extends Module {
   // Header acquires own the shared AS port, not the lane stacks.  Other lanes
   // may still pop into their pending request slots in the same cycle.
   val popMayFire = !headerLineActive
-  val nodeAcquire = !headerAcquire && pendingMask.orR
+  val worldContextNeeded = !pendingObjectRay &&
+    (pendingType === RtVtasLayout.NodeBox4.U || pendingType === RtVtasLayout.NodeAabb.U ||
+      pendingType === RtVtasLayout.NodeInstance.U || pendingType === RtVtasLayout.NodeTriangle.U)
+  worldContexts.io.prefetch.valid := !headerAcquire && pendingMask.orR && nodeBaseValid && worldContextNeeded
+  worldContexts.io.prefetch.bits.laneId := pendingLane
+  worldContexts.io.prefetch.bits.purpose := Mux(pendingType === RtVtasLayout.NodeInstance.U,
+    RtWorldRayPurpose.instance, Mux(pendingType === RtVtasLayout.NodeTriangle.U,
+      RtWorldRayPurpose.triangle, RtWorldRayPurpose.box))
+  val nodeAcquire = !headerAcquire && pendingMask.orR && nodeBaseValid &&
+    (!worldContextNeeded || worldContexts.io.prefetch.ready)
 
   table.io.asAcquire.valid := headerAcquire || nodeAcquire
   table.io.asAcquire.bits := 0.U.asTypeOf(new RtAsTableAcquire)
@@ -440,6 +488,8 @@ class RtCoreScheduler extends Module {
     table.io.asAcquire.bits.waiter.objectRay := pendingObjectRay
   }
   when(table.io.asAcquire.fire && headerAcquire) {
+    // Elaborated only in the dedicated trace build; keep normal RTL free of
+    // diagnostic print logic.
     if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
       when(headerLane < 4.U || headerLane >= 12.U) {
         printf(p"[RTCORE trace] header-req lane=${Decimal(headerLane)}" +
@@ -509,7 +559,6 @@ class RtCoreScheduler extends Module {
   asReady.bits.data := table.io.asLineRead(0).data
   val asConsumedLanes = WireDefault(0.U(num_thread.W))
   table.io.asConsumeLanes := asConsumedLanes
-  local.io.issueRayLookup(0).laneId := asReady.bits.waiter.laneId
   val asUsesObjectRay = asReady.bits.waiter.objectRay
   val headerRoot = asReady.bits.data((RtVtasLayout.AsHeaderRootNodeRef / 4).toInt)
   val headerInvalid = headerRoot === RtVtasLayout.InvalidNodeRef.U(32.W)
@@ -527,11 +576,19 @@ class RtCoreScheduler extends Module {
     stack.io.init.bits.objectRay(lane) := false.B
   }
   val boxConsumed = Wire(Vec(boxUnitCount, Bool()))
+  val boxWorldIssue = Wire(Vec(boxUnitCount, Bool()))
   for (unit <- 0 until boxUnitCount) {
+    // A world-space Instance is served by the scalar path but uses this same
+    // bank's sole ordinary context lookup/consume port.  Do not also issue a
+    // Box4 from the bank in that cycle: otherwise the Instance lookup wins,
+    // while the Box4 AS waiter is consumed and its own context leaks.
+    val instanceOwnsContextPort = asReady.valid && asIsInstance && !asUsesObjectRay &&
+      asReady.bits.waiter.laneId(log2Ceil(boxUnitCount) - 1, 0) === unit.U
     val groupMask = VecInit((0 until num_thread).map { lane =>
       (if (lane % boxUnitCount == unit) dispatchLineMask(lane) &&
         (table.io.asReadyMeta(lane).bits.nodeKind === RtVtasNodeKind.box4 ||
-          table.io.asReadyMeta(lane).bits.nodeKind === RtVtasNodeKind.aabb) else false.B)
+          table.io.asReadyMeta(lane).bits.nodeKind === RtVtasNodeKind.aabb) &&
+          !instanceOwnsContextPort else false.B)
     }).asUInt
     val lane = PriorityEncoder(groupMask)
     val port = unit + 1
@@ -545,20 +602,23 @@ class RtCoreScheduler extends Module {
     line.bits.waiter.nodeKind := meta.bits.nodeKind
     line.bits.waiter.objectRay := meta.bits.objectRay
     line.bits.data := table.io.asLineRead(port).data
-    local.io.issueRayLookup(port).laneId := lane
     val ray = Wire(new Ray(recorded_float = false))
-    ray := local.io.issueRay(port).ray
+    ray := 0.U.asTypeOf(new Ray(recorded_float = false))
+    worldContexts.io.lookupLane(unit) := Mux(asReady.valid && asIsInstance && !asUsesObjectRay &&
+      asReady.bits.waiter.laneId(2, 0) === unit.U, asReady.bits.waiter.laneId, lane)
+    when(!line.bits.waiter.objectRay) { ray := worldContexts.io.result(unit).ray }
     when(line.bits.waiter.objectRay) {
       ray.origin := objectPrepared(0)(lane).origin
       ray.dir := objectPrepared(0)(lane).dir
       ray.inv := objectPrepared(0)(lane).inv
       ray.shear := objectPrepared(0)(lane).shear
       ray.originalTmin := objectPrepared(0)(lane).originalTmin
-      ray.extent := local.io.issueRay(port).currentTmax
+      ray.extent := Mux(worldTmaxValid(0)(lane), worldTmax(0)(lane),
+        objectPrepared(0)(lane).currentTmax)
       ray.kx := objectPrepared(0)(lane).kx; ray.ky := objectPrepared(0)(lane).ky; ray.kz := objectPrepared(0)(lane).kz
     }
-    val rayValid = local.io.issueRay(port).valid &&
-      (!line.bits.waiter.objectRay || objectPrepared(0)(lane).valid)
+    val rayValid = Mux(line.bits.waiter.objectRay, objectPrepared(0)(lane).valid,
+      worldContexts.io.result(unit).valid)
     val isAabb = line.bits.waiter.nodeKind === RtVtasNodeKind.aabb
     boxIssue(unit).valid := groupMask.orR && rayValid
     boxIssue(unit).bits := 0.U.asTypeOf(new RtBox4IntersectionInput)
@@ -579,7 +639,13 @@ class RtCoreScheduler extends Module {
         line.bits.data((RtVtasLayout.AabbMax / 4 + 2).toInt), line.bits.data((RtVtasLayout.Box4MaxZ / 4).toInt + child))
     }
     boxConsumed(unit) := boxIssue(unit).fire
+    boxWorldIssue(unit) := boxIssue(unit).fire && !line.bits.waiter.objectRay
+    when(instanceOwnsContextPort) {
+      assert(!boxIssue(unit).fire,
+        "world Instance and Box4 must not consume one context port in the same bank/cycle")
+    }
     when(boxIssue(unit).fire) {
+      when(!line.bits.waiter.objectRay) { worldContexts.io.consume(unit) := true.B }
       laneState(0)(lane) := sBoxInflight
       for (child <- 0 until 4) boxChildRefs(0)(lane)(child) := line.bits.data(child)
       boxObjectRay(0)(lane) := line.bits.waiter.objectRay
@@ -597,6 +663,9 @@ class RtCoreScheduler extends Module {
     }
   }
   val triangleConsumed = Wire(Vec(triangleUnitCount, Bool()))
+  val directSetupEligible = Wire(Vec(triangleUnitCount, Bool()))
+  val directSetupLaneCandidate = Wire(Vec(triangleUnitCount, UInt(log2Ceil(num_thread).W)))
+  val directSetupRayCandidate = Wire(Vec(triangleUnitCount, new Ray(recorded_float = false)))
   for (unit <- 0 until triangleUnitCount) {
     val groupMask = VecInit((0 until num_thread).map { lane =>
       if (lane % triangleUnitCount == unit) dispatchLineMask(lane) &&
@@ -614,17 +683,36 @@ class RtCoreScheduler extends Module {
     line.bits.waiter.nodeKind := meta.bits.nodeKind
     line.bits.waiter.objectRay := meta.bits.objectRay
     line.bits.data := table.io.asLineRead(port).data
-    local.io.issueRayLookup(port).laneId := lane
+    val directContext = worldContexts.io.setupResult(lane(2, 0))
+    for (bank <- 0 until boxUnitCount) {
+      when(groupMask.orR && !line.bits.waiter.objectRay && lane(2, 0) === bank.U) {
+        worldContexts.io.setupLookupLane(bank) := lane
+      }
+    }
+    directSetupLaneCandidate(unit) := lane
+    directSetupRayCandidate(unit) := directContext.ray
+    directSetupEligible(unit) := groupMask.orR && !line.bits.waiter.objectRay &&
+      !directPrepared(0)(lane).valid && !directSetupStarted(0)(lane) &&
+      directContext.valid && directContext.purpose === RtWorldRayPurpose.triangle
     val ray = Wire(new Ray(recorded_float = false))
-    ray := local.io.issueRay(port).ray
+    ray := 0.U.asTypeOf(new Ray(recorded_float = false))
     when(line.bits.waiter.objectRay) {
       ray.origin := objectPrepared(0)(lane).origin; ray.dir := objectPrepared(0)(lane).dir
       ray.inv := objectPrepared(0)(lane).inv; ray.shear := objectPrepared(0)(lane).shear
-      ray.originalTmin := objectPrepared(0)(lane).originalTmin; ray.extent := local.io.issueRay(port).currentTmax
+      ray.originalTmin := objectPrepared(0)(lane).originalTmin
+      ray.extent := Mux(worldTmaxValid(0)(lane), worldTmax(0)(lane),
+        objectPrepared(0)(lane).currentTmax)
       ray.kx := objectPrepared(0)(lane).kx; ray.ky := objectPrepared(0)(lane).ky; ray.kz := objectPrepared(0)(lane).kz
     }
-    val rayValid = local.io.issueRay(port).valid &&
-      (!line.bits.waiter.objectRay || objectPrepared(0)(lane).valid)
+    when(!line.bits.waiter.objectRay) {
+      ray.origin := directPrepared(0)(lane).origin; ray.dir := directPrepared(0)(lane).dir
+      ray.inv := directPrepared(0)(lane).inv; ray.shear := directPrepared(0)(lane).shear
+      ray.originalTmin := directPrepared(0)(lane).originalTmin
+      ray.extent := Mux(worldTmaxValid(0)(lane), worldTmax(0)(lane), directPrepared(0)(lane).currentTmax)
+      ray.kx := directPrepared(0)(lane).kx; ray.ky := directPrepared(0)(lane).ky; ray.kz := directPrepared(0)(lane).kz
+    }
+    val rayValid = Mux(line.bits.waiter.objectRay, objectPrepared(0)(lane).valid,
+      directPrepared(0)(lane).valid)
     triangleIssue(unit).valid := groupMask.orR && rayValid
     triangleIssue(unit).bits := 0.U.asTypeOf(new RtTriangleIntersectionInput)
     triangleIssue(unit).bits.requestId := requestId(line.bits.waiter.warpId, lane)
@@ -641,6 +729,7 @@ class RtCoreScheduler extends Module {
     triangleConsumed(unit) := triangleIssue(unit).fire
     when(triangleIssue(unit).fire) {
       laneState(0)(lane) := sTriangleInflight
+      triangleMeta(0)(lane).objectRay := line.bits.waiter.objectRay
       triangleMeta(0)(lane).opaque := line.bits.data((RtVtasLayout.TriangleFlags / 4).toInt)(0)
       triangleMeta(0)(lane).primitiveId := line.bits.data((RtVtasLayout.TrianglePrimitiveId / 4).toInt)
       triangleMeta(0)(lane).geometryId := line.bits.data((RtVtasLayout.TriangleGeometryId / 4).toInt)
@@ -649,6 +738,17 @@ class RtCoreScheduler extends Module {
       triangleMeta(0)(lane).instanceCustomIndex := objectCustomIndex(0)(lane)
       triangleMeta(0)(lane).instanceSbtRecordOffset := objectSbtRecordOffset(0)(lane)
       triangleMeta(0)(lane).instanceFlags := objectFlags(0)(lane)
+    }
+  }
+  val directSetupSelect = PriorityEncoder(directSetupEligible.asUInt)
+  directSetupRequest := directSetupEligible.asUInt.orR
+  directSetupLane := directSetupLaneCandidate(directSetupSelect)
+  directSetupRay := directSetupRayCandidate(directSetupSelect)
+  for (unit <- 0 until triangleUnitCount) {
+    when(raySetup.io.in.fire && directSetupSelect === unit.U) {
+      val lane = directSetupLaneCandidate(unit)
+      directSetupStarted(0) := directSetupStarted(0) | UIntToOH(lane, num_thread)
+      worldContexts.io.setupConsume(lane(2, 0)) := true.B
     }
   }
   val dispatchedLanes = VecInit((0 until num_thread).map { lane =>
@@ -663,12 +763,15 @@ class RtCoreScheduler extends Module {
       }).asUInt) }.reduce(_ || _)
   }).asUInt
   asConsumedLanes := Mux(asReady.fire, UIntToOH(asReadyLane, num_thread), 0.U) | dispatchedLanes
-  val instanceMaskMatch = traceMeta0(0)(asReady.bits.waiter.laneId)(15, 8) &
+  val instanceContext = worldContexts.io.result(asReady.bits.waiter.laneId(2, 0))
+  val instanceTraceMetaReady = instanceContext.valid && instanceContext.purpose === RtWorldRayPurpose.instance
+  val instanceMaskMatch = instanceContext.traceMeta0(15, 8) &
     asReady.bits.data((RtVtasLayout.InstanceMask / 4).toInt)(7, 0)
-  instanceTransform.io.in.valid := asReady.valid && asIsInstance && !asUsesObjectRay && local.io.issueRay(0).valid && instanceMaskMatch.orR
+  instanceTransform.io.in.valid := asReady.valid && asIsInstance && !asUsesObjectRay &&
+    instanceTraceMetaReady && instanceMaskMatch.orR
   instanceTransform.io.in.bits := 0.U.asTypeOf(new RtInstanceTransformInput)
   instanceTransform.io.in.bits.laneId := asReady.bits.waiter.laneId
-  instanceTransform.io.in.bits.ray := local.io.issueRay(0).ray
+  instanceTransform.io.in.bits.ray := instanceContext.ray
   for (word <- 0 until 12)
     instanceTransform.io.in.bits.matrix(word) := asReady.bits.data((RtVtasLayout.InstanceWorldToObject / 4).toInt + word)
   val asHeaderReady = asReady.valid && asIsHeader && (headerInvalid || stack.io.init.ready)
@@ -676,9 +779,33 @@ class RtCoreScheduler extends Module {
   val asBlasHeaderReady = asReady.valid && asIsBlasHeader &&
     (headerInvalid || stack.io.pushAcceptedMask(asReady.bits.waiter.laneId))
   val asInstanceReady = asReady.valid && asIsInstance &&
-    (!instanceMaskMatch.orR || instanceTransform.io.in.ready)
+    instanceTraceMetaReady && (!instanceMaskMatch.orR || instanceTransform.io.in.ready)
   asReady.ready := asHeaderReady || asBlasHeaderReady || asInstanceReady ||
     (asReady.valid && !asIsHeader && !asIsBlasHeader && !asIsInstance)
+  // A masked-out instance consumes no transform input, but its short-lived
+  // context is still finished once the AS line has been consumed.
+  when(asReady.fire && asIsInstance && !asUsesObjectRay) {
+    worldContexts.io.consume(asReady.bits.waiter.laneId(2, 0)) := true.B
+  }
+  // Several fixed Box4 IUs may initialise different lanes in one cycle.
+  // Merge those writes by lane instead of relying on connection order.
+  val instanceTmaxSeed = asReady.fire && asIsInstance && !asUsesObjectRay
+  val worldTmaxSeedMask = VecInit((0 until num_thread).map { lane =>
+    val fromBox = (0 until boxUnitCount).map(unit => boxWorldIssue(unit) &&
+      requestLane(boxIssue(unit).bits.requestId) === lane.U).reduce(_ || _)
+    fromBox || (instanceTmaxSeed && asReady.bits.waiter.laneId === lane.U)
+  }).asUInt & ~worldTmaxValid(0)
+  when(worldTmaxSeedMask.orR) {
+    worldTmaxValid(0) := worldTmaxValid(0) | worldTmaxSeedMask
+    for (lane <- 0 until num_thread) when(worldTmaxSeedMask(lane)) {
+      val boxWriters = (0 until boxUnitCount).map(unit => boxWorldIssue(unit) &&
+        requestLane(boxIssue(unit).bits.requestId) === lane.U)
+      worldTmax(0)(lane) := Mux(instanceTmaxSeed && asReady.bits.waiter.laneId === lane.U,
+        instanceContext.ray.extent, Mux1H(boxWriters.zipWithIndex.map { case (write, unit) =>
+          write -> boxIssue(unit).bits.ray.extent
+        }))
+    }
+  }
   when(asReady.fire) {
     val waiter = asReady.bits.waiter
     if (sys.env.get("VENTUS_RTCORE_DEEP_TRACE").contains("1")) {
@@ -824,14 +951,19 @@ class RtCoreScheduler extends Module {
     (triangleResultSelect === unit.U) -> triangleResult(unit).bits))
   val selectedTriangleWarp = requestWarp(selectedTriangleResult.requestId)
   val selectedTriangleLane = requestLane(selectedTriangleResult.requestId)
-  local.io.resultRayLookup.laneId := selectedTriangleLane
+  val triangleUsesObjectRay = triangleMeta(selectedTriangleWarp)(selectedTriangleLane).objectRay
+  val trianglePrepared = Wire(new RtPreparedRay)
+  trianglePrepared := Mux(triangleUsesObjectRay,
+    objectPrepared(selectedTriangleWarp)(selectedTriangleLane),
+    directPrepared(selectedTriangleWarp)(selectedTriangleLane))
   val tBoundProduct = Module(new MulRecFN(8, 24))
-  tBoundProduct.io.a := recFNFromFN(8, 24, local.io.resultRay.currentTmax)
+  tBoundProduct.io.a := recFNFromFN(8, 24, Mux(worldTmaxValid(selectedTriangleWarp)(selectedTriangleLane),
+    worldTmax(selectedTriangleWarp)(selectedTriangleLane), trianglePrepared.currentTmax))
   tBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
   tBoundProduct.io.roundingMode := consts.round_near_even
   tBoundProduct.io.detectTininess := consts.tininess_beforeRounding
   val tMinBoundProduct = Module(new MulRecFN(8, 24))
-  tMinBoundProduct.io.a := recFNFromFN(8, 24, local.io.resultRay.ray.originalTmin)
+  tMinBoundProduct.io.a := recFNFromFN(8, 24, trianglePrepared.originalTmin)
   tMinBoundProduct.io.b := recFNFromFN(8, 24, selectedTriangleResult.tDenom)
   tMinBoundProduct.io.roundingMode := consts.round_near_even
   tMinBoundProduct.io.detectTininess := consts.tininess_beforeRounding
@@ -847,7 +979,7 @@ class RtCoreScheduler extends Module {
   aboveOriginalTmin.io.a := recFNFromFN(8, 24, selectedTriangleResult.tNum)
   aboveOriginalTmin.io.b := tMinBoundProduct.io.out
   aboveOriginalTmin.io.signaling := false.B
-  val acceptedTriangleResult = selectedTriangleResult.hit && local.io.resultRay.valid &&
+  val acceptedTriangleResult = selectedTriangleResult.hit && trianglePrepared.valid &&
     denominatorPositive.io.gt &&
     (aboveOriginalTmin.io.gt || aboveOriginalTmin.io.eq) && withinCurrentTmax.io.lt
   when(triangleResultMask.orR && selectedTriangleResult.hit) {
@@ -859,7 +991,7 @@ class RtCoreScheduler extends Module {
   for (unit <- 0 until triangleUnitCount) {
     val selected = triangleResultMask.orR && triangleResultSelect === unit.U
     triangleResult(unit).ready := selected && (!selectedTriangleResult.hit ||
-      (local.io.resultRay.valid && (!acceptedTriangleResult || triangleResolve.io.in.ready)))
+      (trianglePrepared.valid && (!acceptedTriangleResult || triangleResolve.io.in.ready)))
   }
   when(triangleResultMask.orR && triangleResult(triangleResultSelect).fire) {
     nextTriangleResult := triangleResultSelect + 1.U
@@ -921,15 +1053,16 @@ class RtCoreScheduler extends Module {
         p"${Hexadecimal(update.data(7))},${Hexadecimal(update.data(8))}]\n")
     }
   }
-  val triangleTmaxUpdate = Wire(new RtLocalRayTmaxUpdate)
-  triangleTmaxUpdate.laneId := resultLane
-  triangleTmaxUpdate.tmax := triangleResolve.io.out.bits.t
-  local.io.rayTmaxUpdate.valid := triangleResolve.io.out.valid && triangleIsOpaque
-  local.io.rayTmaxUpdate.bits := triangleTmaxUpdate
-  triangleResolve.io.out.ready := !aabbCandidateMask.orR && local.io.hitUpdate.ready &&
-    (!triangleIsOpaque || local.io.rayTmaxUpdate.ready)
+  triangleResolve.io.out.ready := !aabbCandidateMask.orR && local.io.hitUpdate.ready
   when(triangleResolve.io.out.fire) {
     when(triangleIsOpaque) {
+      worldTmax(resultWarp)(resultLane) := triangleResolve.io.out.bits.t
+      // The scalar resolve may coincide with one or more Box/Instance first
+      // uses. Preserve those same-cycle seed bits instead of overwriting the
+      // whole per-warp valid mask with only the resolved lane.
+      worldTmaxValid(resultWarp) := worldTmaxValid(resultWarp) |
+        UIntToOH(resultLane, num_thread) |
+        Mux(resultWarp === 0.U, worldTmaxSeedMask, 0.U)
       committedValid(resultWarp)(resultLane) := true.B
       laneState(resultWarp)(resultLane) := sStackReady
     }.otherwise {
@@ -1095,10 +1228,17 @@ class RtCoreScheduler extends Module {
 
   // Export only physical handshakes.  In particular, local SRAM is private to
   // RTcore: these events must not be relabelled as generic LSU traffic.
-  io.perf.localSramReadRequest := io.localRequest.fire && !io.localRequest.bits.write
-  io.perf.localSramWriteRequest := io.localRequest.fire && io.localRequest.bits.write
-  io.perf.localSramReadResponse := io.localResponse.fire
-  io.perf.localSramBackpressure := io.localRequest.valid && !io.localRequest.ready
+  val narrowLocalReads = io.localNarrowRequest.map(port => port.fire && !port.bits.write)
+  val narrowLocalWrites = io.localNarrowRequest.map(port => port.fire && port.bits.write)
+  val narrowLocalResponses = io.localNarrowResponse.map(_.fire)
+  val narrowLocalBackpressure = io.localNarrowRequest.map(port => port.valid && !port.ready)
+  io.perf.localSramReadRequest := (io.localRequest.fire && !io.localRequest.bits.write) ||
+    narrowLocalReads.reduce(_ || _)
+  io.perf.localSramWriteRequest := (io.localRequest.fire && io.localRequest.bits.write) ||
+    narrowLocalWrites.reduce(_ || _)
+  io.perf.localSramReadResponse := io.localResponse.fire || narrowLocalResponses.reduce(_ || _)
+  io.perf.localSramBackpressure := (io.localRequest.valid && !io.localRequest.ready) ||
+    narrowLocalBackpressure.reduce(_ || _)
   io.perf.raySetupOutput := raySetup.io.out.fire
   io.perf.asLineAcquire := table.io.asAcquire.fire
   io.perf.asLineReady := PopCount(asConsumedLanes)
@@ -1150,6 +1290,7 @@ class RtCoreScheduler extends Module {
     d.readyBlockedRay := false.B
     d.readyBlockedBox := false.B
     d.readyBlockedTriangle := false.B
+    d.rayLoad := local.io.detailed.get
     d.asTable := table.io.detailed.get
     def observe(dst: RtUnitObservation, in: DecoupledIO[_], out: DecoupledIO[_]): Unit = {
       dst.inValid := in.valid; dst.inReady := in.ready

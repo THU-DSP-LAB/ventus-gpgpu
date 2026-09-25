@@ -25,6 +25,12 @@ struct RtAsSample {
     uint32_t serveLanes = 0;
     std::array<uint32_t, 32> serveEntries{};
 };
+struct RtRayLoadSample {
+    bool gatherStart = false, gatherReadRequest = false, gatherReadResponse = false;
+    uint32_t gatherField = 0;
+    bool gatherDone = false, laneOut = false, setupWrite = false;
+    uint32_t laneOutLane = 0, setupWriteLane = 0;
+};
 struct RtDetailedSample {
     bool enabled = false, clear = false, session = false, command = false, release = false;
     uint32_t activeMask = 0, commandMask = 0, commandKind = 0;
@@ -36,6 +42,7 @@ struct RtDetailedSample {
     bool stackSelected = false, popBlockedHeader = false, popBlockedPush = false;
     bool popBlockedHeaderLine = false, asBlocked = false;
     bool readyBlockedRay = false, readyBlockedBox = false, readyBlockedTriangle = false;
+    RtRayLoadSample rayLoad;
     RtUnitSample lsu;
     uint32_t lsuRequestTag = 0, lsuResponseTag = 0;
     std::array<RtUnitSample, 11> units{}; // 8 Box4, 2 Triangle, 1 resolve
@@ -123,6 +130,117 @@ class RtDetailedPmu {
         std::string path;
     };
     std::array<NodeVisit, 32> nodes{};
+    struct RayLoad {
+        bool live = false, gathered = false, readOutstanding = false;
+        uint64_t startCycle = 0, gatherCycle = 0, readRequestCycle = 0;
+        uint32_t kind = 0, mask = 0, readField = 0, laneOutMask = 0, setupMask = 0;
+        std::array<uint64_t, 32> laneOutCycle{};
+    } rayLoad;
+    std::string ray_load_prefix() const {
+        switch (rayLoad.kind) {
+        case 0: return "rayload_fresh_";
+        case 2: return "rayload_restart_";
+        default: return "rayload_unknown_";
+        }
+    }
+    void count_ray(const std::string& key, uint64_t n = 1) {
+        stats.count("rayload_" + key, n);
+        if (rayLoad.live) stats.count(ray_load_prefix() + key, n);
+    }
+    void bin_ray(const std::string& key, uint64_t value) {
+        stats.bin("rayload_" + key, value);
+        if (rayLoad.live) stats.bin(ray_load_prefix() + key, value);
+    }
+    void sample_rayload(const RtDetailedSample& s) {
+        const auto& r = s.rayLoad;
+        if (s.command && s.commandKind != 1 && !r.gatherStart)
+            stats.count("rayload_command_without_gather_start");
+        if (r.gatherStart) {
+            if (!s.command) stats.count("rayload_gather_start_without_command");
+            if (s.commandKind == 1) stats.count("rayload_resume_started_gather");
+            if (rayLoad.live) stats.count("rayload_overlapped_command");
+            rayLoad = RayLoad{};
+            rayLoad.live = true;
+            rayLoad.startCycle = cycle;
+            rayLoad.kind = s.commandKind;
+            rayLoad.mask = s.commandMask;
+            count_ray("commands");
+            bin_ray("command_active_lanes", __builtin_popcount(rayLoad.mask));
+        }
+        if (r.gatherReadRequest) {
+            if (!rayLoad.live) stats.count("rayload_read_without_command");
+            else {
+                if (rayLoad.readOutstanding) count_ray("duplicate_read_requests");
+                rayLoad.readOutstanding = true;
+                rayLoad.readRequestCycle = cycle;
+                rayLoad.readField = r.gatherField;
+                count_ray("gather_read_requests");
+                bin_ray("gather_read_field", r.gatherField);
+            }
+        }
+        if (r.gatherReadResponse) {
+            if (!rayLoad.live || !rayLoad.readOutstanding) stats.count("rayload_unmatched_read_responses");
+            else {
+                if (rayLoad.readField != r.gatherField) count_ray("read_field_mismatches");
+                bin_ray("gather_read_latency_cycles", cycle - rayLoad.readRequestCycle);
+                rayLoad.readOutstanding = false;
+                count_ray("gather_read_responses");
+            }
+        }
+        if (r.gatherDone) {
+            if (!rayLoad.live || !r.gatherReadResponse || rayLoad.gathered)
+                stats.count("rayload_unmatched_gather_done");
+            else {
+                rayLoad.gathered = true;
+                rayLoad.gatherCycle = cycle;
+                const uint64_t elapsed = cycle - rayLoad.startCycle;
+                const uint64_t lanes = __builtin_popcount(rayLoad.mask);
+                count_ray("gather_commands_completed");
+                bin_ray("command_to_gather_cycles", elapsed);
+                count_ray("command_to_gather_lane_cycles", elapsed * lanes);
+            }
+        }
+        if (r.laneOut) {
+            const uint32_t lane = r.laneOutLane;
+            const uint32_t bit = lane < 32 ? (uint32_t(1) << lane) : 0;
+            if (!rayLoad.live || !rayLoad.gathered || !(rayLoad.mask & bit))
+                stats.count("rayload_unmatched_lane_out");
+            else if (rayLoad.laneOutMask & bit) count_ray("duplicate_lane_out");
+            else {
+                rayLoad.laneOutMask |= bit;
+                rayLoad.laneOutCycle[lane] = cycle;
+                const uint64_t elapsed = cycle - rayLoad.gatherCycle;
+                count_ray("lane_outs");
+                bin_ray("gather_to_lane_out_cycles", elapsed);
+                count_ray("gather_to_lane_out_lane_cycles", elapsed);
+            }
+        }
+        if (r.setupWrite) {
+            const uint32_t lane = r.setupWriteLane;
+            const uint32_t bit = lane < 32 ? (uint32_t(1) << lane) : 0;
+            if (!rayLoad.live || !(rayLoad.laneOutMask & bit))
+                stats.count("rayload_unmatched_setup_writes");
+            else if (rayLoad.setupMask & bit) count_ray("duplicate_setup_writes");
+            else {
+                rayLoad.setupMask |= bit;
+                const uint64_t queue = cycle - rayLoad.laneOutCycle[lane];
+                const uint64_t total = cycle - rayLoad.startCycle;
+                count_ray("setup_writes");
+                bin_ray("lane_out_to_setup_write_cycles", queue);
+                count_ray("lane_out_to_setup_write_lane_cycles", queue);
+                bin_ray("command_to_setup_write_cycles", total);
+                count_ray("command_to_setup_write_lane_cycles", total);
+                if (rayLoad.setupMask == rayLoad.mask) {
+                    count_ray("commands_completed");
+                    rayLoad.live = false;
+                }
+            }
+        }
+        if (s.release && rayLoad.live) {
+            stats.count("rayload_unfinished_at_release");
+            rayLoad = RayLoad{};
+        }
+    }
     void sample_nodes(const RtDetailedSample& s) {
         const auto& a = s.asTable;
         for (unsigned lane = 0; lane < nodes.size(); ++lane) {
@@ -202,6 +320,7 @@ public:
         if (!s.enabled) return;
         stats.count("sampled_cycles");
         stats.count("session_cycles", s.session);
+        sample_rayload(s);
         sample_nodes(s);
         if (s.command) {
             stats.bin("command_active_lanes", __builtin_popcount(s.commandMask));

@@ -35,6 +35,13 @@ ifneq ($(filter $(VLIB_PMU_MODE),off basic detailed),$(VLIB_PMU_MODE))
 $(error VLIB_PMU_MODE must be one of off, basic, detailed; got '$(VLIB_PMU_MODE)')
 endif
 export VENTUS_PMU_MODE = $(VLIB_PMU_MODE)
+# This value is sampled by Chisel during elaboration.  An explicitly requested
+# latency therefore needs a separate generated RTL directory; otherwise Make
+# can silently reuse a dut.v generated with the default latency.
+VLIB_EXTMEM_LATENCY := $(strip $(VENTUS_RTL_EXTMEM_LATENCY))
+ifneq ($(VLIB_EXTMEM_LATENCY),)
+export VENTUS_RTL_EXTMEM_LATENCY = $(VLIB_EXTMEM_LATENCY)
+endif
 export VENTUS_RTCORE_TRACE = $(VLIB_RTCORE_TRACE)
 export VENTUS_RTCORE_DEEP_TRACE = $(VLIB_RTCORE_DEEP_TRACE)
 export VENTUS_RTCORE_RECORD_TRACE = $(VLIB_RTCORE_RECORD_TRACE)
@@ -89,6 +96,9 @@ VLIB_DIR_SCALA = ../ventus/src
 # RTCore printf probes change Chisel output, while ``--trace-fst`` changes the
 # generated Verilator model. Namespace both forms of diagnostic elaboration.
 VLIB_ELAB_FLAVOR = $(VLIB_PMU_MODE)
+ifneq ($(VLIB_EXTMEM_LATENCY),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-lat$(VLIB_EXTMEM_LATENCY)
+endif
 ifneq ($(filter 1 yes true on,$(VLIB_RTCORE_TRACE)),)
 VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-rtcoretrace
 endif

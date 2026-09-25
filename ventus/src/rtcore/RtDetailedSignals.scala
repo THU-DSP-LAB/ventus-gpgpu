@@ -40,6 +40,19 @@ class RtUnitObservation extends Bundle {
   val outReady = Bool()
 }
 
+/** Ray-load boundaries observed without feeding back into its control path. */
+class RtRayLoadObservation extends Bundle {
+  val gatherStart = Bool()
+  val gatherReadRequest = Bool()
+  val gatherReadResponse = Bool()
+  val gatherField = UInt(4.W)
+  val gatherDone = Bool()
+  val laneOut = Bool()
+  val laneOutLane = UInt(5.W)
+  val setupWrite = Bool()
+  val setupWriteLane = UInt(5.W)
+}
+
 class RtDetailedSignals extends Bundle {
   val enabled = Bool()
   val clear = Bool()
@@ -62,6 +75,7 @@ class RtDetailedSignals extends Bundle {
   val readyBlockedRay = Bool()
   val readyBlockedBox = Bool()
   val readyBlockedTriangle = Bool()
+  val rayLoad = new RtRayLoadObservation
   val lsu = new RtUnitObservation // request on input, response on output
   val lsuRequestTag = UInt(LsuClientTag.width.W)
   val lsuResponseTag = UInt(LsuClientTag.width.W)

@@ -31,6 +31,8 @@ class RtCore extends Module {
   scheduler.io.lsuResponse <> io.lsuResponse
   io.localRequest <> scheduler.io.localRequest
   scheduler.io.localResponse <> io.localResponse
+  io.localNarrowRequest <> scheduler.io.localNarrowRequest
+  scheduler.io.localNarrowResponse <> io.localNarrowResponse
   io.perf := scheduler.io.perf
 
   for (index <- 0 until boxUnitCount) {

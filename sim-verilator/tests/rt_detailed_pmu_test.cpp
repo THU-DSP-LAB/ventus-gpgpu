@@ -2,6 +2,58 @@
 #include <cassert>
 
 int main() {
+    // RayLoad splits common field-major gather delay from each lane's setup
+    // queueing delay.  The two completed lanes must conserve their total
+    // command-to-write time across those three phases.
+    {
+        RtDetailedPmu ray;
+        auto sample = [] { RtDetailedSample s; s.enabled = true; return s; };
+        auto s = sample();
+        s.command = true; s.commandKind = 0; s.commandMask = 3;
+        s.rayLoad.gatherStart = true;
+        ray.sample(s); // 0: fresh command
+        s = sample(); s.rayLoad.gatherReadRequest = true; s.rayLoad.gatherField = 0;
+        ray.sample(s); // 1: field 0 request
+        s = sample(); ray.sample(s); // 2
+        s = sample(); ray.sample(s); // 3
+        s = sample(); s.rayLoad.gatherReadResponse = true; s.rayLoad.gatherField = 0;
+        ray.sample(s); // 4: field 0 response, latency 3
+        s = sample(); s.rayLoad.gatherReadRequest = true; s.rayLoad.gatherField = 14;
+        ray.sample(s); // 5: final field request
+        s = sample(); ray.sample(s); // 6
+        s = sample(); s.rayLoad.gatherReadResponse = s.rayLoad.gatherDone = true;
+        s.rayLoad.gatherField = 14;
+        ray.sample(s); // 7: gather complete, 7 cycles from command
+        s = sample(); s.rayLoad.laneOut = true; s.rayLoad.laneOutLane = 0;
+        ray.sample(s); // 8
+        s = sample(); s.rayLoad.laneOut = true; s.rayLoad.laneOutLane = 1;
+        ray.sample(s); // 9
+        s = sample(); ray.sample(s); // 10
+        s = sample(); s.rayLoad.setupWrite = true; s.rayLoad.setupWriteLane = 0;
+        ray.sample(s); // 11
+        s = sample(); s.rayLoad.setupWrite = true; s.rayLoad.setupWriteLane = 1;
+        ray.sample(s); // 12
+        const auto& c = ray.stats.counters;
+        assert(c.at("rayload_fresh_commands") == 1);
+        assert(c.at("rayload_fresh_gather_read_requests") == 2);
+        assert(c.at("rayload_fresh_command_to_gather_lane_cycles") == 14);
+        assert(c.at("rayload_fresh_gather_to_lane_out_lane_cycles") == 3);
+        assert(c.at("rayload_fresh_lane_out_to_setup_write_lane_cycles") == 6);
+        assert(c.at("rayload_fresh_command_to_setup_write_lane_cycles") == 23);
+        assert(c.at("rayload_fresh_commands_completed") == 1);
+        assert(ray.stats.histograms["rayload_fresh_gather_read_latency_cycles"][3] == 1);
+        assert(ray.stats.histograms["rayload_fresh_gather_read_latency_cycles"][2] == 1);
+        // A released incomplete restart cannot leak into the next command.
+        s = sample(); s.command = true; s.commandKind = 2; s.commandMask = 1;
+        s.rayLoad.gatherStart = true; ray.sample(s);
+        s = sample(); s.release = true; ray.sample(s);
+        assert(ray.stats.counters["rayload_unfinished_at_release"] == 1);
+        s = sample(); s.command = true; s.commandKind = 0; s.commandMask = 1;
+        s.rayLoad.gatherStart = true; ray.sample(s);
+        assert(ray.stats.counters["rayload_overlapped_command"] == 0);
+        s.clear = true; ray.sample(s);
+        assert(ray.stats.counters.empty());
+    }
     // Three node visits share an entry: miss, pending merge, resident hit.
     // First-ready is independent of consumption; two lanes may serve together.
     {

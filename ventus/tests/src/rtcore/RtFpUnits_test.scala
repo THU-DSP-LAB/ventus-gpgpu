@@ -142,10 +142,6 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
     val reciprocal = if (inverse.nonEmpty) inverse else direction.map(value => 1.0f / value)
     dut.io.in.bits.warpId.poke(0.U)
     dut.io.in.bits.laneId.poke(lane.U)
-    dut.io.in.bits.accelLo.poke(0x8000.U)
-    dut.io.in.bits.accelHi.poke(0x9000.U)
-    dut.io.in.bits.traceMeta0.poke(0x1111.U)
-    dut.io.in.bits.traceMeta1.poke(0x2222.U)
     dut.io.in.bits.rayState.origin.x.poke(raw(origin(0)).U)
     dut.io.in.bits.rayState.origin.y.poke(raw(origin(1)).U)
     dut.io.in.bits.rayState.origin.z.poke(raw(origin(2)).U)
@@ -183,10 +179,6 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
     val reciprocal = if (inverse.nonEmpty) inverse else direction.map(value => 1.0f / value)
     dut.io.out.bits.warpId.expect(0.U)
     dut.io.out.bits.laneId.expect(lane.U)
-    dut.io.out.bits.accelLo.expect(0x8000.U)
-    dut.io.out.bits.accelHi.expect(0x9000.U)
-    dut.io.out.bits.traceMeta0.expect(0x1111.U)
-    dut.io.out.bits.traceMeta1.expect(0x2222.U)
     dut.io.out.bits.ray.origin.x.expect(raw(origin(0)).U)
     dut.io.out.bits.ray.origin.y.expect(raw(origin(1)).U)
     dut.io.out.bits.ray.origin.z.expect(raw(origin(2)).U)
@@ -265,6 +257,38 @@ class RtFpUnitsTest extends AnyFreeSpec with ChiselScalatestTester {
       checkSetupResult(dut, 3, origin, direction, 20.0f)
       dut.io.out.ready.poke(true.B)
       dut.clock.step()
+      dut.io.out.valid.expect(false.B)
+    }
+  }
+
+  "RaySetup accepts consecutive lanes while writing back prior lanes" in {
+    test(new RtRaySetup).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      reset(dut)
+      dut.io.out.ready.poke(true.B)
+      val vectors = Seq(
+        (Seq(1.0f, 2.0f, 3.0f), Seq(4.0f, -2.0f, 1.0f), 10.0f),
+        (Seq(2.0f, 3.0f, 4.0f), Seq(-1.0f, 5.0f, 2.0f), 11.0f),
+        (Seq(3.0f, 4.0f, 5.0f), Seq(2.0f, 1.0f, -8.0f), 12.0f),
+        (Seq(4.0f, 5.0f, 6.0f), Seq(-3.0f, 2.0f, 7.0f), 13.0f)
+      )
+      vectors.zipWithIndex.foreach { case ((origin, direction, tmax), lane) =>
+        pokeSetup(dut, lane, origin, direction, tmax)
+        dut.io.in.valid.poke(true.B)
+        dut.io.in.ready.expect(true.B)
+        if (lane >= 2) {
+          val (oldOrigin, oldDirection, oldTmax) = vectors(lane - 2)
+          dut.io.out.valid.expect(true.B)
+          checkSetupResult(dut, lane - 2, oldOrigin, oldDirection, oldTmax)
+        }
+        dut.clock.step()
+      }
+      dut.io.in.valid.poke(false.B)
+      for (lane <- vectors.indices.drop(2)) {
+        val (origin, direction, tmax) = vectors(lane)
+        dut.io.out.valid.expect(true.B)
+        checkSetupResult(dut, lane, origin, direction, tmax)
+        dut.clock.step()
+      }
       dut.io.out.valid.expect(false.B)
     }
   }

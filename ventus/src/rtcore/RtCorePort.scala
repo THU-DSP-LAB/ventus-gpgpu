@@ -108,6 +108,10 @@ class RtCoreIO extends Bundle {
 
   val localRequest = Decoupled(new RtLocalSramRequest)
   val localResponse = Flipped(Decoupled(new RtLocalSramResponse))
+  val localNarrowRequest = Vec(RtLocalSramParameters.corePortCount,
+    Decoupled(new RtLocalSramNarrowRequest))
+  val localNarrowResponse = Flipped(Vec(RtLocalSramParameters.corePortCount,
+    Decoupled(new RtLocalSramNarrowResponse)))
 
   val lsuRequest = Decoupled(new LsuClientRequest)
   val lsuResponse = Flipped(Decoupled(new LsuClientResponse))

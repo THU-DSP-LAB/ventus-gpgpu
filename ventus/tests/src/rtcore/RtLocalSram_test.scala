@@ -41,6 +41,70 @@ class RtLocalSramTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.request.bits.warpId.poke(0.U); dut.io.request.bits.fieldId.poke(0.U)
     dut.io.request.bits.write.poke(false.B); dut.io.request.bits.laneMask.poke(0.U)
     dut.io.request.bits.writeData.foreach(_.poke(0.U)); dut.io.response.ready.poke(true.B)
+    dut.io.coreRequest.foreach { request =>
+      request.valid.poke(false.B)
+      request.bits.warpId.poke(0.U); request.bits.laneId.poke(0.U)
+      request.bits.fieldId.poke(0.U); request.bits.write.poke(false.B)
+      request.bits.writeData.poke(0.U)
+    }
+    dut.io.coreResponse.foreach(_.ready.poke(true.B))
+  }
+
+  "serves eight different lane-word reads in parallel" in {
+    test(new RtLocalSram) { dut =>
+      idle(dut); dut.clock.step()
+      dut.io.request.bits.warpId.poke(2.U); dut.io.request.bits.fieldId.poke(9.U)
+      dut.io.request.bits.write.poke(true.B); dut.io.request.bits.laneMask.poke("hffffffff".U)
+      dut.io.request.bits.writeData.zipWithIndex.foreach { case (word, lane) => word.poke((0x600 + lane).U) }
+      dut.io.request.valid.poke(true.B); dut.io.request.ready.expect(true.B); dut.clock.step()
+      dut.io.request.valid.poke(false.B)
+
+      for (port <- 0 until RtLocalSramParameters.corePortCount) {
+        dut.io.coreRequest(port).bits.warpId.poke(2.U)
+        dut.io.coreRequest(port).bits.laneId.poke(port.U)
+        dut.io.coreRequest(port).bits.fieldId.poke(9.U)
+        dut.io.coreRequest(port).bits.write.poke(false.B)
+        dut.io.coreRequest(port).valid.poke(true.B)
+        dut.io.coreRequest(port).ready.expect(true.B)
+      }
+      dut.clock.step()
+      dut.io.coreRequest.foreach(_.valid.poke(false.B))
+      for (port <- 0 until RtLocalSramParameters.corePortCount) {
+        dut.io.coreResponse(port).valid.expect(true.B)
+        dut.io.coreResponse(port).bits.readData.expect((0x600 + port).U)
+      }
+    }
+  }
+
+  "serves every bank-local lane slot through the narrow path" in {
+    test(new RtLocalSram) { dut =>
+      idle(dut); dut.clock.step()
+      dut.io.request.bits.warpId.poke(2.U); dut.io.request.bits.fieldId.poke(10.U)
+      dut.io.request.bits.write.poke(true.B); dut.io.request.bits.laneMask.poke("hffffffff".U)
+      dut.io.request.bits.writeData.zipWithIndex.foreach { case (word, lane) => word.poke((0x700 + lane).U) }
+      dut.io.request.valid.poke(true.B); dut.io.request.ready.expect(true.B); dut.clock.step()
+      dut.io.request.valid.poke(false.B)
+
+      for (slot <- 0 until RtLocalSramParameters.lanesPerBank) {
+        for (port <- 0 until RtLocalSramParameters.corePortCount) {
+          val lane = slot * RtLocalSramParameters.bankCount + port
+          dut.io.coreRequest(port).bits.warpId.poke(2.U)
+          dut.io.coreRequest(port).bits.laneId.poke(lane.U)
+          dut.io.coreRequest(port).bits.fieldId.poke(10.U)
+          dut.io.coreRequest(port).bits.write.poke(false.B)
+          dut.io.coreRequest(port).valid.poke(true.B)
+          dut.io.coreRequest(port).ready.expect(true.B)
+        }
+        dut.clock.step()
+        dut.io.coreRequest.foreach(_.valid.poke(false.B))
+        for (port <- 0 until RtLocalSramParameters.corePortCount) {
+          val lane = slot * RtLocalSramParameters.bankCount + port
+          dut.io.coreResponse(port).valid.expect(true.B)
+          dut.io.coreResponse(port).bits.readData.expect((0x700 + lane).U)
+        }
+        dut.clock.step()
+      }
+    }
   }
   "maps a field-major warp row across all 32 banks" in {
     test(new RtLocalSram) { dut =>

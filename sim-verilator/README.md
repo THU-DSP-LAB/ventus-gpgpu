@@ -159,6 +159,19 @@ These observers exist only in detailed mode and never drive DUT inputs.
 Run `python3 sim-verilator/tests/test_detailed_pmu.py` from the gpgpu repository
 to check the host collector without rebuilding the full model.
 
+### RT RayLoad phases
+
+Detailed PMU splits RT Local ray loading into the shared fifteen-field gather
+and the subsequent per-lane delivery/setup path.  `rayload_command_to_gather`
+is emitted once per fresh/restart command; its `*_lane_cycles` companion weighs
+that common wait by the command active-lane count.  Per-lane
+`rayload_gather_to_lane_out` and `rayload_lane_out_to_setup_write` complete the
+partition through the prepared-ray write.  All keys are also emitted with
+`rayload_fresh_` or `rayload_restart_` prefixes.  Read request/response field
+and latency histograms make Local-SRAM protocol stalls distinguishable from
+RaySetup queueing; unmatched/unfinished counters must remain zero before using
+the distributions.
+
 ### RT Local SRAM backpressure regression
 
 Run `python3 sim-verilator/tests/test_rt_local_sram.py --rtl sim-verilator/build/generated/rtl-detailed/dut.v` from the gpgpu repository (substitute the actual elaboration flavor).

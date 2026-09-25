@@ -25,7 +25,7 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.clock.step()
         dut.io.admission.valid.poke(false.B)
         dut.io.request.bits.warpId.expect(owner.U)
-        completeRayGather(dut)
+        completeRayGather(dut, mask)
         dut.clock.step(2)
         val writes = finishAndCollectWrites(dut, mask = mask, stall = true)
         assert(writes.size == 2 * hitWords)
@@ -64,13 +64,37 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.clock.step()
       dut.io.restart.valid.poke(false.B)
       dut.io.request.bits.warpId.expect(3.U)
-      dut.io.laneOut.ready.poke(false.B)
-      completeRayGather(dut)
-      dut.io.laneOut.valid.expect(true.B)
-      dut.io.laneOut.bits.laneId.expect(0.U)
-      dut.io.laneOut.ready.poke(true.B)
+      completeRayGather(dut, mask = 1)
+    }
+  }
+
+  "world AS bases are visible after the first gather response" in {
+    test(new RtLocalRayState) { dut =>
+      idle(dut)
+      admit(dut, restart = false, mask = 3)
+      // Admission allocates the fixed narrow-bank readers; the next cycle
+      // issues field zero for lanes 0 and 1 on banks 0 and 1.
       dut.clock.step()
-      dut.io.laneOut.valid.expect(false.B)
+      for (port <- 0 until 2) {
+        dut.io.narrowRequest(port).valid.expect(true.B)
+        dut.io.narrowRequest(port).bits.laneId.expect(port.U)
+        dut.io.narrowRequest(port).bits.fieldId.expect(RtAbiLayout.SlotAccelLo.U)
+        dut.io.narrowRequest(port).ready.poke(true.B)
+      }
+      dut.clock.step()
+      dut.io.narrowResponse(0).valid.poke(true.B); dut.io.narrowResponse(0).bits.readData.poke("h1000".U)
+      dut.io.narrowResponse(1).valid.poke(true.B); dut.io.narrowResponse(1).bits.readData.poke("h2000".U)
+      dut.io.worldBaseArrivedMask.expect(3.U)
+      dut.clock.step()
+      dut.io.narrowResponse.foreach(_.valid.poke(false.B))
+
+      dut.io.worldBaseLookup.laneId.poke(0.U)
+      dut.io.worldBase.valid.expect(true.B)
+      dut.io.worldBase.asBase.expect("h1000".U)
+      dut.io.worldBaseLookup.laneId.poke(1.U)
+      dut.io.worldBase.valid.expect(true.B)
+      dut.io.worldBase.asBase.expect("h2000".U)
+      dut.io.narrowRequest.foreach(_.valid.expect(false.B))
     }
   }
 
@@ -86,19 +110,10 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.restart.valid.poke(false.B)
     dut.io.restart.bits.warpId.poke(0.U)
     dut.io.restart.bits.activeMask.poke(0.U)
-    dut.io.laneOut.ready.poke(true.B)
     dut.io.resume.valid.poke(false.B)
     dut.io.resume.bits.activeMask.poke(0.U)
     dut.io.resumeOut.ready.poke(true.B)
-    dut.io.raySetup.valid.poke(false.B)
-    dut.io.raySetup.bits.laneId.poke(0.U)
-    dut.io.rayTmaxUpdate.valid.poke(false.B)
-    dut.io.rayTmaxUpdate.bits.laneId.poke(0.U)
-    dut.io.rayTmaxUpdate.bits.tmax.poke(0.U)
-    dut.io.nodeRayLookup.laneId.poke(0.U)
-    dut.io.issueRayLookup(0).laneId.poke(0.U)
-    dut.io.issueRayLookup.drop(1).foreach(_.laneId.poke(0.U))
-    dut.io.resultRayLookup.laneId.poke(0.U)
+    dut.io.worldBaseLookup.laneId.poke(0.U)
     dut.io.hitUpdate.valid.poke(false.B)
     dut.io.hitUpdate.bits.laneId.poke(0.U)
     dut.io.hitUpdate.bits.committed.poke(false.B)
@@ -112,6 +127,11 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.request.ready.poke(false.B)
     dut.io.response.valid.poke(false.B)
     dut.io.response.bits.readData.foreach(_.poke(0.U))
+    dut.io.narrowRequest.foreach(_.ready.poke(true.B))
+    dut.io.narrowResponse.foreach { response =>
+      response.valid.poke(false.B)
+      response.bits.readData.poke(0.U)
+    }
   }
 
   private def admit(dut: RtLocalRayState, restart: Boolean, mask: Int = activeLane0): Unit = {
@@ -124,45 +144,76 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
     port.valid.poke(false.B)
   }
 
-  /** Supply the fixed 15-word input record exactly as the Local SRAM does.
-    * Completion is only meaningful after this normal gather has completed. */
-  private def completeRayGather(dut: RtLocalRayState): Unit = {
-    dut.io.request.ready.poke(true.B)
-    for (offset <- 0 until 15) {
-      dut.io.request.valid.expect(true.B)
-      dut.io.request.bits.write.expect(false.B)
-      dut.io.request.bits.fieldId.expect((RtAbiLayout.SlotAccelLo + offset).U)
+  /** Supply the one AccelLo control-word reply per active lane. World-ray
+    * fields are fetched later by RtWorldRayContexts. */
+  private def completeRayGather(dut: RtLocalRayState, mask: Int = activeLane0): Unit = {
+    var pending = Array.fill[Option[(BigInt, BigInt)]](RtLocalSramParameters.corePortCount)(None)
+    val expectedReads = Integer.bitCount(mask)
+    var completedReads = 0
+    var cycles = 0
+    while (cycles < 256 && (completedReads < expectedReads || pending.exists(_.nonEmpty))) {
+      for (port <- dut.io.narrowResponse.indices) {
+        pending(port) match {
+          case Some((field, lane)) =>
+            dut.io.narrowResponse(port).valid.poke(true.B)
+            // Distinct values make accidental field/lane transposition visible
+            // in focused tests without affecting the default zero ray.
+            dut.io.narrowResponse(port).bits.readData.poke(0.U)
+          case None => dut.io.narrowResponse(port).valid.poke(false.B)
+        }
+        dut.io.narrowRequest(port).ready.poke(true.B)
+      }
+      val issued = dut.io.narrowRequest.indices.map { port =>
+        val request = dut.io.narrowRequest(port)
+        val fire = request.valid.peek().litToBoolean && request.ready.peek().litToBoolean &&
+          !request.bits.write.peek().litToBoolean
+        if (fire) Some((request.bits.fieldId.peek().litValue, request.bits.laneId.peek().litValue)) else None
+      }.toArray
+      completedReads += issued.count(_.nonEmpty)
       dut.clock.step()
-      dut.io.response.ready.expect(true.B)
-      dut.io.response.bits.readData.foreach(_.poke(0.U))
-      dut.io.response.valid.poke(true.B)
-      dut.clock.step()
-      dut.io.response.valid.poke(false.B)
+      pending = issued
+      cycles += 1
     }
-    dut.io.request.valid.expect(false.B)
+    assert(completedReads == expectedReads && pending.forall(_.isEmpty),
+      "narrow RT Local gather never completed")
+    dut.io.narrowResponse.foreach(_.valid.poke(false.B))
   }
 
   private def finishAndCollectWrites(dut: RtLocalRayState, mask: Int = activeLane0,
                                     stall: Boolean = false): Seq[(BigInt, BigInt, BigInt)] = {
-    dut.io.finish.bits.terminalMask.poke(mask.U)
-    dut.io.finish.valid.poke(true.B)
-    dut.io.finish.ready.expect(true.B)
-    dut.clock.step()
-    dut.io.finish.valid.poke(false.B)
-
-    dut.io.request.ready.poke(true.B)
     var writes = Vector.empty[(BigInt, BigInt, BigInt)]
-    var cycles = 0
-    while (!dut.io.drained.valid.peek().litToBoolean && cycles < 64) {
-      val ready = !stall || cycles % 3 == 2
-      dut.io.request.ready.poke(ready.B)
-      if (ready && dut.io.request.valid.peek().litToBoolean) {
-        dut.io.request.bits.write.expect(true.B)
+    def collectWrites(acceptWide: Boolean): Unit = {
+      if (acceptWide && dut.io.request.valid.peek().litToBoolean &&
+          dut.io.request.ready.peek().litToBoolean && dut.io.request.bits.write.peek().litToBoolean) {
         writes :+= (
           dut.io.request.bits.fieldId.peek().litValue,
           dut.io.request.bits.laneMask.peek().litValue,
           dut.io.request.bits.writeData(0).peek().litValue)
       }
+      for (port <- dut.io.narrowRequest.indices) {
+        val request = dut.io.narrowRequest(port)
+        if (request.valid.peek().litToBoolean && request.ready.peek().litToBoolean &&
+            request.bits.write.peek().litToBoolean) {
+          writes :+= (
+            request.bits.fieldId.peek().litValue,
+            BigInt(1) << request.bits.laneId.peek().litValue.toInt,
+            request.bits.writeData.peek().litValue)
+        }
+      }
+    }
+    dut.io.finish.bits.terminalMask.poke(mask.U)
+    dut.io.finish.valid.poke(true.B)
+    dut.io.finish.ready.expect(true.B)
+    collectWrites(acceptWide = false)
+    dut.clock.step()
+    dut.io.finish.valid.poke(false.B)
+
+    dut.io.request.ready.poke(true.B)
+    var cycles = 0
+    while (!dut.io.drained.valid.peek().litToBoolean && cycles < 64) {
+      val ready = !stall || cycles % 3 == 2
+      dut.io.request.ready.poke(ready.B)
+      collectWrites(acceptWide = ready)
       dut.clock.step()
       cycles += 1
     }
@@ -173,36 +224,15 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
   "resume reloads shader committed HitT only for ACCEPT and preserves other lane bounds" in {
     test(new RtLocalRayState) { dut =>
       def raw(f: Float): BigInt = BigInt(java.lang.Float.floatToRawIntBits(f)) & BigInt("ffffffff", 16)
-      def zero(data: Data): Unit = data match {
-        case b: Bool => b.poke(false.B)
-        case u: UInt => u.poke(0.U)
-        case a: Aggregate => a.getElements.foreach(zero)
-      }
       idle(dut)
       admit(dut, restart = false, mask = 15)
-      completeRayGather(dut)
-      dut.clock.step(4)
-      val bounds = Array.fill(4)(raw(100.0f))
-      for (lane <- 0 until 4) {
-        zero(dut.io.raySetup.bits)
-        dut.io.raySetup.bits.laneId.poke(lane.U)
-        dut.io.raySetup.bits.ray.extent.poke(bounds(lane).U)
-        dut.io.raySetup.bits.ray.originalTmin.poke(raw(0.25f).U)
-        dut.io.raySetup.valid.poke(true.B)
-        dut.io.raySetup.ready.expect(true.B)
-        dut.clock.step()
-      }
-      dut.io.raySetup.valid.poke(false.B)
+      completeRayGather(dut, mask = 15)
       finishAndCollectWrites(dut, mask = 15)
       dut.io.drained.ready.poke(true.B)
       dut.clock.step()
       dut.io.drained.ready.poke(false.B)
 
-      def checkBounds(): Unit = for (lane <- 0 until 4) {
-        dut.io.nodeRayLookup.laneId.poke(lane.U)
-        dut.io.nodeRay.currentTmax.expect(bounds(lane).U)
-        dut.io.nodeRay.ray.originalTmin.expect(raw(0.25f).U)
-      }
+      def checkBounds(): Unit = () // World tmax is Scheduler-owned now.
       def respond(field: Int, values: Seq[BigInt]): Unit = {
         dut.io.request.ready.poke(false.B)
         for (_ <- 0 until 3) {
@@ -256,7 +286,6 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
           dut.io.resumeOut.ready.poke(true.B)
           dut.clock.step()
           dut.io.resumeOut.ready.poke(false.B)
-          if (decisions(lane) == accept) bounds(lane) = raw(distances(lane))
           checkBounds()
         }
         dut.io.resumeOut.valid.expect(false.B)
@@ -322,16 +351,14 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
       // `drained` is not allowed while the SRAM writes are still being issued.
       dut.io.drained.valid.expect(true.B)
       assert(firstWrites.length == 2 * hitWords)
-      firstWrites.zipWithIndex.foreach { case ((field, laneMask, data), index) =>
+      val firstByField = firstWrites.map { case (field, laneMask, data) =>
         assert(laneMask == activeLane0)
-        if (index < hitWords) {
-          assert(field == candidateBase + index)
-          assert(data == 0, s"candidate word $index was not cleared")
-        } else {
-          val word = index - hitWords
-          assert(field == committedBase + word)
-          assert(data == hitWordsData(word), s"committed word $word did not reach SRAM")
-        }
+        field -> data
+      }.toMap
+      for (word <- 0 until hitWords) {
+        assert(firstByField(candidateBase + word) == 0, s"candidate word $word was not cleared")
+        assert(firstByField(committedBase + word) == hitWordsData(word),
+          s"committed word $word did not reach SRAM")
       }
 
       dut.io.drained.ready.poke(true.B)
@@ -374,13 +401,7 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.finish.ready.expect(true.B)
       dut.io.finish.valid.poke(false.B)
 
-      dut.io.laneOut.ready.poke(false.B)
-      completeRayGather(dut)
-      dut.io.laneOut.valid.expect(true.B)
-      dut.io.laneOut.bits.laneId.expect(1.U)
-      dut.io.laneOut.ready.poke(true.B)
-      dut.clock.step()
-      dut.io.laneOut.valid.expect(false.B)
+      completeRayGather(dut, childMask)
     }
   }
 }

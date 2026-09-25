@@ -515,6 +515,10 @@ class pipe() extends Module{
   }
   rtcore.io.localResponse.valid := rtLocalSram.io.response.valid && rtLocalResponseToCore
   rtcore.io.localResponse.bits := rtLocalSram.io.response.bits
+  for (port <- 0 until RtLocalSramParameters.corePortCount) {
+    rtLocalSram.io.coreRequest(port) <> rtcore.io.localNarrowRequest(port)
+    rtcore.io.localNarrowResponse(port) <> rtLocalSram.io.coreResponse(port)
+  }
   rtLocalWriteback.io.enq.valid := rtLocalSram.io.response.valid && !rtLocalResponseToCore
   rtLocalWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
   rtLocalWriteback.io.enq.bits.warp_id := rtLocalReadWarp
