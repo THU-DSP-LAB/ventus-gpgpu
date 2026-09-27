@@ -112,10 +112,15 @@ class pipe() extends Module{
   // the workgroup is live so grouped traversal can translate its logical
   // cross-warp TIDs without exposing physical rows to software.
   val rtWorkgroupValid = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  // A member may finish traversal long before the shader consumes its result.
+  // Keep the complete mapping until every member has acknowledged rt.release;
+  // otherwise a recycled CTA tag could resolve a later group to stale rows.
+  val rtWorkgroupReleased = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
   when(io.warpReq.fire) {
     rtWorkgroupTag(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch
     rtWorkgroupWarps(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
     rtWorkgroupValid(io.warpReq.bits.wid) := true.B
+    rtWorkgroupReleased(io.warpReq.bits.wid) := false.B
   }
   val rtCompletionAwaitingWb = RegInit(false.B)
   val rtCompletionWarp = Reg(UInt(depth_warp.W))
@@ -671,6 +676,30 @@ class pipe() extends Module{
     assert(rtcore.io.releaseAck.bits.warpId === rtIssue.ctrl.wid,
       "RT release acknowledgement must retire the reserved issue warp")
     rtReleaseSent := false.B
+    val releasedWarp = rtcore.io.releaseAck.bits.warpId
+    val releasedGroupTag = rtWorkgroupTag(releasedWarp)(TAG_WIDTH - 1,
+      log2Ceil(num_warp_in_a_block))
+    val releasedGroupWarps = rtWorkgroupWarps(releasedWarp)
+    val releasedMembers = VecInit((0 until num_warp_in_a_block).map { member =>
+      VecInit((0 until num_warp).map { warp =>
+        val isReleasedNow = releasedWarp === warp.U
+        rtWorkgroupValid(warp) &&
+          rtWorkgroupTag(warp)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block)) === releasedGroupTag &&
+          rtWorkgroupTag(warp)(log2Ceil(num_warp_in_a_block) - 1, 0) === member.U &&
+          (rtWorkgroupReleased(warp) || isReleasedNow)
+      }).asUInt.orR
+    }).asUInt
+    val releasedExpected = (1.U(num_warp_in_a_block.W) << releasedGroupWarps) - 1.U
+    rtWorkgroupReleased(releasedWarp) := true.B
+    when((releasedMembers & releasedExpected) === releasedExpected) {
+      for (warp <- 0 until num_warp) {
+        when(rtWorkgroupValid(warp) &&
+            rtWorkgroupTag(warp)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block)) === releasedGroupTag) {
+          rtWorkgroupValid(warp) := false.B
+          rtWorkgroupReleased(warp) := false.B
+        }
+      }
+    }
   }
 
   val rtCoreCompletionGrouped = rtGroupedInFlight(rtcore.io.completion.bits.warpId)

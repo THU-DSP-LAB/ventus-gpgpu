@@ -17,13 +17,12 @@ import top.parameters._
 import rtcore.RtCorePortParameters.{regidx_totalwidth => regidx_totalwidth}
 
 object RtCorePortParameters {
-  /* Elaborate the RT group controller with the same specialization selected
-   * by Vulkan. Eight RT Local warp rows are physically available, so group
-   * slots are 8/1, 8/2, 8/4 or 8/8. */
+  /* Validate the Vulkan-selected group size.  Admission uses the physical
+   * RT Local row map, so multiple 1/2/4/8-warp groups occupy the available
+   * rows naturally instead of relying on a separate static slot counter. */
   val groupWarps = sys.env.get("VENTUS_VK_RT_GROUP_WARPS").flatMap(_.toIntOption).getOrElse(1)
   require(Set(1, 2, 4, 8).contains(groupWarps),
     s"VENTUS_VK_RT_GROUP_WARPS must be 1, 2, 4, or 8 (got $groupWarps)")
-  val groupSlotCount = 8 / groupWarps
   // RTcore accepts one warp command at a time.  This is deliberately
   // independent of the number of resident SIMT warps in the enclosing SM.
   val residentWarpCount = 1
