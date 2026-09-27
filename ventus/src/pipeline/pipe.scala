@@ -126,6 +126,10 @@ class pipe() extends Module{
   val rtCompletionWarp = Reg(UInt(depth_warp.W))
   val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
   val rtCompletionContextReleased = RegInit(false.B)
+  // An ordinary terminal completion can free the sole RTcore context before
+  // its vector status reaches writeback.  Remember that its reservation was
+  // already retired so the later writeback only clears the scoreboard state.
+  val rtCompletionReservationReleased = RegInit(false.B)
   // Every grouped primary-trace completion, including a candidate callback,
   // is withheld until its full cohort has arrived.  This is the shader-entry
   // fence: no lane may execute a post-traverse shader while a sibling warp is
@@ -702,7 +706,13 @@ class pipe() extends Module{
     }
   }
 
-  val rtCoreCompletionGrouped = rtGroupedInFlight(rtcore.io.completion.bits.warpId)
+  // A candidate callback is an in-traversal control transfer, not the
+  // post-primary shader fence.  The single physical RT context must return
+  // that callback to its owner immediately so it can accept/ignore and
+  // resume; holding it for sibling primary warps would deadlock the cohort.
+  // Only a physically released terminal completion joins the group fence.
+  val rtCoreCompletionGrouped = rtGroupedInFlight(rtcore.io.completion.bits.warpId) &&
+    rtcore.io.completion.bits.contextReleased
   val rtGroupProbe = PriorityEncoder(rtGroupTerminalValid.asUInt)
   val rtGroupProbeTag = rtGroupTagByWarp(rtGroupProbe)
   val rtGroupProbeCount = rtGroupCountByWarp(rtGroupProbe)
@@ -770,6 +780,10 @@ class pipe() extends Module{
       rtCompletionWarp := rtcore.io.completion.bits.warpId
       rtCompletionDestination := rtcore.io.completion.bits.destinationVd
       rtCompletionContextReleased := rtcore.io.completion.bits.contextReleased
+      rtCompletionReservationReleased := rtcore.io.completion.bits.contextReleased
+      when(rtcore.io.completion.bits.contextReleased) {
+        rtInFlight(rtcore.io.completion.bits.warpId) := false.B
+      }
     }
   }
 
@@ -792,10 +806,17 @@ class pipe() extends Module{
   // destination on another vector writer. No new owner enters before this.
   val rtCompletionWriteback = rtWriteback.io.deq.fire && rtCompletionAwaitingWb
   val rtGroupedPhysicalCompletion = rtcore.io.completion.fire && rtCoreCompletionGrouped
-  rtReservation.io.completed.valid := rtCompletionWriteback || rtGroupedPhysicalCompletion
-  rtReservation.io.completed.bits.warpId := Mux(rtGroupedPhysicalCompletion,
+  val rtUngroupedPhysicalContextCompletion = rtcore.io.completion.fire &&
+    !rtCoreCompletionGrouped && rtcore.io.completion.bits.contextReleased
+  val rtPhysicalReservationCompletion = rtGroupedPhysicalCompletion ||
+    rtUngroupedPhysicalContextCompletion
+  val rtWritebackReservationCompletion = rtCompletionWriteback &&
+    !rtCompletionReservationReleased
+  rtReservation.io.completed.valid := rtWritebackReservationCompletion ||
+    rtPhysicalReservationCompletion
+  rtReservation.io.completed.bits.warpId := Mux(rtPhysicalReservationCompletion,
     rtcore.io.completion.bits.warpId, rtCompletionWarp)
-  rtReservation.io.completed.bits.contextReleased := Mux(rtGroupedPhysicalCompletion,
+  rtReservation.io.completed.bits.contextReleased := Mux(rtPhysicalReservationCompletion,
     rtcore.io.completion.bits.contextReleased, rtCompletionContextReleased)
   when(rtCompletionWriteback) {
     assert(rtWriteback.io.deq.bits.warp_id === rtCompletionWarp &&
@@ -807,6 +828,7 @@ class pipe() extends Module{
     }
     rtInFlight(rtCompletionWarp) := false.B
     rtCompletionAwaitingWb := false.B
+    rtCompletionReservationReleased := false.B
   }
   when(rtWriteback.io.enq.fire && rtEnqueueGroupCompletion) {
     val pendingForGroup = VecInit((0 until num_warp).map { warp =>
