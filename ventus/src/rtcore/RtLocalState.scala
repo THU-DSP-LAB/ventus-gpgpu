@@ -8,11 +8,15 @@ import top.parameters._
   * register buffer, not a cache/PDS table: SRAM has fixed one-cycle access
   * and all requests are field-major vectors. */
 class RtLocalRayState extends Module {
+  // Coherence recording is a diagnostic elaboration only.  It reads
+  // TraceMeta1 so the offline analyser can use the shader's recursion level;
+  // ordinary RTL continues to fetch only AccelLo on the header path.
+  private val coherenceRecordTrace = sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")
   // Traversal control needs only AccelLo from the command record.  World-ray
   // payload is fetched on demand by RtWorldRayContexts; keeping a full
   // 15-word mirror here would reintroduce the duplicated state this SRAM
   // design is meant to remove.
-  private val rayFieldCount = 1
+  private val rayFieldCount = if (coherenceRecordTrace) 2 else 1
   private val hitWords = RtAbiLayout.HitRecordWordCount
   val io = IO(new Bundle {
     val admission = Flipped(Decoupled(new RtLocalAdmission))
@@ -25,11 +29,22 @@ class RtLocalRayState extends Module {
     // On-demand world-ray readers must use the same physical Local-SRAM row
     // as the header/record path; the resident scheduler slot is not a warp ID.
     val ownerWarpId = Output(UInt(depth_warp.W))
+    // Mapping from a physical execution lane to its persistent RT Local SRAM
+    // location. Group traversal resolves logical TIDs through scheduler-owned
+    // workgroup allocation metadata; it never names PDS state.
+    val targetRowBase = Output(Vec(num_thread,
+      UInt(log2Ceil(RtLocalSramParameters.bankDepth).W)))
+    val targetLane = Output(Vec(num_thread, UInt(log2Ceil(num_thread).W)))
     val worldBaseArrived = Output(Bool())
     val worldBaseArrivedLane = Output(UInt(log2Ceil(num_thread).W))
     // Several fixed SRAM banks may return an AccelLo word together.  Keep the
     // complete set so the scheduler cannot strand every lane but the first.
     val worldBaseArrivedMask = Output(UInt(num_thread.W))
+    // Trace-only per-lane recursion metadata.  This port does not exist in
+    // normal elaborations, so coherence observation does not affect the
+    // functional model's area or timing.
+    val coherenceTraceMeta1 = if (coherenceRecordTrace)
+      Some(Output(Vec(num_thread, UInt(xLen.W)))) else None
     val worldBaseLookup = Input(new RtLocalRayLookup)
     val worldBase = Output(new RtLocalWorldBaseLookupResult)
     val hitUpdate = Flipped(Decoupled(new RtLocalHitRecordUpdate))
@@ -51,7 +66,16 @@ class RtLocalRayState extends Module {
   // `valid`/`loaded`/`resumeActive`; resetting those arrays would create a
   // disproportionate reset network.
   val ownerWarp = RegInit(0.U(depth_warp.W))
+  // Physical scheduler lanes are allowed to execute a ray whose persistent
+  // RT Local storage belongs to another warp/lane.  Keep that mapping here;
+  // later narrow reads select SRAM banks from targetLane, while all transient
+  // scheduler state remains indexed by the physical lane.
+  val targetRowBase = Reg(Vec(num_thread,
+    UInt(log2Ceil(RtLocalSramParameters.bankDepth).W)))
+  val targetLane = Reg(Vec(num_thread, UInt(log2Ceil(num_thread).W)))
   io.ownerWarpId := ownerWarp
+  io.targetRowBase := targetRowBase
+  io.targetLane := targetLane
   // Session ownership survives nested traces so final hit-record flush and
   // release still cover the original warp.  A restart may gather only the
   // divergent lanes which actually issued the child trace.
@@ -69,6 +93,12 @@ class RtLocalRayState extends Module {
   // SRAM read on every stack pop.
   val worldBaseData = Reg(Vec(num_thread, UInt(memReqLen.W)))
   val worldBaseValid = RegInit(0.U(num_thread.W))
+  val traceMeta1 = if (coherenceRecordTrace) Some(Reg(Vec(num_thread, UInt(xLen.W)))) else None
+  // The last command-header response and worldBaseArrived occur together.
+  // Record trace needs the new word in that cycle, rather than the prior
+  // register contents which are only visible after the clock edge.
+  val traceMeta1Observed = if (coherenceRecordTrace) Some(Wire(Vec(num_thread, UInt(xLen.W)))) else None
+  if (coherenceRecordTrace) traceMeta1Observed.get := traceMeta1.get
   // Hit records write through to Local SRAM.  Keep only per-word ownership
   // bits so finish can clear untouched words; retaining both 9-word planes
   // for every lane here would duplicate 2.25 KiB of the SRAM payload.
@@ -100,7 +130,11 @@ class RtLocalRayState extends Module {
     io.narrowResponse(port).ready := true.B
   }
 
-  private def traversalField(index: UInt): UInt = RtAbiLayout.SlotAccelLo.U + index
+  private def traversalField(index: UInt): UInt = {
+    if (coherenceRecordTrace)
+      Mux(index === 0.U, RtAbiLayout.SlotAccelLo.U, RtAbiLayout.SlotTraceMeta1.U)
+    else RtAbiLayout.SlotAccelLo.U
+  }
   private def advanceFlush(): Unit = {
     when(flushWord === (hitWords - 1).U) {
       flushWord := 0.U
@@ -119,6 +153,31 @@ class RtLocalRayState extends Module {
   when(startSession) {
     valid := true.B; gatherMask := startBits.activeMask
     when(io.admission.fire) { ownerWarp := startBits.warpId; activeMask := startBits.activeMask }
+    when(io.admission.fire) {
+      for (lane <- 0 until num_thread) {
+        // Group locator is a software-supplied workgroup-local cross-warp
+        // TID. Its high bits name a logical member; the scheduler-provided
+        // table translates that member to the physical RT Local SRAM row.
+        val groupMember = startBits.locator(lane)(
+          log2Ceil(num_thread) + log2Ceil(num_warp_in_a_block) - 1,
+          log2Ceil(num_thread))
+        val groupRowBase = startBits.memberWarp(groupMember) *
+          RtLocalSramParameters.fieldCount.U
+        targetRowBase(lane) := Mux(startBits.grouped,
+          groupRowBase,
+          startBits.warpId * RtLocalSramParameters.fieldCount.U)
+        targetLane(lane) := Mux(startBits.grouped,
+          startBits.locator(lane)(log2Ceil(num_thread) - 1, 0), lane.U)
+      }
+      if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+        printf(p"[RTLOCAL trace] admit owner=${Decimal(startBits.warpId)}" +
+          p" grouped=${Decimal(startBits.grouped)}" +
+          p" locator0=0x${Hexadecimal(startBits.locator(0))}" +
+          p" locator31=0x${Hexadecimal(startBits.locator(num_thread - 1))}" +
+          p" member0=${Decimal(startBits.locator(0)(log2Ceil(num_thread) + log2Ceil(num_warp_in_a_block) - 1, log2Ceil(num_thread)))}" +
+          p" member31=${Decimal(startBits.locator(num_thread - 1)(log2Ceil(num_thread) + log2Ceil(num_warp_in_a_block) - 1, log2Ceil(num_thread)))}\n")
+      }
+    }
     loaded := false.B
     fetchStarted := 0.U; worldBaseValid := 0.U
     for (port <- 0 until RtLocalSramParameters.corePortCount) {
@@ -138,14 +197,15 @@ class RtLocalRayState extends Module {
     }
   }
 
-  // Start at most one lane per bank.  Low lane IDs retain the scheduler's
-  // deterministic ordering, but each slot now fetches only its own words.
+  // Start at most one physical execution lane per *target* SRAM bank.  The
+  // response remains tagged with fetchLane, so a group permutation may read
+  // arbitrary original RT Local slots without changing scheduler state IDs.
   val fetchStartMask = Wire(Vec(RtLocalSramParameters.corePortCount, UInt(num_thread.W)))
   val fetchRequest = Wire(Vec(RtLocalSramParameters.corePortCount, Bool()))
   for (port <- 0 until RtLocalSramParameters.corePortCount) {
     val candidates = VecInit((0 until num_thread).map(lane =>
       gatherMask(lane) && !fetchStarted(lane) &&
-        lane.U(log2Ceil(num_thread).W)(log2Ceil(RtLocalSramParameters.bankCount) - 1, 0) === port.U)).asUInt
+        targetLane(lane)(log2Ceil(RtLocalSramParameters.bankCount) - 1, 0) === port.U)).asUInt
     val start = valid && !flushing && !resumeActive &&
       !fetchActive(port) && !fetchReadOutstanding(port) && candidates.orR
     val lane = PriorityEncoder(candidates)
@@ -181,27 +241,47 @@ class RtLocalRayState extends Module {
     recordWriteData := hitWriteQueue.io.deq.bits.data
   }
 
+  val hitWritesDrained = !recordWriteActive && !hitWriteQueue.io.deq.valid
+  val flushMask = Wire(UInt(num_thread.W))
+  flushMask := VecInit((0 until num_thread).map(lane =>
+    activeMask(lane) && !recordWordWritten(lane)(flushRecord)(flushWord))).asUInt
+  val flushScatterRequest = valid && flushing && hitWritesDrained && flushMask.orR
+  val flushScatterLane = PriorityEncoder(flushMask)
+  val flushScatterPort = targetLane(flushScatterLane)(log2Ceil(RtLocalSramParameters.bankCount) - 1, 0)
   val recordWriteWord = PriorityEncoder(recordWriteMask)
   val recordWriteRequest = valid && recordWriteActive && recordWriteMask.orR
-  val recordWritePort = recordWriteLane(log2Ceil(RtLocalSramParameters.bankCount) - 1, 0)
+  val recordWritePort = targetLane(recordWriteLane)(log2Ceil(RtLocalSramParameters.bankCount) - 1, 0)
   for (port <- 0 until RtLocalSramParameters.corePortCount) {
     val recordRequest = recordWriteRequest && recordWritePort === port.U && !fetchRequest(port)
-    io.narrowRequest(port).valid := fetchRequest(port) || recordRequest
+    val flushRequest = flushScatterRequest && flushScatterPort === port.U && !fetchRequest(port) && !recordRequest
+    io.narrowRequest(port).valid := fetchRequest(port) || recordRequest || flushRequest
     io.narrowRequest(port).bits.warpId := ownerWarp
-    io.narrowRequest(port).bits.laneId := Mux(fetchRequest(port), fetchLane(port), recordWriteLane)
+    val narrowPhysicalLane = Mux(fetchRequest(port), fetchLane(port),
+      Mux(flushRequest, flushScatterLane, recordWriteLane))
+    io.narrowRequest(port).bits.rowBase := targetRowBase(narrowPhysicalLane)
+    io.narrowRequest(port).bits.laneId := targetLane(narrowPhysicalLane)
     io.narrowRequest(port).bits.fieldId := Mux(fetchRequest(port),
-      traversalField(fetchField(port)), Mux(recordWriteCommitted,
+      traversalField(fetchField(port)), Mux(flushRequest,
+        Mux(flushRecord,
+          (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord,
+          (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord), Mux(recordWriteCommitted,
         (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + recordWriteWord,
-        (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + recordWriteWord))
+        (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + recordWriteWord)))
     io.narrowRequest(port).bits.write := !fetchRequest(port)
     io.narrowRequest(port).bits.writeData := Mux(fetchRequest(port), 0.U,
-      recordWriteData(recordWriteWord))
+      Mux(flushRequest, 0.U, recordWriteData(recordWriteWord)))
     io.narrowResponse(port).ready := fetchReadOutstanding(port)
     when(io.narrowRequest(port).fire && fetchRequest(port)) {
       fetchReadOutstanding(port) := true.B
     }
     when(io.narrowResponse(port).fire) {
       fetchReadOutstanding(port) := false.B
+      if (coherenceRecordTrace) {
+        when(fetchField(port) === 1.U) {
+          traceMeta1.get(fetchLane(port)) := io.narrowResponse(port).bits.readData
+          traceMeta1Observed.get(fetchLane(port)) := io.narrowResponse(port).bits.readData
+        }
+      }
       when(fetchField(port) === (rayFieldCount - 1).U) {
         fetchActive(port) := false.B
       }.otherwise {
@@ -209,14 +289,18 @@ class RtLocalRayState extends Module {
       }
     }
   }
-  val worldBaseArrival = VecInit((0 until RtLocalSramParameters.corePortCount).map(port =>
+  val baseArrival = VecInit((0 until RtLocalSramParameters.corePortCount).map(port =>
     io.narrowResponse(port).fire && fetchField(port) === 0.U)).asUInt
+  // In the record-only build arrival waits for TraceMeta1 as well, ensuring a
+  // logged ray is labelled with its correct recursion level before traversal.
+  val worldBaseArrival = VecInit((0 until RtLocalSramParameters.corePortCount).map(port =>
+    io.narrowResponse(port).fire && fetchField(port) === (rayFieldCount - 1).U)).asUInt
   val worldBaseArrivalMask = (0 until RtLocalSramParameters.corePortCount).map(port =>
     Mux(worldBaseArrival(port), UIntToOH(fetchLane(port), num_thread), 0.U)).reduce(_ | _)
   when(worldBaseArrival.orR) { worldBaseValid := worldBaseValid | worldBaseArrivalMask }
   for (lane <- 0 until num_thread) {
     val baseWriters = (0 until RtLocalSramParameters.corePortCount).map(port =>
-      worldBaseArrival(port) && fetchLane(port) === lane.U)
+      baseArrival(port) && fetchLane(port) === lane.U)
     when(baseWriters.reduce(_ || _)) {
       worldBaseData(lane) := Mux1H(baseWriters.zipWithIndex.map { case (write, port) =>
         write -> io.narrowResponse(port).bits.readData
@@ -226,12 +310,7 @@ class RtLocalRayState extends Module {
   // Words which did not receive a hardware update in this trace are zeroed
   // before completion.  Once written (by either path), mark ownership so a
   // later completion cannot overwrite shader-side changes without a restart.
-  val hitWritesDrained = !recordWriteActive && !hitWriteQueue.io.deq.valid
-  val flushMask = Wire(UInt(num_thread.W))
-  flushMask := VecInit((0 until num_thread).map(lane =>
-    activeMask(lane) && !recordWordWritten(lane)(flushRecord)(flushWord))).asUInt
-  val flushRequest = valid && flushing && hitWritesDrained && flushMask.orR
-  io.request.valid := resumeRequest || flushRequest
+  io.request.valid := resumeRequest
   io.request.bits := 0.U.asTypeOf(new RtLocalSramRequest)
   io.request.bits.warpId := ownerWarp
   io.request.bits.fieldId := Mux(resumeRequest, Mux(controlLoaded,
@@ -240,8 +319,8 @@ class RtLocalRayState extends Module {
       Mux(flushRecord,
         (RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord,
         (RtAbiLayout.LocalCandidateHitRecordBaseBytes / RtAbiLayout.AbiWordBytes).U(6.W) + flushWord))
-  io.request.bits.write := flushRequest
-  io.request.bits.laneMask := Mux(flushRequest, flushMask, 0.U)
+  io.request.bits.write := false.B
+  io.request.bits.laneMask := 0.U
   for (lane <- 0 until num_thread) {
     io.request.bits.writeData(lane) := 0.U
   }
@@ -255,18 +334,11 @@ class RtLocalRayState extends Module {
         recordWriteActive := false.B
       }
   }
-  when(io.request.fire) {
-    when(flushRequest) {
-      // After a zero row is accepted it is part of the completed record just
-      // like a direct hit update.  This prevents a later completion from
-      // replaying stale zeros over a shader callback's writes.
-      for (lane <- 0 until num_thread) when(flushMask(lane)) {
-        recordWordWritten(lane)(flushRecord)(flushWord) := true.B
-      }
-      advanceFlush()
-    }
+  when(io.narrowRequest(flushScatterPort).fire && flushScatterRequest) {
+    recordWordWritten(flushScatterLane)(flushRecord)(flushWord) := true.B
+    when((flushMask & ~UIntToOH(flushScatterLane, num_thread)) === 0.U) { advanceFlush() }
   }
-  when(flushing && hitWritesDrained && !flushMask.orR && !flushRequest) { advanceFlush() }
+  when(flushing && hitWritesDrained && !flushMask.orR) { advanceFlush() }
 
   io.response.ready := readOutstanding
   when(io.response.fire) {
@@ -319,6 +391,7 @@ class RtLocalRayState extends Module {
   io.worldBase.valid := valid && worldBaseValid(io.worldBaseLookup.laneId) &&
     gatherMask(io.worldBaseLookup.laneId)
   io.worldBase.asBase := worldBaseData(io.worldBaseLookup.laneId)
+  if (coherenceRecordTrace) io.coherenceTraceMeta1.get := traceMeta1Observed.get
 
   when(io.hitUpdate.fire) {
     for (word <- 0 until hitWords) when(io.hitUpdate.bits.dirty(word)) {
@@ -333,7 +406,13 @@ class RtLocalRayState extends Module {
   when(io.retire.fire) { valid := false.B }
 }
 
-class RtLocalAdmission extends Bundle { val warpId = UInt(depth_warp.W); val activeMask = UInt(num_thread.W) }
+class RtLocalAdmission extends Bundle {
+  val warpId = UInt(depth_warp.W)
+  val activeMask = UInt(num_thread.W)
+  val grouped = Bool()
+  val locator = Vec(num_thread, UInt(xLen.W))
+  val memberWarp = Vec(num_warp_in_a_block, UInt(depth_warp.W))
+}
 class RtLocalResume extends Bundle { val activeMask = UInt(num_thread.W) }
 class RtLocalResumeLane extends Bundle { val laneId = UInt(log2Ceil(num_thread).W); val callbackDecision = UInt(xLen.W) }
 class RtLocalRayLookup extends Bundle { val laneId = UInt(log2Ceil(num_thread).W) }

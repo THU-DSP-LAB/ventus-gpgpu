@@ -23,6 +23,10 @@ class RtLocalSramResponse extends Bundle {
   * this narrow path. */
 class RtLocalSramNarrowRequest extends Bundle {
   val warpId = UInt(depth_warp.W)
+  /* Internal physical row base.  Normal traversal derives it from warpId;
+   * group traversal resolves its logical (member,lane) locator through the
+   * scheduler-owned member-to-physical-warp map before reaching this port. */
+  val rowBase = UInt(log2Ceil(RtLocalSramParameters.bankDepth).W)
   val laneId = UInt(log2Ceil(num_thread).W)
   val fieldId = UInt(6.W)
   val write = Bool()
@@ -115,7 +119,7 @@ class RtLocalSram extends Module {
     val selectedPort = coreSelectedPort(bank)
     val selectedRequest = io.coreRequest(selectedPort)
     val selectedSlot = selectedRequest.bits.laneId >> log2Ceil(bankCount)
-    val selectedAddress = selectedRequest.bits.warpId * fieldCount.U + selectedRequest.bits.fieldId
+    val selectedAddress = selectedRequest.bits.rowBase + selectedRequest.bits.fieldId
     for (slot <- 0 until lanesPerBank) {
       val lane = slot * bankCount + bank
       writeData(slot) := Mux(coreSelected(bank), selectedRequest.bits.writeData,
@@ -160,7 +164,7 @@ class RtLocalSram extends Module {
       narrowReadPending(bank) := true.B
       narrowReadPort(bank) := coreSelectedPort(bank)
       narrowReadSlot(bank) := io.coreRequest(coreSelectedPort(bank)).bits.laneId >> log2Ceil(bankCount)
-      narrowReadAddress(bank) := io.coreRequest(coreSelectedPort(bank)).bits.warpId * fieldCount.U +
+      narrowReadAddress(bank) := io.coreRequest(coreSelectedPort(bank)).bits.rowBase +
         io.coreRequest(coreSelectedPort(bank)).bits.fieldId
     }
   }

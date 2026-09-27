@@ -59,6 +59,9 @@ class RtCoreScheduler extends Module {
 
   private val residentWarpCount = RtCorePortParameters.residentWarpCount
   private val residentWarpIdWidth = RtCorePortParameters.residentWarpIdWidth
+  // This elaboration-only trace records ray coherence offline.  It must never
+  // become part of the normal scheduling/PMU datapath.
+  private val coherenceRecordTrace = sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")
 
   val io = IO(new RtCoreIO)
   val boxIssue = IO(Vec(boxUnitCount, Decoupled(new RtBox4IntersectionInput)))
@@ -81,29 +84,47 @@ class RtCoreScheduler extends Module {
   table.io.lsuResponse <> io.lsuResponse
   io.localRequest <> local.io.request
   local.io.response <> io.localResponse
-  // World-ray context reads have priority over the legacy local-state narrow
-  // path.  A per-bank ownership bit routes the delayed response without a
-  // crossbar; bank i only ever serves context reader i.
-  val contextReadOutstanding = RegInit(VecInit(Seq.fill(RtLocalSramParameters.corePortCount)(false.B)))
-  for (port <- 0 until RtLocalSramParameters.corePortCount) {
-    val useContext = worldContexts.io.request(port).valid
-    io.localNarrowRequest(port).valid := useContext || local.io.narrowRequest(port).valid
-    io.localNarrowRequest(port).bits := Mux(useContext,
-      worldContexts.io.request(port).bits, local.io.narrowRequest(port).bits)
-    worldContexts.io.request(port).ready := io.localNarrowRequest(port).ready && useContext
-    local.io.narrowRequest(port).ready := io.localNarrowRequest(port).ready && !useContext
-    worldContexts.io.response(port).valid := io.localNarrowResponse(port).valid && contextReadOutstanding(port)
-    worldContexts.io.response(port).bits := io.localNarrowResponse(port).bits
-    local.io.narrowResponse(port).valid := io.localNarrowResponse(port).valid && !contextReadOutstanding(port)
-    local.io.narrowResponse(port).bits := io.localNarrowResponse(port).bits
-    io.localNarrowResponse(port).ready := Mux(contextReadOutstanding(port),
-      worldContexts.io.response(port).ready, local.io.narrowResponse(port).ready)
-    when(io.localNarrowRequest(port).fire && !io.localNarrowRequest(port).bits.write) {
-      contextReadOutstanding(port) := useContext
+  // World-ray contexts are indexed by physical execution lane, whereas their
+  // request may address any locator-selected RT SRAM bank.  Arbitrating by
+  // target bank keeps PDS untouched and records the source reader so the
+  // delayed response returns to the right short-lived context.
+  private val localBankCount = RtLocalSramParameters.corePortCount
+  private val localBankIdWidth = log2Ceil(localBankCount)
+  val contextReadOutstanding = RegInit(VecInit(Seq.fill(localBankCount)(false.B)))
+  val contextReadSource = Reg(Vec(localBankCount, UInt(localBankIdWidth.W)))
+  val contextUse = Wire(Vec(localBankCount, Bool()))
+  val contextSource = Wire(Vec(localBankCount, UInt(localBankIdWidth.W)))
+  for (bank <- 0 until localBankCount) {
+    val candidates = VecInit((0 until localBankCount).map(source =>
+      worldContexts.io.request(source).valid &&
+        worldContexts.io.request(source).bits.laneId(localBankIdWidth - 1, 0) === bank.U)).asUInt
+    contextUse(bank) := candidates.orR && !contextReadOutstanding(bank)
+    contextSource(bank) := PriorityEncoder(candidates)
+    io.localNarrowRequest(bank).valid := contextUse(bank) || local.io.narrowRequest(bank).valid
+    io.localNarrowRequest(bank).bits := Mux(contextUse(bank),
+      worldContexts.io.request(contextSource(bank)).bits, local.io.narrowRequest(bank).bits)
+    local.io.narrowRequest(bank).ready := io.localNarrowRequest(bank).ready && !contextUse(bank)
+    local.io.narrowResponse(bank).valid := io.localNarrowResponse(bank).valid && !contextReadOutstanding(bank)
+    local.io.narrowResponse(bank).bits := io.localNarrowResponse(bank).bits
+    io.localNarrowResponse(bank).ready := Mux(contextReadOutstanding(bank),
+      worldContexts.io.response(contextReadSource(bank)).ready, local.io.narrowResponse(bank).ready)
+    when(io.localNarrowRequest(bank).fire && contextUse(bank)) {
+      contextReadOutstanding(bank) := true.B
+      contextReadSource(bank) := contextSource(bank)
     }
-    when(io.localNarrowResponse(port).fire) {
-      contextReadOutstanding(port) := false.B
+    when(io.localNarrowResponse(bank).fire && contextReadOutstanding(bank)) {
+      contextReadOutstanding(bank) := false.B
     }
+  }
+  for (source <- 0 until localBankCount) {
+    val responseFromBank = VecInit((0 until localBankCount).map(bank =>
+      contextReadOutstanding(bank) && contextReadSource(bank) === source.U)).asUInt
+    worldContexts.io.request(source).ready := VecInit((0 until localBankCount).map(bank =>
+      contextUse(bank) && contextSource(bank) === source.U && io.localNarrowRequest(bank).ready)).asUInt.orR
+    worldContexts.io.response(source).valid := VecInit((0 until localBankCount).map(bank =>
+      responseFromBank(bank) && io.localNarrowResponse(bank).valid)).asUInt.orR
+    worldContexts.io.response(source).bits := Mux1H((0 until localBankCount).map(bank =>
+      responseFromBank(bank) -> io.localNarrowResponse(bank).bits))
   }
 
   val Seq(sIdle, sRayLoad, sHeaderRequest, sHeaderPending, sStackReady,
@@ -118,6 +139,11 @@ class RtCoreScheduler extends Module {
   // the command mask, so a subset of retained candidate lanes may resume.
   val commandMask = RegInit(VecInit(Seq.fill(residentWarpCount)(0.U(num_thread.W))))
   val warpIssueId = Reg(Vec(residentWarpCount, UInt(RtCorePortParameters.issueIdWidth.W)))
+  val coherenceEpoch = if (coherenceRecordTrace) Some(RegInit(0.U(32.W))) else None
+  val coherenceLaneEpoch = if (coherenceRecordTrace)
+    Some(Reg(Vec(residentWarpCount, Vec(num_thread, UInt(32.W))))) else None
+  val coherenceLaneDepth = if (coherenceRecordTrace)
+    Some(Reg(Vec(residentWarpCount, Vec(num_thread, UInt(RtAbiLayout.TraceMeta1ActiveLevelBits.W))))) else None
   val warpDestination = Reg(Vec(residentWarpCount, UInt(RtCorePortParameters.regidx_totalwidth.W)))
   val sessionActive = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
   val finishIssued = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
@@ -168,7 +194,8 @@ class RtCoreScheduler extends Module {
 
   val instanceTransform = Module(new RtInstanceTransform)
   val objectRaySetup = Module(new RtRaySetup)
-  worldContexts.io.warpId := local.io.ownerWarpId
+  worldContexts.io.targetRowBase := local.io.targetRowBase
+  worldContexts.io.targetLane := local.io.targetLane
   worldContexts.io.clear := io.command.fire || io.releaseAck.fire
   for (unit <- 0 until boxUnitCount) {
     worldContexts.io.lookupLane(unit) := 0.U
@@ -204,16 +231,28 @@ class RtCoreScheduler extends Module {
   val restartCommand = ownedCommand && io.command.bits.activeMask.orR && sessionActive(commandSlot) &&
     completionPublished(commandSlot) && !retainedCandidateMask.orR
   val commandAllowed = freshCommand || resumeCommand || restartCommand
+  val groupExpectedMembers = (1.U(num_warp_in_a_block.W) << io.command.bits.workgroupWarps) - 1.U
+  val groupMappingReady = !io.command.bits.grouped ||
+    ((io.command.bits.workgroupMemberValid & groupExpectedMembers) === groupExpectedMembers)
   local.io.admission.valid := io.command.valid && freshCommand
   local.io.admission.bits.warpId := io.command.bits.warpId
   local.io.admission.bits.activeMask := io.command.bits.activeMask
+  local.io.admission.bits.grouped := io.command.bits.grouped
+  local.io.admission.bits.locator := io.command.bits.locator
+  local.io.admission.bits.memberWarp := io.command.bits.workgroupMemberWarp
   local.io.restart.valid := io.command.valid && restartCommand
   local.io.restart.bits.warpId := io.command.bits.warpId
   local.io.restart.bits.activeMask := io.command.bits.activeMask
+  // Restart retains the LocalState mapping captured on admission; these
+  // fields are intentionally ignored by LocalState for restart, but they
+  // must still be driven as a complete Decoupled bundle.
+  local.io.restart.bits.grouped := false.B
+  local.io.restart.bits.locator := VecInit(Seq.fill(num_thread)(0.U(xLen.W)))
+  local.io.restart.bits.memberWarp := VecInit(Seq.fill(num_warp_in_a_block)(0.U(depth_warp.W)))
   local.io.resume.valid := io.command.valid && resumeCommand
   local.io.resume.bits.activeMask := io.command.bits.activeMask
   val restartStackClearRequest = io.command.valid && restartCommand && local.io.restart.ready
-  io.command.ready := commandAllowed && Mux(freshCommand,
+  io.command.ready := commandAllowed && groupMappingReady && Mux(freshCommand,
     local.io.admission.ready, Mux(resumeCommand, local.io.resume.ready,
       local.io.restart.ready && stack.io.clear.ready))
   when(io.command.fire) {
@@ -224,8 +263,28 @@ class RtCoreScheduler extends Module {
         p" issue=${Decimal(io.command.bits.issueId)} mask=0x${Hexadecimal(io.command.bits.activeMask)}\\n")
     }
     when(freshCommand) { residentOwnerWarpId := io.command.bits.warpId }
+    when(io.command.bits.grouped) {
+      for (lane <- 0 until num_thread) {
+        val logicalMember = io.command.bits.locator(lane)(
+          log2Ceil(num_thread) + log2Ceil(num_warp_in_a_block) - 1,
+          log2Ceil(num_thread))
+        when(io.command.bits.activeMask(lane)) {
+          assert(logicalMember < io.command.bits.workgroupWarps,
+            "group traverse logical TID names a member outside this workgroup")
+        }
+      }
+    }
     commandMask(warp) := io.command.bits.activeMask
     warpIssueId(warp) := io.command.bits.issueId
+    if (coherenceRecordTrace) {
+      when(freshCommand || restartCommand) {
+        coherenceEpoch.get := coherenceEpoch.get + 1.U
+        for (lane <- 0 until num_thread) when(io.command.bits.activeMask(lane)) {
+          coherenceLaneEpoch.get(warp)(lane) := coherenceEpoch.get
+          coherenceLaneDepth.get(warp)(lane) := 0.U
+        }
+      }
+    }
     warpDestination(warp) := io.command.bits.destinationVd
     finishIssued(warp) := false.B
     when(freshCommand) {
@@ -314,6 +373,18 @@ class RtCoreScheduler extends Module {
   raySetup.io.in.bits.rayState.dir := directSetupRay.dir
   raySetup.io.in.bits.rayState.tmax := directSetupRay.extent
   raySetup.io.in.bits.rayState.inv := directSetupRay.inv
+  // The diagnostic record includes the logical warp ID as well as the
+  // physical resident slot, so offline cohorts never mix same-numbered lanes.
+  if (coherenceRecordTrace) {
+    when(raySetup.io.in.fire) {
+      printf(p"[RTCORE coherence-ray] warp=${Decimal(residentOwnerWarpId)} epoch=${Decimal(coherenceLaneEpoch.get(0)(directSetupLane))}" +
+        p" lane=${Decimal(directSetupLane)} depth=${Decimal(coherenceLaneDepth.get(0)(directSetupLane))}" +
+        p" active_level=${Decimal(coherenceLaneDepth.get(0)(directSetupLane))}" +
+        p" source=triangle o=[${Hexadecimal(directSetupRay.origin.x)},${Hexadecimal(directSetupRay.origin.y)},${Hexadecimal(directSetupRay.origin.z)}]" +
+        p" d=[${Hexadecimal(directSetupRay.dir.x)},${Hexadecimal(directSetupRay.dir.y)},${Hexadecimal(directSetupRay.dir.z)}]" +
+        p" tmin=${Hexadecimal(directSetupRay.originalTmin)} tmax=${Hexadecimal(directSetupRay.extent)}\n")
+    }
+  }
 
   // Stack operation defaults.  Header initialisation, deferred Box4 pushes,
   // and node pop are ordered by the stack module; scheduler only offers one
@@ -348,6 +419,19 @@ class RtCoreScheduler extends Module {
   for (lane <- 0 until num_thread) {
     when(local.io.worldBaseArrivedMask(lane) && laneState(0)(lane) === sRayLoad) {
       laneState(0)(lane) := sHeaderRequest
+    }
+    if (coherenceRecordTrace) {
+      when(local.io.worldBaseArrivedMask(lane)) {
+        val meta1 = local.io.coherenceTraceMeta1.get(lane)
+        val depth = meta1(RtAbiLayout.TraceMeta1ActiveLevelShift + RtAbiLayout.TraceMeta1ActiveLevelBits - 1,
+          RtAbiLayout.TraceMeta1ActiveLevelShift)
+        coherenceLaneDepth.get(0)(lane) := depth
+        printf(p"[RTCORE coherence-meta] warp=${Decimal(residentOwnerWarpId)} epoch=${Decimal(coherenceLaneEpoch.get(0)(lane))}" +
+          p" issue=${Decimal(warpIssueId(0))} lane=${Decimal(lane.U)}" +
+          p" depth=${Decimal(depth)} active_level=${Decimal(depth)}" +
+          p" mask=0x${Hexadecimal(commandMask(0))}" +
+          p"\n")
+      }
     }
   }
 
@@ -499,6 +583,11 @@ class RtCoreScheduler extends Module {
     laneState(headerWarp)(headerLane) := Mux(headerObject, sBlasHeaderPending, sHeaderPending)
   }
   when(table.io.asAcquire.fire && nodeAcquire) {
+    if (coherenceRecordTrace) {
+      printf(p"[RTCORE coherence-line] warp=${Decimal(residentOwnerWarpId)} epoch=${Decimal(coherenceLaneEpoch.get(popWarp)(pendingLane))}" +
+        p" lane=${Decimal(pendingLane)} addr=0x${Hexadecimal(table.io.asAcquire.bits.lineAddress)}" +
+        p" is64=${Decimal(table.io.asAcquire.bits.is64B)} object=${Decimal(pendingObjectRay)}\n")
+    }
     pendingNodeValid(popWarp)(pendingLane) := false.B
   }
 
@@ -528,6 +617,7 @@ class RtCoreScheduler extends Module {
       }.otherwise {
         if (sys.env.get("VENTUS_RTCORE_RECORD_TRACE").contains("1")) {
           printf(p"[RTCORE node] warp=${Decimal(residentOwnerWarpId)}" +
+            p" epoch=${Decimal(coherenceLaneEpoch.get(popWarp)(lane))}" +
             p" issue=${Decimal(warpIssueId(popWarp))} lane=${Decimal(lane.U)}" +
             p" kind=${Decimal(kind)} ref=0x${Hexadecimal(ref)}" +
             p" object=${Decimal(stack.io.popObjectRay(lane))}\\n")
@@ -640,6 +730,16 @@ class RtCoreScheduler extends Module {
     }
     boxConsumed(unit) := boxIssue(unit).fire
     boxWorldIssue(unit) := boxIssue(unit).fire && !line.bits.waiter.objectRay
+    if (coherenceRecordTrace) {
+      when(boxWorldIssue(unit)) {
+        printf(p"[RTCORE coherence-ray] warp=${Decimal(residentOwnerWarpId)} epoch=${Decimal(coherenceLaneEpoch.get(0)(lane))}" +
+          p" lane=${Decimal(lane)} depth=${Decimal(coherenceLaneDepth.get(0)(lane))}" +
+          p" active_level=${Decimal(coherenceLaneDepth.get(0)(lane))}" +
+          p" source=box o=[${Hexadecimal(ray.origin.x)},${Hexadecimal(ray.origin.y)},${Hexadecimal(ray.origin.z)}]" +
+          p" d=[${Hexadecimal(ray.dir.x)},${Hexadecimal(ray.dir.y)},${Hexadecimal(ray.dir.z)}]" +
+          p" tmin=${Hexadecimal(ray.originalTmin)} tmax=${Hexadecimal(ray.extent)}\n")
+      }
+    }
     when(instanceOwnsContextPort) {
       assert(!boxIssue(unit).fire,
         "world Instance and Box4 must not consume one context port in the same bank/cycle")
@@ -772,6 +872,18 @@ class RtCoreScheduler extends Module {
   instanceTransform.io.in.bits := 0.U.asTypeOf(new RtInstanceTransformInput)
   instanceTransform.io.in.bits.laneId := asReady.bits.waiter.laneId
   instanceTransform.io.in.bits.ray := instanceContext.ray
+  if (coherenceRecordTrace) {
+    when(instanceTransform.io.in.fire) {
+      val lane = asReady.bits.waiter.laneId
+      val ray = instanceTransform.io.in.bits.ray
+      printf(p"[RTCORE coherence-ray] warp=${Decimal(residentOwnerWarpId)} epoch=${Decimal(coherenceLaneEpoch.get(0)(lane))}" +
+        p" lane=${Decimal(lane)} depth=${Decimal(coherenceLaneDepth.get(0)(lane))}" +
+        p" active_level=${Decimal(coherenceLaneDepth.get(0)(lane))}" +
+        p" source=instance o=[${Hexadecimal(ray.origin.x)},${Hexadecimal(ray.origin.y)},${Hexadecimal(ray.origin.z)}]" +
+        p" d=[${Hexadecimal(ray.dir.x)},${Hexadecimal(ray.dir.y)},${Hexadecimal(ray.dir.z)}]" +
+        p" tmin=${Hexadecimal(ray.originalTmin)} tmax=${Hexadecimal(ray.extent)}\n")
+    }
+  }
   for (word <- 0 until 12)
     instanceTransform.io.in.bits.matrix(word) := asReady.bits.data((RtVtasLayout.InstanceWorldToObject / 4).toInt + word)
   val asHeaderReady = asReady.valid && asIsHeader && (headerInvalid || stack.io.init.ready)

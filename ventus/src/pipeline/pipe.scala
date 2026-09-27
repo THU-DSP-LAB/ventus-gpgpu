@@ -102,10 +102,45 @@ class pipe() extends Module{
   val rtLocalWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
   val rtInFlight = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
   val rtIssueId = RegInit(VecInit(Seq.fill(num_warp)(0.U(RtCorePortParameters.issueIdWidth.W))))
+  // Capture the CTA-provided tag at allocation time.  The tag lookup port is
+  // otherwise only driven for barriers/end-program and is not meaningful for
+  // an arbitrary issued instruction.
+  val rtWorkgroupTag = Reg(Vec(num_warp, UInt(TAG_WIDTH.W)))
+  val rtWorkgroupWarps = Reg(Vec(num_warp,
+    UInt(log2Ceil(num_warp_in_a_block + 1).W)))
+  // Physical warp slots are reusable.  Retain the allocation identity while
+  // the workgroup is live so grouped traversal can translate its logical
+  // cross-warp TIDs without exposing physical rows to software.
+  val rtWorkgroupValid = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  when(io.warpReq.fire) {
+    rtWorkgroupTag(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch
+    rtWorkgroupWarps(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
+    rtWorkgroupValid(io.warpReq.bits.wid) := true.B
+  }
   val rtCompletionAwaitingWb = RegInit(false.B)
   val rtCompletionWarp = Reg(UInt(depth_warp.W))
   val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
   val rtCompletionContextReleased = RegInit(false.B)
+  // Every grouped primary-trace completion, including a candidate callback,
+  // is withheld until its full cohort has arrived.  This is the shader-entry
+  // fence: no lane may execute a post-traverse shader while a sibling warp is
+  // still traversing the same primary round.
+  val rtGroupedInFlight = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtGroupTagByWarp = Reg(Vec(num_warp,
+    UInt((TAG_WIDTH - log2Ceil(num_warp_in_a_block)).W)))
+  val rtGroupMemberByWarp = Reg(Vec(num_warp, UInt(log2Ceil(num_warp_in_a_block).W)))
+  val rtGroupCountByWarp = Reg(Vec(num_warp,
+    UInt(log2Ceil(num_warp_in_a_block + 1).W)))
+  val rtGroupTerminalValid = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  // Arrival is independent from pending vector writeback.  A released group
+  // writes one terminal member per cycle, while its cohort membership must
+  // remain visible until the last member has been drained.
+  val rtGroupTerminalArrived = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtGroupTerminal = Reg(Vec(num_warp, new RtWarpCompletion))
+  // A warp whose group-traverse mask is empty still executes the collective
+  // instruction, but correctly creates no RTcore session or completion.
+  // Record that arrival so a sparse workgroup cannot wait forever for it.
+  val rtGroupEmptyArrived = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
   val rtReleaseSent = RegInit(false.B)
   // Reserve at operand-collector admission. A foreign traversal admitted
   // before this reservation is visible can later block the owner's RT path.
@@ -253,7 +288,8 @@ class pipe() extends Module{
   warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
-    val rtAdmissionAllowed = ibuffer.io.out(i).bits.rtOp =/= RtOp.traverse ||
+    val rtAdmissionAllowed = (ibuffer.io.out(i).bits.rtOp =/= RtOp.traverse &&
+      ibuffer.io.out(i).bits.rtOp =/= RtOp.groupTraverse) ||
       rtReservation.io.allowed(i)
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
     ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
@@ -294,7 +330,8 @@ class pipe() extends Module{
   // Issue is too late, because a foreign traversal can already be buffered
   // upstream. The lane mask is resolved at RT issue below.
   rtReservation.io.issued.valid := ibuffer2issue.io.out_v.fire &&
-    ibuffer2issue.io.out_v.bits.rtOp === RtOp.traverse
+    (ibuffer2issue.io.out_v.bits.rtOp === RtOp.traverse ||
+      ibuffer2issue.io.out_v.bits.rtOp === RtOp.groupTraverse)
   rtReservation.io.issued.bits := ibuffer2issue.io.out_v.bits.wid
   rtReservation.io.releaseIssued.valid := rtcore.io.release.fire
   rtReservation.io.releaseIssued.bits := rtcore.io.release.bits.warpId
@@ -469,6 +506,8 @@ class pipe() extends Module{
 
   val rtIssue = issueV.io.out_RT.bits
   val rtIsTraverse = rtIssue.ctrl.rtOp === RtOp.traverse
+  val rtIsGroupTraverse = rtIssue.ctrl.rtOp === RtOp.groupTraverse
+  val rtIsAnyTraverse = rtIsTraverse || rtIsGroupTraverse
   val rtIsRelease = rtIssue.ctrl.rtOp === RtOp.release
   val rtIsLocalLoad = rtIssue.ctrl.rtOp === RtOp.localLoad
   val rtIsLocalStore = rtIssue.ctrl.rtOp === RtOp.localStore
@@ -476,7 +515,7 @@ class pipe() extends Module{
   // control has disabled every lane.  They have no RT-local side effect in
   // that case: in particular, do not create (or try to retire) a session.
   val rtIssueMask = rtIssue.mask.asUInt
-  val rtTraverseEmpty = rtIsTraverse && !rtIssueMask.orR
+  val rtTraverseEmpty = rtIsAnyTraverse && !rtIssueMask.orR
   val rtReleaseEmpty = rtIsRelease && !rtIssueMask.orR
   // A reconverged release can have live lanes even though its matching
   // traverse was empty and therefore deliberately never opened a session.
@@ -487,7 +526,7 @@ class pipe() extends Module{
   val rtReleaseNoSession = rtIsRelease &&
     (!rtReservation.io.reserved || rtReservation.io.owner =/= rtIssue.ctrl.wid)
   val rtReleaseSkipped = rtReleaseEmpty || rtReleaseNoSession
-  rtReservation.io.traverseResolved.valid := issueV.io.out_RT.fire && rtIsTraverse
+  rtReservation.io.traverseResolved.valid := issueV.io.out_RT.fire && rtIsAnyTraverse
   rtReservation.io.traverseResolved.bits.warpId := rtIssue.ctrl.wid
   rtReservation.io.traverseResolved.bits.wasEmpty := rtTraverseEmpty
   val softwareLocalRequest = Wire(Decoupled(new RtLocalSramRequest))
@@ -560,12 +599,32 @@ class pipe() extends Module{
   // release is a lifecycle barrier: software TERMINATED stores for this warp
   // must complete through the legacy LSU before RTcore may reclaim its state.
   val rtReleaseStoreDrained = lsu.io.fence_end(rtIssue.ctrl.wid)
-  rtcore.io.command.valid := issueV.io.out_RT.valid && rtIsTraverse &&
+  rtcore.io.command.valid := issueV.io.out_RT.valid && rtIsAnyTraverse &&
     !rtTraverseEmpty && !rtInFlight(rtIssue.ctrl.wid)
   rtcore.io.command.bits.warpId := rtIssue.ctrl.wid
+  rtcore.io.command.bits.workgroupTag :=
+    rtWorkgroupTag(rtIssue.ctrl.wid)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block))
+  rtcore.io.command.bits.workgroupMember :=
+    rtWorkgroupTag(rtIssue.ctrl.wid)(log2Ceil(num_warp_in_a_block) - 1, 0)
+  rtcore.io.command.bits.workgroupWarps := rtWorkgroupWarps(rtIssue.ctrl.wid)
+  val rtCommandGroupTag = rtWorkgroupTag(rtIssue.ctrl.wid)(TAG_WIDTH - 1,
+    log2Ceil(num_warp_in_a_block))
+  val rtMemberAllocated = Wire(Vec(num_warp_in_a_block, Bool()))
+  for (member <- 0 until num_warp_in_a_block) {
+    val candidates = VecInit((0 until num_warp).map { warp =>
+      rtWorkgroupValid(warp) &&
+        rtWorkgroupTag(warp)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block)) === rtCommandGroupTag &&
+        rtWorkgroupTag(warp)(log2Ceil(num_warp_in_a_block) - 1, 0) === member.U
+    }).asUInt
+    rtMemberAllocated(member) := candidates.orR
+    rtcore.io.command.bits.workgroupMemberWarp(member) := PriorityEncoder(candidates)
+  }
+  rtcore.io.command.bits.workgroupMemberValid := rtMemberAllocated.asUInt
   rtcore.io.command.bits.issueId := rtIssueId(rtIssue.ctrl.wid)
   rtcore.io.command.bits.destinationVd := rtIssue.ctrl.reg_idxw
   rtcore.io.command.bits.activeMask := rtIssue.mask.asUInt
+  rtcore.io.command.bits.grouped := rtIsGroupTraverse
+  rtcore.io.command.bits.locator := rtIssue.in2
 
   // A release must not retire before the RTcore has actually reclaimed its
   // retained context.  Hold the issue entry after its one-time submission.
@@ -574,7 +633,7 @@ class pipe() extends Module{
   rtcore.io.release.bits.warpId := rtIssue.ctrl.wid
   rtcore.io.release.bits.activeMask := rtIssue.mask.asUInt
   rtcore.io.releaseAck.ready := rtReleaseSent && issueV.io.out_RT.valid && rtIsRelease
-  issueV.io.out_RT.ready := Mux(rtIsTraverse,
+  issueV.io.out_RT.ready := Mux(rtIsAnyTraverse,
     rtTraverseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtcore.io.command.ready),
     Mux(rtIsRelease, Mux(rtReleaseSkipped,
       rtReleaseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained),
@@ -586,10 +645,24 @@ class pipe() extends Module{
       printf(p"[RTCORE trace] command sm=${Decimal(sm_id)} warp=${Decimal(wid)}" +
         p" issue=${Decimal(rtcore.io.command.bits.issueId)}" +
         p" vd=${Decimal(rtcore.io.command.bits.destinationVd)}" +
-        p" mask=0x${Hexadecimal(rtcore.io.command.bits.activeMask)}\n")
+        p" mask=0x${Hexadecimal(rtcore.io.command.bits.activeMask)}" +
+        p" grouped=${Decimal(rtcore.io.command.bits.grouped)}" +
+        p" locator0=0x${Hexadecimal(rtcore.io.command.bits.locator(0))}" +
+        p" locator31=0x${Hexadecimal(rtcore.io.command.bits.locator(num_thread - 1))}\n")
     }
     rtInFlight(wid) := true.B
+    rtGroupedInFlight(wid) := rtcore.io.command.bits.grouped
+    rtGroupTagByWarp(wid) := rtcore.io.command.bits.workgroupTag
+    rtGroupMemberByWarp(wid) := rtcore.io.command.bits.workgroupMember
+    rtGroupCountByWarp(wid) := rtcore.io.command.bits.workgroupWarps
     rtIssueId(wid) := rtIssueId(wid) + 1.U
+  }
+  when(issueV.io.out_RT.fire && rtIsGroupTraverse && rtTraverseEmpty) {
+    val wid = rtIssue.ctrl.wid
+    rtGroupEmptyArrived(wid) := true.B
+    rtGroupTagByWarp(wid) := rtWorkgroupTag(wid)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block))
+    rtGroupMemberByWarp(wid) := rtWorkgroupTag(wid)(log2Ceil(num_warp_in_a_block) - 1, 0)
+    rtGroupCountByWarp(wid) := rtWorkgroupWarps(wid)
   }
   when(rtcore.io.release.fire) {
     rtReleaseSent := true.B
@@ -600,16 +673,45 @@ class pipe() extends Module{
     rtReleaseSent := false.B
   }
 
-  rtWriteback.io.enq.valid := rtcore.io.completion.valid && !rtCompletionAwaitingWb
+  val rtCoreCompletionGrouped = rtGroupedInFlight(rtcore.io.completion.bits.warpId)
+  val rtGroupProbe = PriorityEncoder(rtGroupTerminalValid.asUInt)
+  val rtGroupProbeTag = rtGroupTagByWarp(rtGroupProbe)
+  val rtGroupProbeCount = rtGroupCountByWarp(rtGroupProbe)
+  val rtGroupArrived = VecInit((0 until num_warp_in_a_block).map { member =>
+    VecInit((0 until num_warp).map { warp =>
+      (rtGroupTerminalArrived(warp) || rtGroupEmptyArrived(warp)) &&
+        rtGroupTagByWarp(warp) === rtGroupProbeTag &&
+        rtGroupMemberByWarp(warp) === member.U
+    }).asUInt.orR
+  }).asUInt
+  val rtGroupExpected = (1.U(num_warp_in_a_block.W) << rtGroupProbeCount) - 1.U
+  val rtGroupReleaseReady = rtGroupTerminalValid.asUInt.orR && rtGroupProbeCount.orR &&
+    (rtGroupArrived & rtGroupExpected) === rtGroupExpected
+  val rtEnqueueCoreCompletion = rtcore.io.completion.valid && !rtCoreCompletionGrouped &&
+    !rtCompletionAwaitingWb
+  val rtEnqueueGroupCompletion = rtGroupReleaseReady
+  rtWriteback.io.enq.valid := rtEnqueueCoreCompletion || rtEnqueueGroupCompletion
   rtWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
-  rtWriteback.io.enq.bits.warp_id := rtcore.io.completion.bits.warpId
-  rtWriteback.io.enq.bits.reg_idxw := rtcore.io.completion.bits.destinationVd
+  val rtWritebackCompletion = Wire(new RtWarpCompletion)
+  rtWritebackCompletion := Mux(rtEnqueueGroupCompletion,
+    rtGroupTerminal(rtGroupProbe), rtcore.io.completion.bits)
+  rtWriteback.io.enq.bits.warp_id := rtWritebackCompletion.warpId
+  rtWriteback.io.enq.bits.reg_idxw := rtWritebackCompletion.destinationVd
   rtWriteback.io.enq.bits.wvd := true.B
-  rtWriteback.io.enq.bits.wvd_mask := rtcore.io.completion.bits.completionMask.asBools
-  rtWriteback.io.enq.bits.wb_wvd_rd := rtcore.io.completion.bits.laneStatus
+  rtWriteback.io.enq.bits.wvd_mask := rtWritebackCompletion.completionMask.asBools
+  rtWriteback.io.enq.bits.wb_wvd_rd := rtWritebackCompletion.laneStatus
   if (SPIKE_OUTPUT) { rtWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
-  rtcore.io.completion.ready := rtWriteback.io.enq.ready && !rtCompletionAwaitingWb
+  rtcore.io.completion.ready := Mux(rtCoreCompletionGrouped,
+    !rtGroupTerminalValid(rtcore.io.completion.bits.warpId),
+    rtWriteback.io.enq.ready && !rtCompletionAwaitingWb && !rtGroupReleaseReady)
   when(rtcore.io.completion.fire) {
+    when(rtCoreCompletionGrouped) {
+      val wid = rtcore.io.completion.bits.warpId
+      rtGroupTerminal(wid) := rtcore.io.completion.bits
+      rtGroupTerminalValid(wid) := true.B
+      rtGroupTerminalArrived(wid) := true.B
+      rtInFlight(wid) := false.B
+    }
     if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
       val hitMask = VecInit((0 until num_thread).map(lane =>
         rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCompleteHit.U)).asUInt
@@ -634,10 +736,12 @@ class pipe() extends Module{
         p" mask0=${Decimal(rtcore.io.completion.bits.completionMask(0))}" +
         p" status0=0x${Hexadecimal(rtcore.io.completion.bits.laneStatus(0))}\n")
     }
-    rtCompletionAwaitingWb := true.B
-    rtCompletionWarp := rtcore.io.completion.bits.warpId
-    rtCompletionDestination := rtcore.io.completion.bits.destinationVd
-    rtCompletionContextReleased := rtcore.io.completion.bits.contextReleased
+    when(!rtCoreCompletionGrouped) {
+      rtCompletionAwaitingWb := true.B
+      rtCompletionWarp := rtcore.io.completion.bits.warpId
+      rtCompletionDestination := rtcore.io.completion.bits.destinationVd
+      rtCompletionContextReleased := rtcore.io.completion.bits.contextReleased
+    }
   }
 
   wb.io.in_x(0)<>alu.io.out
@@ -658,9 +762,12 @@ class pipe() extends Module{
   // Observe the actual RT writeback input, not a coincidentally matching
   // destination on another vector writer. No new owner enters before this.
   val rtCompletionWriteback = rtWriteback.io.deq.fire && rtCompletionAwaitingWb
-  rtReservation.io.completed.valid := rtCompletionWriteback
-  rtReservation.io.completed.bits.warpId := rtCompletionWarp
-  rtReservation.io.completed.bits.contextReleased := rtCompletionContextReleased
+  val rtGroupedPhysicalCompletion = rtcore.io.completion.fire && rtCoreCompletionGrouped
+  rtReservation.io.completed.valid := rtCompletionWriteback || rtGroupedPhysicalCompletion
+  rtReservation.io.completed.bits.warpId := Mux(rtGroupedPhysicalCompletion,
+    rtcore.io.completion.bits.warpId, rtCompletionWarp)
+  rtReservation.io.completed.bits.contextReleased := Mux(rtGroupedPhysicalCompletion,
+    rtcore.io.completion.bits.contextReleased, rtCompletionContextReleased)
   when(rtCompletionWriteback) {
     assert(rtWriteback.io.deq.bits.warp_id === rtCompletionWarp &&
       rtWriteback.io.deq.bits.reg_idxw === rtCompletionDestination)
@@ -671,6 +778,22 @@ class pipe() extends Module{
     }
     rtInFlight(rtCompletionWarp) := false.B
     rtCompletionAwaitingWb := false.B
+  }
+  when(rtWriteback.io.enq.fire && rtEnqueueGroupCompletion) {
+    val pendingForGroup = VecInit((0 until num_warp).map { warp =>
+      rtGroupTerminalValid(warp) && rtGroupTagByWarp(warp) === rtGroupProbeTag
+    }).asUInt
+    val lastTerminal = PopCount(pendingForGroup) === 1.U
+    rtGroupTerminalValid(rtGroupProbe) := false.B
+    rtGroupedInFlight(rtGroupProbe) := false.B
+    when(lastTerminal) {
+      for (warp <- 0 until num_warp) {
+        when(rtGroupTagByWarp(warp) === rtGroupProbeTag) {
+          rtGroupTerminalArrived(warp) := false.B
+          rtGroupEmptyArrived(warp) := false.B
+        }
+      }
+    }
   }
 
   // PMU is an elaboration-time option.  Keep this collector in one structural

@@ -43,7 +43,7 @@ class RtLocalSramTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.request.bits.writeData.foreach(_.poke(0.U)); dut.io.response.ready.poke(true.B)
     dut.io.coreRequest.foreach { request =>
       request.valid.poke(false.B)
-      request.bits.warpId.poke(0.U); request.bits.laneId.poke(0.U)
+      request.bits.warpId.poke(0.U); request.bits.rowBase.poke(0.U); request.bits.laneId.poke(0.U)
       request.bits.fieldId.poke(0.U); request.bits.write.poke(false.B)
       request.bits.writeData.poke(0.U)
     }
@@ -61,6 +61,7 @@ class RtLocalSramTest extends AnyFreeSpec with ChiselScalatestTester {
 
       for (port <- 0 until RtLocalSramParameters.corePortCount) {
         dut.io.coreRequest(port).bits.warpId.poke(2.U)
+        dut.io.coreRequest(port).bits.rowBase.poke((2 * RtLocalSramParameters.fieldCount).U)
         dut.io.coreRequest(port).bits.laneId.poke(port.U)
         dut.io.coreRequest(port).bits.fieldId.poke(9.U)
         dut.io.coreRequest(port).bits.write.poke(false.B)
@@ -89,6 +90,7 @@ class RtLocalSramTest extends AnyFreeSpec with ChiselScalatestTester {
         for (port <- 0 until RtLocalSramParameters.corePortCount) {
           val lane = slot * RtLocalSramParameters.bankCount + port
           dut.io.coreRequest(port).bits.warpId.poke(2.U)
+          dut.io.coreRequest(port).bits.rowBase.poke((2 * RtLocalSramParameters.fieldCount).U)
           dut.io.coreRequest(port).bits.laneId.poke(lane.U)
           dut.io.coreRequest(port).bits.fieldId.poke(10.U)
           dut.io.coreRequest(port).bits.write.poke(false.B)

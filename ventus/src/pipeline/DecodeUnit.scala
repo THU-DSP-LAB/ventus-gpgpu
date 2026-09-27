@@ -594,7 +594,8 @@ class InstrDecodeV2 extends Module {
       io.inst(i)(6, 0) === "b0001010".U,
       MuxLookup(io.inst(i)(14, 12), RtOp.none)(Seq(
         "b000".U -> RtOp.traverse,
-        "b001".U -> RtOp.release)), RtOp.none)
+        "b001".U -> RtOp.release,
+        "b011".U -> RtOp.groupTraverse)), RtOp.none)
     val rtLocalOp = Mux(io.inst(i)(6, 0) === "b1011111".U,
       MuxLookup(io.inst(i)(14, 12), RtOp.none)(Seq(
         "b011".U -> RtOp.localLoad,
@@ -604,7 +605,7 @@ class InstrDecodeV2 extends Module {
     c.isvec := s(0).asBool || rtOp.orR // RT consumes a vector source and lane mask
     c.sel_alu3 := s(8)
     c.mask := ((~io.inst(i)(25)).asBool | c.alu_fn === pipeline.IDecode.FN_VMERGE) & c.isvec & !c.disable_mask //一旦启用mask就会去读v0，所以必须这么写，避免标量指令也不小心读v0
-    c.sel_alu2 := Mux(rtOp === RtOp.traverse || rtOp === RtOp.localStore, IDecode.A2_VRS2, s(9))
+    c.sel_alu2 := Mux(rtOp === RtOp.traverse || rtOp === RtOp.groupTraverse || rtOp === RtOp.localStore, IDecode.A2_VRS2, s(9))
     c.sel_alu1 := s(10)
     c.sel_imm := s(11)
     c.mem_whb := s(12)
@@ -617,7 +618,7 @@ class InstrDecodeV2 extends Module {
     c.mem_unsigned := s(16)
     c.fence := s(17)
     c.sfu := s(18)
-    c.wvd := s(19).asBool || rtOp === RtOp.traverse || rtOp === RtOp.localLoad
+    c.wvd := s(19).asBool || rtOp === RtOp.traverse || rtOp === RtOp.groupTraverse || rtOp === RtOp.localLoad
     c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
     c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)

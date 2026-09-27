@@ -17,6 +17,13 @@ import top.parameters._
 import rtcore.RtCorePortParameters.{regidx_totalwidth => regidx_totalwidth}
 
 object RtCorePortParameters {
+  /* Elaborate the RT group controller with the same specialization selected
+   * by Vulkan. Eight RT Local warp rows are physically available, so group
+   * slots are 8/1, 8/2, 8/4 or 8/8. */
+  val groupWarps = sys.env.get("VENTUS_VK_RT_GROUP_WARPS").flatMap(_.toIntOption).getOrElse(1)
+  require(Set(1, 2, 4, 8).contains(groupWarps),
+    s"VENTUS_VK_RT_GROUP_WARPS must be 1, 2, 4, or 8 (got $groupWarps)")
+  val groupSlotCount = 8 / groupWarps
   // RTcore accepts one warp command at a time.  This is deliberately
   // independent of the number of resident SIMT warps in the enclosing SM.
   val residentWarpCount = 1
@@ -34,9 +41,24 @@ object RtCorePortParameters {
 /** Warp-granular representation of a decoded `vt.rt.traverse`. */
 class RtWarpCommand extends Bundle {
   val warpId = UInt(depth_warp.W)
+  // Resident CTA slot plus the warp's position in that CTA.  `warpId` is a
+  // reusable physical register-file slot and therefore must never identify a
+  // group-traverse collective by itself.
+  val workgroupTag = UInt((TAG_WIDTH - log2Ceil(num_warp_in_a_block)).W)
+  val workgroupMember = UInt(log2Ceil(num_warp_in_a_block).W)
+  val workgroupWarps = UInt(log2Ceil(num_warp_in_a_block + 1).W)
+  // Scheduler-private allocation map for this workgroup.  Software locators
+  // name logical members; only this table names reusable physical warp rows.
+  val workgroupMemberWarp = Vec(num_warp_in_a_block, UInt(depth_warp.W))
+  val workgroupMemberValid = UInt(num_warp_in_a_block.W)
   val issueId = UInt(RtCorePortParameters.issueIdWidth.W)
   val destinationVd = UInt(regidx_totalwidth.W)
   val activeMask = UInt(num_thread.W)
+  /* `grouped` is an ISA semantic bit, not an ownership bit. `locator` is a
+   * per-lane workgroup-local cross-warp TID; scheduler resolves it through
+   * workgroupTag/member allocation metadata before touching RT Local SRAM. */
+  val grouped = Bool()
+  val locator = Vec(num_thread, UInt(xLen.W))
 }
 
 /** Completion consumed by vector writeback and the warp scoreboard. */

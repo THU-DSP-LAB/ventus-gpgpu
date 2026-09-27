@@ -43,8 +43,11 @@ class RtWorldRayContexts extends Module {
 
   val io = IO(new Bundle {
     val clear = Input(Bool())
-    // Physical Local-SRAM warp row, supplied by the owning LocalState.
-    val warpId = Input(UInt(depth_warp.W))
+    // Persistent SRAM location for each physical execution lane.  These are
+    // identity mappings normally and locator-derived mappings for a group.
+    val targetRowBase = Input(Vec(num_thread,
+      UInt(log2Ceil(RtLocalSramParameters.bankDepth).W)))
+    val targetLane = Input(Vec(num_thread, UInt(log2Ceil(num_thread).W)))
     val prefetch = Flipped(Decoupled(new RtWorldRayPrefetch))
     val lookupLane = Input(Vec(boxUnitCount, UInt(log2Ceil(num_thread).W)))
     val result = Output(Vec(boxUnitCount, new RtWorldRayContextResult))
@@ -100,8 +103,10 @@ class RtWorldRayContexts extends Module {
       valid(unit)(slot) && !ready(unit)(slot))).asUInt
     val slot = PriorityEncoder(filling)
     io.request(unit).valid := filling.orR && !readPending(unit) && !io.clear
-    io.request(unit).bits.warpId := io.warpId
-    io.request(unit).bits.laneId := lane(unit)(slot)
+    val physicalLane = lane(unit)(slot)
+    io.request(unit).bits.warpId := 0.U
+    io.request(unit).bits.rowBase := io.targetRowBase(physicalLane)
+    io.request(unit).bits.laneId := io.targetLane(physicalLane)
     io.request(unit).bits.fieldId := fieldId(purpose(unit)(slot), field(unit)(slot))
     io.request(unit).bits.write := false.B
     io.request(unit).bits.writeData := 0.U

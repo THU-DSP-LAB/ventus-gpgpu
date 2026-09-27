@@ -22,6 +22,7 @@ object RtOp {
   val release = 2.U(width.W)
   val localLoad = 3.U(width.W)
   val localStore = 4.U(width.W)
+  val groupTraverse = 5.U(width.W)
 }
 
 
