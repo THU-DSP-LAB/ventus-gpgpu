@@ -1307,9 +1307,11 @@ class RtCoreScheduler extends Module {
   local.io.retire.valid := finalRetirePending && releaseTableCleared && table.io.quiescent &&
     (contextRetirePending || io.releaseAck.ready)
   local.io.retire.bits := residentOwnerWarpId
-  table.io.clear.valid := finalRetirePending && !releaseTableCleared
+  // An RT context retire drains its waiters but must not invalidate returned
+  // AS lines: the table is an SM-local cache shared by subsequent contexts.
+  table.io.clear.valid := false.B
   table.io.clear.bits := true.B
-  when(table.io.clear.fire) { releaseTableCleared := true.B }
+  when(finalRetirePending && !releaseTableCleared) { releaseTableCleared := true.B }
   io.releaseAck.valid := releasePending && finalRetirePending && releaseTableCleared &&
     local.io.retire.ready && table.io.quiescent
   io.releaseAck.bits.warpId := residentOwnerWarpId

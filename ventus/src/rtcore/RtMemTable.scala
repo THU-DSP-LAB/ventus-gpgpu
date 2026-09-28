@@ -143,7 +143,9 @@ class RtAsTable extends Module {
     entries.foreach(_.valid := false.B)
     victimCursor := (p.asEntryCount - 1).U
   }
-  io.idle := !VecInit(entries.map(_.valid)).asUInt.orR
+  // Returned entries without waiters are a reusable AS cache, not outstanding
+  // traversal state.  A retiring context only needs the latter to drain.
+  io.idle := !busy
   if (PMU_DETAILED) {
     require(p.asEntryCount == 32 && num_thread == 32, "Update detailed observation index widths")
     val d = io.detailed.get
@@ -194,7 +196,8 @@ class RtMemTable extends Module {
   as.io.clear <> io.clear
   adapter.io.as <> as.io.candidate; as.io.injection <> adapter.io.asInjection
   io.lsuRequest <> adapter.io.request; adapter.io.response <> io.lsuResponse
-  // Pending transactions keep their AS entry valid and prevent clear.
+  // `quiescent` means no transaction or lane waiter remains. Returned cache
+  // entries may stay resident across physical traversal contexts.
   io.quiescent := as.io.idle
   io.asCacheResidentHit := as.io.residentHit
   io.asCachePendingMerge := as.io.pendingMerge
