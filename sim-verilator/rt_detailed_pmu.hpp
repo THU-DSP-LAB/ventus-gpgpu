@@ -327,7 +327,8 @@ public:
             stats.bin("command_kind", s.commandKind);
         }
         if (s.session) {
-            std::array<unsigned, 15> occupancy{};
+            // Match RtCoreScheduler's Enum(16), including sContinuationInit.
+            std::array<unsigned, 16> occupancy{};
             unsigned live = 0;
             for (unsigned lane = 0; lane < 32; ++lane) {
                 if (!(s.activeMask & (uint32_t(1) << lane))) continue;

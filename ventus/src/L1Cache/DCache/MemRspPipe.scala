@@ -86,7 +86,7 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     val missRspEntryIdx_st1 = Wire(UInt(log2Up(NMshrEntry).W))
     // regular read 的整条回包数据按 instrId 暂存。
     // 这样在 MSHRMissRspOut 给出 targetInfo 时，coreRsp 可以取到与当前 miss 身份绑定的 line data。
-    val missRspDataByInstrId = Reg(Vec(NMshrEntry, Vec(BlockWords, UInt(WordLength.W))))
+    val missRspDataByInstrId = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(BlockWords)(0.U(WordLength.W))))))
     val memRspisRead = io.memRsp.bits.d_opcode === 1.U && io.memRsp.bits.d_param === 0.U
     val memRspisWrite = io.memRsp.bits.d_opcode === 0.U
     val memRspisFlushOrInv = io.memRsp.bits.d_opcode === 2.U

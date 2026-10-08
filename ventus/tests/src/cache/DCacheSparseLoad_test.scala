@@ -245,6 +245,50 @@ class DCacheSparseLoadTest extends AnyFreeSpec with ChiselScalatestTester {
     }
   }
 
+  "a following flush must not steal the SRAM read of a preceding hit" in {
+    test(new DataCachev2(None)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      val hitBase = BigInt("90008800", 16)
+      val victimBase = BigInt("90001380", 16)
+      val lanes = Map(16 -> 10)
+      dut.io.coreReq.valid.poke(false.B)
+      dut.io.coreRsp.ready.poke(true.B)
+      dut.io.memReq.get.ready.poke(true.B)
+      driveMemoryIdle(dut)
+      dut.clock.step(2)
+
+      for ((id, base, data) <- Seq(
+        (1, hitBase, BigInt("41061939", 16)),
+        (2, victimBase, BigInt("22000000", 16)))) {
+        val source = sendRequestAndCaptureMiss(dut, id, base, lanes)
+        returnMiss(dut, source, base, data)
+        waitFor(dut, dut.io.coreRsp.valid.peek().litToBoolean, "warm cache response")
+        expectSparseResponse(dut, id, lanes, data)
+        dut.clock.step(5)
+      }
+      // Dirty a distinct resident row so flush needs its own SRAM read.
+      driveRequest(dut, 2, victimBase, Map(0 -> 0))
+      dut.io.coreReq.bits.opcode.poke(1.U)
+      dut.io.coreReq.bits.data(0).poke("hdeadbeef".U)
+      dut.io.coreReq.valid.poke(true.B)
+      waitFor(dut, dut.io.coreReq.ready.peek().litToBoolean, "write hit acceptance")
+      dut.clock.step()
+      dut.io.coreReq.valid.poke(false.B)
+      waitFor(dut, dut.io.coreRsp.valid.peek().litToBoolean, "write hit response")
+      dut.clock.step(5)
+
+      driveRequest(dut, 3, hitBase, lanes)
+      dut.io.coreReq.valid.poke(true.B)
+      waitFor(dut, dut.io.coreReq.ready.peek().litToBoolean, "read hit acceptance")
+      dut.clock.step()
+      // The previous request is now in st1; flush is exposed at st0.
+      driveRequest(dut, 4, 0, Map.empty[Int, Int])
+      dut.io.coreReq.bits.opcode.poke(3.U)
+      dut.io.coreReq.bits.param.poke(1.U)
+      waitFor(dut, dut.io.coreRsp.valid.peek().litToBoolean, "read hit before flush")
+      expectSparseResponse(dut, 3, lanes, BigInt("41061939", 16))
+    }
+  }
+
   "DCache keeps four sampled-load masks with their out-of-order cache-line replies" in {
     test(new DataCachev2(None)).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       val requests = Seq(

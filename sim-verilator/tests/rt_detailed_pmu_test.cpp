@@ -2,6 +2,21 @@
 #include <cassert>
 
 int main() {
+    // Continuation initialisation is a real lane state, not a PMU error.
+    {
+        RtDetailedPmu continuation;
+        RtDetailedSample s;
+        s.enabled = s.session = true;
+        s.activeMask = 1;
+        s.laneState[0] = 15;
+        continuation.sample(s);
+        assert(continuation.stats.counters["state_15_lane_cycles"] == 1);
+        assert(continuation.stats.counters["invalid_lane_state"] == 0);
+        assert(continuation.stats.histograms["state_15_lanes"][1] == 1);
+        s.laneState[0] = 16;
+        continuation.sample(s);
+        assert(continuation.stats.counters["invalid_lane_state"] == 1);
+    }
     // RayLoad splits common field-major gather delay from each lane's setup
     // queueing delay.  The two completed lanes must conserve their total
     // command-to-write time across those three phases.
