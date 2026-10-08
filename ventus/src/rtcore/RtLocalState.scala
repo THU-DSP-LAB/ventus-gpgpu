@@ -26,6 +26,9 @@ class RtLocalRayState extends Module {
     val restart = Flipped(Decoupled(new RtLocalAdmission))
     val resume = Flipped(Decoupled(new RtLocalResume))
     val resumeOut = Decoupled(new RtLocalResumeLane)
+    // A released physical context may resume shader-owned committed words
+    // already present in persistent parent SRAM. Do not clear that plane.
+    val preserveCommitted = Input(UInt(num_thread.W))
     // On-demand world-ray readers must use the same physical Local-SRAM row
     // as the header/record path; the resident scheduler slot is not a warp ID.
     val ownerWarpId = Output(UInt(depth_warp.W))
@@ -328,13 +331,18 @@ class RtLocalRayState extends Module {
       readOutstanding := true.B
       readField := Mux(controlLoaded, (rayFieldCount + 1).U, rayFieldCount.U)
   }
-  when(io.narrowRequest(recordWritePort).fire) {
+  // This bank may instead accept its higher-priority header gather. Advance
+  // only the write actually selected, never an unrelated read on that port.
+  when(recordWriteRequest && !fetchRequest(recordWritePort) &&
+      io.narrowRequest(recordWritePort).fire) {
       recordWriteMask := recordWriteMask & ~UIntToOH(recordWriteWord, hitWords)
       when((recordWriteMask & ~UIntToOH(recordWriteWord, hitWords)) === 0.U) {
         recordWriteActive := false.B
       }
   }
-  when(io.narrowRequest(flushScatterPort).fire && flushScatterRequest) {
+  when(flushScatterRequest && !fetchRequest(flushScatterPort) &&
+      !(recordWriteRequest && recordWritePort === flushScatterPort) &&
+      io.narrowRequest(flushScatterPort).fire) {
     recordWordWritten(flushScatterLane)(flushRecord)(flushWord) := true.B
     when((flushMask & ~UIntToOH(flushScatterLane, num_thread)) === 0.U) { advanceFlush() }
   }
@@ -397,6 +405,9 @@ class RtLocalRayState extends Module {
     for (word <- 0 until hitWords) when(io.hitUpdate.bits.dirty(word)) {
       recordWordWritten(io.hitUpdate.bits.laneId)(io.hitUpdate.bits.committed)(word) := true.B
     }
+  }
+  for (lane <- 0 until num_thread) when(io.preserveCommitted(lane)) {
+    for (word <- 0 until hitWords) recordWordWritten(lane)(1)(word) := true.B
   }
   io.finish.ready := valid && !flushing && io.finish.bits.terminalMask === activeMask
   when(io.finish.fire) { flushing := true.B; flushRecord := false.B; flushWord := 0.U }

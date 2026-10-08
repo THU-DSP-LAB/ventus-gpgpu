@@ -98,6 +98,10 @@ bool Cta::apply_to_dut(Vdut* dut) {
         dut->io_host_req_bits_host_gds_baseaddr = kernel->get_gds_baseaddr();
         // PDS base is a pool base. CU interface maps WG to a resident slot.
         dut->io_host_req_bits_host_pds_baseaddr = kernel->get_pds_baseaddr();
+        dut->io_host_req_bits_host_rt_spill_pool_base = kernel->get_rt_spill_pool_base();
+        dut->io_host_req_bits_host_rt_spill_slots_per_core = kernel->get_rt_spill_slots_per_core();
+        dut->io_host_req_bits_host_rt_spill_per_core_stride = kernel->get_rt_spill_per_core_stride();
+        dut->io_host_req_bits_host_rt_spill_dispatch_epoch = kernel->get_rt_spill_dispatch_epoch();
         dut->io_host_req_bits_host_gds_size_total = 0; // useless
         return true;
     }

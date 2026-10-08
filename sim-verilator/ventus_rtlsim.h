@@ -43,6 +43,11 @@ typedef struct ventus_kernel_metadata_t {
     uint64_t* buffer_base;         // 各buffer的基址。第一块buffer是给硬件用的metadata
     uint64_t* buffer_size;      // 各buffer的size，以Bytes为单位。实际使用的大小，用于初始化.data
     uint64_t* buffer_allocsize; // 各buffer的size，以Bytes为单位。分配的大小
+    // Driver-private RT spill descriptor, never copied into CSR_KNL/PDS.
+    uint64_t rtSpillPoolBase;
+    uint32_t rtSpillSlotsPerCore;
+    uint32_t rtSpillPerCoreStride;
+    uint32_t rtSpillDispatchEpoch;
 } ventus_kernel_metadata_t;
 
 typedef struct {

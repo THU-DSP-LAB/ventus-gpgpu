@@ -10,7 +10,9 @@ class RtAbiLayoutTest extends AnyFreeSpec {
     val committedBase = RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
 
     assert(RtAbiLayout.AbiWordBytes == 4)
-    assert(RtAbiLayout.AbiVersion == 12)
+    assert(RtAbiLayout.AbiVersion == 13)
+    assert(RtAbiLayout.SlotReservedLo == 16)
+    assert(RtAbiLayout.SlotReservedHi == 17)
     assert(rayEnd <= RtAbiLayout.SlotWordCount)
     assert(candidateBase + RtAbiLayout.HitRecordWordCount == committedBase)
     assert(committedBase + RtAbiLayout.HitRecordWordCount ==

@@ -58,6 +58,10 @@ class host2CTA_data extends Bundle{
   val host_pds_size_per_wf  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_PDS_MAX+1).W)
   val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_rt_spill_pool_base = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_rt_spill_slots_per_core = UInt(32.W)
+  val host_rt_spill_per_core_stride = UInt(32.W)
+  val host_rt_spill_dispatch_epoch = UInt(32.W)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
   val host_kernel_dim       = UInt(2.W) // how many dimension does this kernel have
   val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
@@ -73,6 +77,15 @@ class CTAinterface extends Module{
     val warp2CTA = Vec(NUMBER_CU,Flipped(DecoupledIO(new CTArspData)))
   })
   val cta_sche = Module(new cta_scheduler_top)
+  // Driver serialises dispatches using this pool; keep the descriptor stable
+  // across all WG admissions until the next dispatch epoch.
+  val rtSpillPool = RegInit(0.U.asTypeOf(new rtcore.RtSpillPoolDescriptor))
+  when(io.host2CTA.fire) {
+    rtSpillPool.spillPoolBase := io.host2CTA.bits.host_rt_spill_pool_base
+    rtSpillPool.slotsPerCore := io.host2CTA.bits.host_rt_spill_slots_per_core
+    rtSpillPool.perCoreStride := io.host2CTA.bits.host_rt_spill_per_core_stride
+    rtSpillPool.dispatchEpoch := io.host2CTA.bits.host_rt_spill_dispatch_epoch
+  }
   cta_sche.io.host_wg_new.valid <> io.host2CTA.valid
   cta_sche.io.host_wg_new.ready <> io.host2CTA.ready
   // Register-file addressing discards the bank bits of the allocation base.
@@ -120,6 +133,7 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_done.ready := io.CTA2host.ready
 
   for (i <- 0 until NUMBER_CU){
+    io.CTA2warp(i).bits.rtSpillPool := rtSpillPool
     io.CTA2warp(i).valid := cta_sche.io.cu_wf_new(i).valid
     io.CTA2warp(i).bits.dispatch2cu_wg_wf_count := cta_sche.io.cu_wf_new(i).bits.num_wf
     io.CTA2warp(i).bits.dispatch2cu_wf_size_dispatch   := cta_sche.io.cu_wf_new(i).bits.num_thread_per_wf

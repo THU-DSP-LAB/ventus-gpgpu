@@ -10,6 +10,16 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
     dut.io.push.valid.poke(false.B)
     dut.io.pop.valid.poke(false.B)
     dut.io.clear.valid.poke(false.B)
+    dut.io.snapshotLane.poke(0.U)
+    dut.io.restore.valid.poke(false.B)
+    dut.io.restore.bits.laneId.poke(0.U)
+    dut.io.restore.bits.image.baseNodeRef.foreach(_.poke(0.U))
+    dut.io.restore.bits.image.overflowNodeRef.foreach(_.poke(0.U))
+    dut.io.restore.bits.image.baseObjectTags.poke(0.U)
+    dut.io.restore.bits.image.overflowObjectTags.poke(0.U)
+    dut.io.restore.bits.image.stackDepth.poke(0.U)
+    dut.io.restore.bits.image.valid.poke(false.B)
+    dut.io.restore.bits.image.instanceNodeRef.poke(0.U)
     dut.io.init.bits.laneMask.poke(0.U)
     dut.io.init.bits.rootNodeRef.foreach(_.poke(0.U))
     dut.io.init.bits.objectRay.foreach(_.poke(false.B))
@@ -85,6 +95,51 @@ class RtTraversalStackTest extends AnyFreeSpec with ChiselScalatestTester {
       pop(dut, BigInt(1), Map(0 -> 0x30), Map(0 -> false))
       pop(dut, BigInt(1), Map(0 -> 0x20), Map(0 -> true))
       pop(dut, BigInt(1), Map(0 -> 0x10), Map(0 -> false))
+    }
+  }
+
+  "spill snapshots restore empty, base and overflow stacks into a different physical lane" in {
+    test(new RtTraversalStack).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+      driveIdle(dut)
+      for (depth <- Seq(0, 32, 49, 64)) {
+        init(dut, BigInt(1), Map(0 -> 0x100), Map(0 -> true))
+        if (depth == 0) pop(dut, BigInt(1), Map(0 -> 0x100), Map(0 -> true))
+        for (entry <- 1 until depth) {
+          push(dut, BigInt(1), Map(0 -> BigInt(0x100 + entry)), Map(0 -> (entry % 2 == 0)))
+        }
+        dut.io.snapshotLane.poke(0.U)
+        dut.io.snapshot.valid.expect(true.B)
+        dut.io.snapshot.stackDepth.expect(depth.U)
+        val base = dut.io.snapshot.baseNodeRef.map(_.peek().litValue)
+        val overflow = dut.io.snapshot.overflowNodeRef.map(_.peek().litValue)
+        val baseTags = dut.io.snapshot.baseObjectTags.peek().litValue
+        val overflowTags = dut.io.snapshot.overflowObjectTags.peek().litValue
+        for (entry <- 0 until 32) {
+          assert(base(entry) == (if (entry < depth) 0x100 + entry else 0))
+          assert(overflow(entry) == (if (entry + 32 < depth) 0x120 + entry else 0))
+        }
+        // Freeze/snapshot does not pop anything. Only the later physical
+        // release clears lane 0; resume may be routed to physical lane 1.
+        clear(dut, BigInt(1))
+        dut.io.restore.bits.laneId.poke(1.U)
+        base.zip(dut.io.restore.bits.image.baseNodeRef).foreach { case (v, port) => port.poke(v.U) }
+        overflow.zip(dut.io.restore.bits.image.overflowNodeRef).foreach { case (v, port) => port.poke(v.U) }
+        dut.io.restore.bits.image.baseObjectTags.poke(baseTags.U)
+        dut.io.restore.bits.image.overflowObjectTags.poke(overflowTags.U)
+        dut.io.restore.bits.image.stackDepth.poke(depth.U)
+        dut.io.restore.bits.image.valid.poke(true.B)
+        dut.io.restore.valid.poke(true.B)
+        dut.io.restore.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.restore.valid.poke(false.B)
+        dut.io.snapshotLane.poke(1.U)
+        dut.io.snapshot.stackDepth.expect(depth.U)
+        for (entry <- (0 until depth).reverse) {
+          pop(dut, BigInt(2), Map(1 -> BigInt(0x100 + entry)), Map(1 -> (entry % 2 == 0)))
+        }
+        dut.io.laneEmpty.expect(2.U)
+        clear(dut, BigInt(2))
+      }
     }
   }
 

@@ -90,7 +90,7 @@ class RtAsTableTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.io.readyMeta(0).valid.expect(false.B)
       dut.io.readyMeta(17).valid.expect(false.B)
       for (lane <- (1 until 32).filter(_ != 17)) serve(lane)
-      dut.io.idle.expect(false.B) // retained, but safe to clear
+      dut.io.idle.expect(true.B) // retained cache lines have no outstanding work
       acquire(0x100, 0, hit = true)
       // Same-cycle acquire and last waiter service preserve the new waiter.
       dut.io.consumeLanes.poke(1.U)

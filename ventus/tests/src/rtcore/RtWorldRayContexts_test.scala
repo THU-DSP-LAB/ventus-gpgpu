@@ -6,10 +6,21 @@ import org.scalatest.freespec.AnyFreeSpec
 import top.parameters._
 
 class RtWorldRayContextsTest extends AnyFreeSpec with ChiselScalatestTester {
-  "fills and consumes one raw Box4 world-ray context" in {
-    test(new RtWorldRayContexts) { dut =>
+  for ((parentRow, parentLane) <- Seq((0, 0), (120, 19))) {
+    s"fills and consumes Box4 world ray from parent row $parentRow lane $parentLane" in {
+      checkParent(parentRow, parentLane)
+    }
+  }
+
+  private def checkParent(parentRow: Int, parentLane: Int): Unit = {
+    test(new RtWorldRayContexts).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       dut.io.clear.poke(false.B)
-      dut.io.warpId.poke(0.U)
+      for (lane <- 0 until num_thread) {
+        dut.io.targetRowBase(lane).poke(0.U)
+        dut.io.targetLane(lane).poke(lane.U)
+      }
+      dut.io.targetRowBase(0).poke(parentRow.U)
+      dut.io.targetLane(0).poke(parentLane.U)
       dut.io.prefetch.valid.poke(false.B)
       dut.io.prefetch.bits.laneId.poke(0.U)
       dut.io.prefetch.bits.purpose.poke(RtWorldRayPurpose.box)
@@ -31,7 +42,8 @@ class RtWorldRayContextsTest extends AnyFreeSpec with ChiselScalatestTester {
 
       for (field <- 0 until 11) {
         dut.io.request(0).valid.expect(true.B)
-        dut.io.request(0).bits.laneId.expect(0.U)
+        dut.io.request(0).bits.rowBase.expect(parentRow.U)
+        dut.io.request(0).bits.laneId.expect(parentLane.U)
         dut.io.request(0).bits.fieldId.expect((RtAbiLayout.SlotOriginX + field).U)
         dut.clock.step()
         dut.io.response(0).valid.poke(true.B)

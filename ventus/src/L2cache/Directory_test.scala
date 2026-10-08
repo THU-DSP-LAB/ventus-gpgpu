@@ -154,19 +154,35 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val flush_way =(flushCount%params.cache.ways.asUInt)
   val regout = cc_dir.io.r.resp.data //
   val ways = regout.asTypeOf(Vec(params.cache.ways,new DirectoryEntry_lite(params)))
-  val flush_tag =ways(flush_way).tag
-  when(io.flush || io.invalidate  || (flush_issue_reg&& (io.result.fire || !RegNext(status_reg(flush_set).dirty(flush_way), false.B)))){
-    flushCount := flushCount +1.U
-  }.elsewhen(flushDone){
-    flushCount :=0.U
+  // A scan item is a transaction: read its directory row, latch its tag,
+  // then hold its identity/dirty bit until SourceD's queue accepts it.
+  // Advancing a live cursor against RegNext(dirty/way) can skip dirty lines
+  // or pair another row's tag with the writeback's BankedStore address.
+  val scanRead :: scanLatch :: scanEmit :: Nil = Enum(3)
+  val scanState = RegInit(scanRead)
+  val scanDirty = RegInit(false.B)
+  val scanTag = RegInit(0.U(params.tagBits.W))
+  val scanReadFire = flush_issue_reg && scanState === scanRead
+  val scanAdvance = flush_issue_reg && scanState === scanEmit &&
+    ((!scanDirty && !flushDone) || io.result.fire)
+  when(scanReadFire) {
+    scanDirty := status_reg(flush_set).dirty(flush_way)
+    scanState := scanLatch
+  }.elsewhen(flush_issue_reg && scanState === scanLatch) {
+    scanTag := ways(flush_way).tag
+    scanState := scanEmit
+  }.elsewhen(scanAdvance) {
+    scanState := scanRead
+    flushCount := Mux(flushDone, 0.U, flushCount + 1.U)
   }
-  //todo not sure
 
   when(io.flush || io.invalidate){
     flush_issue_reg:= true.B
+    flushCount := 0.U
+    scanState := scanRead
     flush_source_reg:=io.flush_invalidate_src
     is_invalidate_reg:=  io.invalidate
-  }.elsewhen(flushDone){
+  }.elsewhen(scanAdvance && flushDone){
     flush_issue_reg:= false.B
     is_invalidate_reg :=false.B
     flush_source_reg:=0.U
@@ -177,7 +193,7 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 
 
 
-  val ren = io.read.fire || flush_issue
+  val ren = io.read.fire || scanReadFire
 
   val wen_new = (!wipeDone && !wipeOff) || io.write.fire
   val wen =io.write.fire
@@ -367,7 +383,6 @@ for(i<- 0 until params.cache.sets){
 
   val timely_hit = (RegNext(io.read.bits.tag) ===io.write.bits.data.tag) && io.write.fire && (RegNext(io.read.bits.set)===io.write.bits.set)
 
-  val flush_issue_regnext = RegNext(flush_issue, false.B)
   // nn64k-007 迭代6: victim_stall(codex#3 精确公式 + next-state)。occSetThisCyc 并入同拍刚预定的 way
   // (修 same-cycle hole); rdInvalidVec.orR 项修 mixed-state hole(有空 way 但全 reserved 时不踢 valid, 等填回)。
   // srad-004 A''': occHitThisCyc 并入 occSetThisCyc；rdResvNext 并 hitBusyVecRd（确保同拍 will_resv_hit
@@ -396,7 +411,8 @@ for(i<- 0 until params.cache.sets){
   // normal read; otherwise the miss path can consume victimWay's placeholder.
   io.read.ready := (((wipeDone && !io.write.fire) || writeBypass) && !victim_stall) &&
                    !flush_issue_reg && io.result.ready
-  io.result.valid := Mux(flush_issue_regnext, io.result.bits.last_flush|| RegNext(status_reg(flush_set).dirty(flush_way) && flush_issue, false.B), valid_signal)
+  io.result.valid := Mux(flush_issue_reg,
+    scanState === scanEmit && (scanDirty || flushDone), valid_signal)
 
   // bfs4096-004 fix: 把 io.result.bits 的 {hit, way, dirty, victim_tag} 4 个字段从纯组合
   // 改为 RegEnable(comb, ren1) 锁存版本，避开 Decoupled 反压窗口里 directory.write
@@ -416,8 +432,8 @@ for(i<- 0 until params.cache.sets){
   // (line 284)。若同拍 ready=1（零反压 fire），下游会拿到 stale reg。Mux on ren1 让
   // 当拍直接走 comb 表达式（与 valid 同步），反压期间走 reg（稳定）。
   //
-  // 范围最小化：flush 路径（flush_issue_regnext=1 分支）完全保持原样——flush 时
-  // io.write.ready=0（line 277），dir.write 不可能 fire，没有反压期被改写的 race。
+  // The flush scan uses its own stable transaction above. During a scan,
+  // io.write.ready=0, so directory fills cannot change the sampled row.
   // about_replace（line 289）也不动——它仍每拍重算，但只在 ren1 那拍被 sample 到
   // result_hit_reg，反压期出现的新 about_replace=1 不再传到下游，正向修复。
   val result_hit_comb        = (hit || (setQuash && tagMatch) || timely_hit) && (!about_replace)
@@ -432,32 +448,30 @@ for(i<- 0 until params.cache.sets){
   val normal_dirty_reg       = RegEnable(normal_dirty_comb,      ren1)
   val normal_victim_tag_reg  = RegEnable(normal_victim_tag_comb, ren1)
 
-  io.result.bits.hit := Mux(ren1, result_hit_comb, result_hit_reg)
-  io.result.bits.way  := Mux(flush_issue_regnext, RegNext(flush_way, false.B),
+  io.result.bits.hit := !flush_issue_reg && Mux(ren1, result_hit_comb, result_hit_reg)
+  io.result.bits.way  := Mux(flush_issue_reg, flush_way,
                              Mux(ren1, normal_way_comb, normal_way_reg))
-  io.result.bits.put    :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.put)
-  io.result.bits.data   :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.data)
-  io.result.bits.offset :=Mux(flush_issue_regnext, 0.U ,read_bits_reg.offset)
-  io.result.bits.size   :=Mux(flush_issue_regnext, log2Up(params.cache.beatBytes).asUInt, read_bits_reg.size)
-  io.result.bits.set    :=Mux(flush_issue_regnext, RegNext(flush_set, false.B), read_bits_reg.set)
-  io.result.bits.source :=Mux(flush_issue_regnext, RegNext(flush_source_reg, false.B), read_bits_reg.source)
-  io.result.bits.tag    :=Mux(flush_issue_regnext, ways(RegNext(flush_way, false.B)).tag, read_bits_reg.tag)
+  io.result.bits.put    :=Mux(flush_issue_reg, 0.U ,read_bits_reg.put)
+  io.result.bits.data   :=Mux(flush_issue_reg, 0.U ,read_bits_reg.data)
+  io.result.bits.offset :=Mux(flush_issue_reg, 0.U ,read_bits_reg.offset)
+  io.result.bits.size   :=Mux(flush_issue_reg, log2Up(params.cache.beatBytes).asUInt, read_bits_reg.size)
+  io.result.bits.set    :=Mux(flush_issue_reg, flush_set, read_bits_reg.set)
+  io.result.bits.source :=Mux(flush_issue_reg, flush_source_reg, read_bits_reg.source)
+  io.result.bits.tag    :=Mux(flush_issue_reg, scanTag, read_bits_reg.tag)
   //victim tag should be transfered when miss dirty
-  io.result.bits.opcode :=Mux(flush_issue_regnext, Hint, read_bits_reg.opcode)
+  io.result.bits.opcode :=Mux(flush_issue_reg, Hint, read_bits_reg.opcode)
 
-  io.result.bits.mask   :=Mux(flush_issue_regnext, Fill(params.mask_bits,1.U),read_bits_reg.mask)
-  io.result.bits.dirty  :=Mux(flush_issue_regnext, RegNext(status_reg(flush_set).dirty(flush_way), false.B),
+  io.result.bits.mask   :=Mux(flush_issue_reg, Fill(params.mask_bits,1.U),read_bits_reg.mask)
+  io.result.bits.dirty  :=Mux(flush_issue_reg, scanDirty,
                               Mux(ren1, normal_dirty_comb, normal_dirty_reg))
-  io.result.bits.last_flush :=Mux(flush_issue_regnext, RegNext(flushDone, false.B),false.B)
-  io.result.bits.flush  := RegNext(flush_issue, false.B)
-  // bfs4096-004 fix: victim_tag 原本隐式依赖 io.result.bits.way 已经按 flush_issue_regnext 分支选过，
-  // 现在 way 已改为锁存版本，必须在这里显式 mux 出 flush 分支（用 ways(RegNext(flush_way)).tag），
-  // 否则反压期间 ways(...) 仍是组合读，会被 dir.write 改 ways 后污染 victim_tag。
-  io.result.bits.victim_tag := Mux(flush_issue_regnext, ways(RegNext(flush_way, false.B)).tag,
+  io.result.bits.last_flush :=flush_issue_reg && flushDone
+  io.result.bits.flush  := flush_issue_reg
+  // Normal lookup and flush both retain the tag belonging to their sampled way.
+  io.result.bits.victim_tag := Mux(flush_issue_reg, scanTag,
                                    Mux(ren1, normal_victim_tag_comb, normal_victim_tag_reg))
   //todo what's the function of flush
-  io.result.bits.l2cidx := Mux(flush_issue_regnext, 0.U, read_bits_reg.l2cidx)
-  io.result.bits.param  := Mux(flush_issue_regnext, 0.U, read_bits_reg.param)
+  io.result.bits.l2cidx := Mux(flush_issue_reg, 0.U, read_bits_reg.l2cidx)
+  io.result.bits.param  := Mux(flush_issue_reg, 0.U, read_bits_reg.param)
   io.result.bits.spike_info.foreach( _ := read_bits_reg.spike_info.getOrElse(0.U) )
 
   // nn64k-007 Phase 4.5 迭代6: reservation set/clear。

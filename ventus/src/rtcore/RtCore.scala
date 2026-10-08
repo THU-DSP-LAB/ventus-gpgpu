@@ -24,6 +24,7 @@ class RtCore extends Module {
   }
 
   scheduler.io.command <> io.command
+  scheduler.io.coreId := io.coreId
   io.completion <> scheduler.io.completion
   scheduler.io.release <> io.release
   io.releaseAck <> scheduler.io.releaseAck

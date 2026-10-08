@@ -14,6 +14,51 @@ import top.parameters._
   * completion becomes visible.
   */
 class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
+  "released-context resume preserves the shader-owned committed plane" in {
+    test(new RtLocalRayState) { dut =>
+      idle(dut)
+      admit(dut, restart = false)
+      completeRayGather(dut)
+      dut.io.preserveCommitted.poke(1.U)
+      dut.clock.step()
+      dut.io.preserveCommitted.poke(0.U)
+      val writes = finishAndCollectWrites(dut)
+      assert(writes.size == hitWords)
+      assert(writes.forall { case (field, _, _) => field >= candidateBase && field < committedBase })
+    }
+  }
+  "header read cannot consume a queued candidate write on the same bank" in {
+    test(new RtLocalRayState) { dut =>
+      idle(dut)
+      dut.io.narrowRequest(0).ready.poke(false.B)
+      admit(dut, restart = false)
+      dut.io.hitUpdate.bits.dirty.poke(1.U)
+      dut.io.hitUpdate.bits.data(0).poke("h12345678".U)
+      dut.io.hitUpdate.valid.poke(true.B)
+      dut.io.hitUpdate.ready.expect(true.B)
+      dut.clock.step()
+      dut.io.hitUpdate.valid.poke(false.B)
+      dut.clock.step(3)
+      dut.io.narrowRequest(0).valid.expect(true.B)
+      dut.io.narrowRequest(0).bits.write.expect(false.B)
+      dut.io.narrowRequest(0).ready.poke(true.B)
+      dut.clock.step()
+      // SRAM cannot accept another transaction while this bank's read
+      // response is pending; don't silently accept the candidate here.
+      dut.io.narrowRequest(0).ready.poke(false.B)
+      dut.io.narrowResponse(0).valid.poke(true.B)
+      dut.io.narrowResponse(0).ready.expect(true.B)
+      dut.clock.step()
+      dut.io.narrowResponse(0).valid.poke(false.B)
+      dut.io.narrowRequest(0).ready.poke(true.B)
+      dut.io.narrowRequest(0).valid.expect(true.B)
+      dut.io.narrowRequest(0).bits.write.expect(true.B)
+      dut.io.narrowRequest(0).bits.fieldId.expect(candidateBase.U)
+      dut.io.narrowRequest(0).bits.writeData.expect("h12345678".U)
+      dut.clock.step()
+      dut.io.narrowRequest(0).valid.expect(false.B)
+    }
+  }
   "retire waits for drained records and allows a different warp to gather" in {
     test(new RtLocalRayState) { dut =>
       idle(dut)
@@ -28,8 +73,16 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
         completeRayGather(dut, mask)
         dut.clock.step(2)
         val writes = finishAndCollectWrites(dut, mask = mask, stall = true)
-        assert(writes.size == 2 * hitWords)
-        assert(writes.forall(_._2 == BigInt(mask)))
+        assert(writes.size == 2 * hitWords * Integer.bitCount(mask))
+        for (field <- candidateBase until committedBase + hitWords) {
+          val fieldWrites = writes.filter(_._1 == BigInt(field))
+          assert(fieldWrites.size == Integer.bitCount(mask))
+          assert(fieldWrites.map(_._2).distinct.size == fieldWrites.size)
+          assert(fieldWrites.forall { case (_, laneMask, _) =>
+            laneMask.bitCount == 1 && (laneMask & BigInt(mask)) == laneMask
+          })
+          assert(fieldWrites.map(_._2).reduce(_ | _) == BigInt(mask))
+        }
         dut.io.retire.bits.poke(owner.U)
         dut.io.retire.ready.expect(false.B)
         dut.io.admission.ready.expect(false.B)
@@ -104,6 +157,7 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
   private val committedBase = RtAbiLayout.LocalCommittedHitRecordBaseBytes / RtAbiLayout.AbiWordBytes
 
   private def idle(dut: RtLocalRayState): Unit = {
+    dut.io.preserveCommitted.poke(0.U)
     dut.io.admission.valid.poke(false.B)
     dut.io.admission.bits.warpId.poke(0.U)
     dut.io.admission.bits.activeMask.poke(0.U)
@@ -210,14 +264,17 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
 
     dut.io.request.ready.poke(true.B)
     var cycles = 0
-    while (!dut.io.drained.valid.peek().litToBoolean && cycles < 64) {
+    // Fixed per-lane writes plus bounded backpressure, not one vector write
+    // per field. Still time out if any accepted record cannot drain.
+    val maxCycles = 16 + 6 * hitWords * Integer.bitCount(mask)
+    while (!dut.io.drained.valid.peek().litToBoolean && cycles < maxCycles) {
       val ready = !stall || cycles % 3 == 2
       dut.io.request.ready.poke(ready.B)
       collectWrites(acceptWide = ready)
       dut.clock.step()
       cycles += 1
     }
-    assert(cycles < 64, "Local hit records never drained")
+    assert(cycles < maxCycles, "Local hit records never drained")
     writes
   }
 
@@ -390,6 +447,9 @@ class RtLocalStateTest extends AnyFreeSpec with ChiselScalatestTester {
       dut.clock.step()
 
       admit(dut, restart = false, mask = sessionMask)
+      // Scheduler only restarts after the prior traversal's gather has
+      // completed; this test checks mask lifetime, not read cancellation.
+      completeRayGather(dut, sessionMask)
       // A nested command replaces the pending gather with its own divergent
       // mask, but must not shrink the session that eventual finish/release
       // flushes from RT Local SRAM.

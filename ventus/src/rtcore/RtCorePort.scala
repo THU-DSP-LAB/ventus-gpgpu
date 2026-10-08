@@ -39,6 +39,7 @@ object RtCorePortParameters {
 
 /** Warp-granular representation of a decoded `vt.rt.traverse`. */
 class RtWarpCommand extends Bundle {
+  val spillPool = new RtSpillPoolDescriptor
   val warpId = UInt(depth_warp.W)
   // Resident CTA slot plus the warp's position in that CTA.  `warpId` is a
   // reusable physical register-file slot and therefore must never identify a
@@ -70,6 +71,12 @@ class RtWarpCompletion extends Bundle {
   // Physical traversal state has been drained and reclaimed. This is not
   // the software session's rt.release; its per-warp Local SRAM remains live.
   val contextReleased = Bool()
+  // A released physical context may still need a shader callback/resume.
+  // Only logical terminal completions participate in the group end fence.
+  def hasCandidate: Bool = VecInit((0 until num_thread).map(lane =>
+    completionMask(lane) &&
+      (laneStatus(lane) === RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U ||
+       laneStatus(lane) === RtAbiLayout.TraversalCandidateProceduralAabb.U))).asUInt.orR
 }
 
 /** A masked end-of-session acknowledgement request from `vt.rt.release`. */
@@ -122,6 +129,7 @@ class RtCorePerfEvents extends Bundle {
  * tags remain LSU-private; opaque client tags identify AS entries on return.
  */
 class RtCoreIO extends Bundle {
+  val coreId = Input(UInt(32.W))
   val command = Flipped(Decoupled(new RtWarpCommand))
   val completion = Decoupled(new RtWarpCompletion)
   val release = Flipped(Decoupled(new RtReleaseCommand))

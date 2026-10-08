@@ -73,6 +73,52 @@ class RtCoreScheduler extends Module {
   val local = Module(new RtLocalRayState)
   val worldContexts = Module(new RtWorldRayContexts)
   val stack = Module(new RtTraversalStack)
+  val bindings = Module(new RtSpillBindings)
+  val parentAccess = Module(new RtSpillParentAccess)
+  val spillTransfer = Module(new RtSpillTransfer)
+  val Seq(cIdle, cInitSelect, cInitParent, cInitParentWait, cRestoreStart,
+    cRestoreWait, cRestoreStack, cSpillSelect, cSpillParent, cSpillParentWait,
+    cSpillStart, cSpillWait) = Enum(12)
+  val continuationPhase = RegInit(cIdle)
+  val continuationLane = RegInit(0.U(log2Ceil(num_thread).W))
+  val continuationMask = RegInit(0.U(num_thread.W))
+  val continuationPointer = Reg(UInt(64.W))
+  val continuationDecision = Reg(UInt(xLen.W))
+  val continuationImage = Reg(new RtSpillSlotImage)
+  val continuationWasSuspended = Reg(Bool())
+  val spillPool = RegInit(0.U.asTypeOf(new RtSpillPoolDescriptor))
+  val rebuildingInstance = RegInit(VecInit(Seq.fill(num_thread)(false.B)))
+  val instanceNodeRef = Reg(Vec(num_thread, UInt(32.W)))
+  val initializingContinuation = continuationPhase >= cInitSelect && continuationPhase <= cRestoreStack
+  val spillEnabled = spillPool.spillPoolBase =/= 0.U && spillPool.dispatchEpoch =/= 0.U &&
+    spillPool.slotsPerCore >= RtSpillSlotLayout.slotsPerCore.U
+  bindings.io.descriptor := spillPool
+  bindings.io.coreId := io.coreId
+  bindings.io.query.valid := continuationPhase =/= cIdle
+  bindings.io.query.bits.rowBase := local.io.targetRowBase(continuationLane)
+  bindings.io.query.bits.laneId := local.io.targetLane(continuationLane)
+  bindings.io.update.valid := false.B
+  bindings.io.update.bits.parent := bindings.io.query.bits
+  bindings.io.update.bits.suspended := false.B
+  parentAccess.io.command.valid := false.B
+  parentAccess.io.command.bits.rowBase := local.io.targetRowBase(continuationLane)
+  parentAccess.io.command.bits.laneId := local.io.targetLane(continuationLane)
+  parentAccess.io.command.bits.write := false.B
+  parentAccess.io.command.bits.pointerOnly := false.B
+  parentAccess.io.command.bits.pointer := bindings.io.pointer
+  parentAccess.io.result.ready := false.B
+  spillTransfer.io.command.valid := false.B
+  spillTransfer.io.command.bits.pointer := continuationPointer
+  spillTransfer.io.command.bits.restore := initializingContinuation
+  spillTransfer.io.command.bits.terminate := initializingContinuation &&
+    continuationDecision === RtAbiLayout.CallbackTerminate.U
+  stack.io.snapshotLane := continuationLane
+  spillTransfer.io.command.bits.image := stack.io.snapshot
+  spillTransfer.io.command.bits.image.instanceNodeRef := instanceNodeRef(continuationLane)
+  spillTransfer.io.result.ready := false.B
+  stack.io.restore.valid := false.B
+  stack.io.restore.bits := 0.U.asTypeOf(new RtTraversalStackRestore)
+  local.io.preserveCommitted := 0.U
   val raySetup = Module(new RtRaySetup)
   val directSetupRequest = WireDefault(false.B)
   val directSetupLane = WireDefault(0.U(log2Ceil(num_thread).W))
@@ -80,8 +126,23 @@ class RtCoreScheduler extends Module {
   val triangleResolve = Module(new RtTriangleResolve)
   for (port <- 0 until RtMemTableParameters.asReadPortCount)
     table.io.asLineRead(port).entryId := 0.U
-  io.lsuRequest <> table.io.lsuRequest
-  table.io.lsuResponse <> io.lsuResponse
+  // The table uses every 5-bit tag. Spill owns the LSU only in an exclusive
+  // quiescent phase, so no tag extension or AS-entry reduction is needed.
+  val spillLsuActive = RegInit(false.B)
+  when(spillTransfer.io.command.fire) {
+    assert(table.io.quiescent)
+    spillLsuActive := true.B
+  }
+  when(spillTransfer.io.result.fire) { spillLsuActive := false.B }
+  io.lsuRequest.valid := Mux(spillLsuActive, spillTransfer.io.request.valid, table.io.lsuRequest.valid)
+  io.lsuRequest.bits := Mux(spillLsuActive, spillTransfer.io.request.bits, table.io.lsuRequest.bits)
+  spillTransfer.io.request.ready := io.lsuRequest.ready && spillLsuActive
+  table.io.lsuRequest.ready := io.lsuRequest.ready && !spillLsuActive
+  spillTransfer.io.response.valid := io.lsuResponse.valid && spillLsuActive
+  spillTransfer.io.response.bits := io.lsuResponse.bits
+  table.io.lsuResponse.valid := io.lsuResponse.valid && !spillLsuActive
+  table.io.lsuResponse.bits := io.lsuResponse.bits
+  io.lsuResponse.ready := Mux(spillLsuActive, spillTransfer.io.response.ready, table.io.lsuResponse.ready)
   io.localRequest <> local.io.request
   local.io.response <> io.localResponse
   // World-ray contexts are indexed by physical execution lane, whereas their
@@ -94,20 +155,38 @@ class RtCoreScheduler extends Module {
   val contextReadSource = Reg(Vec(localBankCount, UInt(localBankIdWidth.W)))
   val contextUse = Wire(Vec(localBankCount, Bool()))
   val contextSource = Wire(Vec(localBankCount, UInt(localBankIdWidth.W)))
+  val parentReadOutstanding = RegInit(VecInit(Seq.fill(localBankCount)(false.B)))
+  val parentUse = Wire(Vec(localBankCount, Bool()))
+  val parentBank = parentAccess.io.request.bits.laneId(localBankIdWidth - 1, 0)
+  parentAccess.io.request.ready := false.B
+  parentAccess.io.response.valid := false.B
+  parentAccess.io.response.bits := Mux1H((0 until localBankCount).map(bank =>
+    parentReadOutstanding(bank) -> io.localNarrowResponse(bank).bits))
   for (bank <- 0 until localBankCount) {
+    parentUse(bank) := parentAccess.io.request.valid && parentBank === bank.U &&
+      !contextReadOutstanding(bank) && !parentReadOutstanding(bank)
     val candidates = VecInit((0 until localBankCount).map(source =>
       worldContexts.io.request(source).valid &&
         worldContexts.io.request(source).bits.laneId(localBankIdWidth - 1, 0) === bank.U)).asUInt
-    contextUse(bank) := candidates.orR && !contextReadOutstanding(bank)
+    contextUse(bank) := candidates.orR && !contextReadOutstanding(bank) &&
+      !parentReadOutstanding(bank) && !parentUse(bank)
     contextSource(bank) := PriorityEncoder(candidates)
-    io.localNarrowRequest(bank).valid := contextUse(bank) || local.io.narrowRequest(bank).valid
-    io.localNarrowRequest(bank).bits := Mux(contextUse(bank),
-      worldContexts.io.request(contextSource(bank)).bits, local.io.narrowRequest(bank).bits)
-    local.io.narrowRequest(bank).ready := io.localNarrowRequest(bank).ready && !contextUse(bank)
-    local.io.narrowResponse(bank).valid := io.localNarrowResponse(bank).valid && !contextReadOutstanding(bank)
+    io.localNarrowRequest(bank).valid := parentUse(bank) || contextUse(bank) || local.io.narrowRequest(bank).valid
+    io.localNarrowRequest(bank).bits := Mux(parentUse(bank), parentAccess.io.request.bits,
+      Mux(contextUse(bank), worldContexts.io.request(contextSource(bank)).bits, local.io.narrowRequest(bank).bits))
+    local.io.narrowRequest(bank).ready := io.localNarrowRequest(bank).ready && !contextUse(bank) && !parentUse(bank)
+    local.io.narrowResponse(bank).valid := io.localNarrowResponse(bank).valid && !contextReadOutstanding(bank) &&
+      !parentReadOutstanding(bank)
     local.io.narrowResponse(bank).bits := io.localNarrowResponse(bank).bits
-    io.localNarrowResponse(bank).ready := Mux(contextReadOutstanding(bank),
-      worldContexts.io.response(contextReadSource(bank)).ready, local.io.narrowResponse(bank).ready)
+    io.localNarrowResponse(bank).ready := Mux(parentReadOutstanding(bank), parentAccess.io.response.ready,
+      Mux(contextReadOutstanding(bank), worldContexts.io.response(contextReadSource(bank)).ready,
+        local.io.narrowResponse(bank).ready))
+    when(parentUse(bank)) { parentAccess.io.request.ready := io.localNarrowRequest(bank).ready }
+    when(parentReadOutstanding(bank)) { parentAccess.io.response.valid := io.localNarrowResponse(bank).valid }
+    when(io.localNarrowRequest(bank).fire && parentUse(bank) && !parentAccess.io.request.bits.write) {
+      parentReadOutstanding(bank) := true.B
+    }
+    when(io.localNarrowResponse(bank).fire && parentReadOutstanding(bank)) { parentReadOutstanding(bank) := false.B }
     when(io.localNarrowRequest(bank).fire && contextUse(bank)) {
       contextReadOutstanding(bank) := true.B
       contextReadSource(bank) := contextSource(bank)
@@ -130,7 +209,7 @@ class RtCoreScheduler extends Module {
   val Seq(sIdle, sRayLoad, sHeaderRequest, sHeaderPending, sStackReady,
     sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal,
     sResumePending, sInstanceTransform, sBlasHeaderRequest, sBlasHeaderPending,
-    sAabbCandidate) = Enum(15)
+    sAabbCandidate, sContinuationInit) = Enum(16)
   val laneState = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(sIdle)))))
   val laneStatus = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   val committedValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
@@ -191,6 +270,14 @@ class RtCoreScheduler extends Module {
   // retained-session resume/release admission, so its reset value must be
   // defined even while `sessionActive` is false.
   val residentOwnerWarpId = RegInit(0.U(depth_warp.W))
+  when(continuationPhase === cRestoreWait && spillTransfer.io.response.fire &&
+    spillTransfer.io.response.bits.lineBase === continuationPointer + 128.U &&
+    !spillTransfer.io.response.bits.data(RtSpillSlotLayout.validWord)(0)) {
+    printf(p"[RT spill invariant] core=${Decimal(io.coreId)} owner=${Decimal(residentOwnerWarpId)}" +
+      p" lane=${Decimal(continuationLane)} parentRow=${Decimal(bindings.io.query.bits.rowBase)}" +
+      p" parentLane=${Decimal(bindings.io.query.bits.laneId)}" +
+      p" decision=${Decimal(continuationDecision)}\n")
+  }
 
   val instanceTransform = Module(new RtInstanceTransform)
   val objectRaySetup = Module(new RtRaySetup)
@@ -287,6 +374,18 @@ class RtCoreScheduler extends Module {
     }
     warpDestination(warp) := io.command.bits.destinationVd
     finishIssued(warp) := false.B
+    when(freshCommand || restartCommand) {
+      spillPool := io.command.bits.spillPool
+      val enabled = io.command.bits.spillPool.spillPoolBase =/= 0.U &&
+        io.command.bits.spillPool.dispatchEpoch =/= 0.U &&
+        io.command.bits.spillPool.slotsPerCore >= RtSpillSlotLayout.slotsPerCore.U
+      continuationPhase := Mux(enabled, cInitSelect, cIdle)
+      continuationMask := io.command.bits.activeMask
+      for (lane <- 0 until num_thread) when(io.command.bits.activeMask(lane)) {
+        instanceNodeRef(lane) := RtVtasLayout.InvalidNodeRef.U
+        rebuildingInstance(lane) := false.B
+      }
+    }
     when(freshCommand) {
       sessionActive(warp) := true.B
       completionPublished(warp) := false.B
@@ -333,6 +432,129 @@ class RtCoreScheduler extends Module {
             "resume lane must be terminal after a published candidate completion")
           laneState(warp)(lane) := sResumePending
         }
+      }
+    }
+  }
+
+  // Before any AS issue, install the software-assigned parent address or
+  // restore its already-published continuation. Physical lanes may differ
+  // from the persistent parent locations selected by the group locator.
+  switch(continuationPhase) {
+    is(cInitSelect) {
+      val ready = VecInit((0 until num_thread).map(lane =>
+        continuationMask(lane) && laneState(0)(lane) === sContinuationInit)).asUInt
+      when(!continuationMask.orR) { continuationPhase := cIdle }
+        .elsewhen(ready.orR) {
+          continuationLane := PriorityEncoder(ready)
+          continuationPhase := cInitParent
+        }
+    }
+    is(cInitParent) {
+      parentAccess.io.command.valid := true.B
+      parentAccess.io.command.bits.write := !bindings.io.suspended
+      when(parentAccess.io.command.fire) {
+        continuationWasSuspended := bindings.io.suspended
+        continuationPhase := cInitParentWait
+      }
+    }
+    is(cInitParentWait) {
+      parentAccess.io.result.ready := true.B
+      when(parentAccess.io.result.fire) {
+        when(continuationWasSuspended) {
+          val result = parentAccess.io.result.bits
+          assert(result.pointer === bindings.io.pointer)
+          assert(result.callbackDecision === RtAbiLayout.CallbackAccept.U ||
+            result.callbackDecision === RtAbiLayout.CallbackIgnore.U ||
+            result.callbackDecision === RtAbiLayout.CallbackTerminate.U)
+          continuationPointer := result.pointer
+          continuationDecision := result.callbackDecision
+          val committed = result.committedMeta0(RtAbiLayout.HitRecordMeta0ValidShift)
+          committedValid(0)(continuationLane) := committed
+          when(committed) {
+            worldTmax(0)(continuationLane) := result.committedHitT
+            worldTmaxValid(0) := worldTmaxValid(0) | UIntToOH(continuationLane, num_thread)
+          }
+          local.io.preserveCommitted := UIntToOH(continuationLane, num_thread)
+          continuationPhase := cRestoreStart
+        }.otherwise {
+          laneState(0)(continuationLane) := sHeaderRequest
+          continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
+          continuationPhase := cInitSelect
+        }
+      }
+    }
+    is(cRestoreStart) {
+      spillTransfer.io.command.valid := table.io.quiescent
+      when(spillTransfer.io.command.fire) { continuationPhase := cRestoreWait }
+    }
+    is(cRestoreWait) {
+      spillTransfer.io.result.ready := true.B
+      when(spillTransfer.io.result.fire) {
+        when(continuationDecision === RtAbiLayout.CallbackTerminate.U) {
+          laneState(0)(continuationLane) := sTerminal
+          laneStatus(0)(continuationLane) := RtAbiLayout.TraversalTerminated.U
+          bindings.io.update.valid := true.B
+          continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
+          continuationPhase := cInitSelect
+        }.otherwise {
+          continuationImage := spillTransfer.io.result.bits.image
+          continuationPhase := cRestoreStack
+        }
+      }
+    }
+    is(cRestoreStack) {
+      stack.io.restore.valid := true.B
+      stack.io.restore.bits.laneId := continuationLane
+      stack.io.restore.bits.image := continuationImage
+      when(stack.io.restore.fire) {
+        bindings.io.update.valid := true.B
+        instanceNodeRef(continuationLane) := continuationImage.instanceNodeRef
+        val hasObject = continuationImage.baseObjectTags.orR || continuationImage.overflowObjectTags.orR
+        when(hasObject) {
+          assert(continuationImage.instanceNodeRef =/= RtVtasLayout.InvalidNodeRef.U)
+          pendingNodeRef(0)(continuationLane) := continuationImage.instanceNodeRef
+          pendingNodeObjectRay(0)(continuationLane) := false.B
+          pendingNodeValid(0)(continuationLane) := true.B
+          rebuildingInstance(continuationLane) := true.B
+          laneState(0)(continuationLane) := sNodePending
+        }.otherwise { laneState(0)(continuationLane) := sStackReady }
+        continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
+        continuationPhase := cInitSelect
+      }
+    }
+    is(cSpillSelect) {
+      when(continuationMask.orR) {
+        continuationLane := PriorityEncoder(continuationMask)
+        continuationPhase := cSpillParent
+      }
+    }
+    is(cSpillParent) {
+      parentAccess.io.command.valid := true.B
+      parentAccess.io.command.bits.pointerOnly := true.B
+      when(parentAccess.io.command.fire) { continuationPhase := cSpillParentWait }
+    }
+    is(cSpillParentWait) {
+      parentAccess.io.result.ready := true.B
+      when(parentAccess.io.result.fire) {
+        assert(parentAccess.io.result.bits.pointer === bindings.io.pointer)
+        assert(!bindings.io.suspended)
+        continuationPointer := parentAccess.io.result.bits.pointer
+        continuationPhase := cSpillStart
+      }
+    }
+    is(cSpillStart) {
+      spillTransfer.io.command.valid := table.io.quiescent
+      when(spillTransfer.io.command.fire) { continuationPhase := cSpillWait }
+    }
+    is(cSpillWait) {
+      spillTransfer.io.result.ready := true.B
+      when(spillTransfer.io.result.fire) {
+        // Only after all three LSU write acknowledgements. Shader callback
+        // cannot run until the later context-releasing completion.
+        bindings.io.update.valid := true.B
+        bindings.io.update.bits.suspended := true.B
+        continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
+        continuationPhase := cSpillSelect
       }
     }
   }
@@ -418,7 +640,7 @@ class RtCoreScheduler extends Module {
   // RayLoad after their only AccelLo response has already arrived.
   for (lane <- 0 until num_thread) {
     when(local.io.worldBaseArrivedMask(lane) && laneState(0)(lane) === sRayLoad) {
-      laneState(0)(lane) := sHeaderRequest
+      laneState(0)(lane) := Mux(spillEnabled, sContinuationInit, sHeaderRequest)
     }
     if (coherenceRecordTrace) {
       when(local.io.worldBaseArrivedMask(lane)) {
@@ -472,7 +694,8 @@ class RtCoreScheduler extends Module {
           p" tmin=${Hexadecimal(ray.originalTmin)} tmax=${Hexadecimal(ray.extent)}\\n")
       }
     }
-    laneState(0)(lane) := sBlasHeaderRequest
+    laneState(0)(lane) := Mux(rebuildingInstance(lane), sStackReady, sBlasHeaderRequest)
+    rebuildingInstance(lane) := false.B
   }
 
   // A setup-complete header request and a stack pop share the AS acquire port.
@@ -525,22 +748,23 @@ class RtCoreScheduler extends Module {
   val nodeBase = Mux(pendingObjectRay, objectBase(popWarp)(pendingLane), local.io.worldBase.asBase)
   val nodeBaseValid = Mux(pendingObjectRay, objectPrepared(popWarp)(pendingLane).valid,
     local.io.worldBase.valid)
-  val headerAcquire = hasHeaderRequest && headerValid
+  val headerAcquire = hasHeaderRequest && headerValid && !initializingContinuation
   // A Box child push belongs to its own lane.  It may proceed alongside a
   // different lane's pop; only headers and an active returned header line
   // retain global priority.
   // Header acquires own the shared AS port, not the lane stacks.  Other lanes
   // may still pop into their pending request slots in the same cycle.
-  val popMayFire = !headerLineActive
+  val popMayFire = !headerLineActive && !initializingContinuation
   val worldContextNeeded = !pendingObjectRay &&
     (pendingType === RtVtasLayout.NodeBox4.U || pendingType === RtVtasLayout.NodeAabb.U ||
       pendingType === RtVtasLayout.NodeInstance.U || pendingType === RtVtasLayout.NodeTriangle.U)
-  worldContexts.io.prefetch.valid := !headerAcquire && pendingMask.orR && nodeBaseValid && worldContextNeeded
+  worldContexts.io.prefetch.valid := !initializingContinuation && !headerAcquire &&
+    pendingMask.orR && nodeBaseValid && worldContextNeeded
   worldContexts.io.prefetch.bits.laneId := pendingLane
   worldContexts.io.prefetch.bits.purpose := Mux(pendingType === RtVtasLayout.NodeInstance.U,
     RtWorldRayPurpose.instance, Mux(pendingType === RtVtasLayout.NodeTriangle.U,
       RtWorldRayPurpose.triangle, RtWorldRayPurpose.box))
-  val nodeAcquire = !headerAcquire && pendingMask.orR && nodeBaseValid &&
+  val nodeAcquire = !initializingContinuation && !headerAcquire && pendingMask.orR && nodeBaseValid &&
     (!worldContextNeeded || worldContexts.io.prefetch.ready)
 
   table.io.asAcquire.valid := headerAcquire || nodeAcquire
@@ -583,6 +807,9 @@ class RtCoreScheduler extends Module {
     laneState(headerWarp)(headerLane) := Mux(headerObject, sBlasHeaderPending, sHeaderPending)
   }
   when(table.io.asAcquire.fire && nodeAcquire) {
+    when(pendingType === RtVtasLayout.NodeInstance.U) {
+      instanceNodeRef(pendingLane) := pendingRef
+    }
     if (coherenceRecordTrace) {
       printf(p"[RTCORE coherence-line] warp=${Decimal(residentOwnerWarpId)} epoch=${Decimal(coherenceLaneEpoch.get(popWarp)(pendingLane))}" +
         p" lane=${Decimal(pendingLane)} addr=0x${Hexadecimal(table.io.asAcquire.bits.lineAddress)}" +
@@ -1213,7 +1440,9 @@ class RtCoreScheduler extends Module {
   val releaseStackCleared = RegInit(false.B)
   val releaseLanesInvalidated = RegInit(false.B)
   val releaseTableCleared = RegInit(false.B)
-  local.io.drained.ready := !completionPending && !finalRetirePending
+  local.io.drained.ready := !completionPending && !finalRetirePending &&
+    continuationPhase === cIdle && table.io.quiescent &&
+    !contextReadOutstanding.asUInt.orR && !parentReadOutstanding.asUInt.orR
   when(local.io.drained.fire) {
     completionBits.warpId := residentOwnerWarpId
     completionBits.issueId := warpIssueId(0)
@@ -1221,15 +1450,28 @@ class RtCoreScheduler extends Module {
     completionBits.completionMask := commandMask(0)
     completionBits.laneStatus := laneStatus(0)
     // Include candidates outside the most recent command's sparse mask.
-    val retainContext = (candidateValid(0).asUInt & activeMask(0)).orR
+    val candidates = candidateValid(0).asUInt & activeMask(0)
+    val spillCandidates = candidates.orR && spillEnabled
+    val retainContext = candidates.orR && !spillEnabled
     completionBits.contextReleased := !retainContext
-    completionPending := true.B
-    when(!retainContext) {
+    when(spillCandidates) {
+      continuationMask := candidates
+      continuationPhase := cSpillSelect
+    }.otherwise { completionPending := true.B }
+    when(!retainContext && !spillCandidates) {
       contextRetirePending := true.B
       releaseStackCleared := false.B
       releaseLanesInvalidated := false.B
       releaseTableCleared := false.B
     }
+  }
+  when(continuationPhase === cSpillSelect && !continuationMask.orR) {
+    continuationPhase := cIdle
+    completionPending := true.B
+    contextRetirePending := true.B
+    releaseStackCleared := false.B
+    releaseLanesInvalidated := false.B
+    releaseTableCleared := false.B
   }
   // Opt-in full-app diagnosis: distinguishes a traversal status error from a
   // later shader callback/control-flow error without perturbing normal RTL.

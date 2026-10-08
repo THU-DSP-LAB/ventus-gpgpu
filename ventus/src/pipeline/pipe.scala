@@ -97,6 +97,9 @@ class pipe() extends Module{
   val lsu2wb=Module(new LSU2WB)
   val wb=Module(new Writeback(6,9))
   val rtcore = Module(new RtCore)
+  rtcore.io.coreId := sm_id
+  val rtSpillPool = RegInit(VecInit(Seq.fill(num_warp)(
+    0.U.asTypeOf(new RtSpillPoolDescriptor))))
   val rtLocalSram = Module(new RtLocalSram)
   val rtWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
   val rtLocalWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
@@ -117,6 +120,7 @@ class pipe() extends Module{
   // otherwise a recycled CTA tag could resolve a later group to stale rows.
   val rtWorkgroupReleased = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
   when(io.warpReq.fire) {
+    rtSpillPool(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.rtSpillPool
     rtWorkgroupTag(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch
     rtWorkgroupWarps(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
     rtWorkgroupValid(io.warpReq.bits.wid) := true.B
@@ -611,6 +615,7 @@ class pipe() extends Module{
   rtcore.io.command.valid := issueV.io.out_RT.valid && rtIsAnyTraverse &&
     !rtTraverseEmpty && !rtInFlight(rtIssue.ctrl.wid)
   rtcore.io.command.bits.warpId := rtIssue.ctrl.wid
+  rtcore.io.command.bits.spillPool := rtSpillPool(rtIssue.ctrl.wid)
   rtcore.io.command.bits.workgroupTag :=
     rtWorkgroupTag(rtIssue.ctrl.wid)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block))
   rtcore.io.command.bits.workgroupMember :=
@@ -660,7 +665,7 @@ class pipe() extends Module{
         p" locator31=0x${Hexadecimal(rtcore.io.command.bits.locator(num_thread - 1))}\n")
     }
     rtInFlight(wid) := true.B
-    rtGroupedInFlight(wid) := rtcore.io.command.bits.grouped
+    rtGroupedInFlight(wid) := rtGroupedInFlight(wid) || rtcore.io.command.bits.grouped
     rtGroupTagByWarp(wid) := rtcore.io.command.bits.workgroupTag
     rtGroupMemberByWarp(wid) := rtcore.io.command.bits.workgroupMember
     rtGroupCountByWarp(wid) := rtcore.io.command.bits.workgroupWarps
@@ -710,9 +715,10 @@ class pipe() extends Module{
   // post-primary shader fence.  The single physical RT context must return
   // that callback to its owner immediately so it can accept/ignore and
   // resume; holding it for sibling primary warps would deadlock the cohort.
-  // Only a physically released terminal completion joins the group fence.
+  // Spill also releases physical state, but a candidate is not logically
+  // terminal. Keep its cohort identity across ordinary callback resumes.
   val rtCoreCompletionGrouped = rtGroupedInFlight(rtcore.io.completion.bits.warpId) &&
-    rtcore.io.completion.bits.contextReleased
+    rtcore.io.completion.bits.contextReleased && !rtcore.io.completion.bits.hasCandidate
   val rtGroupProbe = PriorityEncoder(rtGroupTerminalValid.asUInt)
   val rtGroupProbeTag = rtGroupTagByWarp(rtGroupProbe)
   val rtGroupProbeCount = rtGroupCountByWarp(rtGroupProbe)

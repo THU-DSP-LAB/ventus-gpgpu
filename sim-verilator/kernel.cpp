@@ -148,6 +148,11 @@ void Kernel::initMetaData(const std::string& filename) {
 }
 
 void Kernel::assignMetadata(const std::vector<uint64_t>& metadata, metadata_t& mtd) {
+    // File-based standalone kernels have no driver-private spill allocation.
+    mtd.rtSpillPoolBase = 0;
+    mtd.rtSpillSlotsPerCore = 0;
+    mtd.rtSpillPerCoreStride = 0;
+    mtd.rtSpillDispatchEpoch = 0;
     int index = 0;
 
     mtd.startaddr = metadata[index++];

@@ -4,7 +4,7 @@
 package rtcore
 
 object RtAbiLayout {
-  final val AbiVersion: Int = 12
+  final val AbiVersion: Int = 13
   final val AbiWordBytes: Int = 4
   final val AbiAlignmentBytes: Int = 16
   final val TraceMeta0FlagsShift: Int = 0
@@ -57,8 +57,8 @@ object RtAbiLayout {
   final val SlotInvX: Int = 13
   final val SlotInvY: Int = 14
   final val SlotInvZ: Int = 15
-  final val SlotPayloadPtrLo: Int = 16
-  final val SlotPayloadPtrHi: Int = 17
+  final val SlotReservedLo: Int = 16
+  final val SlotReservedHi: Int = 17
   final val SlotLaunchIdX: Int = 18
   final val SlotLaunchIdY: Int = 19
   final val SlotLaunchIdZ: Int = 20
