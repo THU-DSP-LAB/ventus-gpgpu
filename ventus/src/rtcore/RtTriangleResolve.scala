@@ -24,7 +24,10 @@ class RtTriangleResolve extends Module {
     val out = Decoupled(new RtTriangleResolveResult)
   })
 
-  val saved = Reg(new RtTriangleIntersectionOutput)
+  // Numerators/denominator are owned by the three dividers after admission.
+  // The resolver only needs identity and orientation until they finish.
+  val savedRequestId = Reg(UInt(RtCorePortParameters.requestIdWidth.W))
+  val savedFrontFace = Reg(Bool())
   val busy = RegInit(false.B)
   val outValid = RegInit(false.B)
   val outBits = Reg(new RtTriangleResolveResult)
@@ -46,7 +49,8 @@ class RtTriangleResolve extends Module {
   when(io.out.fire) { outValid := false.B }
 
   when(io.in.fire) {
-    saved := io.in.bits
+    savedRequestId := io.in.bits.requestId
+    savedFrontFace := io.in.bits.frontFace
     busy := true.B
     divisionReturned := 0.U
   }
@@ -67,11 +71,11 @@ class RtTriangleResolve extends Module {
     completedDivision(index) := Mux(resultValid(index), result(index), divisionBits(index))
   }
   when(busy && divisionComplete.andR) {
-    outBits.requestId := saved.requestId
+    outBits.requestId := savedRequestId
     outBits.u := completedDivision(0)
     outBits.v := completedDivision(1)
     outBits.t := completedDivision(2)
-    outBits.frontFace := saved.frontFace
+    outBits.frontFace := savedFrontFace
     busy := false.B
     outValid := true.B
   }

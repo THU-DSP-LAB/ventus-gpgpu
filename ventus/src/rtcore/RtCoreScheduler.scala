@@ -5,52 +5,13 @@ import chisel3.util._
 import hardfloat._
 import top.parameters._
 
-object RtCoreSchedulerParameters {
-  val boxUnitCount = 8
-  val triangleUnitCount = 2
-  require(RtCorePortParameters.requestIdWidth >= log2Ceil(num_thread))
-}
-
-private[rtcore] object RtVtasNodeKind {
-  val header = 0.U(3.W)
-  val box4 = 1.U(3.W)
-  val triangle = 2.U(3.W)
-  val instance = 3.U(3.W)
-  val aabb = 4.U(3.W)
-  // Same on-wire header format, but it must initialise an object-tagged
-  // stack entry after an Instance transform.
-  val blasHeader = 5.U(3.W)
-}
-
-private[rtcore] class RtTriangleDispatchMeta extends Bundle {
-  val objectRay = Bool()
-  val opaque = Bool()
-  val primitiveId = UInt(xLen.W)
-  val geometryId = UInt(xLen.W)
-  val sbtRecordOffset = UInt(xLen.W)
-  val instanceId = UInt(xLen.W)
-  val instanceCustomIndex = UInt(24.W)
-  val instanceSbtRecordOffset = UInt(24.W)
-  val instanceFlags = UInt(xLen.W)
-}
-
-private[rtcore] class RtAabbDispatchMeta extends Bundle {
-  val primitiveId = UInt(xLen.W)
-  val geometryId = UInt(xLen.W)
-  val sbtRecordOffset = UInt(xLen.W)
-  val hitKind = UInt(xLen.W)
-  val instanceId = UInt(xLen.W)
-  val instanceCustomIndex = UInt(24.W)
-  val instanceSbtRecordOffset = UInt(24.W)
-  val instanceFlags = UInt(xLen.W)
-}
-
 /**
   * Warp/lane traversal controller.
   *
   * It is the RTcore control boundary: commands start RT Local SRAM gather,
   * local-ready notifications feed setup and traversal, and only this module
-  * chooses an IU destination.  RtMemTable remains the sole LSU client.  The
+  * chooses an IU destination. RtMemTable owns AS traffic; RtSpillTransfer
+  * borrows the LSU only after the table and the physical session drain. The
   * stack carries a world/object tag so one lane can return from a BLAS to a
   * TLAS sibling without ever storing object rays in RT Local SRAM.
   */
@@ -69,6 +30,7 @@ class RtCoreScheduler extends Module {
   val triangleIssue = IO(Vec(triangleUnitCount, Decoupled(new RtTriangleIntersectionInput)))
   val triangleResult = IO(Flipped(Vec(triangleUnitCount, Decoupled(new RtTriangleIntersectionOutput))))
 
+  // Datapath services and continuation transaction defaults.
   val table = Module(new RtMemTable)
   val local = Module(new RtLocalRayState)
   val worldContexts = Module(new RtWorldRayContexts)
@@ -126,86 +88,30 @@ class RtCoreScheduler extends Module {
   val triangleResolve = Module(new RtTriangleResolve)
   for (port <- 0 until RtMemTableParameters.asReadPortCount)
     table.io.asLineRead(port).entryId := 0.U
-  // The table uses every 5-bit tag. Spill owns the LSU only in an exclusive
-  // quiescent phase, so no tag extension or AS-entry reduction is needed.
-  val spillLsuActive = RegInit(false.B)
-  when(spillTransfer.io.command.fire) {
-    assert(table.io.quiescent)
-    spillLsuActive := true.B
-  }
-  when(spillTransfer.io.result.fire) { spillLsuActive := false.B }
-  io.lsuRequest.valid := Mux(spillLsuActive, spillTransfer.io.request.valid, table.io.lsuRequest.valid)
-  io.lsuRequest.bits := Mux(spillLsuActive, spillTransfer.io.request.bits, table.io.lsuRequest.bits)
-  spillTransfer.io.request.ready := io.lsuRequest.ready && spillLsuActive
-  table.io.lsuRequest.ready := io.lsuRequest.ready && !spillLsuActive
-  spillTransfer.io.response.valid := io.lsuResponse.valid && spillLsuActive
-  spillTransfer.io.response.bits := io.lsuResponse.bits
-  table.io.lsuResponse.valid := io.lsuResponse.valid && !spillLsuActive
-  table.io.lsuResponse.bits := io.lsuResponse.bits
-  io.lsuResponse.ready := Mux(spillLsuActive, spillTransfer.io.response.ready, table.io.lsuResponse.ready)
+  val spillLsuArbiter = Module(new RtSpillLsuArbiter)
+  spillLsuArbiter.io.begin := spillTransfer.io.command.fire
+  spillLsuArbiter.io.end := spillTransfer.io.result.fire
+  spillLsuArbiter.io.tableQuiescent := table.io.quiescent
+  spillLsuArbiter.io.asRequest <> table.io.lsuRequest
+  table.io.lsuResponse <> spillLsuArbiter.io.asResponse
+  spillLsuArbiter.io.spillRequest <> spillTransfer.io.request
+  spillTransfer.io.response <> spillLsuArbiter.io.spillResponse
+  io.lsuRequest <> spillLsuArbiter.io.request
+  spillLsuArbiter.io.response <> io.lsuResponse
   io.localRequest <> local.io.request
   local.io.response <> io.localResponse
-  // World-ray contexts are indexed by physical execution lane, whereas their
-  // request may address any locator-selected RT SRAM bank.  Arbitrating by
-  // target bank keeps PDS untouched and records the source reader so the
-  // delayed response returns to the right short-lived context.
-  private val localBankCount = RtLocalSramParameters.corePortCount
-  private val localBankIdWidth = log2Ceil(localBankCount)
-  val contextReadOutstanding = RegInit(VecInit(Seq.fill(localBankCount)(false.B)))
-  val contextReadSource = Reg(Vec(localBankCount, UInt(localBankIdWidth.W)))
-  val contextUse = Wire(Vec(localBankCount, Bool()))
-  val contextSource = Wire(Vec(localBankCount, UInt(localBankIdWidth.W)))
-  val parentReadOutstanding = RegInit(VecInit(Seq.fill(localBankCount)(false.B)))
-  val parentUse = Wire(Vec(localBankCount, Bool()))
-  val parentBank = parentAccess.io.request.bits.laneId(localBankIdWidth - 1, 0)
-  parentAccess.io.request.ready := false.B
-  parentAccess.io.response.valid := false.B
-  parentAccess.io.response.bits := Mux1H((0 until localBankCount).map(bank =>
-    parentReadOutstanding(bank) -> io.localNarrowResponse(bank).bits))
-  for (bank <- 0 until localBankCount) {
-    parentUse(bank) := parentAccess.io.request.valid && parentBank === bank.U &&
-      !contextReadOutstanding(bank) && !parentReadOutstanding(bank)
-    val candidates = VecInit((0 until localBankCount).map(source =>
-      worldContexts.io.request(source).valid &&
-        worldContexts.io.request(source).bits.laneId(localBankIdWidth - 1, 0) === bank.U)).asUInt
-    contextUse(bank) := candidates.orR && !contextReadOutstanding(bank) &&
-      !parentReadOutstanding(bank) && !parentUse(bank)
-    contextSource(bank) := PriorityEncoder(candidates)
-    io.localNarrowRequest(bank).valid := parentUse(bank) || contextUse(bank) || local.io.narrowRequest(bank).valid
-    io.localNarrowRequest(bank).bits := Mux(parentUse(bank), parentAccess.io.request.bits,
-      Mux(contextUse(bank), worldContexts.io.request(contextSource(bank)).bits, local.io.narrowRequest(bank).bits))
-    local.io.narrowRequest(bank).ready := io.localNarrowRequest(bank).ready && !contextUse(bank) && !parentUse(bank)
-    local.io.narrowResponse(bank).valid := io.localNarrowResponse(bank).valid && !contextReadOutstanding(bank) &&
-      !parentReadOutstanding(bank)
-    local.io.narrowResponse(bank).bits := io.localNarrowResponse(bank).bits
-    io.localNarrowResponse(bank).ready := Mux(parentReadOutstanding(bank), parentAccess.io.response.ready,
-      Mux(contextReadOutstanding(bank), worldContexts.io.response(contextReadSource(bank)).ready,
-        local.io.narrowResponse(bank).ready))
-    when(parentUse(bank)) { parentAccess.io.request.ready := io.localNarrowRequest(bank).ready }
-    when(parentReadOutstanding(bank)) { parentAccess.io.response.valid := io.localNarrowResponse(bank).valid }
-    when(io.localNarrowRequest(bank).fire && parentUse(bank) && !parentAccess.io.request.bits.write) {
-      parentReadOutstanding(bank) := true.B
-    }
-    when(io.localNarrowResponse(bank).fire && parentReadOutstanding(bank)) { parentReadOutstanding(bank) := false.B }
-    when(io.localNarrowRequest(bank).fire && contextUse(bank)) {
-      contextReadOutstanding(bank) := true.B
-      contextReadSource(bank) := contextSource(bank)
-    }
-    when(io.localNarrowResponse(bank).fire && contextReadOutstanding(bank)) {
-      contextReadOutstanding(bank) := false.B
-    }
-  }
-  for (source <- 0 until localBankCount) {
-    val responseFromBank = VecInit((0 until localBankCount).map(bank =>
-      contextReadOutstanding(bank) && contextReadSource(bank) === source.U)).asUInt
-    worldContexts.io.request(source).ready := VecInit((0 until localBankCount).map(bank =>
-      contextUse(bank) && contextSource(bank) === source.U && io.localNarrowRequest(bank).ready)).asUInt.orR
-    worldContexts.io.response(source).valid := VecInit((0 until localBankCount).map(bank =>
-      responseFromBank(bank) && io.localNarrowResponse(bank).valid)).asUInt.orR
-    worldContexts.io.response(source).bits := Mux1H((0 until localBankCount).map(bank =>
-      responseFromBank(bank) -> io.localNarrowResponse(bank).bits))
-  }
+  val localReadArbiter = Module(new RtLocalReadArbiter)
+  localReadArbiter.io.parentRequest <> parentAccess.io.request
+  parentAccess.io.response <> localReadArbiter.io.parentResponse
+  localReadArbiter.io.contextRequest <> worldContexts.io.request
+  worldContexts.io.response <> localReadArbiter.io.contextResponse
+  localReadArbiter.io.localRequest <> local.io.narrowRequest
+  local.io.narrowResponse <> localReadArbiter.io.localResponse
+  io.localNarrowRequest <> localReadArbiter.io.bankRequest
+  localReadArbiter.io.bankResponse <> io.localNarrowResponse
 
+  // Physical lane state. These arrays describe one execution session, not
+  // persistent shader parents; LocalState/bindings resolve those separately.
   val Seq(sIdle, sRayLoad, sHeaderRequest, sHeaderPending, sStackReady,
     sNodePending, sBoxInflight, sBoxPush, sTriangleInflight, sTerminal,
     sResumePending, sInstanceTransform, sBlasHeaderRequest, sBlasHeaderPending,
@@ -229,17 +135,19 @@ class RtCoreScheduler extends Module {
   // Completion has been handed to pipe, but the retained RT session still
   // owns its RT Local buffer/stack state until resume or final release.
   val completionPublished = RegInit(VecInit(Seq.fill(residentWarpCount)(false.B)))
+  // One bank per lane: unsorted refs while its Box IU is in flight, then
+  // reordered in place until all deferred DFS pushes have been accepted.
   val boxChildRefs = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(4, UInt(32.W)))))
-  val boxDeferredRefs = Reg(Vec(residentWarpCount, Vec(num_thread, Vec(4, UInt(32.W)))))
   val boxDeferredCount = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(3.W))))
   val boxPushedCount = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(3.W))))
   val boxObjectRay = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
   val boxIsAabb = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
   val triangleMeta = Reg(Vec(residentWarpCount, Vec(num_thread, new RtTriangleDispatchMeta)))
-  val aabbMeta = Reg(Vec(residentWarpCount, Vec(num_thread, new RtAabbDispatchMeta)))
   val candidateValid = RegInit(VecInit(Seq.fill(residentWarpCount)(VecInit(Seq.fill(num_thread)(false.B)))))
+  // Only a pending procedural record, not a mirror of the two SRAM planes.
+  // Capture its metadata at issue; the Box result supplies HitT later.
   val candidateData = Reg(Vec(residentWarpCount, Vec(num_thread,
-    Vec(RtMemTableParameters.hitRecordStorageWordCount, UInt(xLen.W)))))
+    Vec(RtAbiLayout.HitRecordWordCount, UInt(xLen.W)))))
   // A lane keeps its popped continuation here until the shared AS acquire
   // port accepts it.  This decouples independent stack pops from single-port
   // AS admission without duplicating AS cacheline data.
@@ -265,7 +173,6 @@ class RtCoreScheduler extends Module {
   val objectInstanceId = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   val objectCustomIndex = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
   val objectSbtRecordOffset = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(24.W))))
-  val objectFlags = Reg(Vec(residentWarpCount, Vec(num_thread, UInt(xLen.W))))
   // This is control state, unlike the lane payload arrays above.  It gates
   // retained-session resume/release admission, so its reset value must be
   // defined even while `sessionActive` is false.
@@ -439,125 +346,7 @@ class RtCoreScheduler extends Module {
   // Before any AS issue, install the software-assigned parent address or
   // restore its already-published continuation. Physical lanes may differ
   // from the persistent parent locations selected by the group locator.
-  switch(continuationPhase) {
-    is(cInitSelect) {
-      val ready = VecInit((0 until num_thread).map(lane =>
-        continuationMask(lane) && laneState(0)(lane) === sContinuationInit)).asUInt
-      when(!continuationMask.orR) { continuationPhase := cIdle }
-        .elsewhen(ready.orR) {
-          continuationLane := PriorityEncoder(ready)
-          continuationPhase := cInitParent
-        }
-    }
-    is(cInitParent) {
-      parentAccess.io.command.valid := true.B
-      parentAccess.io.command.bits.write := !bindings.io.suspended
-      when(parentAccess.io.command.fire) {
-        continuationWasSuspended := bindings.io.suspended
-        continuationPhase := cInitParentWait
-      }
-    }
-    is(cInitParentWait) {
-      parentAccess.io.result.ready := true.B
-      when(parentAccess.io.result.fire) {
-        when(continuationWasSuspended) {
-          val result = parentAccess.io.result.bits
-          assert(result.pointer === bindings.io.pointer)
-          assert(result.callbackDecision === RtAbiLayout.CallbackAccept.U ||
-            result.callbackDecision === RtAbiLayout.CallbackIgnore.U ||
-            result.callbackDecision === RtAbiLayout.CallbackTerminate.U)
-          continuationPointer := result.pointer
-          continuationDecision := result.callbackDecision
-          val committed = result.committedMeta0(RtAbiLayout.HitRecordMeta0ValidShift)
-          committedValid(0)(continuationLane) := committed
-          when(committed) {
-            worldTmax(0)(continuationLane) := result.committedHitT
-            worldTmaxValid(0) := worldTmaxValid(0) | UIntToOH(continuationLane, num_thread)
-          }
-          local.io.preserveCommitted := UIntToOH(continuationLane, num_thread)
-          continuationPhase := cRestoreStart
-        }.otherwise {
-          laneState(0)(continuationLane) := sHeaderRequest
-          continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
-          continuationPhase := cInitSelect
-        }
-      }
-    }
-    is(cRestoreStart) {
-      spillTransfer.io.command.valid := table.io.quiescent
-      when(spillTransfer.io.command.fire) { continuationPhase := cRestoreWait }
-    }
-    is(cRestoreWait) {
-      spillTransfer.io.result.ready := true.B
-      when(spillTransfer.io.result.fire) {
-        when(continuationDecision === RtAbiLayout.CallbackTerminate.U) {
-          laneState(0)(continuationLane) := sTerminal
-          laneStatus(0)(continuationLane) := RtAbiLayout.TraversalTerminated.U
-          bindings.io.update.valid := true.B
-          continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
-          continuationPhase := cInitSelect
-        }.otherwise {
-          continuationImage := spillTransfer.io.result.bits.image
-          continuationPhase := cRestoreStack
-        }
-      }
-    }
-    is(cRestoreStack) {
-      stack.io.restore.valid := true.B
-      stack.io.restore.bits.laneId := continuationLane
-      stack.io.restore.bits.image := continuationImage
-      when(stack.io.restore.fire) {
-        bindings.io.update.valid := true.B
-        instanceNodeRef(continuationLane) := continuationImage.instanceNodeRef
-        val hasObject = continuationImage.baseObjectTags.orR || continuationImage.overflowObjectTags.orR
-        when(hasObject) {
-          assert(continuationImage.instanceNodeRef =/= RtVtasLayout.InvalidNodeRef.U)
-          pendingNodeRef(0)(continuationLane) := continuationImage.instanceNodeRef
-          pendingNodeObjectRay(0)(continuationLane) := false.B
-          pendingNodeValid(0)(continuationLane) := true.B
-          rebuildingInstance(continuationLane) := true.B
-          laneState(0)(continuationLane) := sNodePending
-        }.otherwise { laneState(0)(continuationLane) := sStackReady }
-        continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
-        continuationPhase := cInitSelect
-      }
-    }
-    is(cSpillSelect) {
-      when(continuationMask.orR) {
-        continuationLane := PriorityEncoder(continuationMask)
-        continuationPhase := cSpillParent
-      }
-    }
-    is(cSpillParent) {
-      parentAccess.io.command.valid := true.B
-      parentAccess.io.command.bits.pointerOnly := true.B
-      when(parentAccess.io.command.fire) { continuationPhase := cSpillParentWait }
-    }
-    is(cSpillParentWait) {
-      parentAccess.io.result.ready := true.B
-      when(parentAccess.io.result.fire) {
-        assert(parentAccess.io.result.bits.pointer === bindings.io.pointer)
-        assert(!bindings.io.suspended)
-        continuationPointer := parentAccess.io.result.bits.pointer
-        continuationPhase := cSpillStart
-      }
-    }
-    is(cSpillStart) {
-      spillTransfer.io.command.valid := table.io.quiescent
-      when(spillTransfer.io.command.fire) { continuationPhase := cSpillWait }
-    }
-    is(cSpillWait) {
-      spillTransfer.io.result.ready := true.B
-      when(spillTransfer.io.result.fire) {
-        // Only after all three LSU write acknowledgements. Shader callback
-        // cannot run until the later context-releasing completion.
-        bindings.io.update.valid := true.B
-        bindings.io.update.bits.suspended := true.B
-        continuationMask := continuationMask & ~UIntToOH(continuationLane, num_thread)
-        continuationPhase := cSpillSelect
-      }
-    }
-  }
+  RtSchedulerContinuation.connect(this)
 
   // Software callbacks already committed their accepted hit in Local SRAM.
   // LocalState reloads that HitT and updates its private bound on this
@@ -978,14 +767,20 @@ class RtCoreScheduler extends Module {
       boxObjectRay(0)(lane) := line.bits.waiter.objectRay
       boxIsAabb(0)(lane) := isAabb
       when(isAabb) {
-        aabbMeta(0)(lane).primitiveId := line.bits.data((RtVtasLayout.AabbPrimitiveId / 4).toInt)
-        aabbMeta(0)(lane).geometryId := line.bits.data((RtVtasLayout.AabbGeometryId / 4).toInt)
-        aabbMeta(0)(lane).sbtRecordOffset := line.bits.data((RtVtasLayout.AabbSbtRecordOffset / 4).toInt)
-        aabbMeta(0)(lane).hitKind := line.bits.data((RtVtasLayout.AabbHitKind / 4).toInt)
-        aabbMeta(0)(lane).instanceId := objectInstanceId(0)(lane)
-        aabbMeta(0)(lane).instanceCustomIndex := objectCustomIndex(0)(lane)
-        aabbMeta(0)(lane).instanceSbtRecordOffset := objectSbtRecordOffset(0)(lane)
-        aabbMeta(0)(lane).instanceFlags := objectFlags(0)(lane)
+        candidateData(0)(lane)(RtAbiLayout.HitRecordMeta0) :=
+          (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U |
+            (objectCustomIndex(0)(lane) << RtAbiLayout.HitRecordMeta0InstanceCustomIndexShift)
+        candidateData(0)(lane)(RtAbiLayout.HitRecordMeta1) := objectSbtRecordOffset(0)(lane)
+        candidateData(0)(lane)(RtAbiLayout.HitRecordHitT) := 0.U
+        candidateData(0)(lane)(RtAbiLayout.HitRecordBarycentricsX) := 0.U
+        candidateData(0)(lane)(RtAbiLayout.HitRecordBarycentricsY) := 0.U
+        candidateData(0)(lane)(RtAbiLayout.HitRecordPrimitiveId) :=
+          line.bits.data((RtVtasLayout.AabbPrimitiveId / 4).toInt)
+        candidateData(0)(lane)(RtAbiLayout.HitRecordInstanceId) := objectInstanceId(0)(lane)
+        candidateData(0)(lane)(RtAbiLayout.HitRecordGeometryId) :=
+          line.bits.data((RtVtasLayout.AabbGeometryId / 4).toInt)
+        candidateData(0)(lane)(RtAbiLayout.HitRecordHitKind) :=
+          line.bits.data((RtVtasLayout.AabbHitKind / 4).toInt)
       }
     }
   }
@@ -1060,11 +855,9 @@ class RtCoreScheduler extends Module {
       triangleMeta(0)(lane).opaque := line.bits.data((RtVtasLayout.TriangleFlags / 4).toInt)(0)
       triangleMeta(0)(lane).primitiveId := line.bits.data((RtVtasLayout.TrianglePrimitiveId / 4).toInt)
       triangleMeta(0)(lane).geometryId := line.bits.data((RtVtasLayout.TriangleGeometryId / 4).toInt)
-      triangleMeta(0)(lane).sbtRecordOffset := line.bits.data((RtVtasLayout.TriangleSbtRecordOffset / 4).toInt)
       triangleMeta(0)(lane).instanceId := objectInstanceId(0)(lane)
       triangleMeta(0)(lane).instanceCustomIndex := objectCustomIndex(0)(lane)
       triangleMeta(0)(lane).instanceSbtRecordOffset := objectSbtRecordOffset(0)(lane)
-      triangleMeta(0)(lane).instanceFlags := objectFlags(0)(lane)
     }
   }
   val directSetupSelect = PriorityEncoder(directSetupEligible.asUInt)
@@ -1184,7 +977,6 @@ class RtCoreScheduler extends Module {
         objectInstanceId(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceInstanceId / 4).toInt)
         objectCustomIndex(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceCustomIndex / 4).toInt)(23, 0)
         objectSbtRecordOffset(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceSbtRecordOffset / 4).toInt)(23, 0)
-        objectFlags(0)(waiter.laneId) := asReady.bits.data((RtVtasLayout.InstanceFlags / 4).toInt)
         laneState(0)(waiter.laneId) := sInstanceTransform
       }
     }.otherwise {
@@ -1211,19 +1003,7 @@ class RtCoreScheduler extends Module {
       }.otherwise {
         // AABB overlap is only a procedural candidate.  The shader's later
         // reportIntersection result replaces this broad-phase t/hit-kind.
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordMeta0) :=
-          (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U |
-            (aabbMeta(warp)(lane).instanceCustomIndex <<
-              RtAbiLayout.HitRecordMeta0InstanceCustomIndexShift)
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordMeta1) :=
-          aabbMeta(warp)(lane).instanceSbtRecordOffset
         candidateData(warp)(lane)(RtAbiLayout.HitRecordHitT) := result.tmin(0)
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordBarycentricsX) := 0.U
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordBarycentricsY) := 0.U
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordPrimitiveId) := aabbMeta(warp)(lane).primitiveId
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordInstanceId) := aabbMeta(warp)(lane).instanceId
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordGeometryId) := aabbMeta(warp)(lane).geometryId
-        candidateData(warp)(lane)(RtAbiLayout.HitRecordHitKind) := aabbMeta(warp)(lane).hitKind
         laneState(warp)(lane) := sAabbCandidate
       }
     }.otherwise {
@@ -1231,7 +1011,7 @@ class RtCoreScheduler extends Module {
       boxDeferredCount(warp)(lane) := count
       boxPushedCount(warp)(lane) := 0.U
       for (index <- 0 until 4) {
-        boxDeferredRefs(warp)(lane)(index) := boxChildRefs(warp)(lane)(result.boxIndex(index))
+        boxChildRefs(warp)(lane)(index) := boxChildRefs(warp)(lane)(result.boxIndex(index))
       }
     }
   }
@@ -1262,7 +1042,7 @@ class RtCoreScheduler extends Module {
     val pushIndex = boxDeferredCount(pushWarp)(lane) - boxPushedCount(pushWarp)(lane) - 1.U
     val isBlasRoot = blasHeaderPush && asReady.bits.waiter.laneId === lane.U
     stack.io.push.bits.nodeRef(lane) := Mux(isBlasRoot, headerRoot,
-      boxDeferredRefs(pushWarp)(lane)(pushIndex(1, 0)))
+      boxChildRefs(pushWarp)(lane)(pushIndex(1, 0)))
     stack.io.push.bits.objectRay(lane) := Mux(isBlasRoot, true.B,
       boxObjectRay(pushWarp)(lane))
   }
@@ -1354,7 +1134,7 @@ class RtCoreScheduler extends Module {
   triangleHitUpdate := 0.U.asTypeOf(new RtLocalHitRecordUpdate)
   triangleHitUpdate.laneId := resultLane
   triangleHitUpdate.committed := triangleIsOpaque
-  triangleHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
+  triangleHitUpdate.dirty := Fill(RtAbiLayout.HitRecordWordCount, 1.U(1.W))
   triangleHitUpdate.data(RtAbiLayout.HitRecordMeta0) :=
     (1 | (RtAbiLayout.HitRecordStatusValid << RtAbiLayout.HitRecordMeta0StatusShift)).U |
       (triangleResolve.io.out.bits.frontFace.asUInt << RtAbiLayout.HitRecordMeta0FrontFaceShift) |
@@ -1377,7 +1157,7 @@ class RtCoreScheduler extends Module {
   aabbHitUpdate := 0.U.asTypeOf(new RtLocalHitRecordUpdate)
   aabbHitUpdate.laneId := aabbCandidateLane
   aabbHitUpdate.committed := false.B
-  aabbHitUpdate.dirty := Fill(RtMemTableParameters.hitRecordStorageWordCount, 1.U(1.W))
+  aabbHitUpdate.dirty := Fill(RtAbiLayout.HitRecordWordCount, 1.U(1.W))
   aabbHitUpdate.data := candidateData(0)(aabbCandidateLane)
   local.io.hitUpdate.valid := aabbCandidateMask.orR || triangleResolve.io.out.valid
   local.io.hitUpdate.bits := Mux(aabbCandidateMask.orR, aabbHitUpdate, triangleHitUpdate)
@@ -1416,247 +1196,86 @@ class RtCoreScheduler extends Module {
     candidateValid(0)(aabbCandidateLane) := true.B
   }
 
-  // A completed warp first flushes both hit-record planes.  The write table's
-  // drain acknowledgement is the point at which completion may be published.
-  val terminalMasks = Wire(Vec(residentWarpCount, UInt(num_thread.W)))
-  for (warp <- 0 until residentWarpCount) {
-    terminalMasks(warp) := VecInit((0 until num_thread).map(lane =>
-      laneState(warp)(lane) === sTerminal)).asUInt
-  }
-  val finishMasks = VecInit((0 until residentWarpCount).map { warp =>
-    sessionActive(warp) && !completionPublished(warp) && !finishIssued(warp) &&
-      (terminalMasks(warp) & activeMask(warp)) === activeMask(warp)
-  }).asUInt
-  val finishWarp = PriorityEncoder(finishMasks)
-  local.io.finish.valid := finishMasks.orR
-  local.io.finish.bits.terminalMask := activeMask(finishWarp)
-  when(local.io.finish.fire) { finishIssued(finishWarp) := true.B }
+  RtSchedulerCompletion.connect(this)
 
-  val completionPending = RegInit(false.B)
-  val completionBits = Reg(new RtWarpCompletion)
-  val finalRetirePending = RegInit(false.B)
-  val contextRetirePending = RegInit(false.B)
-  val releasePending = RegInit(false.B)
-  val releaseStackCleared = RegInit(false.B)
-  val releaseLanesInvalidated = RegInit(false.B)
-  val releaseTableCleared = RegInit(false.B)
-  local.io.drained.ready := !completionPending && !finalRetirePending &&
-    continuationPhase === cIdle && table.io.quiescent &&
-    !contextReadOutstanding.asUInt.orR && !parentReadOutstanding.asUInt.orR
-  when(local.io.drained.fire) {
-    completionBits.warpId := residentOwnerWarpId
-    completionBits.issueId := warpIssueId(0)
-    completionBits.destinationVd := warpDestination(0)
-    completionBits.completionMask := commandMask(0)
-    completionBits.laneStatus := laneStatus(0)
-    // Include candidates outside the most recent command's sparse mask.
-    val candidates = candidateValid(0).asUInt & activeMask(0)
-    val spillCandidates = candidates.orR && spillEnabled
-    val retainContext = candidates.orR && !spillEnabled
-    completionBits.contextReleased := !retainContext
-    when(spillCandidates) {
-      continuationMask := candidates
-      continuationPhase := cSpillSelect
-    }.otherwise { completionPending := true.B }
-    when(!retainContext && !spillCandidates) {
-      contextRetirePending := true.B
-      releaseStackCleared := false.B
-      releaseLanesInvalidated := false.B
-      releaseTableCleared := false.B
+  private def connectInstrumentation(): Unit = {
+    // Export only physical handshakes.  In particular, local SRAM is private to
+    // RTcore: these events must not be relabelled as generic LSU traffic.
+    val narrowLocalReads = io.localNarrowRequest.map(port => port.fire && !port.bits.write)
+    val narrowLocalWrites = io.localNarrowRequest.map(port => port.fire && port.bits.write)
+    val narrowLocalResponses = io.localNarrowResponse.map(_.fire)
+    val narrowLocalBackpressure = io.localNarrowRequest.map(port => port.valid && !port.ready)
+    io.perf.localSramReadRequest := (io.localRequest.fire && !io.localRequest.bits.write) ||
+      narrowLocalReads.reduce(_ || _)
+    io.perf.localSramWriteRequest := (io.localRequest.fire && io.localRequest.bits.write) ||
+      narrowLocalWrites.reduce(_ || _)
+    io.perf.localSramReadResponse := io.localResponse.fire || narrowLocalResponses.reduce(_ || _)
+    io.perf.localSramBackpressure := (io.localRequest.valid && !io.localRequest.ready) ||
+      narrowLocalBackpressure.reduce(_ || _)
+    io.perf.raySetupOutput := raySetup.io.out.fire
+    io.perf.asLineAcquire := table.io.asAcquire.fire
+    io.perf.asLineReady := PopCount(asConsumedLanes)
+    io.perf.asAcquireBackpressure := table.io.asAcquire.valid && !table.io.asAcquire.ready
+    io.perf.asCacheResidentHit := table.io.asCacheResidentHit
+    io.perf.asCachePendingMerge := table.io.asCachePendingMerge
+    io.perf.asCacheMiss := table.io.asCacheMiss
+    io.perf.asCacheRefill := table.io.asCacheRefill
+    io.perf.asCacheEviction := table.io.asCacheEviction
+    io.perf.box4Issue := PopCount(boxIssue.map(_.fire))
+    io.perf.box4Result := PopCount(boxResult.map(_.fire))
+    io.perf.triangleIssue := PopCount(triangleIssue.map(_.fire))
+    io.perf.triangleResult := PopCount(triangleResult.map(_.fire))
+    io.perf.triangleResolveIssue := triangleResolve.io.in.fire
+    io.perf.triangleResolveResult := triangleResolve.io.out.fire
+    io.perf.stackPush := PopCount(stack.io.pushAcceptedMask)
+    io.perf.stackPop := Mux(stack.io.pop.fire, PopCount(stack.io.pop.bits.laneMask), 0.U)
+    if (PMU_DETAILED) {
+      require(RtCorePortParameters.residentWarpCount == 1 && num_thread == 32)
+      val d = io.perf.detailed.get
+      d.enabled := false.B // parent applies the common PMU window
+      d.clear := reset.asBool
+      d.session := sessionActive(0)
+      d.activeMask := activeMask(0)
+      d.command := io.command.fire
+      d.commandMask := io.command.bits.activeMask
+      d.commandKind := Mux(freshCommand, 0.U, Mux(resumeCommand, 1.U, 2.U))
+      // Detailed reuse windows follow physical ownership, including automatic
+      // reclamation. The basic software-release counter remains separate.
+      d.release := local.io.retire.fire
+      d.laneState := laneState(0)
+      // Observe only valid node pops (not empty-stack termination or headers).
+      d.nodePopLanes := VecInit((0 until num_thread).map { lane =>
+        val ref = stack.io.popNodeRef(lane)
+        val kind = nodeType(ref)
+        stack.io.pop.fire && popMask(lane) && ref =/= RtVtasLayout.InvalidNodeRef.U &&
+          (kind === RtVtasLayout.NodeBox4.U || kind === RtVtasLayout.NodeTriangle.U ||
+            kind === RtVtasLayout.NodeInstance.U || kind === RtVtasLayout.NodeAabb.U)
+      }).asUInt
+      for (lane <- 0 until num_thread) d.nodePopKinds(lane) := nodeType(stack.io.popNodeRef(lane))
+      d.nodeAcquire := table.io.asAcquire.fire && nodeAcquire
+      d.stackReady := PopCount(readyMasks(0))
+      d.stackSelected := stack.io.pop.fire
+      // Overlapping blockers, not an additive partition of stall cycles.
+      d.popBlockedHeader := hasStackReady && headerAcquire
+      d.popBlockedPush := false.B
+      d.popBlockedHeaderLine := hasStackReady && headerLineActive
+      d.asBlocked := table.io.asAcquire.valid && !table.io.asAcquire.ready
+      d.readyBlockedRay := false.B
+      d.readyBlockedBox := false.B
+      d.readyBlockedTriangle := false.B
+      d.rayLoad := local.io.detailed.get
+      d.asTable := table.io.detailed.get
+      def observe(dst: RtUnitObservation, in: DecoupledIO[_], out: DecoupledIO[_]): Unit = {
+        dst.inValid := in.valid; dst.inReady := in.ready
+        dst.outValid := out.valid; dst.outReady := out.ready
+      }
+      observe(d.lsu, io.lsuRequest, io.lsuResponse)
+      d.lsuRequestTag := io.lsuRequest.bits.clientTag
+      d.lsuResponseTag := io.lsuResponse.bits.clientTag
+      for (i <- 0 until boxUnitCount) observe(d.units(i), boxIssue(i), boxResult(i))
+      for (i <- 0 until triangleUnitCount) observe(d.units(boxUnitCount + i), triangleIssue(i), triangleResult(i))
+      observe(d.units(boxUnitCount + triangleUnitCount), triangleResolve.io.in, triangleResolve.io.out)
     }
   }
-  when(continuationPhase === cSpillSelect && !continuationMask.orR) {
-    continuationPhase := cIdle
-    completionPending := true.B
-    contextRetirePending := true.B
-    releaseStackCleared := false.B
-    releaseLanesInvalidated := false.B
-    releaseTableCleared := false.B
-  }
-  // Opt-in full-app diagnosis: distinguishes a traversal status error from a
-  // later shader callback/control-flow error without perturbing normal RTL.
-  if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
-    when(local.io.drained.fire) {
-      val hitMask = VecInit((0 until num_thread).map(lane =>
-        laneStatus(0)(lane) === RtAbiLayout.TraversalCompleteHit.U)).asUInt
-      val nonOpaqueMask = VecInit((0 until num_thread).map(lane =>
-        laneStatus(0)(lane) === RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U)).asUInt
-      val proceduralMask = VecInit((0 until num_thread).map(lane =>
-        laneStatus(0)(lane) === RtAbiLayout.TraversalCandidateProceduralAabb.U)).asUInt
-      val terminatedMask = VecInit((0 until num_thread).map(lane =>
-        laneStatus(0)(lane) === RtAbiLayout.TraversalTerminated.U)).asUInt
-      printf(p"[RTCORE trace] drain warp=${Decimal(residentOwnerWarpId)}" +
-        p" mask=0x${Hexadecimal(commandMask(0))}" +
-        p" hit=0x${Hexadecimal(hitMask)} nonopaque=0x${Hexadecimal(nonOpaqueMask)}" +
-        p" procedural=0x${Hexadecimal(proceduralMask)} terminated=0x${Hexadecimal(terminatedMask)}\n")
-    }
-  }
-  // Reclaim before publishing a context-releasing completion. Pipeline holds
-  // the reservation until this completion reaches vector writeback.
-  io.completion.valid := completionPending && !contextRetirePending
-  io.completion.bits := completionBits
-  when(io.completion.fire) {
-    completionPending := false.B
-    completionPublished(0) := !completionBits.contextReleased
-    finishIssued(0) := false.B
-  }
-
-  // Software release destroys a retained context. A new sparse child trace
-  // can have a smaller physical mask than the final reconverged release.
-  val retireRequested = releasePending || contextRetirePending
-  retiring := retireRequested || finalRetirePending || completionPending || io.release.valid
-  val releaseAllowed = sessionActive(0) && completionPublished(0) && !completionPending &&
-    io.release.bits.warpId === residentOwnerWarpId &&
-    (io.release.bits.activeMask & activeMask(0)) === activeMask(0)
-  io.release.ready := releaseAllowed && !retireRequested && !finalRetirePending
-  when(io.release.fire) {
-    releasePending := true.B
-    releaseStackCleared := false.B
-    releaseLanesInvalidated := false.B
-  }
-  when(io.release.fire) {
-    assert(io.release.bits.warpId === residentOwnerWarpId,
-      "release warp must match the resident RT session")
-    assert((io.release.bits.activeMask & activeMask(0)) === activeMask(0),
-      "release must cover the complete retained RT context mask")
-    for (lane <- 0 until num_thread) when(activeMask(0)(lane)) {
-      assert(laneState(0)(lane) === sTerminal,
-        "release may retire only a completed retained lane")
-    }
-  }
-  // A nested traversal starts from the shader's newly written local ray and
-  // must not inherit stale DFS entries from the preceding opaque/miss trace.
-  // Its Local gather begins in the following cycle, so this same-cycle clear
-  // is complete before the new header can initialise a root node.
-  stack.io.clear.valid := (retireRequested && !releaseStackCleared) || restartStackClearRequest
-  stack.io.clear.bits.laneMask := Mux(retireRequested, activeMask(0), io.command.bits.activeMask)
-  when(stack.io.clear.fire && retireRequested) { releaseStackCleared := true.B }
-  when(retireRequested && releaseStackCleared && !releaseLanesInvalidated) {
-    releaseLanesInvalidated := true.B
-    finalRetirePending := true.B
-    for (lane <- 0 until num_thread) when(activeMask(0)(lane)) {
-      laneState(0)(lane) := sIdle
-      candidateValid(0)(lane) := false.B
-      committedValid(0)(lane) := false.B
-      laneStatus(0)(lane) := 0.U
-      boxDeferredCount(0)(lane) := 0.U
-      boxPushedCount(0)(lane) := 0.U
-      pendingNodeValid(0)(lane) := false.B
-    }
-  }
-  // Auto-reclaim never emits a software release acknowledgement. In both
-  // paths, retire local ownership only after pending AS traffic has drained.
-  local.io.retire.valid := finalRetirePending && releaseTableCleared && table.io.quiescent &&
-    (contextRetirePending || io.releaseAck.ready)
-  local.io.retire.bits := residentOwnerWarpId
-  // An RT context retire drains its waiters but must not invalidate returned
-  // AS lines: the table is an SM-local cache shared by subsequent contexts.
-  table.io.clear.valid := false.B
-  table.io.clear.bits := true.B
-  when(finalRetirePending && !releaseTableCleared) { releaseTableCleared := true.B }
-  io.releaseAck.valid := releasePending && finalRetirePending && releaseTableCleared &&
-    local.io.retire.ready && table.io.quiescent
-  io.releaseAck.bits.warpId := residentOwnerWarpId
-  io.releaseAck.bits.releasedMask := activeMask(0)
-  when(local.io.retire.fire) {
-    when(contextRetirePending) {
-      assert(completionPending && completionBits.contextReleased,
-        "automatic reclamation must retain its context-releasing completion")
-      assert(!(candidateValid(0).asUInt & activeMask(0)).orR,
-        "automatic reclamation must not discard retained candidates")
-    }
-    releaseTableCleared := false.B
-    releasePending := false.B
-    contextRetirePending := false.B
-    releaseStackCleared := false.B
-    releaseLanesInvalidated := false.B
-    sessionActive(0) := false.B
-    finishIssued(0) := false.B
-    completionPublished(0) := false.B
-    activeMask(0) := 0.U
-    commandMask(0) := 0.U
-    finalRetirePending := false.B
-    for (lane <- 0 until num_thread) {
-      laneState(0)(lane) := sIdle
-      pendingNodeValid(0)(lane) := false.B
-    }
-  }
-
-  // Export only physical handshakes.  In particular, local SRAM is private to
-  // RTcore: these events must not be relabelled as generic LSU traffic.
-  val narrowLocalReads = io.localNarrowRequest.map(port => port.fire && !port.bits.write)
-  val narrowLocalWrites = io.localNarrowRequest.map(port => port.fire && port.bits.write)
-  val narrowLocalResponses = io.localNarrowResponse.map(_.fire)
-  val narrowLocalBackpressure = io.localNarrowRequest.map(port => port.valid && !port.ready)
-  io.perf.localSramReadRequest := (io.localRequest.fire && !io.localRequest.bits.write) ||
-    narrowLocalReads.reduce(_ || _)
-  io.perf.localSramWriteRequest := (io.localRequest.fire && io.localRequest.bits.write) ||
-    narrowLocalWrites.reduce(_ || _)
-  io.perf.localSramReadResponse := io.localResponse.fire || narrowLocalResponses.reduce(_ || _)
-  io.perf.localSramBackpressure := (io.localRequest.valid && !io.localRequest.ready) ||
-    narrowLocalBackpressure.reduce(_ || _)
-  io.perf.raySetupOutput := raySetup.io.out.fire
-  io.perf.asLineAcquire := table.io.asAcquire.fire
-  io.perf.asLineReady := PopCount(asConsumedLanes)
-  io.perf.asAcquireBackpressure := table.io.asAcquire.valid && !table.io.asAcquire.ready
-  io.perf.asCacheResidentHit := table.io.asCacheResidentHit
-  io.perf.asCachePendingMerge := table.io.asCachePendingMerge
-  io.perf.asCacheMiss := table.io.asCacheMiss
-  io.perf.asCacheRefill := table.io.asCacheRefill
-  io.perf.asCacheEviction := table.io.asCacheEviction
-  io.perf.box4Issue := PopCount(boxIssue.map(_.fire))
-  io.perf.box4Result := PopCount(boxResult.map(_.fire))
-  io.perf.triangleIssue := PopCount(triangleIssue.map(_.fire))
-  io.perf.triangleResult := PopCount(triangleResult.map(_.fire))
-  io.perf.triangleResolveIssue := triangleResolve.io.in.fire
-  io.perf.triangleResolveResult := triangleResolve.io.out.fire
-  io.perf.stackPush := PopCount(stack.io.pushAcceptedMask)
-  io.perf.stackPop := Mux(stack.io.pop.fire, PopCount(stack.io.pop.bits.laneMask), 0.U)
-  if (PMU_DETAILED) {
-    require(residentWarpCount == 1 && num_thread == 32)
-    val d = io.perf.detailed.get
-    d.enabled := false.B // parent applies the common PMU window
-    d.clear := reset.asBool
-    d.session := sessionActive(0)
-    d.activeMask := activeMask(0)
-    d.command := io.command.fire
-    d.commandMask := io.command.bits.activeMask
-    d.commandKind := Mux(freshCommand, 0.U, Mux(resumeCommand, 1.U, 2.U))
-    // Detailed reuse windows follow physical ownership, including automatic
-    // reclamation. The basic software-release counter remains separate.
-    d.release := local.io.retire.fire
-    d.laneState := laneState(0)
-    // Observe only valid node pops (not empty-stack termination or headers).
-    d.nodePopLanes := VecInit((0 until num_thread).map { lane =>
-      val ref = stack.io.popNodeRef(lane)
-      val kind = nodeType(ref)
-      stack.io.pop.fire && popMask(lane) && ref =/= RtVtasLayout.InvalidNodeRef.U &&
-        (kind === RtVtasLayout.NodeBox4.U || kind === RtVtasLayout.NodeTriangle.U ||
-          kind === RtVtasLayout.NodeInstance.U || kind === RtVtasLayout.NodeAabb.U)
-    }).asUInt
-    for (lane <- 0 until num_thread) d.nodePopKinds(lane) := nodeType(stack.io.popNodeRef(lane))
-    d.nodeAcquire := table.io.asAcquire.fire && nodeAcquire
-    d.stackReady := PopCount(readyMasks(0))
-    d.stackSelected := stack.io.pop.fire
-    // Overlapping blockers, not an additive partition of stall cycles.
-    d.popBlockedHeader := hasStackReady && headerAcquire
-    d.popBlockedPush := false.B
-    d.popBlockedHeaderLine := hasStackReady && headerLineActive
-    d.asBlocked := table.io.asAcquire.valid && !table.io.asAcquire.ready
-    d.readyBlockedRay := false.B
-    d.readyBlockedBox := false.B
-    d.readyBlockedTriangle := false.B
-    d.rayLoad := local.io.detailed.get
-    d.asTable := table.io.detailed.get
-    def observe(dst: RtUnitObservation, in: DecoupledIO[_], out: DecoupledIO[_]): Unit = {
-      dst.inValid := in.valid; dst.inReady := in.ready
-      dst.outValid := out.valid; dst.outReady := out.ready
-    }
-    observe(d.lsu, io.lsuRequest, io.lsuResponse)
-    d.lsuRequestTag := io.lsuRequest.bits.clientTag
-    d.lsuResponseTag := io.lsuResponse.bits.clientTag
-    for (i <- 0 until boxUnitCount) observe(d.units(i), boxIssue(i), boxResult(i))
-    for (i <- 0 until triangleUnitCount) observe(d.units(boxUnitCount + i), triangleIssue(i), triangleResult(i))
-    observe(d.units(boxUnitCount + triangleUnitCount), triangleResolve.io.in, triangleResolve.io.out)
-  }
+  connectInstrumentation()
 }

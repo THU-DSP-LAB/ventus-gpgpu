@@ -12,30 +12,9 @@ package rtcore
 
 import chisel3._
 import chisel3.util._
-import lsu.{LsuClientRequest, LsuClientResponse}
+import lsu.{LsuClientRequest, LsuClientResponse, LsuClientTag}
 import top.parameters._
 import rtcore.RtCorePortParameters.{regidx_totalwidth => regidx_totalwidth}
-
-object RtCorePortParameters {
-  /* Validate the Vulkan-selected group size.  Admission uses the physical
-   * RT Local row map, so multiple 1/2/4/8-warp groups occupy the available
-   * rows naturally instead of relying on a separate static slot counter. */
-  val groupWarps = sys.env.get("VENTUS_VK_RT_GROUP_WARPS").flatMap(_.toIntOption).getOrElse(1)
-  require(Set(1, 2, 4, 8).contains(groupWarps),
-    s"VENTUS_VK_RT_GROUP_WARPS must be 1, 2, 4, or 8 (got $groupWarps)")
-  // RTcore accepts one warp command at a time.  This is deliberately
-  // independent of the number of resident SIMT warps in the enclosing SM.
-  val residentWarpCount = 1
-  val residentWarpIdWidth = math.max(1, log2Ceil(residentWarpCount))
-  val issueIdWidth = 8
-  // Intersection pipelines use this as an internal ownership tag; it is not
-  // an LSU request identifier.
-  val requestIdWidth = 8
-  val lineWordCount = dcache_BlockWords
-  val lineBytes = lineWordCount * (xLen / 8)
-  require(lineBytes == 128, "RTcore reads use one 128-byte DCache line")
-  val regidx_totalwidth = regidx_width + regext_width
-}
 
 /** Warp-granular representation of a decoded `vt.rt.traverse`. */
 class RtWarpCommand extends Bundle {
@@ -145,4 +124,107 @@ class RtCoreIO extends Bundle {
   val lsuRequest = Decoupled(new LsuClientRequest)
   val lsuResponse = Flipped(Decoupled(new LsuClientResponse))
   val perf = Output(new RtCorePerfEvents)
+}
+
+/** Scheduler-private decoded node kinds and per-ray primitive metadata.
+  * These are not shader ABI records or transferable shader register state. */
+private[rtcore] object RtVtasNodeKind {
+  val header = 0.U(3.W)
+  val box4 = 1.U(3.W)
+  val triangle = 2.U(3.W)
+  val instance = 3.U(3.W)
+  val aabb = 4.U(3.W)
+  // Same on-wire header format, but it must initialise an object-tagged
+  // stack entry after an Instance transform.
+  val blasHeader = 5.U(3.W)
+}
+
+private[rtcore] class RtTriangleDispatchMeta extends Bundle {
+  val objectRay = Bool()
+  val opaque = Bool()
+  val primitiveId = UInt(xLen.W)
+  val geometryId = UInt(xLen.W)
+  val instanceId = UInt(xLen.W)
+  val instanceCustomIndex = UInt(24.W)
+  val instanceSbtRecordOffset = UInt(24.W)
+}
+
+/** Simulation-only observation ports. No counters or feedback into control. */
+class RtAsObservation extends Bundle {
+  val occupied = UInt(6.W)
+  val returned = UInt(6.W)
+  val readyEntries = UInt(6.W)
+  val acquire = Bool()
+  val allocate = Bool()
+  val residentHit = Bool()
+  val readyLanes = UInt(num_thread.W)
+  val acquireEntry = UInt(5.W)
+  val address = UInt(memReqLen.W)
+  val is64B = Bool()
+  val acquireLane = UInt(5.W)
+  val refill = Bool()
+  val refillEntry = UInt(5.W)
+  val injection = Bool()
+  val injectionEntry = UInt(5.W)
+  val serve = Bool()
+  val serveEntry = UInt(5.W)
+  val serveLane = UInt(5.W)
+  // Multiple fixed IU ports may consume returned lines in one cycle.  Keep
+  // the old scalar fields as a representative for simple timeline readers,
+  // and export the complete per-lane mapping for the detailed host observer.
+  val serveLanes = UInt(num_thread.W)
+  val serveEntries = Vec(num_thread, UInt(5.W))
+  val eviction = Bool()
+  val clear = Bool()
+}
+
+class RtUnitObservation extends Bundle {
+  val inValid = Bool()
+  val inReady = Bool()
+  val outValid = Bool()
+  val outReady = Bool()
+}
+
+/** Ray-load boundaries observed without feeding back into its control path. */
+class RtRayLoadObservation extends Bundle {
+  val gatherStart = Bool()
+  val gatherReadRequest = Bool()
+  val gatherReadResponse = Bool()
+  val gatherField = UInt(4.W)
+  val gatherDone = Bool()
+  val laneOut = Bool()
+  val laneOutLane = UInt(5.W)
+  val setupWrite = Bool()
+  val setupWriteLane = UInt(5.W)
+}
+
+class RtDetailedSignals extends Bundle {
+  val enabled = Bool()
+  val clear = Bool()
+  val session = Bool()
+  val activeMask = UInt(num_thread.W)
+  val command = Bool()
+  val commandMask = UInt(num_thread.W)
+  val commandKind = UInt(2.W) // fresh=0, resume=1, restart=2
+  val release = Bool() // physical context retirement, not software session count
+  val laneState = Vec(num_thread, UInt(4.W))
+  val nodePopLanes = UInt(num_thread.W)
+  val nodePopKinds = Vec(num_thread, UInt(3.W))
+  val nodeAcquire = Bool()
+  val stackReady = UInt(6.W)
+  val stackSelected = Bool()
+  val popBlockedHeader = Bool()
+  val popBlockedPush = Bool()
+  val popBlockedHeaderLine = Bool()
+  val asBlocked = Bool()
+  val readyBlockedRay = Bool()
+  val readyBlockedBox = Bool()
+  val readyBlockedTriangle = Bool()
+  val rayLoad = new RtRayLoadObservation
+  val lsu = new RtUnitObservation // request on input, response on output
+  val lsuRequestTag = UInt(LsuClientTag.width.W)
+  val lsuResponseTag = UInt(LsuClientTag.width.W)
+  val units = Vec(RtCoreSchedulerParameters.boxUnitCount +
+    RtCoreSchedulerParameters.triangleUnitCount + 1, new RtUnitObservation)
+  val asTable = new RtAsObservation
 }

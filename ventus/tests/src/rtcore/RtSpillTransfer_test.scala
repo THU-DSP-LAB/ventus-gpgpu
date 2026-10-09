@@ -78,6 +78,15 @@ class RtSpillTransferTest extends AnyFreeSpec with ChiselScalatestTester {
         dut.io.result.ready.poke(false.B)
       }
       start(false)
+      // Admission owns the snapshot. Changing the input must not affect any
+      // later write page or the result held under backpressure.
+      image.baseNodeRef.foreach(_.poke("hdeadbeef".U))
+      image.overflowNodeRef.foreach(_.poke("hcafebabe".U))
+      image.baseObjectTags.poke(0.U)
+      image.overflowObjectTags.poke(0.U)
+      image.stackDepth.poke(0.U)
+      image.valid.poke(false.B)
+      image.instanceNodeRef.poke(0.U)
       dut.io.request.bits.writeData(31).expect("h101f".U)
       transfer(0, false)
       dut.io.request.bits.writeData(2).expect(49.U)
@@ -85,6 +94,15 @@ class RtSpillTransferTest extends AnyFreeSpec with ChiselScalatestTester {
       transfer(1, false)
       dut.io.request.bits.writeData(31).expect("h201f".U)
       transfer(2, false)
+      dut.io.result.bits.image.valid.expect(true.B)
+      dut.io.result.bits.image.stackDepth.expect(49.U)
+      dut.io.result.bits.image.baseObjectTags.expect("h80000001".U)
+      dut.io.result.bits.image.overflowObjectTags.expect(2.U)
+      dut.io.result.bits.image.instanceNodeRef.expect("h12345678".U)
+      for (i <- 0 until 32) {
+        dut.io.result.bits.image.baseNodeRef(i).expect((0x1000 + i).U)
+        dut.io.result.bits.image.overflowNodeRef(i).expect((0x2000 + i).U)
+      }
       finish()
       for (depth <- Seq(0, 32, 49, 64)) {
         start(true)

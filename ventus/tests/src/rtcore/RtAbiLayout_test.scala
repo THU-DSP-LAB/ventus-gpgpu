@@ -17,7 +17,6 @@ class RtAbiLayoutTest extends AnyFreeSpec {
     assert(candidateBase + RtAbiLayout.HitRecordWordCount == committedBase)
     assert(committedBase + RtAbiLayout.HitRecordWordCount ==
       RtAbiLayout.LocalFieldMajorFixedHeaderWordCount)
-    assert(RtAbiLayout.HitRecordWordCount == RtMemTableParameters.hitRecordStorageWordCount)
   }
 
   "VTAS node references and cacheline node sizes match scheduler fetch rules" in {

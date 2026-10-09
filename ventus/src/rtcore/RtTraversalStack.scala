@@ -4,13 +4,6 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 
-object RtTraversalStackParameters {
-  val nodeRefWidth = 32
-  val prototypeDepth = 32
-  val overflowStacks = 4
-  val overflowDepth = 32
-}
-
 class RtTraversalStackInit extends Bundle {
   val laneMask = UInt(num_thread.W)
   val rootNodeRef = Vec(num_thread, UInt(RtTraversalStackParameters.nodeRefWidth.W))
@@ -48,7 +41,7 @@ class RtTraversalStackRestore extends Bundle {
   * Four shared 32-entry overflow stacks extend at most four lanes at a time;
   * each lane may own only one. Init, clear and pop remain masked atomic ops.
   */
-class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.prototypeDepth)
+class RtTraversalStack(stackDepth: Int = RtTraversalStackParameters.baseDepth)
     extends Module {
   require(stackDepth > 0)
   require(stackDepth <= RtSpillSlotLayout.wordsPerPage)

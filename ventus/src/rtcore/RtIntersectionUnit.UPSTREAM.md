@@ -8,9 +8,8 @@ implementation, `b835680cf66dae2b332bbe5ab8c2cdf16f2edb45`:
 
 RayFlex provenance is limited to `RtIntersectionUnit.scala`,
 `RtIntersectionUnitIO.scala`,
-`RtIntersectionCompareSelect.scala`, `RtIntersectionCompareAndSwap.scala`,
-`RtIntersectionQuadSort.scala`, `RtIntersectionQuadSortWithIndex.scala`, and
-`RtIntersectionFnHelpers.scala`. `RtCorePort.scala`, `RtMemTable.scala`, and
+and `RtIntersectionHelpers.scala` (the consolidated compare/select,
+compare/swap, quad-sort and sign-flip helpers). `RtCorePort.scala`, `RtMemTable.scala`, and
 `RtAbiLayout.scala` are Ventus-owned RTcore interface and ABI work, not
 RayFlex-derived source.
 

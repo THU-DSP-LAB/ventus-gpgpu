@@ -37,22 +37,6 @@ class RtLocalSramNarrowResponse extends Bundle {
   val readData = UInt(xLen.W)
 }
 
-object RtLocalSramParameters {
-  final val warpCount = num_warp
-  final val fieldCount = RtAbiLayout.LocalFieldMajorFixedHeaderWordCount
-  final val bankDepth = warpCount * fieldCount
-  // One bank maps directly to one Box4 IU: lanes i, i+8, i+16 and i+24
-  // always use bank i.  This preserves the scheduler's fixed laneId % 8 IU
-  // routing and limits the core-side selector to four local lanes.
-  final val bankCount = RtCoreSchedulerParameters.boxUnitCount
-  final val lanesPerBank = num_thread / bankCount
-  final val corePortCount = bankCount
-  require(num_thread == 32)
-  require(xLen == 32)
-  require(bankDepth == 320)
-  require(num_thread % bankCount == 0)
-}
-
 /** Behavioural replacement for eight single-port 320x128 SRAM macros.
   *
   * Each macro stores four IU-local lanes.  The external ABI remains
