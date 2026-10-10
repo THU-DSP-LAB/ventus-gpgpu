@@ -96,11 +96,9 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val read_Req_dA         = ValidIO(Vec(BlockWords,new SRAMBundleA(NSets*NWays)))
     val CacheHit_st1        = Output(Bool())
     val Req_st1_RTAB        = ValidIO(new RTABReq())
-    // nn64k-009 fix: st1 的 raw RTAB-slot 占用意图，不带 st1_ready gate。
-    // DCachev2.allowIn1 用它在 RTAB almost_full 时为当前 st1 请求预留最后一格。
-    // 不能用 Req_st1_RTAB.valid(=Req_RTAB_st1_valid && st1_ready)：st1_ready 在
-    // mshrReleasingSameBlock_st1 等 hold 拍被拉低(L660-662)，会把真实 park 意图掩盖成 0，
-    // 让外部 in(1) 的 st0-hitRTAB 路径占掉最后一格 → 闭合 st1⇄RTAB 死锁环。
+    // Reserve the final RTAB slot for any resident st1 request. Its replay
+    // classification can change across a fill-release edge, after admission
+    // has already allowed an st0 hit to consume that slot.
     val Req_st1_RTAB_reserve = Output(Bool())
     val CheckReq_WSHR       = Output(new WSHRreq)
     // {S}MSHRmissReq.instrId width tracks both LSU and DCache MSHR spaces.
@@ -121,6 +119,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     val memReq_coreRsp = Flipped(DecoupledIO(new DCacheCoreRsp))
 
     val CoreRsp = DecoupledIO(new DCacheCoreRsp)
+    val kernelFlushDone = Output(Bool())
 
     val memRspIsFlu = Input(Bool())
     val st2_ready = Output(Bool())
@@ -208,9 +207,16 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
   val FlushInvstateReg = RegInit(idle)
   val FlushInvstateReg_next = WireInit(FlushInvstateReg)
   val fluInvReq_st0 = io.CoreReq.valid && (CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate)
-  // A flush's st0 dirty-row read shares the SRAM port with the preceding
-  // request's st1 hit read. Drain st1 before selecting the flush address.
-  val fluInvStartOk_st0 = fluInvReq_st0 && io.MSHREmpty && io.SMSHREmpty && io.fillPipeDrained && !CoreReq_pipeReg_st0_st1.deq.valid
+  // A dirty flush and an older st1 hit otherwise select different rows on the
+  // single dA read port while only the older request generates a core response.
+  val st1DataReadInUse =
+    CoreReq_pipeReg_st0_st1.deq.valid &&
+      io.tA_Hit_st1.hit &&
+      (CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isRead ||
+        (CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isUncached && io.tA_Hit_st1.isDirty))
+  val flushStartResourcesReady_st0 =
+    io.MSHREmpty && io.SMSHREmpty && io.fillPipeDrained && !CoreReq_pipeReg_st0_st1.deq.valid
+  val fluInvStartOk_st0 = fluInvReq_st0 && flushStartResourcesReady_st0//bfs4096-008 §9: invalidate 启动须 cached-read fill pipe 已 drain (覆盖 MSHREmpty 漏的 W1/st1 窗口)
   val flushDirtyReq_st0 = fluInvStartOk_st0 && io.hasDirty && (FlushInvstateReg === idle)
   io.flushDirty_tA := flushDirtyReq_st0
   val FluInv_st1 = CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isFlush || CoreReq_pipeReg_st0_st1.deq.bits.Ctrl.isInvalidate
@@ -249,7 +255,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
       st0_ready := CoreReq_pipeReg_st0_st1.enq.ready && io.MSHREmpty && io.SMSHREmpty
     }.elsewhen(CoreReqControl_st0.isFlush || CoreReqControl_st0.isInvalidate){
         when(FlushInvstateReg === idle){
-          when(!fluInvStartOk_st0){ // Keep the flush token and its dirty-row read aligned.
+          when(!flushStartResourcesReady_st0){//bfs4096-008 §9: fill pipe 未 drain 时 invalidate 停 st0 (仅 idle 态 gate, FSM 离 idle 后不再 gate=死锁免疫)
             st0_valid := false.B
             st0_ready := false.B
           }.elsewhen(io.hasDirty){
@@ -292,6 +298,12 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
       CoreRsp_pipeReg_st1_st2.enq.ready && !io.memRsp_coreRsp.valid
   val fluInvCoreRspFire =
     fluInvRspPendingFire || (CoreReq_pipeReg_st0_st1.deq.fire && FluInv_st1 && (FlushInvstateReg === responding))
+  val completingKernelFlush = Mux(
+    fluInvRspPendingFire,
+    FluInvRspReqReg.isKernelFlush,
+    CoreReq_pipeReg_st0_st1.deq.bits.Req.isKernelFlush
+  )
+  io.kernelFlushDone := fluInvCoreRspFire && completingKernelFlush
   FlushInvstateReg_next := FlushInvstateReg
   FlushInvstateReg := FlushInvstateReg_next
   when(FlushInvstateReg === idle){
@@ -509,19 +521,19 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     Req_RTAB_st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
     ReplayType := WriteMissFillWait
   }
-  // nn64k-009 fix: 导出 st1 raw RTAB 预留意图(不经 st1_ready gate)。等价于 L599 "requesting RTAB"
-  // 分支谓词 (Req_RTAB_st1_valid || ReplayType===UCacheHitDirty)——凡这条 st1 请求最终必须进 RTAB
-  // 才能 drain 的情形都纳入预留，使 DCachev2 在 almost_full 时给它留住最后一格，防外部 st0-hitRTAB
-  // 抢槽把 RTAB 填满后 st1 被 L649 永久 hold(死锁环首跳)。UCacheHitDirty 在 evict 等待阶段
-  // Req_RTAB_st1_valid 可能尚为 0 但该请求已占 st1 且后续必进 RTAB，故一并纳入(对齐 L599 谓词)。
-  io.Req_st1_RTAB_reserve :=
-    Req_RTAB_st1_valid ||
-    (CoreReq_pipeReg_st0_st1.deq.valid && (ReplayType === UCacheHitDirty))
+  // A replay classification is not stable while a request is parked in st1.
+  // In particular, an MSHR release can turn a read miss into
+  // ReadMissFillWait one cycle after an external st0 hit was admitted. Reserve
+  // the slot from st1 residency itself so that transition cannot close the
+  // st1 <-> RTAB circular wait.
+  io.Req_st1_RTAB_reserve := CoreReq_pipeReg_st0_st1.deq.valid
   // bfs4096-006 fix: gate 掉 dA read 避免被 bypass 污染。replay 出来后 tag 已 update，
   // 同 way 的 tag 已经是 fill 后新 tag (例: visited 0x90002)，原 hit-read 的 tag (cost 0x90034) 不再 match → miss
   // → 走 MSHR 重新 fetch cost cacheline，落到 LRU 选的另一 way (visited 此时是 MRU 不会被选中)。
   val realReadHit_st1 = ReadHit_st1 && !fillConflictSt1
   io.read_Req_dA.valid := realReadHit_st1 || UCReqHitDirty || flushDirtyReq_st0
+  assert(!(flushDirtyReq_st0 && st1DataReadInUse),
+    "dirty flush must not steal the dA read port from an older st1 request")
 
   //missReq 2 mem, request type and data generator
   OpcodeGen.io.coreReqCtrl := Control_st1

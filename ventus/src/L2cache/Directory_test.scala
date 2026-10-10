@@ -105,6 +105,9 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     // srad-004 Phase 4.5 A''': hit-reservation clear 回传（SourceD→Scheduler→Directory）。
     // SourceD io.d.fire 时，若该 entry 是 hit 且 opcode∈{Get,Put*}，回传 (set,way) 递减 hitRefCount。
     val hit_resv_clear = Flipped(Valid(new ResvClear_lite(params)))
+    // A refill targeting a way with an outstanding hit must wait until SourceD
+    // has consumed the hit data from BankedStore.
+    val write_hit_hazard = Output(Bool())
  //   val finish_issue =Output(Bool())
   })
 
@@ -150,8 +153,13 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
   val flushDone = flushCount===((params.cache.sets*params.cache.ways).asUInt-1.U)
 
   val status_reg =Reg(Vec(params.cache.sets,new Directory_status(params)))
-  val flush_set =flushCount/params.cache.ways.asUInt
-  val flush_way =(flushCount%params.cache.ways.asUInt)
+  // flushCount carries one terminal bit so completion can be observed by the
+  // following pipeline stage. Keep that bit for control, but never use it as
+  // part of a dynamic Vec index.
+  val flush_set_raw = flushCount / params.cache.ways.asUInt
+  val flush_way_raw = flushCount % params.cache.ways.asUInt
+  val flush_set = flush_set_raw(params.setBits - 1, 0)
+  val flush_way = flush_way_raw(params.wayBits - 1, 0)
   val regout = cc_dir.io.r.resp.data //
   val ways = regout.asTypeOf(Vec(params.cache.ways,new DirectoryEntry_lite(params)))
   // A scan item is a transaction: read its directory row, latch its tag,
@@ -293,6 +301,12 @@ for(i<- 0 until params.cache.sets){
                    io.result.bits.opcode === PutFullData ||
                    io.result.bits.opcode === PutPartialData
   val will_resv_hit = io.result.fire && io.result.bits.hit && !io.result.bits.flush && hitUsesWay
+  val writeHitsHeldWay = hitRefCount(io.write.bits.set)(io.write.bits.way).orR
+  // Interlock same-set fills for the result cycle. This lets a hit establish
+  // hitRefCount before a write can alter the tag/data used by that result and
+  // avoids feeding result.bits.hit back into io.write.valid.
+  val writeSharesResultSet = io.result.valid && (io.result.bits.set === io.write.bits.set)
+  io.write_hit_hazard := writeHitsHeldWay || writeSharesResultSet
   // hitBusyVec: LSB=way0，与 reservation/hits 等全程约定一致
   val hitBusyVec = VecInit((0 until params.cache.ways).map(w => hitRefCount(set)(w).orR)).asUInt
 
@@ -494,7 +508,13 @@ for(i<- 0 until params.cache.sets){
 
   // Consuming the placeholder means admission failed to reserve a real way;
   // continuing would permit an in-flight line to be overwritten silently.
-  assert(!(will_alloc_victim && !effInvalidVec.orR && invalidVec.orR),
+  val placeholderAlloc = will_alloc_victim && !effInvalidVec.orR && invalidVec.orR
+  when(placeholderAlloc) {
+    printf(p"[RESV_PLACEHOLDER_ALLOC] set=${io.result.bits.set} way=${io.result.bits.way} " +
+           p"valid=0x${Hexadecimal(validVec)} reservation=0x${Hexadecimal(reservation(set))} " +
+           p"hit_busy=0x${Hexadecimal(hitBusyVec)}\n")
+  }
+  assert(!placeholderAlloc,
          "RESV_PLACEHOLDER_ALLOC: victim_stall admission leak")
 
   // srad-004 A''': hitRefCount inc/dec（同拍 set+clear 安全）。

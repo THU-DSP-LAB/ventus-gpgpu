@@ -145,6 +145,7 @@ class L1TagAccess(set: Int, way: Int, tagBits: Int, AsidBits: Int, readOnly: Boo
   val cachehit_hold = Module(new Queue(new tagCheckerResult(way),1))
   // bfs4096-007 v15: hit_st1_raw 前置 Wire 声明, 给下方 in(1).valid 用 (实际赋值在 L355)
   val hit_st1_raw = Wire(Bool())
+  val waymask_st1_raw = Wire(UInt(way.W))
   //SRAM to store tag
   val tagBodyAccess = Module(new SRAMTemplate(
     UInt(tagBits.W),
@@ -359,13 +360,15 @@ if(MMU_ENABLED) {
   // → bfs4096-007 byte mismatch. 改用 hit_st1_raw (cachehit_hold 出来的 ST1-held hit).
   // L335 setIdx/waymask 在 valid=0 时永不写 SRAM, 不需联动改 (root cause 在 valid 源).
   // 详见 bugs/bfs4096-007/checkpoint_15_valid_gate.md。
-  // [hotspot3d512-001 记录, 未修, 与本 fix 无关] dirtyMask 的 OR-base(下方 data=dirtyMaskPerCL, 其 L330 读
-  //   dirtyMaskAccess.io.r.resp 是 live)在多拍 stall 期会被"不同 set 的 fill"(in(0)=allocateWrite.fire, L299 抢共享读口)
-  //   覆盖 → 漏掉本行已脏字节 → 写回 L2 丢 store。这是 pre-existing 通用洞(baseline 同, 非本 fix 引入), 且 hotspot3d
-  //   目标 store 被件2 转 miss 根本不写 dirtyMask, 故收口时不动 dirtyMask, 单列待修: bugs/hotspot3d512-001/dirtyMask_orbase_latent.md。
+  // The write-hit update commits only when the held ST1 request can leave the
+  // buffer. Its set, way, and OR-base below all use the same held identity, so
+  // an allocate or flush read cannot redirect a stalled update to another line.
   dirtyMaskWriteArb.io.in(1).valid :=
-    io.coreReq_st1_valid && hit_st1_raw && io.probeIsWrite_st1.get
-  dirtyMaskWriteArb.io.in(1).bits.apply(data = dirtyMaskPerCL.asUInt, setIdx = RegNext(io.probeRead.bits.setIdx), waymask = iTagChecker.io.waymask)
+    io.coreReq_st1_valid && hit_st1_raw && io.probeIsWrite_st1.get && probeReadBuf.ready
+  dirtyMaskWriteArb.io.in(1).bits.apply(
+    data = dirtyMaskPerCL.asUInt,
+    setIdx = probeReadBuf.bits.setIdx,
+    waymask = waymask_st1_raw)
   // 只有当 flushChoosen 拉高时，读出来 dirty mask 才会被用到，需要被写0
   // 这里的 valid 需要用 RegNext 延迟一周期是因为在dcache的顶层模块将 InvOrFluMemReqValid_st1 里也延了一个clk
   // 不使用dcache中的 InvOrFluMemReqValid_st1 是因为与tag的发出对齐
@@ -447,7 +450,7 @@ if(MMU_ENABLED) {
   }
   // bfs4096-007 v15: hit_st1_raw 已在前置 Wire 声明, 此处 := 赋值
   hit_st1_raw := st1HitEff_raw && !(writeHitFillConflictHeld || writeHitFillConflict_set)  // ★gate: 冲突→hit 强制 0→write-miss
-  val waymask_st1_raw = st1WaymaskEff_raw
+  waymask_st1_raw := st1WaymaskEff_raw
   // ===== btree-004 P1′ (read 侧 dirtyMask OR-base held-identity valid-gate) =====
   // btree-004 fix: 用 way_dirty 做 dirtyMask OR-base 的 valid-gate(落实 L283 设计本意: way_dirty=阵列 valid)。
   //   clean way(way_dirty=0)的 dirtyMask SRAM 残留视为无效, 不 OR 进首写 mask; 已脏 way(way_dirty=1)仍正常累积。
@@ -456,14 +459,25 @@ if(MMU_ENABLED) {
   val orBaseHeldWay        = OHToUInt(waymask_st1_raw)                          // held way (= L451 isDirty 同源)
   val orBaseHeldSet        = probeReadBuf.bits.setIdx                           // held set (= L451 isDirty 同源)
   val hitWayCurrentlyDirty = way_dirty(orBaseHeldSet)(orBaseHeldWay).asBool
+  // The SRAM response belongs to the probe accepted one cycle earlier.  Capture
+  // that complete response before allocate/flush reads can move the shared read
+  // port while the ST1 request is stalled.
+  val dirtyMaskProbeRespValid = RegNext(io.probeRead.fire, false.B)
+  val dirtyMaskProbeRespHeld = RegEnable(
+    dirtyMaskAccess.io.r.resp.data,
+    VecInit(Seq.fill(way)(0.U((dcache_BlockWords * BytesOfWord).W))),
+    dirtyMaskProbeRespValid)
+  val dirtyMaskProbeResp = Mux(
+    dirtyMaskProbeRespValid,
+    dirtyMaskAccess.io.r.resp.data,
+    dirtyMaskProbeRespHeld)
   val dirtyMaskOrBase      = Mux(hitWayCurrentlyDirty,
-                                 dirtyMaskAccess.io.r.resp.data(orBaseHeldWay), // OR-base 用同一 held way 选
+                                 dirtyMaskProbeResp(orBaseHeldWay),             // OR-base 用同一 held way 选
                                  0.U)
   dirtyMaskPerCL := (dirtyMaskPerCL_init.asUInt | dirtyMaskOrBase).asTypeOf(dirtyMaskPerCL)
-  // ★btree-004 P1″ (写回端口 in(1) 也改 held identity) 已实测引入回归(command-j 路径 bid=-1 + btree-003 reclength=0 复发,
-  //   isolated-serial 铁实, codex 设计审被 build-trial 推翻), 故 P1′ 只保留上方读侧 OR-base held valid-gate,
-  //   in(1) 写回沿用原 live 信号(empirically 正确)。写回端口 identity latent = codex 标记的理论概念(无 failing seed),
-  //   held-write-back 闭合法错误, 残留待人类用不同 approach 或接受 live。
+  // The write port above uses the same held ST1 set/way as this OR-base.  The
+  // probe response is captured before another client can move the shared SRAM
+  // read port, preserving the dirty bytes accumulated by earlier stores.
   io.hit_st1 := hit_st1_raw && probeReadBuf.valid//RegNext(io.probeRead.fire) //todo remove
   io.hitStatus_st1.hit := hit_st1_raw && probeReadBuf.valid
   io.hitStatus_st1.waymask := waymask_st1_raw

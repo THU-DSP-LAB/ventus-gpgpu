@@ -25,29 +25,27 @@ MOLD = $(shell which mold)
 # Source file list and build directories
 #=====================================================================
 
-DIR_BUILD = build/driver_example
-DIR_BUILDOBJ_DEBUG = $(DIR_BUILD)/debug
-DIR_BUILDOBJ_RELEASE = $(DIR_BUILD)/release
-ifeq ($(RELEASE),1)
-DIR_BUILDOBJ = $(DIR_BUILDOBJ_RELEASE)
-else
-DIR_BUILDOBJ = $(DIR_BUILDOBJ_DEBUG)
-endif
-
 SRC_CXX = sim_main.cpp cmdarg.cpp kernel.cpp
-OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
-DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
-
-APP = $(DIR_BUILDOBJ)/sim-VentusRTL
 
 #=====================================================================
 # Include Ventus RTL library build rules
 #=====================================================================
 
-# default build target should be set by this Makefile
-default: $(APP)
-
 include verilate.mk
+
+DIR_BUILD = build/driver_example
+DIR_BUILDOBJ = $(DIR_BUILD)/$(VLIB_VARIANT_KEY)
+OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
+DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
+
+APP = $(DIR_BUILDOBJ)/sim-VentusRTL
+METADATA_PARSER_TEST = build/tests/common/metadata_parser_test
+FORK_SNAPSHOT_TEST = build/tests/$(VLIB_VARIANT_KEY)/fork_snapshot_test
+PERSISTENT_STATE_TEST = build/tests/$(VLIB_VARIANT_KEY)/persistent_state_test
+PMEM_REGION_TEST = build/tests/$(VLIB_VARIANT_KEY)/pmem_region_test
+
+# Extend verilate.mk's default target with the matching host variant.
+default: $(APP)
 
 #=====================================================================
 # Toolchain flags
@@ -86,13 +84,61 @@ run: $(APP)
 	$(APP)
 	@echo
 
+$(METADATA_PARSER_TEST): tests/metadata_parser_test.cpp kernel.cpp kernel.hpp ventus_rtlsim.h
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
+	  -I. tests/metadata_parser_test.cpp kernel.cpp -lspdlog -lfmt -o $@
+
+test-metadata-parser: $(METADATA_PARSER_TEST)
+	ASAN_OPTIONS=detect_leaks=1 $(METADATA_PARSER_TEST)
+
+$(FORK_SNAPSHOT_TEST): tests/fork_snapshot_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/fork_snapshot_test.cpp \
+	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
+	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+
+test-fork-snapshot: $(FORK_SNAPSHOT_TEST)
+	$(FORK_SNAPSHOT_TEST) invalid
+	$(FORK_SNAPSHOT_TEST) success
+	$(FORK_SNAPSHOT_TEST) mismatch
+
+$(PERSISTENT_STATE_TEST): tests/persistent_state_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/persistent_state_test.cpp \
+	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
+	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+
+test-persistent-state: $(PERSISTENT_STATE_TEST)
+	$(PERSISTENT_STATE_TEST) save
+	$(PERSISTENT_STATE_TEST) restore
+ifeq ($(TRACE),1)
+	$(PERSISTENT_STATE_TEST) restore-waveform
+endif
+	$(PERSISTENT_STATE_TEST) corrupt
+ifneq ($(TRACE),1)
+	$(PERSISTENT_STATE_TEST) no-trace-config
+endif
+
+print-build-identity: $(VLIB_MODEL_IDENTITY_JSON)
+	@cat $(VLIB_MODEL_IDENTITY_JSON)
+
+$(PMEM_REGION_TEST): tests/pmem_region_test.cpp standalone_pmem_regions.hpp ventus_rtlsim.h $(VLIB_TARGET)
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/pmem_region_test.cpp \
+	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
+	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+
+test-pmem-region: $(PMEM_REGION_TEST)
+	$(PMEM_REGION_TEST)
+
 gdb: $(APP)
 	@echo
 	-rm -f logs/ventus_rtlsim.log
 	gdb --tui $(APP)
 	@echo
 
-.PHONY: lib run gdb
+.PHONY: lib run test-metadata-parser test-fork-snapshot test-persistent-state test-pmem-region print-build-identity gdb
 
 #=====================================================================
 # Other targets

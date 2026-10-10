@@ -39,6 +39,7 @@ class pipe() extends Module{
     val externalFlushPipe = ValidIO(UInt(depth_warp.W))
     val dcache_req = DecoupledIO(new DCacheCoreReq_np)
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    val dcache_flush_done = Input(Bool())
     val shared_req = DecoupledIO(new ShareMemCoreReq_np)
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val pc_reset = Input(Bool())
@@ -248,20 +249,25 @@ class pipe() extends Module{
   warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
   val scoreboardBusy = (VecInit(scoreb.map(_.delay))).asUInt
   warp_sche.io.scoreboard_busy:=scoreboardBusy
+  warp_sche.io.lsu_idle:=lsu.io.fence_end
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
   val init_thread_mask = (1.U(num_thread.W) << warp_sche.io.CTA2csr.bits.CTAdata.dispatch2cu_wf_size_dispatch).asUInt - 1.U
   simt_stack.io.initMask.valid := warp_sche.io.CTA2csr.valid
   simt_stack.io.initMask.bits.warp_id := warp_sche.io.CTA2csr.bits.wid
   simt_stack.io.initMask.bits.thread_mask := init_thread_mask
-  when(warp_sche.io.CTA2csr.fire){
-    printf(p"sm ${sm_id} warp ${Decimal(warp_sche.io.CTA2csr.bits.wid)} init thread mask 0x${Hexadecimal(init_thread_mask)}\n")
+  if (SPIKE_OUTPUT) {
+    when(warp_sche.io.CTA2csr.fire){
+      printf(p"sm ${sm_id} warp ${Decimal(warp_sche.io.CTA2csr.bits.wid)} init thread mask 0x${Hexadecimal(init_thread_mask)}\n")
+    }
   }
   operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
   operand_collector.io.vgpr_base:=csrfile.io.vgpr_base
   warp_sche.io.warpReq<>io.warpReq
   warp_sche.io.warpRsp<>io.warpRsp
   warp_sche.io.flushDCache <> lsu.io.flush_dcache
+  warp_sche.io.flushDCacheDone := io.dcache_flush_done
+  lsu.io.flush_dcache_done := io.dcache_flush_done
 
   //flush:=(warp_sche.io.branch.fire&warp_sche.io.branch.bits.jump) | ()
   flush:=warp_sche.io.flush.valid

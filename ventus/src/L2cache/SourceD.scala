@@ -62,7 +62,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val finish_issue = Output(Bool())
     // srad-004 Phase 4.5 A''': hit-reservation one-shot clear（io.d.fire 时回传 (set,way)→Directory 递减 hitRefCount）。
     val hit_done = Valid(new ResvClear_lite(params))
-    // srad-007 Bug3 fix(B): dirty-victim writeback A 请求发出那拍回传 (set,way)，给 Scheduler 清 evictReadPending。
+    // Dirty-victim data has entered the prioritized write buffer.
     val evict_read_done = Valid(new ResvClear_lite(params))
     // btree-002 fix: L2 hit Put 的 BankedStore 写已完成且 D ack 已 fire。
     // Scheduler 用该事件 retire L2 write-through scoreboard 的一个 pending count；
@@ -71,6 +71,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     // btree-002 fix v3.2: 当前 io.a beat 是否为真正的 write-through miss/no-allocate Put。
     // dirty-victim writeback 虽然 io.a.bits.opcode 也会被改成 PutFullData，但该标志保持 false。
     val wt_miss_a = Output(Bool())
+    val maintenance_writes_drained = Input(Bool())
   })
 
 
@@ -129,9 +130,11 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
 
 
   val write_sent_reg=RegInit(false.B)
-  when((s1_w_valid&&io.bs_wadr.ready)){
+  // A hit Put owns exactly one BankedStore write. Keep completion sticky until
+  // the next request; port backpressure after the write must not re-arm it.
+  when(io.bs_wadr.fire) {
     write_sent_reg:=true.B
-  }.otherwise{
+  }.elsewhen(io.req.fire) {
     write_sent_reg:=false.B
   }
   val write_sent=Mux(io.req.fire,false.B,write_sent_reg)
@@ -273,14 +276,22 @@ val mshr_wait_reg =RegInit(false.B)
     }
   }
   io.mshr_wait      :=mshr_wait_reg
-  io.bs_wadr.valid   :=    s1_w_valid &&(!write_sent)
+  // A write is active only on initial request acceptance or while stage_2 is
+  // retrying a write that lost BankedStore arbitration to a refill.
+  val hitPutWriteActive = io.req.fire || stateReg === stage_2
+  io.bs_wadr.valid   :=    s1_w_valid && hitPutWriteActive &&(!write_sent)
   io.bs_wadr.bits.set:=    s1_req.set
   io.bs_wadr.bits.way:=    s1_req.way
   io.bs_wdat.data    :=    pb_beat.data
   io.bs_wadr.bits.mask:=   pb_beat.mask
 
+  assert(!(stateReg === stage_1 && !io.req.fire && io.bs_wadr.valid),
+    "SourceD emitted a stale hit-Put BankedStore write while idle")
+
   ///将读取数据输出d
-  io.d.valid        :=((stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
+  val finalMaintenanceRsp = s_final_req.opcode === Hint && s_final_req.last_flush
+  io.d.valid        :=((stateReg===stage_4 || stateReg===stage_8)&& !(s_final_req.opcode===Hint && !s_final_req.last_flush) &&
+    (!finalMaintenanceRsp || io.maintenance_writes_drained)) //&& s1_req.opcode===Get)//数据读出来之后准备输出
   io.d.bits.source  :=s_final_req.source
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,Mux(s_final_req.last_flush,HintAck,AccessAck))
   io.d.bits.size    := s_final_req.size
@@ -309,7 +320,7 @@ val mshr_wait_reg =RegInit(false.B)
   io.wt_miss_a := (stateReg === stage_4 || stateReg === stage_7) && !s_final_req.hit &&
     (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)
 
-  io.finish_issue := io.d.valid && s_final_req.last_flush
+  io.finish_issue := io.d.fire && s_final_req.last_flush
 
   // srad-004 Phase 4.5 A''': hit-reservation clear（one-shot，统一到 io.d.fire）。
   // io.d.fire 在 stage_4/stage_8 各自最多一次（SourceD entry 释放条件），保证 1:1 对应 will_resv_hit。
@@ -320,10 +331,10 @@ val mshr_wait_reg =RegInit(false.B)
   io.hit_done.bits.set  := s_final_req.set
   io.hit_done.bits.way  := s_final_req.way
 
-  // srad-007 Bug3 root-fix(B): L2 BankedStore evict-vs-fill WAR — dirty-victim eviction 的 BankedStore 读
-  // (SourceD stage_3 bs_radr) 必须早于 refill 经 sinkD 写同 (set,way)。dirtyVictimWbFire = 该 victim writeback
-  // A 请求发出那拍(io.a.fire 且 s_final_req 是 dirty miss 的读路径 Get/Hint-evict，非 write-through Put)，
-  // 此拍 evict 读已完成(stage_3 先读后发)，回传 (set,way) 给 Scheduler 清 evictReadPending → 放行 fill 写。
+  // SourceD stage_3 reads a dirty victim before presenting its writeback on A.
+  // io.a.fire means the writeback has entered Scheduler's prioritized write
+  // buffer. Scheduler can then release the miss Get without allowing it to
+  // overtake the victim writeback on the outer A channel.
   // codex 4.5.5: 收窄到 opcode===Get（refill-eviction 才置 pending）；flush-dirty writeback(Hint)也读 bs_rdat 写回
   // 但非 refill-eviction，不该按 (set,way) 误清 pending（flush 可与 MSHR 重叠）。
   val dirtyVictimWbFire = io.a.fire && s_final_req.dirty && !s_final_req.hit && (s_final_req.opcode === Get)

@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 #include <spdlog/logger.h>
+#include <verilated_save.h>
 
 Cta::Cta(std::shared_ptr<spdlog::logger> logger_)
     : m_kernel_idx_dispatching(-1)
@@ -40,6 +41,27 @@ bool Cta::wg_get_info(std::string& kernel_name, uint32_t& kernel_id, uint32_t& w
 }
 
 bool Cta::is_idle() const { return m_kernels.size() == 0; }
+
+bool Cta::save_idle(VerilatedSerialize& output) const {
+    if (!m_kernels.empty() || m_kernel_idx_dispatching != -1) {
+        return false;
+    }
+    output << static_cast<uint32_t>(UINT32_MAX) << m_kernel_id_next << m_kernel_wgid_base_next;
+    return true;
+}
+
+bool Cta::restore_idle(VerilatedDeserialize& input) {
+    uint32_t dispatching = 0;
+    uint32_t kernel_id_next = 0;
+    uint32_t kernel_wgid_base_next = 0;
+    input >> dispatching >> kernel_id_next >> kernel_wgid_base_next;
+    if (!m_kernels.empty() || m_kernel_idx_dispatching != -1 || dispatching != UINT32_MAX) {
+        return false;
+    }
+    m_kernel_id_next = kernel_id_next;
+    m_kernel_wgid_base_next = kernel_wgid_base_next;
+    return true;
+}
 
 bool Cta::apply_to_dut(Vdut* dut) {
     assert(m_kernel_idx_dispatching < 0 || m_kernel_idx_dispatching < m_kernels.size());

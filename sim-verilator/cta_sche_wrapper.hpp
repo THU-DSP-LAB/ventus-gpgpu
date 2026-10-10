@@ -5,6 +5,9 @@
 #include <spdlog/logger.h>
 #include <vector>
 
+class VerilatedDeserialize;
+class VerilatedSerialize;
+
 class Cta {
 public:
     Cta(std::shared_ptr<spdlog::logger> logger);
@@ -22,6 +25,8 @@ public:
     void wg_finish(uint32_t wgid);
 
     bool is_idle() const;
+    bool save_idle(VerilatedSerialize& output) const;
+    bool restore_idle(VerilatedDeserialize& input);
 
 private:
     std::vector<std::shared_ptr<Kernel>> m_kernels;

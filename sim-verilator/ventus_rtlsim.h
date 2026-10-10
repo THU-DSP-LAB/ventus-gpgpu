@@ -182,6 +182,17 @@ typedef struct {
     uint32_t num_sm;
     const ventus_rtlsim_rtcore_pmu_t *rtcore;
 } ventus_rtlsim_rtcore_pmu_view_t;
+typedef enum {
+    VENTUS_PMEM_REGION_BUFFER = 0,
+    VENTUS_PMEM_REGION_PDS = 1,
+} ventus_pmem_region_kind_t;
+
+typedef struct {
+    uint64_t cold_page;
+    uint64_t pds_cold_page;
+    uint64_t allocation_padding;
+    uint64_t out_of_bounds;
+} ventus_pmem_missing_read_stats_t;
 
 // =
 // API functions:
@@ -212,6 +223,14 @@ DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* con
 //   it will rollback to the oldest snapshot to find out what happened.
 // You can force the rollback by passing `snapshot_rollback_forcing = true`
 DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+// Status-returning variant. Returns zero only when cleanup and any requested replay succeed.
+DLL_PUBLIC int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+// Persist or cold-restore a complete idle RTL simulator state. Only available in SAVABLE=1 builds.
+DLL_PUBLIC int ventus_rtlsim_save_state(ventus_rtlsim_t* sim, const char* directory);
+DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_restore_state(
+    const ventus_rtlsim_config_t* config, const char* directory);
+// Return the supported persistent-state ABI version, or zero when this build is not savable.
+DLL_PUBLIC uint32_t ventus_rtlsim_persistent_state_version(void);
 // Ask RTL to print the accumulated testcase PMU summary once.
 DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 // Return a read-only view of the latest PMU counters sampled after the most recent step().
@@ -263,6 +282,17 @@ DLL_PUBLIC void ventus_rtlsim_add_kernel(
 // If config.pmem.auto_alloc is set, you don't need to call these functions.
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
+
+// Register driver-owned physical ranges for classifying reads from sparse, unmaterialized pages.
+// Region metadata is diagnostic state and is intentionally not part of persistent RTL snapshots.
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_register(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t requested_size,
+    uint64_t allocated_size, ventus_pmem_region_kind_t kind,
+    uint64_t allocation_id);
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_unregister(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t allocation_id);
+DLL_PUBLIC ventus_pmem_missing_read_stats_t ventus_rtlsim_pmem_missing_read_stats(
+    const ventus_rtlsim_t* sim);
 
 // Physical memory read & write
 // copy data from host to device
