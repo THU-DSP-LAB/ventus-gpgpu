@@ -33,9 +33,14 @@ class RtWarpCommand extends Bundle {
   val issueId = UInt(RtCorePortParameters.issueIdWidth.W)
   val destinationVd = UInt(regidx_totalwidth.W)
   val activeMask = UInt(num_thread.W)
-  /* `grouped` is an ISA semantic bit, not an ownership bit. `locator` is a
-   * per-lane workgroup-local cross-warp TID; scheduler resolves it through
-   * workgroupTag/member allocation metadata before touching RT Local SRAM. */
+  // Hardware admission hint from already-published RT Local ray headers.
+  // No ray payload or shader-register values are carried in this hint.
+  val batchEligible = Bool()
+  /* At the pipeline boundary `grouped` denotes the group-traverse ISA form.
+   * RtTaskBatcher also uses this locator path for an internal proxy batch;
+   * its member table maps directly to parent rows, without a shader collective.
+   * The scheduler resolves every locator through the supplied member table
+   * before touching RT Local SRAM. This bit does not imply context ownership. */
   val grouped = Bool()
   val locator = Vec(num_thread, UInt(xLen.W))
 }

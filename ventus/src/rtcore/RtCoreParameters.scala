@@ -11,6 +11,7 @@ object RtCoreSchedulerParameters {
   val boxUnitCount = 8
   val triangleUnitCount = 2
   val physicalSessionCount = 1
+  val taskBatchingEnabled = true
   val stackBaseDepth = 32
   val stackOverflowBanks = 4
   val stackOverflowDepth = 32

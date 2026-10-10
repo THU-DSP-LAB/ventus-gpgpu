@@ -23,9 +23,17 @@ class RtCore extends Module {
     Module(new RtTrianglePipeline).suggestName(s"triangle_$index")
   }
 
-  scheduler.io.command <> io.command
+  if (taskBatchingEnabled) {
+    val batcher = Module(new RtTaskBatcher)
+    batcher.io.command <> io.command
+    scheduler.io.command <> batcher.io.schedulerCommand
+    batcher.io.schedulerCompletion <> scheduler.io.completion
+    io.completion <> batcher.io.completion
+  } else {
+    scheduler.io.command <> io.command
+    io.completion <> scheduler.io.completion
+  }
   scheduler.io.coreId := io.coreId
-  io.completion <> scheduler.io.completion
   scheduler.io.release <> io.release
   io.releaseAck <> scheduler.io.releaseAck
   io.lsuRequest <> scheduler.io.lsuRequest

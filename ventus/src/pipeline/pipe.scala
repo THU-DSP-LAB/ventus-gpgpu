@@ -105,6 +105,9 @@ class pipe() extends Module{
   val rtLocalWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
   val rtInFlight = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
   val rtIssueId = RegInit(VecInit(Seq.fill(num_warp)(0.U(RtCorePortParameters.issueIdWidth.W))))
+  val rtRayHistory = Module(new RtParentRayHistory)
+  rtRayHistory.io.allocated.valid := io.warpReq.fire
+  rtRayHistory.io.allocated.bits := io.warpReq.bits.wid
   // Capture the CTA-provided tag at allocation time.  The tag lookup port is
   // otherwise only driven for barriers/end-program and is not meaningful for
   // an arbitrary issued instruction.
@@ -157,7 +160,15 @@ class pipe() extends Module{
   val rtReleaseSent = RegInit(false.B)
   // Reserve at operand-collector admission. A foreign traversal admitted
   // before this reservation is visible can later block the owner's RT path.
-  val rtReservation = Module(new RtSessionReservation)
+  val rtReservation = Module(new RtSessionReservation(RtCoreSchedulerParameters.taskBatchingEnabled))
+  if (RtCoreSchedulerParameters.taskBatchingEnabled) {
+    for (warp <- 0 until num_warp) {
+      val pool = rtSpillPool(warp)
+      rtReservation.io.concurrent.get(warp) := rtWorkgroupValid(warp) &&
+        pool.spillPoolBase =/= 0.U && pool.dispatchEpoch =/= 0.U &&
+        pool.slotsPerCore >= RtSpillSlotLayout.slotsPerCore.U
+    }
+  }
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
@@ -301,9 +312,13 @@ class pipe() extends Module{
   warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
+    val groupAdmissionAllowed = if (RtCoreSchedulerParameters.taskBatchingEnabled)
+      ibuffer.io.out(i).bits.rtOp =/= RtOp.groupTraverse || !rtReservation.io.busy ||
+        (rtReservation.io.reserved && rtReservation.io.owner === i.U)
+      else true.B
     val rtAdmissionAllowed = (ibuffer.io.out(i).bits.rtOp =/= RtOp.traverse &&
       ibuffer.io.out(i).bits.rtOp =/= RtOp.groupTraverse) ||
-      rtReservation.io.allowed(i)
+      (rtReservation.io.allowed(i) && groupAdmissionAllowed)
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
     ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
     ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
@@ -346,6 +361,9 @@ class pipe() extends Module{
     (ibuffer2issue.io.out_v.bits.rtOp === RtOp.traverse ||
       ibuffer2issue.io.out_v.bits.rtOp === RtOp.groupTraverse)
   rtReservation.io.issued.bits := ibuffer2issue.io.out_v.bits.wid
+  if (RtCoreSchedulerParameters.taskBatchingEnabled) {
+    rtReservation.io.issuedExclusive.get := ibuffer2issue.io.out_v.bits.rtOp === RtOp.groupTraverse
+  }
   rtReservation.io.releaseIssued.valid := rtcore.io.release.fire
   rtReservation.io.releaseIssued.bits := rtcore.io.release.bits.warpId
   rtReservation.io.released.valid := rtcore.io.releaseAck.fire
@@ -551,6 +569,13 @@ class pipe() extends Module{
   softwareLocalRequest.bits.write := rtIsLocalStore
   softwareLocalRequest.bits.laneMask := rtIssue.mask.asUInt
   softwareLocalRequest.bits.writeData := rtIssue.in2
+  rtRayHistory.io.published.valid := softwareLocalRequest.fire &&
+    softwareLocalRequest.bits.write &&
+    softwareLocalRequest.bits.fieldId === RtAbiLayout.SlotStatus.U
+  rtRayHistory.io.published.bits.warpId := softwareLocalRequest.bits.warpId
+  rtRayHistory.io.published.bits.mask := softwareLocalRequest.bits.laneMask &
+    VecInit(softwareLocalRequest.bits.writeData.map(word =>
+      word === RtAbiLayout.SlotStatusTraceRequest.U)).asUInt
 
   rtLocalSram.io.request.valid := rtcore.io.localRequest.valid || softwareLocalRequest.valid
   rtLocalSram.io.request.bits := Mux(rtcore.io.localRequest.valid,
@@ -637,6 +662,9 @@ class pipe() extends Module{
   rtcore.io.command.bits.issueId := rtIssueId(rtIssue.ctrl.wid)
   rtcore.io.command.bits.destinationVd := rtIssue.ctrl.reg_idxw
   rtcore.io.command.bits.activeMask := rtIssue.mask.asUInt
+  rtcore.io.command.bits.batchEligible := !rtIsGroupTraverse &&
+    (rtIssueMask & ~rtRayHistory.io.secondary(rtIssue.ctrl.wid)) === 0.U &&
+    !rtIssueMask.andR
   rtcore.io.command.bits.grouped := rtIsGroupTraverse
   rtcore.io.command.bits.locator := rtIssue.in2
 
