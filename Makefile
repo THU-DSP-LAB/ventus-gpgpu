@@ -75,7 +75,10 @@ clean:
 clean-git:
 	git clean -fd
 
-check-rtlsim-public-abi:
+check-rtlsim-build-config:
+	python3 -m unittest discover -s sim-verilator/tests -p test_ci_build_configuration.py
+
+check-rtlsim-public-abi: check-rtlsim-build-config
 	$(CC) -std=c11 -fsyntax-only -Isim-verilator $(PUBLIC_ABI_COMPILE_TEST)
 	$(CC) -std=c11 -fsyntax-only -Isim-verilator-nocache $(PUBLIC_ABI_COMPILE_TEST)
 
@@ -99,5 +102,5 @@ rtlsim-gvm-install: rtlsim-gvm-build
 	+$(MAKE) -C sim-verilator -f gvm.mk install RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_REF_DIR=$(GVM_REF_DIR)
 	+$(MAKE) -C sim-verilator-nocache -f gvm.mk install RELEASE=$(RELEASE) PREFIX=$(PREFIX) GVM_REF_DIR=$(GVM_REF_DIR)
 
-.PHONY: init bump bsp idea compile test rtcore-test verilog fpga-verilog clean clean-git check-rtlsim-public-abi
+.PHONY: init bump bsp idea compile test rtcore-test verilog fpga-verilog clean clean-git check-rtlsim-public-abi check-rtlsim-build-config
 .PHONY: rtlsim-withcache rtlsim-nocache gvm-withcache gvm-nocache rtlsim-gvm-build rtlsim-gvm-install

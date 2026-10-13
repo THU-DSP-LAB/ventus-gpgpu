@@ -37,7 +37,9 @@ VLIB_FPU_TRACE ?= 0
 # PMU structure is selected during Chisel elaboration.  Keep every mode in a
 # separate generated-model directory: otherwise `make` can accidentally reuse
 # a basic/detailed Verilator model for an `off` regression (or vice versa).
-VLIB_PMU_MODE ?= $(if $(VENTUS_PMU_MODE),$(VENTUS_PMU_MODE),off)
+ifeq ($(origin VLIB_PMU_MODE),undefined)
+VLIB_PMU_MODE := $(if $(VENTUS_PMU_MODE),$(VENTUS_PMU_MODE),off)
+endif
 ifneq ($(filter $(VLIB_PMU_MODE),off basic detailed),$(VLIB_PMU_MODE))
 $(error VLIB_PMU_MODE must be one of off, basic, detailed; got '$(VLIB_PMU_MODE)')
 endif
