@@ -11,6 +11,29 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class CiBuildConfigurationTests(unittest.TestCase):
+    def test_gvm_pmu_recipe_passes_default_and_inherited_modes(self):
+        for mode in (None, "basic", "detailed"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp)
+                params = path / "parameters.json"
+                output = path / "pmu.inc"
+                expected = path / "expected.inc"
+                params.write_text(json.dumps({"num_sm": 1, "num_l2cache": 1}))
+                env = os.environ.copy()
+                env.pop("VENTUS_PMU_MODE", None)
+                if mode is not None:
+                    env["VENTUS_PMU_MODE"] = mode
+                result = subprocess.run(
+                    ["make", "--no-print-directory", "-s", "-f", "gvm.mk",
+                     "VLIB_NPROC_CPU=1", f"VLIB_PARAMS_JSON={params}",
+                     f"VLIB_PMU_SNAPSHOT_INC={output}", "-o", str(params), str(output)],
+                    cwd=ROOT / "sim-verilator", env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                subprocess.run(
+                    ["python3", str(ROOT / "sim-verilator/gen_pmu_snapshot_inc.py"),
+                     str(params), str(expected), mode or "off"], check=True)
+                self.assertEqual(output.read_text(), expected.read_text())
+
     def test_pmu_default_environment_and_command_line(self):
         for inherited, explicit, expected in (
             (None, None, "off"), ("basic", None, "basic"),
