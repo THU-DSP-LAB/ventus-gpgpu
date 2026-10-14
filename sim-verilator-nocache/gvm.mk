@@ -179,11 +179,11 @@ $(VLIB_RTL_PARAMS_CPP) $(VLIB_RTL_PARAMS_HPP) &: $(VLIB_PARAMS_JSON) json2cpp.py
 
 verilog: $(VLIB_SRC_V)
 
-verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_RTL_PARAMS_HPP)
+verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_RTL_PARAMS_HPP) ventus_rtlsim.h ../sim-verilator/ventus_rtlsim.h
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_RTL_PARAMS_HPP)
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_RTL_PARAMS_HPP) ventus_rtlsim.h ../sim-verilator/ventus_rtlsim.h
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
@@ -210,7 +210,7 @@ install: $(VLIB_TARGET)
 	install -d $(PREFIX)/lib
 	install -m 644 $(VLIB_TARGET) $(PREFIX)/lib/lib$(VLIB_TARGET_NAME)-nocache.so
 	install -d $(PREFIX)/include
-	install -m 644 ventus_rtlsim.h $(PREFIX)/include/
+	install -m 644 ../sim-verilator/ventus_rtlsim.h $(PREFIX)/include/
 
 clean-lib:
 	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.a $(VLIB_DIR_BUILDOBJ_DEBUG)/*.o $(VLIB_DIR_BUILDOBJ_DEBUG)/*.so

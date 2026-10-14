@@ -11,6 +11,34 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class CiBuildConfigurationTests(unittest.TestCase):
+    def test_installed_public_header_is_independent_of_backend_install_order(self):
+        backends = (("sim-verilator", "verilate.mk"),
+                    ("sim-verilator-nocache", "verilate.mk"),
+                    ("sim-verilator", "gvm.mk"),
+                    ("sim-verilator-nocache", "gvm.mk"))
+        for order in (backends, tuple(reversed(backends))):
+            with self.subTest(order=order), tempfile.TemporaryDirectory() as temp:
+                path = Path(temp)
+                prefix = path / "install"
+                library = path / "fixture.so"
+                # Exercise installation without pretending to build an RTL model.
+                library.write_bytes(b"install-recipe fixture")
+                for directory, makefile in order:
+                    result = subprocess.run(
+                        ["make", "--no-print-directory", "-s", "-f", makefile,
+                         "VLIB_NPROC_CPU=1", f"PREFIX={prefix}",
+                         f"VLIB_TARGET={library}", "-o", str(library), "install"],
+                        cwd=ROOT / directory, capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    installed = prefix / "include/ventus_rtlsim.h"
+                    self.assertEqual(installed.read_bytes(),
+                                     (ROOT / "sim-verilator/ventus_rtlsim.h").read_bytes())
+                    result = subprocess.run(
+                        ["cc", "-std=c11", "-fsyntax-only", f"-I{prefix / 'include'}",
+                         str(ROOT / "sim-verilator/tests/public_abi_compile_test.c")],
+                        capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_gvm_pmu_recipe_passes_default_and_inherited_modes(self):
         for mode in (None, "basic", "detailed"):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as temp:
