@@ -13,6 +13,7 @@ class L2VictimHoldHarness extends Module {
   val io = IO(new Bundle {
     val request = Flipped(Decoupled(new TLBundleD_lite_withid(params)))
     val writeback = Decoupled(new FullRequest(params))
+    val response = Decoupled(new TLBundleD_lite_plus(params))
     val fill = Flipped(Decoupled(new BankedStoreOuterAddress(params)))
     val fillData = Input(new BankedStoreOuterPoison(params))
   })
@@ -20,13 +21,17 @@ class L2VictimHoldHarness extends Module {
   val store = Module(new BankedStore(params))
   source.io.req <> io.request
   io.writeback <> source.io.a
-  source.io.d.ready := true.B
+  io.response <> source.io.d
   source.io.pb_pop.ready := true.B
   source.io.pb_beat := 0.U.asTypeOf(source.io.pb_beat)
+  source.io.maintenance_writes_drained := true.B
   store.io.sinkD_adr <> io.fill
   store.io.sinkD_dat := io.fillData
   store.io.sourceD_radr <> source.io.bs_radr
-  source.io.bs_rdat := store.io.sourceD_rdat
+  // SyncReadMem does not promise to retain its output after a disabled read.
+  // Poison those cycles so a simulator's incidental hold cannot hide a bug.
+  source.io.bs_rdat.data := Mux(RegNext(source.io.bs_radr.fire, false.B),
+    store.io.sourceD_rdat.data, 0.U)
   store.io.sourceD_wadr <> source.io.bs_wadr
   store.io.sourceD_wdat := source.io.bs_wdat
 }
@@ -38,38 +43,76 @@ class L2VictimHoldTest extends AnyFreeSpec with ChiselScalatestTester {
     case a: Aggregate => a.getElements.foreach(zero)
   }
 
-  "a dirty victim stays intact while its writeback is stalled" in {
+  Seq(("a dirty victim", 4), ("a dirty maintenance line", 5)).foreach { case (name, opcode) =>
+    s"$name stays intact while its writeback is stalled" in {
+      test(new L2VictimHoldHarness).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
+        zero(dut.io.request.bits)
+        zero(dut.io.fill.bits)
+        zero(dut.io.fillData)
+        dut.io.request.valid.poke(false.B)
+        dut.io.fill.valid.poke(false.B)
+        dut.io.writeback.ready.poke(false.B)
+        dut.io.response.ready.poke(true.B)
+        dut.clock.step(2)
+        val image = (0 until 32).foldLeft(BigInt(0)) { (bits, word) =>
+          bits | (BigInt(word + 1) << (word * 32))
+        }
+        dut.io.fill.bits.mask.poke(((BigInt(1) << 128) - 1).U)
+        dut.io.fillData.data.poke(image.U)
+        dut.io.fill.valid.poke(true.B)
+        dut.clock.step()
+        dut.io.fill.valid.poke(false.B)
+        dut.clock.step(2)
+        dut.io.request.bits.opcode.poke(opcode.U)
+        dut.io.request.bits.dirty.poke(true.B)
+        dut.io.request.bits.mask.poke(((BigInt(1) << 128) - 1).U)
+        dut.io.request.valid.poke(true.B)
+        dut.io.request.ready.expect(true.B)
+        dut.clock.step()
+        dut.io.request.valid.poke(false.B)
+        for (_ <- 0 until 8) {
+          dut.io.writeback.valid.expect(true.B)
+          dut.io.writeback.bits.data.expect(image.U)
+          dut.clock.step()
+        }
+        dut.io.writeback.ready.poke(true.B)
+        dut.io.writeback.bits.data.expect(image.U)
+        dut.clock.step()
+      }
+    }
+  }
+
+  "a read hit stays intact while its D response is stalled" in {
     test(new L2VictimHoldHarness).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
       zero(dut.io.request.bits)
       zero(dut.io.fill.bits)
       zero(dut.io.fillData)
       dut.io.request.valid.poke(false.B)
       dut.io.fill.valid.poke(false.B)
-      dut.io.writeback.ready.poke(false.B)
+      dut.io.writeback.ready.poke(true.B)
+      dut.io.response.ready.poke(false.B)
       dut.clock.step(2)
-      val image = (0 until 32).foldLeft(BigInt(0)) { (bits, word) =>
-        bits | (BigInt(word + 1) << (word * 32))
-      }
+      val image = BigInt("123456789abcdef00123456789abcdef", 16)
       dut.io.fill.bits.mask.poke(((BigInt(1) << 128) - 1).U)
       dut.io.fillData.data.poke(image.U)
       dut.io.fill.valid.poke(true.B)
       dut.clock.step()
       dut.io.fill.valid.poke(false.B)
       dut.clock.step(2)
-      dut.io.request.bits.opcode.poke(4.U) // Get causes dirty-victim writeback.
-      dut.io.request.bits.dirty.poke(true.B)
+      dut.io.request.bits.opcode.poke(4.U)
+      dut.io.request.bits.hit.poke(true.B)
       dut.io.request.bits.mask.poke(((BigInt(1) << 128) - 1).U)
       dut.io.request.valid.poke(true.B)
       dut.io.request.ready.expect(true.B)
       dut.clock.step()
       dut.io.request.valid.poke(false.B)
       for (_ <- 0 until 8) {
-        dut.io.writeback.valid.expect(true.B)
-        dut.io.writeback.bits.data.expect(image.U)
+        dut.io.response.valid.expect(true.B)
+        dut.io.response.bits.data.expect(image.U)
         dut.clock.step()
       }
-      dut.io.writeback.ready.poke(true.B)
-      dut.io.writeback.bits.data.expect(image.U)
+      dut.io.response.ready.poke(true.B)
+      dut.io.response.bits.data.expect(image.U)
       dut.clock.step()
     }
   }
