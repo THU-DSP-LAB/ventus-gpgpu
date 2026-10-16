@@ -745,6 +745,10 @@ val mask=Vec(num_thread,Bool())
 }
 class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends Module {
     assert(softThread % hardThread == 0)
+  // The PC is carried only in the diagnostic elaboration.  It lets a full-app
+  // trace associate an FPU writeback with the issuing vector instruction
+  // without changing the ordinary FPU control bundle or timing.
+  private val fpuTrace = sys.env.get("VENTUS_FPU_TRACE").contains("1")
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val rm = Input(UInt(3.W))
@@ -755,6 +759,7 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
     extends FPUv2.utils.TestFPUCtrl(depth_warp, num_thread){
     override val regIndex = UInt(8.W)
     val spike_info = if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
+    val tracePc = if(fpuTrace) Some(UInt(xLen.W)) else None
   }
   val fpu = Module(new FPUv2.VectorFPU(8, 24, softThread, hardThread, new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)))
   (0 until num_thread).foreach{ x =>
@@ -779,8 +784,26 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
   fpu.io.in.bits.ctrl.regIndex := io.in.bits.ctrl.reg_idxw
   fpu.io.in.bits.ctrl.warpID := io.in.bits.ctrl.wid
   fpu.io.in.bits.ctrl.vecMask := io.in.bits.mask.asUInt
+  fpu.io.in.bits.ctrl.tracePc.foreach(_ := io.in.bits.ctrl.pc)
   fpu.io.in.valid := io.in.valid
   io.in.ready := fpu.io.in.ready
+
+  if (fpuTrace) {
+    when(io.in.fire) {
+      printf(p"[FPU in] warp=${io.in.bits.ctrl.wid} pc=0x${Hexadecimal(io.in.bits.ctrl.pc)} op=${io.in.bits.ctrl.alu_fn} mask=0x${Hexadecimal(io.in.bits.mask.asUInt)}")
+      for (lane <- 0 until num_thread) {
+        printf(p" lane${lane} a=0x${Hexadecimal(fpu.io.in.bits.data(lane).a)} b=0x${Hexadecimal(fpu.io.in.bits.data(lane).b)} c=0x${Hexadecimal(fpu.io.in.bits.data(lane).c)}")
+      }
+      printf(p"\\n")
+    }
+    when(fpu.io.out.fire) {
+      printf(p"[FPU out] warp=${fpu.io.out.bits.ctrl.warpID} pc=0x${Hexadecimal(fpu.io.out.bits.ctrl.tracePc.get)} reg=${fpu.io.out.bits.ctrl.regIndex} mask=0x${Hexadecimal(fpu.io.out.bits.ctrl.vecMask)}")
+      for (lane <- 0 until num_thread) {
+        printf(p" lane${lane} out=0x${Hexadecimal(fpu.io.out.bits.data(lane).result(31, 0))}")
+      }
+      printf(p"\\n")
+    }
+  }
 
   (0 until num_thread).foreach{ x =>
     io.out_v.bits.wb_wvd_rd(x) := fpu.io.out.bits.data(x).result(31,0)
@@ -898,11 +921,27 @@ class SFUexe extends Module{
   data_buffer.ready:=state===s_finish&o_ready
 
   val alu_out_fire = alu_out_arbiter(0).out.fire
+  if (sys.env.get("VENTUS_SFU_TRACE").contains("1")) {
+    // Log each FP group transaction, including the operands selected before
+    // the SFU and the four completed results.  The first probe used decoded
+    // PCs from objdump and did not match the PC metadata at this boundary, so
+    // keep this diagnostic unfiltered until the runtime encoding is mapped.
+    when(alu_out_fire && i_ctrl.fp) {
+      printf(p"[SFU FP] warp=${Decimal(i_ctrl.wid)} pc=0x${Hexadecimal(i_ctrl.pc)} group=${Decimal(i_cnt)} mask=0x${Hexadecimal(mask)}")
+      for (lane <- 0 until num_sfu) {
+        printf(p" lane${Decimal(lane.U)} a=0x${Hexadecimal(i_data1(lane))} b=0x${Hexadecimal(i_data2(lane))} out=0x${Hexadecimal(alu_out_arbiter(lane).out.bits)}")
+      }
+      printf(p"\\n")
+    }
+  }
   switch(state){
     is(s_idle){
       when(io.in.fire){
         state:=s_busy
-        mask:=io.in.bits.mask.asUInt
+        // Scalar DIV/REM/FP operations share issueV and may arrive with lane
+        // zero masked off by SIMT. Like the LSU, execute scalars on lane zero
+        // independently of the vector mask; otherwise the dummy 1/1 wins.
+        mask:=Mux(io.in.bits.ctrl.isvec, io.in.bits.mask.asUInt, 1.U(num_thread.W))
         i_valid:=true.B
       }
     }
@@ -943,4 +982,3 @@ class SFUexe extends Module{
   io.out_v<>result_v.io.deq
   io.out_x<>result_x.io.deq
 }
-

@@ -41,12 +41,12 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
 
          //st1
          val memRsp_coreRsp     = DecoupledIO(new CoreRspPipe_st2)
-         // MSHRmissRspOut.instrId width = max(WIdBits, log2Up(NMshrEntry)) to allow
+         // MSHRmissRspOut.instrId width tracks both LSU and DCache MSHR spaces.
          // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
-         val MSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen)))
+         val MSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(DCacheInstrIdBits, log2Up(NMshrEntry)), asidLen)))
          val MSHRMissRspOutAsid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
 
-         val SMSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(WIdBits, log2Up(NMshrEntry)), asidLen)))
+         val SMSHRMissRspOut     = Flipped(DecoupledIO(new MSHRmissRspOut(bABits, tIBits, math.max(DCacheInstrIdBits, log2Up(NMshrEntry)), asidLen)))
          val SMSHRMissRspOutAsid = if(MMU_ENABLED) Some(Input(UInt(asidLen.W))) else None
 
          val dAmemRsp_wReq         = Output(Vec(BlockWords, new SRAMBundleAW(UInt(8.W), NSets * NWays, BytesOfWord)))
@@ -86,7 +86,7 @@ class MemRspPipe(implicit p: Parameters) extends DCacheModule{
     val missRspEntryIdx_st1 = Wire(UInt(log2Up(NMshrEntry).W))
     // regular read 的整条回包数据按 instrId 暂存。
     // 这样在 MSHRMissRspOut 给出 targetInfo 时，coreRsp 可以取到与当前 miss 身份绑定的 line data。
-    val missRspDataByInstrId = Reg(Vec(NMshrEntry, Vec(BlockWords, UInt(WordLength.W))))
+    val missRspDataByInstrId = RegInit(VecInit(Seq.fill(NMshrEntry)(VecInit(Seq.fill(BlockWords)(0.U(WordLength.W))))))
     val memRspisRead = io.memRsp.bits.d_opcode === 1.U && io.memRsp.bits.d_param === 0.U
     val memRspisWrite = io.memRsp.bits.d_opcode === 0.U
     val memRspisFlushOrInv = io.memRsp.bits.d_opcode === 2.U

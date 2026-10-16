@@ -89,7 +89,22 @@ The tutorial of Chisel development environment configuration comes from [chipsal
 apt-get install gcc g++ make parallel wget cmake verilator git llvm clang lld protobuf-compiler antlr4 numactl
 ```
 
-> We recomment using java 17 or higher versions. **We test the project under java 19/21.**
+> We recommend Java 17 or higher. **The project is tested under Java 19/21.**
+
+### RTcore focused tests
+
+RTcore work uses the repository's Java 21, Mill 0.11.8, and Chisel 6.4
+toolchain. Run the focused intersection-unit tests with:
+
+```shell
+make rtcore-test
+```
+
+The target rejects non-Java-21 runtimes so it does not silently fall back to
+an older compatibility environment. RayFlex revision
+`b835680cf66dae2b332bbe5ab8c2cdf16f2edb45` is retained only as a
+source-level behavioral reference; its legacy Mill/Chisel 5 test harness is
+not a Ventus build dependency.
 
 1. Clone project, init and update dependencies
 

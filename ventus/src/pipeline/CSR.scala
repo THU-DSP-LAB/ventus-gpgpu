@@ -234,8 +234,12 @@ class CSRFile extends Module {
   io.wb_wxd_rd:=wdata
   io.wb_wvd_rd:=csr_rdata_v
   io.simt_rpc:=rpc
+  // CSRRSV is issued through the scalar CSR pipe but writes a VGPR.  RT uses
+  // CSR.threadid as its per-warp PDS base, so it must follow the same vector
+  // writeback route as the built-in invocation-ID CSRs.
   io.wb_isvec:= (csr_addr===CSR.global_id_x) || (csr_addr===CSR.global_id_y) || (csr_addr===CSR.global_id_z) ||
-    (csr_addr===CSR.local_id_x) ||(csr_addr===CSR.local_id_y) ||(csr_addr===CSR.local_id_z) ||(csr_addr===CSR.global_linear_id)
+    (csr_addr===CSR.local_id_x) ||(csr_addr===CSR.local_id_y) ||(csr_addr===CSR.local_id_z) ||
+    (csr_addr===CSR.global_linear_id) || (csr_addr===CSR.threadid)
   val wen=io.ctrl.csr.orR&io.write
   val csr_wdata = MuxLookup(io.ctrl.csr, 0.U)(
     Seq(
@@ -275,6 +279,10 @@ class CSRFile extends Module {
   )
 
   val csrFile_v= Seq(
+    // `threadid` is the first physical lane ID of this hardware warp, not a
+    // per-lane invocation ID.  Broadcast it for CSRRSV consumers such as the
+    // RT Local-SRAM/PDS ABI address calculation.
+    BitPat(CSR.threadid) -> VecInit.fill(num_thread)(threadid).asUInt,
     BitPat(CSR.global_id_x) -> global_id_x.asUInt,
     BitPat(CSR.global_id_y) -> global_id_y.asUInt,
     BitPat(CSR.global_id_z) -> global_id_z.asUInt,
@@ -401,6 +409,16 @@ class CSRexe extends Module {
 
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire
   vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
+  if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    when(io.CTA2csr.valid) {
+      printf(p"[RTCORE trace] csr-load wid=${Decimal(io.CTA2csr.bits.wid)}" +
+        p" knl=0x${Hexadecimal(io.CTA2csr.bits.CTAdata.dispatch2cu_csr_knl_dispatch)}\n")
+    }
+    when(io.in.fire && io.in.bits.ctrl.inst(31, 20) === CSR.knl_base) {
+      printf(p"[RTCORE trace] csr-read-knl wid=${Decimal(io.in.bits.ctrl.wid)}" +
+        p" value=0x${Hexadecimal(vCSR(io.in.bits.ctrl.wid).wb_wxd_rd)}\n")
+    }
+  }
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
   val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   result.io.deq<>io.out

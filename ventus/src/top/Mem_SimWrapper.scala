@@ -19,7 +19,7 @@ class Mem_SimIO(DATA_BYTE_LEN: Int, ADDR_WIDTH: Int) extends Bundle {
   }
 }
 
-class Mem_SimWrapper(val genA: TLBundleA_lite, genD: TLBundleD_lite, DELAY_LDS: Int = 0, val DELAY_DDR: Int = 2) extends Module {
+class Mem_SimWrapper(val genA: TLBundleA_lite, genD: TLBundleD_lite, DELAY_LDS: Int = 0, val DELAY_DDR: Int = top.parameters.rtl_external_mem_latency) extends Module {
   val DATA_BYTE_LEN = genA.data.getWidth / 8
   val DEPTH = 5
   val io = IO(new Bundle {

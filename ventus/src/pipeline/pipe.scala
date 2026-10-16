@@ -15,6 +15,7 @@ import chisel3._
 import chisel3.util._
 import top.parameters._
 import gvm._
+import rtcore._
 
 class ICachePipeReq_np extends Bundle {
   val addr = UInt(32.W)
@@ -53,6 +54,7 @@ class pipe() extends Module{
     val perfReset = Input(Bool())
     val perf_pipeline = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
     val perf_inst_class = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
+    val perf_rtcore = Output(new RtCorePerfCounters)
   })
   val issue_stall=Wire(Bool())
   val flush=Wire(Bool())
@@ -94,7 +96,80 @@ class pipe() extends Module{
   val mul=Module(new vMULv2(num_thread,num_lane))
   val tensorcore=Module(new vTCexe)
   val lsu2wb=Module(new LSU2WB)
-  val wb=Module(new Writeback(6,7))
+  val wb=Module(new Writeback(6,9))
+  val rtcore = Module(new RtCore)
+  rtcore.io.coreId := sm_id
+  val rtSpillPool = RegInit(VecInit(Seq.fill(num_warp)(
+    0.U.asTypeOf(new RtSpillPoolDescriptor))))
+  val rtLocalSram = Module(new RtLocalSram)
+  val rtWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
+  val rtLocalWriteback = Module(new Queue(new WriteVecCtrl, 1, pipe = true))
+  val rtInFlight = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtIssueId = RegInit(VecInit(Seq.fill(num_warp)(0.U(RtCorePortParameters.issueIdWidth.W))))
+  val rtRayHistory = Module(new RtParentRayHistory)
+  rtRayHistory.io.allocated.valid := io.warpReq.fire
+  rtRayHistory.io.allocated.bits := io.warpReq.bits.wid
+  // Capture the CTA-provided tag at allocation time.  The tag lookup port is
+  // otherwise only driven for barriers/end-program and is not meaningful for
+  // an arbitrary issued instruction.
+  val rtWorkgroupTag = Reg(Vec(num_warp, UInt(TAG_WIDTH.W)))
+  val rtWorkgroupWarps = Reg(Vec(num_warp,
+    UInt(log2Ceil(num_warp_in_a_block + 1).W)))
+  // Physical warp slots are reusable.  Retain the allocation identity while
+  // the workgroup is live so grouped traversal can translate its logical
+  // cross-warp TIDs without exposing physical rows to software.
+  val rtWorkgroupValid = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  // A member may finish traversal long before the shader consumes its result.
+  // Keep the complete mapping until every member has acknowledged rt.release;
+  // otherwise a recycled CTA tag could resolve a later group to stale rows.
+  val rtWorkgroupReleased = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  when(io.warpReq.fire) {
+    rtSpillPool(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.rtSpillPool
+    rtWorkgroupTag(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch
+    rtWorkgroupWarps(io.warpReq.bits.wid) := io.warpReq.bits.CTAdata.dispatch2cu_wg_wf_count
+    rtWorkgroupValid(io.warpReq.bits.wid) := true.B
+    rtWorkgroupReleased(io.warpReq.bits.wid) := false.B
+  }
+  val rtCompletionAwaitingWb = RegInit(false.B)
+  val rtCompletionWarp = Reg(UInt(depth_warp.W))
+  val rtCompletionDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
+  val rtCompletionContextReleased = RegInit(false.B)
+  // An ordinary terminal completion can free the sole RTcore context before
+  // its vector status reaches writeback.  Remember that its reservation was
+  // already retired so the later writeback only clears the scoreboard state.
+  val rtCompletionReservationReleased = RegInit(false.B)
+  // Every grouped primary-trace completion, including a candidate callback,
+  // is withheld until its full cohort has arrived.  This is the shader-entry
+  // fence: no lane may execute a post-traverse shader while a sibling warp is
+  // still traversing the same primary round.
+  val rtGroupedInFlight = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtGroupTagByWarp = Reg(Vec(num_warp,
+    UInt((TAG_WIDTH - log2Ceil(num_warp_in_a_block)).W)))
+  val rtGroupMemberByWarp = Reg(Vec(num_warp, UInt(log2Ceil(num_warp_in_a_block).W)))
+  val rtGroupCountByWarp = Reg(Vec(num_warp,
+    UInt(log2Ceil(num_warp_in_a_block + 1).W)))
+  val rtGroupTerminalValid = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  // Arrival is independent from pending vector writeback.  A released group
+  // writes one terminal member per cycle, while its cohort membership must
+  // remain visible until the last member has been drained.
+  val rtGroupTerminalArrived = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtGroupTerminal = Reg(Vec(num_warp, new RtWarpCompletion))
+  // A warp whose group-traverse mask is empty still executes the collective
+  // instruction, but correctly creates no RTcore session or completion.
+  // Record that arrival so a sparse workgroup cannot wait forever for it.
+  val rtGroupEmptyArrived = RegInit(VecInit(Seq.fill(num_warp)(false.B)))
+  val rtReleaseSent = RegInit(false.B)
+  // Reserve at operand-collector admission. A foreign traversal admitted
+  // before this reservation is visible can later block the owner's RT path.
+  val rtReservation = Module(new RtSessionReservation(RtCoreSchedulerParameters.taskBatchingEnabled))
+  if (RtCoreSchedulerParameters.taskBatchingEnabled) {
+    for (warp <- 0 until num_warp) {
+      val pool = rtSpillPool(warp)
+      rtReservation.io.concurrent.get(warp) := rtWorkgroupValid(warp) &&
+        pool.spillPoolBase =/= 0.U && pool.dispatchEpoch =/= 0.U &&
+        pool.slotsPerCore >= RtSpillSlotLayout.slotsPerCore.U
+    }
+  }
 
   val inst_cnt_xv = RegInit(VecInit(0.U(32.W), 0.U(32.W)))
   if(INST_CNT_2){
@@ -243,11 +318,18 @@ class pipe() extends Module{
   warp_sche.io.exe_busy:= VecInit(Seq.fill(num_warp)(false.B)).asUInt //~ibuffer_ready.asUInt
 
   for (i <- 0 until num_warp) {
+    val groupAdmissionAllowed = if (RtCoreSchedulerParameters.taskBatchingEnabled)
+      ibuffer.io.out(i).bits.rtOp =/= RtOp.groupTraverse || !rtReservation.io.busy ||
+        (rtReservation.io.reserved && rtReservation.io.owner === i.U)
+      else true.B
+    val rtAdmissionAllowed = (ibuffer.io.out(i).bits.rtOp =/= RtOp.traverse &&
+      ibuffer.io.out(i).bits.rtOp =/= RtOp.groupTraverse) ||
+      (rtReservation.io.allowed(i) && groupAdmissionAllowed)
     ibuffer2issue.io.in(i).bits:=ibuffer.io.out(i).bits
-    ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i)
-    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i)
-    if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay
-      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay}
+    ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
+    ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & warp_sche.io.warp_ready(i) & rtAdmissionAllowed
+    if(SINGLE_INST) {ibuffer2issue.io.in(i).valid:=ibuffer.io.out(i).valid & !scoreb(i).delay & rtAdmissionAllowed
+      ibuffer.io.out(i).ready:=ibuffer2issue.io.in(i).ready & !scoreb(i).delay & rtAdmissionAllowed}
     val ctrl=ibuffer.io.out(i).bits
     /*ibuffer_ready(i):=Mux(ctrl.sfu,sfu.io.in.ready,
       Mux(ctrl.fp,fpu.io.in.ready,
@@ -278,6 +360,20 @@ class pipe() extends Module{
       elsewhen(simt_stack.io.complete.valid&(simt_stack.io.complete.bits===i.asUInt)){scoreb(i).br_ctrl:=true.B}
   }
   val op_colV_in_wid = Wire(UInt(depth_warp.W))
+  // This boundary is intentionally before operand collection: issuing into
+  // Issue is too late, because a foreign traversal can already be buffered
+  // upstream. The lane mask is resolved at RT issue below.
+  rtReservation.io.issued.valid := ibuffer2issue.io.out_v.fire &&
+    (ibuffer2issue.io.out_v.bits.rtOp === RtOp.traverse ||
+      ibuffer2issue.io.out_v.bits.rtOp === RtOp.groupTraverse)
+  rtReservation.io.issued.bits := ibuffer2issue.io.out_v.bits.wid
+  if (RtCoreSchedulerParameters.taskBatchingEnabled) {
+    rtReservation.io.issuedExclusive.get := ibuffer2issue.io.out_v.bits.rtOp === RtOp.groupTraverse
+  }
+  rtReservation.io.releaseIssued.valid := rtcore.io.release.fire
+  rtReservation.io.releaseIssued.bits := rtcore.io.release.bits.warpId
+  rtReservation.io.released.valid := rtcore.io.releaseAck.fire
+  rtReservation.io.released.bits := rtcore.io.releaseAck.bits.warpId
   val op_colV_out_wid = Wire(UInt(depth_warp.W))
   val op_colX_in_wid = Wire(UInt(depth_warp.W))
   val op_colX_out_wid = Wire(UInt(depth_warp.W))
@@ -298,17 +394,16 @@ class pipe() extends Module{
   // ibuffer2issue模块的IO都是实际发射但尚未执行的指令，在这检查undefined instruction
   when(ibuffer2issue.io.out_x.fire){
     val ctrl = ibuffer2issue.io.out_x.bits
-    assert(ctrl.alu_fn =/= 63.U, 
+    assert(ctrl.alu_fn =/= 63.U || ctrl.rtOp.orR,
            p"UNDEFINED INSTRUCTION @ SM ${sm_id} warp ${Decimal(ctrl.wid)} " + 
            p"PC 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}")
   }
   when(ibuffer2issue.io.out_v.fire){
     val ctrl = ibuffer2issue.io.out_v.bits
-    assert(ctrl.alu_fn =/= 63.U, 
+    assert(ctrl.alu_fn =/= 63.U || ctrl.rtOp.orR,
            p"UNDEFINED INSTRUCTION @ SM ${sm_id} warp ${Decimal(ctrl.wid)} " + 
            p"PC 0x${Hexadecimal(ctrl.pc)}: 0x${Hexadecimal(ctrl.inst)}")
   }
-
   operand_collector.io.controlV<>ibuffer2issue.io.out_v//ibuffer2issue.io.out.bits
   operand_collector.io.controlX<>ibuffer2issue.io.out_x//ibuffer2issue.io.out.bits
   operand_collector.io.writeVecCtrl<>wb.io.out_v
@@ -421,6 +516,7 @@ class pipe() extends Module{
   issueX.io.out_TC.ready := false.B
   issueV.io.out_vFPU<>fpu.io.in
   issueX.io.out_vFPU.ready := false.B
+  issueX.io.out_RT.ready := false.B
   issueX.io.out_warpscheduler <> warp_sche.io.warp_control
   issueV.io.out_warpscheduler.ready := false.B
 
@@ -436,6 +532,300 @@ class pipe() extends Module{
   lsu.io.lsu_rsp<>lsu2wb.io.lsu_rsp
   lsu.io.shared_rsp<>io.shared_rsp
   lsu.io.shared_req<>io.shared_req
+  // RTcore is the generic cacheline client; its private MSHR remains behind
+  // this single LSU boundary.
+  lsu.io.cachelineClientReq <> rtcore.io.lsuRequest
+  rtcore.io.lsuResponse <> lsu.io.cachelineClientRsp
+  val rtLocalResponseToCore = RegInit(false.B)
+  val rtLocalReadWarp = Reg(UInt(depth_warp.W))
+  val rtLocalReadDestination = Reg(UInt(RtCorePortParameters.regidx_totalwidth.W))
+  val rtLocalReadMask = Reg(UInt(num_thread.W))
+
+  val rtIssue = issueV.io.out_RT.bits
+  val rtIsTraverse = rtIssue.ctrl.rtOp === RtOp.traverse
+  val rtIsGroupTraverse = rtIssue.ctrl.rtOp === RtOp.groupTraverse
+  val rtIsAnyTraverse = rtIsTraverse || rtIsGroupTraverse
+  val rtIsRelease = rtIssue.ctrl.rtOp === RtOp.release
+  val rtIsLocalLoad = rtIssue.ctrl.rtOp === RtOp.localLoad
+  val rtIsLocalStore = rtIssue.ctrl.rtOp === RtOp.localStore
+  // RT instructions remain in the scalar instruction stream even when SIMT
+  // control has disabled every lane.  They have no RT-local side effect in
+  // that case: in particular, do not create (or try to retire) a session.
+  val rtIssueMask = rtIssue.mask.asUInt
+  val rtTraverseEmpty = rtIsAnyTraverse && !rtIssueMask.orR
+  val rtReleaseEmpty = rtIsRelease && !rtIssueMask.orR
+  // A reconverged release can have live lanes even though its matching
+  // traverse was empty and therefore deliberately never opened a session.
+  // Releasing that non-existent session would hold the RT issue entry forever:
+  // RTcore correctly refuses an acknowledgement without an owner.
+  // A software session can outlive its physical RT context. Its final release
+  // must not touch another warp's newly reserved/executing context.
+  val rtReleaseNoSession = rtIsRelease &&
+    (!rtReservation.io.reserved || rtReservation.io.owner =/= rtIssue.ctrl.wid)
+  val rtReleaseSkipped = rtReleaseEmpty || rtReleaseNoSession
+  rtReservation.io.traverseResolved.valid := issueV.io.out_RT.fire && rtIsAnyTraverse
+  rtReservation.io.traverseResolved.bits.warpId := rtIssue.ctrl.wid
+  rtReservation.io.traverseResolved.bits.wasEmpty := rtTraverseEmpty
+  val softwareLocalRequest = Wire(Decoupled(new RtLocalSramRequest))
+  softwareLocalRequest.valid := issueV.io.out_RT.valid && (rtIsLocalLoad || rtIsLocalStore) &&
+    !rtInFlight(rtIssue.ctrl.wid)
+  softwareLocalRequest.bits := 0.U.asTypeOf(new RtLocalSramRequest)
+  softwareLocalRequest.bits.warpId := rtIssue.ctrl.wid
+  softwareLocalRequest.bits.fieldId := rtIssue.ctrl.inst(31, 26)
+  softwareLocalRequest.bits.write := rtIsLocalStore
+  softwareLocalRequest.bits.laneMask := rtIssue.mask.asUInt
+  softwareLocalRequest.bits.writeData := rtIssue.in2
+  rtRayHistory.io.published.valid := softwareLocalRequest.fire &&
+    softwareLocalRequest.bits.write &&
+    softwareLocalRequest.bits.fieldId === RtAbiLayout.SlotStatus.U
+  rtRayHistory.io.published.bits.warpId := softwareLocalRequest.bits.warpId
+  rtRayHistory.io.published.bits.mask := softwareLocalRequest.bits.laneMask &
+    VecInit(softwareLocalRequest.bits.writeData.map(word =>
+      word === RtAbiLayout.SlotStatusTraceRequest.U)).asUInt
+
+  rtLocalSram.io.request.valid := rtcore.io.localRequest.valid || softwareLocalRequest.valid
+  rtLocalSram.io.request.bits := Mux(rtcore.io.localRequest.valid,
+    rtcore.io.localRequest.bits, softwareLocalRequest.bits)
+  rtcore.io.localRequest.ready := rtLocalSram.io.request.ready
+  softwareLocalRequest.ready := !rtcore.io.localRequest.valid && rtLocalSram.io.request.ready
+  when(rtLocalSram.io.request.fire && !rtLocalSram.io.request.bits.write) {
+    rtLocalResponseToCore := rtcore.io.localRequest.valid
+    when(!rtcore.io.localRequest.valid) {
+      rtLocalReadWarp := rtIssue.ctrl.wid
+      rtLocalReadDestination := rtIssue.ctrl.reg_idxw
+      rtLocalReadMask := rtIssue.mask.asUInt
+    }
+  }
+  rtcore.io.localResponse.valid := rtLocalSram.io.response.valid && rtLocalResponseToCore
+  rtcore.io.localResponse.bits := rtLocalSram.io.response.bits
+  for (port <- 0 until RtLocalSramParameters.corePortCount) {
+    rtLocalSram.io.coreRequest(port) <> rtcore.io.localNarrowRequest(port)
+    rtcore.io.localNarrowResponse(port) <> rtLocalSram.io.coreResponse(port)
+  }
+  rtLocalWriteback.io.enq.valid := rtLocalSram.io.response.valid && !rtLocalResponseToCore
+  rtLocalWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
+  rtLocalWriteback.io.enq.bits.warp_id := rtLocalReadWarp
+  rtLocalWriteback.io.enq.bits.reg_idxw := rtLocalReadDestination
+  rtLocalWriteback.io.enq.bits.wvd := true.B
+  rtLocalWriteback.io.enq.bits.wvd_mask := rtLocalReadMask.asBools
+  rtLocalWriteback.io.enq.bits.wb_wvd_rd := rtLocalSram.io.response.bits.readData
+  if (SPIKE_OUTPUT) { rtLocalWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
+  rtLocalSram.io.response.ready := Mux(rtLocalResponseToCore,
+    rtcore.io.localResponse.ready, rtLocalWriteback.io.enq.ready)
+  if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
+    when(rtLocalSram.io.request.fire) {
+      printf(p"[RTLOCAL trace] request core=${Decimal(rtcore.io.localRequest.valid)}" +
+        p" warp=${Decimal(rtLocalSram.io.request.bits.warpId)}" +
+        p" field=${Decimal(rtLocalSram.io.request.bits.fieldId)}" +
+        p" write=${Decimal(rtLocalSram.io.request.bits.write)}" +
+        p" mask=0x${Hexadecimal(rtLocalSram.io.request.bits.laneMask)}" +
+        p" lane0=0x${Hexadecimal(rtLocalSram.io.request.bits.writeData(0))}\n")
+      // Reflections diverges only after a sparse recursive ray rewrites its
+      // ray-state.  Keep this diagnostic narrow: record the actual values of
+      // active image lanes, not every 32-lane transaction or RTcore flush.
+      when(!rtcore.io.localRequest.valid && rtLocalSram.io.request.bits.write &&
+        rtLocalSram.io.request.bits.fieldId >= 5.U && rtLocalSram.io.request.bits.fieldId <= 15.U) {
+        for (lane <- 1 until 16) {
+          when(rtLocalSram.io.request.bits.laneMask(lane)) {
+            printf(p"[RTLOCAL ray-write] warp=${Decimal(rtLocalSram.io.request.bits.warpId)}" +
+              p" field=${Decimal(rtLocalSram.io.request.bits.fieldId)} lane=${Decimal(lane.U)}" +
+              p" value=0x${Hexadecimal(rtLocalSram.io.request.bits.writeData(lane))}\n")
+          }
+        }
+      }
+    }
+    when(rtLocalSram.io.response.fire) {
+      printf(p"[RTLOCAL trace] response core=${Decimal(rtLocalResponseToCore)}" +
+        p" warp=${Decimal(rtLocalReadWarp)}" +
+        p" lane0=0x${Hexadecimal(rtLocalSram.io.response.bits.readData(0))}\n")
+    }
+  }
+  // release is a lifecycle barrier: software TERMINATED stores for this warp
+  // must complete through the legacy LSU before RTcore may reclaim its state.
+  val rtReleaseStoreDrained = lsu.io.fence_end(rtIssue.ctrl.wid)
+  rtcore.io.command.valid := issueV.io.out_RT.valid && rtIsAnyTraverse &&
+    !rtTraverseEmpty && !rtInFlight(rtIssue.ctrl.wid)
+  rtcore.io.command.bits.warpId := rtIssue.ctrl.wid
+  rtcore.io.command.bits.spillPool := rtSpillPool(rtIssue.ctrl.wid)
+  rtcore.io.command.bits.workgroupTag :=
+    rtWorkgroupTag(rtIssue.ctrl.wid)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block))
+  rtcore.io.command.bits.workgroupMember :=
+    rtWorkgroupTag(rtIssue.ctrl.wid)(log2Ceil(num_warp_in_a_block) - 1, 0)
+  rtcore.io.command.bits.workgroupWarps := rtWorkgroupWarps(rtIssue.ctrl.wid)
+  val rtCommandGroupTag = rtWorkgroupTag(rtIssue.ctrl.wid)(TAG_WIDTH - 1,
+    log2Ceil(num_warp_in_a_block))
+  val rtMemberAllocated = Wire(Vec(num_warp_in_a_block, Bool()))
+  for (member <- 0 until num_warp_in_a_block) {
+    val candidates = VecInit((0 until num_warp).map { warp =>
+      rtWorkgroupValid(warp) &&
+        rtWorkgroupTag(warp)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block)) === rtCommandGroupTag &&
+        rtWorkgroupTag(warp)(log2Ceil(num_warp_in_a_block) - 1, 0) === member.U
+    }).asUInt
+    rtMemberAllocated(member) := candidates.orR
+    rtcore.io.command.bits.workgroupMemberWarp(member) := PriorityEncoder(candidates)
+  }
+  rtcore.io.command.bits.workgroupMemberValid := rtMemberAllocated.asUInt
+  rtcore.io.command.bits.issueId := rtIssueId(rtIssue.ctrl.wid)
+  rtcore.io.command.bits.destinationVd := rtIssue.ctrl.reg_idxw
+  rtcore.io.command.bits.activeMask := rtIssue.mask.asUInt
+  rtcore.io.command.bits.batchEligible := !rtIsGroupTraverse &&
+    (rtIssueMask & ~rtRayHistory.io.secondary(rtIssue.ctrl.wid)) === 0.U &&
+    !rtIssueMask.andR
+  rtcore.io.command.bits.grouped := rtIsGroupTraverse
+  rtcore.io.command.bits.locator := rtIssue.in2
+
+  // A release must not retire before the RTcore has actually reclaimed its
+  // retained context.  Hold the issue entry after its one-time submission.
+  rtcore.io.release.valid := issueV.io.out_RT.valid && rtIsRelease &&
+    !rtReleaseSkipped && !rtReleaseSent && !rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained
+  rtcore.io.release.bits.warpId := rtIssue.ctrl.wid
+  rtcore.io.release.bits.activeMask := rtIssue.mask.asUInt
+  rtcore.io.releaseAck.ready := rtReleaseSent && issueV.io.out_RT.valid && rtIsRelease
+  issueV.io.out_RT.ready := Mux(rtIsAnyTraverse,
+    rtTraverseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtcore.io.command.ready),
+    Mux(rtIsRelease, Mux(rtReleaseSkipped,
+      rtReleaseEmpty || (!rtInFlight(rtIssue.ctrl.wid) && rtReleaseStoreDrained),
+      rtReleaseSent && rtcore.io.releaseAck.valid),
+      Mux(rtIsLocalLoad || rtIsLocalStore, softwareLocalRequest.ready, false.B)))
+  when(rtcore.io.command.fire) {
+    val wid = rtcore.io.command.bits.warpId
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      printf(p"[RTCORE trace] command sm=${Decimal(sm_id)} warp=${Decimal(wid)}" +
+        p" issue=${Decimal(rtcore.io.command.bits.issueId)}" +
+        p" vd=${Decimal(rtcore.io.command.bits.destinationVd)}" +
+        p" mask=0x${Hexadecimal(rtcore.io.command.bits.activeMask)}" +
+        p" grouped=${Decimal(rtcore.io.command.bits.grouped)}" +
+        p" locator0=0x${Hexadecimal(rtcore.io.command.bits.locator(0))}" +
+        p" locator31=0x${Hexadecimal(rtcore.io.command.bits.locator(num_thread - 1))}\n")
+    }
+    rtInFlight(wid) := true.B
+    rtGroupedInFlight(wid) := rtGroupedInFlight(wid) || rtcore.io.command.bits.grouped
+    rtGroupTagByWarp(wid) := rtcore.io.command.bits.workgroupTag
+    rtGroupMemberByWarp(wid) := rtcore.io.command.bits.workgroupMember
+    rtGroupCountByWarp(wid) := rtcore.io.command.bits.workgroupWarps
+    rtIssueId(wid) := rtIssueId(wid) + 1.U
+  }
+  when(issueV.io.out_RT.fire && rtIsGroupTraverse && rtTraverseEmpty) {
+    val wid = rtIssue.ctrl.wid
+    rtGroupEmptyArrived(wid) := true.B
+    rtGroupTagByWarp(wid) := rtWorkgroupTag(wid)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block))
+    rtGroupMemberByWarp(wid) := rtWorkgroupTag(wid)(log2Ceil(num_warp_in_a_block) - 1, 0)
+    rtGroupCountByWarp(wid) := rtWorkgroupWarps(wid)
+  }
+  when(rtcore.io.release.fire) {
+    rtReleaseSent := true.B
+  }
+  when(rtcore.io.releaseAck.fire) {
+    assert(rtcore.io.releaseAck.bits.warpId === rtIssue.ctrl.wid,
+      "RT release acknowledgement must retire the reserved issue warp")
+    rtReleaseSent := false.B
+    val releasedWarp = rtcore.io.releaseAck.bits.warpId
+    val releasedGroupTag = rtWorkgroupTag(releasedWarp)(TAG_WIDTH - 1,
+      log2Ceil(num_warp_in_a_block))
+    val releasedGroupWarps = rtWorkgroupWarps(releasedWarp)
+    val releasedMembers = VecInit((0 until num_warp_in_a_block).map { member =>
+      VecInit((0 until num_warp).map { warp =>
+        val isReleasedNow = releasedWarp === warp.U
+        rtWorkgroupValid(warp) &&
+          rtWorkgroupTag(warp)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block)) === releasedGroupTag &&
+          rtWorkgroupTag(warp)(log2Ceil(num_warp_in_a_block) - 1, 0) === member.U &&
+          (rtWorkgroupReleased(warp) || isReleasedNow)
+      }).asUInt.orR
+    }).asUInt
+    val releasedExpected = (1.U(num_warp_in_a_block.W) << releasedGroupWarps) - 1.U
+    rtWorkgroupReleased(releasedWarp) := true.B
+    when((releasedMembers & releasedExpected) === releasedExpected) {
+      for (warp <- 0 until num_warp) {
+        when(rtWorkgroupValid(warp) &&
+            rtWorkgroupTag(warp)(TAG_WIDTH - 1, log2Ceil(num_warp_in_a_block)) === releasedGroupTag) {
+          rtWorkgroupValid(warp) := false.B
+          rtWorkgroupReleased(warp) := false.B
+        }
+      }
+    }
+  }
+
+  // A candidate callback is an in-traversal control transfer, not the
+  // post-primary shader fence.  The single physical RT context must return
+  // that callback to its owner immediately so it can accept/ignore and
+  // resume; holding it for sibling primary warps would deadlock the cohort.
+  // Spill also releases physical state, but a candidate is not logically
+  // terminal. Keep its cohort identity across ordinary callback resumes.
+  val rtCoreCompletionGrouped = rtGroupedInFlight(rtcore.io.completion.bits.warpId) &&
+    rtcore.io.completion.bits.contextReleased && !rtcore.io.completion.bits.hasCandidate
+  val rtGroupProbe = PriorityEncoder(rtGroupTerminalValid.asUInt)
+  val rtGroupProbeTag = rtGroupTagByWarp(rtGroupProbe)
+  val rtGroupProbeCount = rtGroupCountByWarp(rtGroupProbe)
+  val rtGroupArrived = VecInit((0 until num_warp_in_a_block).map { member =>
+    VecInit((0 until num_warp).map { warp =>
+      (rtGroupTerminalArrived(warp) || rtGroupEmptyArrived(warp)) &&
+        rtGroupTagByWarp(warp) === rtGroupProbeTag &&
+        rtGroupMemberByWarp(warp) === member.U
+    }).asUInt.orR
+  }).asUInt
+  val rtGroupExpected = (1.U(num_warp_in_a_block.W) << rtGroupProbeCount) - 1.U
+  val rtGroupReleaseReady = rtGroupTerminalValid.asUInt.orR && rtGroupProbeCount.orR &&
+    (rtGroupArrived & rtGroupExpected) === rtGroupExpected
+  val rtEnqueueCoreCompletion = rtcore.io.completion.valid && !rtCoreCompletionGrouped &&
+    !rtCompletionAwaitingWb
+  val rtEnqueueGroupCompletion = rtGroupReleaseReady
+  rtWriteback.io.enq.valid := rtEnqueueCoreCompletion || rtEnqueueGroupCompletion
+  rtWriteback.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
+  val rtWritebackCompletion = Wire(new RtWarpCompletion)
+  rtWritebackCompletion := Mux(rtEnqueueGroupCompletion,
+    rtGroupTerminal(rtGroupProbe), rtcore.io.completion.bits)
+  rtWriteback.io.enq.bits.warp_id := rtWritebackCompletion.warpId
+  rtWriteback.io.enq.bits.reg_idxw := rtWritebackCompletion.destinationVd
+  rtWriteback.io.enq.bits.wvd := true.B
+  rtWriteback.io.enq.bits.wvd_mask := rtWritebackCompletion.completionMask.asBools
+  rtWriteback.io.enq.bits.wb_wvd_rd := rtWritebackCompletion.laneStatus
+  if (SPIKE_OUTPUT) { rtWriteback.io.enq.bits.spike_info.get := 0.U.asTypeOf(new InstWriteBack) }
+  rtcore.io.completion.ready := Mux(rtCoreCompletionGrouped,
+    !rtGroupTerminalValid(rtcore.io.completion.bits.warpId),
+    rtWriteback.io.enq.ready && !rtCompletionAwaitingWb && !rtGroupReleaseReady)
+  when(rtcore.io.completion.fire) {
+    when(rtCoreCompletionGrouped) {
+      val wid = rtcore.io.completion.bits.warpId
+      rtGroupTerminal(wid) := rtcore.io.completion.bits
+      rtGroupTerminalValid(wid) := true.B
+      rtGroupTerminalArrived(wid) := true.B
+      rtInFlight(wid) := false.B
+    }
+    if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+      val hitMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCompleteHit.U)).asUInt
+      val nonOpaqueMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCandidateNonOpaqueTriangle.U)).asUInt
+      val proceduralMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalCandidateProceduralAabb.U)).asUInt
+      val terminatedMask = VecInit((0 until num_thread).map(lane =>
+        rtcore.io.completion.bits.laneStatus(lane) === RtAbiLayout.TraversalTerminated.U)).asUInt
+      printf(p"[RTCORE trace] completion sm=${Decimal(sm_id)}" +
+        p" warp=${Decimal(rtcore.io.completion.bits.warpId)}" +
+        p" issue=${Decimal(rtcore.io.completion.bits.issueId)}" +
+        p" vd=${Decimal(rtcore.io.completion.bits.destinationVd)}" +
+        p" contextReleased=${Decimal(rtcore.io.completion.bits.contextReleased)}" +
+        p" mask=0x${Hexadecimal(rtcore.io.completion.bits.completionMask)}" +
+        p" hit=0x${Hexadecimal(hitMask)} nonopaque=0x${Hexadecimal(nonOpaqueMask)}" +
+        p" procedural=0x${Hexadecimal(proceduralMask)} terminated=0x${Hexadecimal(terminatedMask)}\n")
+    }
+    if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
+      printf(p"[RTLOCAL trace] completion warp=${Decimal(rtcore.io.completion.bits.warpId)}" +
+        p" vd=${Decimal(rtcore.io.completion.bits.destinationVd)}" +
+        p" mask0=${Decimal(rtcore.io.completion.bits.completionMask(0))}" +
+        p" status0=0x${Hexadecimal(rtcore.io.completion.bits.laneStatus(0))}\n")
+    }
+    when(!rtCoreCompletionGrouped) {
+      rtCompletionAwaitingWb := true.B
+      rtCompletionWarp := rtcore.io.completion.bits.warpId
+      rtCompletionDestination := rtcore.io.completion.bits.destinationVd
+      rtCompletionContextReleased := rtcore.io.completion.bits.contextReleased
+      rtCompletionReservationReleased := rtcore.io.completion.bits.contextReleased
+      when(rtcore.io.completion.bits.contextReleased) {
+        rtInFlight(rtcore.io.completion.bits.warpId) := false.B
+      }
+    }
+  }
 
   wb.io.in_x(0)<>alu.io.out
   wb.io.in_x(1)<>fpu.io.out_x
@@ -450,7 +840,57 @@ class pipe() extends Module{
   wb.io.in_v(4)<>mul.io.out_v
   wb.io.in_v(5)<>tensorcore.io.out_v
   wb.io.in_v(6)<>csrfile.io.out_v
+  wb.io.in_v(7)<>rtWriteback.io.deq
+  wb.io.in_v(8)<>rtLocalWriteback.io.deq
+  // Observe the actual RT writeback input, not a coincidentally matching
+  // destination on another vector writer. No new owner enters before this.
+  val rtCompletionWriteback = rtWriteback.io.deq.fire && rtCompletionAwaitingWb
+  val rtGroupedPhysicalCompletion = rtcore.io.completion.fire && rtCoreCompletionGrouped
+  val rtUngroupedPhysicalContextCompletion = rtcore.io.completion.fire &&
+    !rtCoreCompletionGrouped && rtcore.io.completion.bits.contextReleased
+  val rtPhysicalReservationCompletion = rtGroupedPhysicalCompletion ||
+    rtUngroupedPhysicalContextCompletion
+  val rtWritebackReservationCompletion = rtCompletionWriteback &&
+    !rtCompletionReservationReleased
+  rtReservation.io.completed.valid := rtWritebackReservationCompletion ||
+    rtPhysicalReservationCompletion
+  rtReservation.io.completed.bits.warpId := Mux(rtPhysicalReservationCompletion,
+    rtcore.io.completion.bits.warpId, rtCompletionWarp)
+  rtReservation.io.completed.bits.contextReleased := Mux(rtPhysicalReservationCompletion,
+    rtcore.io.completion.bits.contextReleased, rtCompletionContextReleased)
+  when(rtCompletionWriteback) {
+    assert(rtWriteback.io.deq.bits.warp_id === rtCompletionWarp &&
+      rtWriteback.io.deq.bits.reg_idxw === rtCompletionDestination)
+    if (sys.env.get("VENTUS_RTLOCAL_TRACE").contains("1")) {
+      printf(p"[RTLOCAL trace] completion-wb warp=${Decimal(wb.io.out_v.bits.warp_id)}" +
+        p" vd=${Decimal(wb.io.out_v.bits.reg_idxw)}" +
+        p" status0=0x${Hexadecimal(wb.io.out_v.bits.wb_wvd_rd(0))}\n")
+    }
+    rtInFlight(rtCompletionWarp) := false.B
+    rtCompletionAwaitingWb := false.B
+    rtCompletionReservationReleased := false.B
+  }
+  when(rtWriteback.io.enq.fire && rtEnqueueGroupCompletion) {
+    val pendingForGroup = VecInit((0 until num_warp).map { warp =>
+      rtGroupTerminalValid(warp) && rtGroupTagByWarp(warp) === rtGroupProbeTag
+    }).asUInt
+    val lastTerminal = PopCount(pendingForGroup) === 1.U
+    rtGroupTerminalValid(rtGroupProbe) := false.B
+    rtGroupedInFlight(rtGroupProbe) := false.B
+    when(lastTerminal) {
+      for (warp <- 0 until num_warp) {
+        when(rtGroupTagByWarp(warp) === rtGroupProbeTag) {
+          rtGroupTerminalArrived(warp) := false.B
+          rtGroupEmptyArrived(warp) := false.B
+        }
+      }
+    }
+  }
 
+  // PMU is an elaboration-time option.  Keep this collector in one structural
+  // branch so an `off` build has neither its counters nor their increment
+  // cones; the always-present ABI output is driven to zero in that mode.
+  if (PMU_ENABLED) {
   val activeCycles = RegInit(0.U(64.W))
   val totalScalarIssued = RegInit(0.U(64.W))
   val totalVectorIssued = RegInit(0.U(64.W))
@@ -467,6 +907,37 @@ class pipe() extends Module{
   val memIssued = RegInit(0.U(64.W))
   val ctrlIssued = RegInit(0.U(64.W))
 
+  val rtTraverseIssued = RegInit(0.U(64.W))
+  val rtTraverseActiveLanes = RegInit(0.U(64.W))
+  val rtCompletionCount = RegInit(0.U(64.W))
+  val rtCompletionLanes = RegInit(0.U(64.W))
+  val rtReleaseIssued = RegInit(0.U(64.W))
+  val rtActiveSessionCycles = RegInit(0.U(64.W))
+  val rtCommandBackpressureCycles = RegInit(0.U(64.W))
+  val rtCompletionBackpressureCycles = RegInit(0.U(64.W))
+  val rtReleaseBackpressureCycles = RegInit(0.U(64.W))
+  val rtLocalSramReadRequests = RegInit(0.U(64.W))
+  val rtLocalSramWriteRequests = RegInit(0.U(64.W))
+  val rtLocalSramReadResponses = RegInit(0.U(64.W))
+  val rtLocalSramBackpressureCycles = RegInit(0.U(64.W))
+  val rtRaySetupOutputs = RegInit(0.U(64.W))
+  val rtAsLineAcquires = RegInit(0.U(64.W))
+  val rtAsLineReady = RegInit(0.U(64.W))
+  val rtAsAcquireBackpressureCycles = RegInit(0.U(64.W))
+  val rtAsCacheResidentHits = RegInit(0.U(64.W))
+  val rtAsCachePendingMerges = RegInit(0.U(64.W))
+  val rtAsCacheMisses = RegInit(0.U(64.W))
+  val rtAsCacheRefills = RegInit(0.U(64.W))
+  val rtAsCacheEvictions = RegInit(0.U(64.W))
+  val rtBox4Issued = RegInit(0.U(64.W))
+  val rtBox4Results = RegInit(0.U(64.W))
+  val rtTriangleIssued = RegInit(0.U(64.W))
+  val rtTriangleResults = RegInit(0.U(64.W))
+  val rtTriangleResolveIssued = RegInit(0.U(64.W))
+  val rtTriangleResolveResults = RegInit(0.U(64.W))
+  val rtStackPushes = RegInit(0.U(64.W))
+  val rtStackPops = RegInit(0.U(64.W))
+
   def isCtrlInst(ctrl: CtrlSigs): Bool = {
     ctrl.csr.orR || ctrl.barrier || ctrl.simt_stack || ctrl.branch.orR
   }
@@ -481,6 +952,22 @@ class pipe() extends Module{
   val barrierStall = noIssueFire && noIssueInput && anyBufferedInst && !anySchedulableInst &&
     !anyScoreExeBlockedInst && anyBarrierBlockedInst
   val frontendStall = noIssueFire && noIssueInput && !dataDepStall && !barrierStall
+
+  // Elaborate-only deadlock aid.  A long no-issue interval used to require
+  // guessing whether the pending warp was blocked by a register, the operand
+  // collector, or a control dependency.  Keep it out of normal RTL builds.
+  if (sys.env.get("VENTUS_SCOREBOARD_TRACE").contains("1")) {
+    val noIssueCycles = RegInit(0.U(16.W))
+    when(noIssueFire) { noIssueCycles := noIssueCycles + 1.U }
+      .otherwise { noIssueCycles := 0.U }
+    when(noIssueCycles === 1024.U) {
+      for (i <- 0 until num_warp) {
+        when(ibuffer.io.out(i).valid) {
+          printf(p"[SCOREBOARD trace] warp=${Decimal(i.U)} pc=0x${Hexadecimal(ibuffer.io.out(i).bits.pc)} inst=0x${Hexadecimal(ibuffer.io.out(i).bits.inst)} ready=${warp_sche.io.warp_ready(i)} exe=${warp_sche.io.exe_busy(i)} barrier=${warp_sche.io.barrier_busy(i)} delay=${scoreb(i).delay} r1=${scoreb(i).stall_read1} r2=${scoreb(i).stall_read2} r3=${scoreb(i).stall_read3} mask=${scoreb(i).stall_mask} wr=${scoreb(i).stall_write} br=${scoreb(i).stall_branch} fence=${scoreb(i).stall_fence} opv=${scoreb(i).stall_opcol_v} opx=${scoreb(i).stall_opcol_x}\n")
+        }
+      }
+    }
+  }
 
   val flushEvent = warp_sche.io.flush.valid && !RegNext(warp_sche.io.flush.valid, false.B)
 
@@ -499,6 +986,36 @@ class pipe() extends Module{
     computeIssued := 0.U
     memIssued := 0.U
     ctrlIssued := 0.U
+    rtTraverseIssued := 0.U
+    rtTraverseActiveLanes := 0.U
+    rtCompletionCount := 0.U
+    rtCompletionLanes := 0.U
+    rtReleaseIssued := 0.U
+    rtActiveSessionCycles := 0.U
+    rtCommandBackpressureCycles := 0.U
+    rtCompletionBackpressureCycles := 0.U
+    rtReleaseBackpressureCycles := 0.U
+    rtLocalSramReadRequests := 0.U
+    rtLocalSramWriteRequests := 0.U
+    rtLocalSramReadResponses := 0.U
+    rtLocalSramBackpressureCycles := 0.U
+    rtRaySetupOutputs := 0.U
+    rtAsLineAcquires := 0.U
+    rtAsLineReady := 0.U
+    rtAsAcquireBackpressureCycles := 0.U
+    rtAsCacheResidentHits := 0.U
+    rtAsCachePendingMerges := 0.U
+    rtAsCacheMisses := 0.U
+    rtAsCacheRefills := 0.U
+    rtAsCacheEvictions := 0.U
+    rtBox4Issued := 0.U
+    rtBox4Results := 0.U
+    rtTriangleIssued := 0.U
+    rtTriangleResults := 0.U
+    rtTriangleResolveIssued := 0.U
+    rtTriangleResolveResults := 0.U
+    rtStackPushes := 0.U
+    rtStackPops := 0.U
   }.elsewhen(io.perfEnable){
     activeCycles := activeCycles + 1.U
 
@@ -548,6 +1065,89 @@ class pipe() extends Module{
     when(ibuffer.io.in.valid && !ibuffer.io.in.ready){
       ibufferFullCycles := ibufferFullCycles + 1.U
     }
+
+    when(rtcore.io.command.fire) {
+      rtTraverseIssued := rtTraverseIssued + 1.U
+      rtTraverseActiveLanes := rtTraverseActiveLanes + PopCount(rtcore.io.command.bits.activeMask)
+    }
+    when(rtcore.io.completion.fire) {
+      rtCompletionCount := rtCompletionCount + 1.U
+      rtCompletionLanes := rtCompletionLanes + PopCount(rtcore.io.completion.bits.completionMask)
+    }
+    // Count logical software-session releases even when physical context
+    // reclamation already happened at a terminal traversal completion.
+    when(issueV.io.out_RT.fire && rtIsRelease && !rtReleaseEmpty) {
+      rtReleaseIssued := rtReleaseIssued + 1.U
+    }
+    when(rtInFlight.asUInt.orR || rtCompletionAwaitingWb || rtReleaseSent) {
+      rtActiveSessionCycles := rtActiveSessionCycles + 1.U
+    }
+    when(rtcore.io.command.valid && !rtcore.io.command.ready) {
+      rtCommandBackpressureCycles := rtCommandBackpressureCycles + 1.U
+    }
+    when(rtcore.io.completion.valid && !rtcore.io.completion.ready) {
+      rtCompletionBackpressureCycles := rtCompletionBackpressureCycles + 1.U
+    }
+    when(rtcore.io.release.valid && !rtcore.io.release.ready) {
+      rtReleaseBackpressureCycles := rtReleaseBackpressureCycles + 1.U
+    }
+    when(rtcore.io.perf.localSramReadRequest) { rtLocalSramReadRequests := rtLocalSramReadRequests + 1.U }
+    when(rtcore.io.perf.localSramWriteRequest) { rtLocalSramWriteRequests := rtLocalSramWriteRequests + 1.U }
+    when(rtcore.io.perf.localSramReadResponse) { rtLocalSramReadResponses := rtLocalSramReadResponses + 1.U }
+    when(rtcore.io.perf.localSramBackpressure) { rtLocalSramBackpressureCycles := rtLocalSramBackpressureCycles + 1.U }
+    when(rtcore.io.perf.raySetupOutput) { rtRaySetupOutputs := rtRaySetupOutputs + 1.U }
+    when(rtcore.io.perf.asLineAcquire) { rtAsLineAcquires := rtAsLineAcquires + 1.U }
+    rtAsLineReady := rtAsLineReady + rtcore.io.perf.asLineReady
+    when(rtcore.io.perf.asAcquireBackpressure) { rtAsAcquireBackpressureCycles := rtAsAcquireBackpressureCycles + 1.U }
+    when(rtcore.io.perf.asCacheResidentHit) { rtAsCacheResidentHits := rtAsCacheResidentHits + 1.U }
+    when(rtcore.io.perf.asCachePendingMerge) { rtAsCachePendingMerges := rtAsCachePendingMerges + 1.U }
+    when(rtcore.io.perf.asCacheMiss) { rtAsCacheMisses := rtAsCacheMisses + 1.U }
+    when(rtcore.io.perf.asCacheRefill) { rtAsCacheRefills := rtAsCacheRefills + 1.U }
+    when(rtcore.io.perf.asCacheEviction) { rtAsCacheEvictions := rtAsCacheEvictions + 1.U }
+    rtBox4Issued := rtBox4Issued + rtcore.io.perf.box4Issue
+    rtBox4Results := rtBox4Results + rtcore.io.perf.box4Result
+    rtTriangleIssued := rtTriangleIssued + rtcore.io.perf.triangleIssue
+    rtTriangleResults := rtTriangleResults + rtcore.io.perf.triangleResult
+    when(rtcore.io.perf.triangleResolveIssue) { rtTriangleResolveIssued := rtTriangleResolveIssued + 1.U }
+    when(rtcore.io.perf.triangleResolveResult) { rtTriangleResolveResults := rtTriangleResolveResults + 1.U }
+    rtStackPushes := rtStackPushes + rtcore.io.perf.stackPush
+    rtStackPops := rtStackPops + rtcore.io.perf.stackPop
+  }
+
+  io.perf_rtcore.traverseIssued := rtTraverseIssued
+  io.perf_rtcore.traverseActiveLanes := rtTraverseActiveLanes
+  io.perf_rtcore.completionCount := rtCompletionCount
+  io.perf_rtcore.completionLanes := rtCompletionLanes
+  io.perf_rtcore.releaseIssued := rtReleaseIssued
+  io.perf_rtcore.activeSessionCycles := rtActiveSessionCycles
+  io.perf_rtcore.commandBackpressureCycles := rtCommandBackpressureCycles
+  io.perf_rtcore.completionBackpressureCycles := rtCompletionBackpressureCycles
+  io.perf_rtcore.releaseBackpressureCycles := rtReleaseBackpressureCycles
+  io.perf_rtcore.localSramReadRequests := rtLocalSramReadRequests
+  io.perf_rtcore.localSramWriteRequests := rtLocalSramWriteRequests
+  io.perf_rtcore.localSramReadResponses := rtLocalSramReadResponses
+  io.perf_rtcore.localSramBackpressureCycles := rtLocalSramBackpressureCycles
+  io.perf_rtcore.raySetupOutputs := rtRaySetupOutputs
+  io.perf_rtcore.asLineAcquires := rtAsLineAcquires
+  io.perf_rtcore.asLineReady := rtAsLineReady
+  io.perf_rtcore.asAcquireBackpressureCycles := rtAsAcquireBackpressureCycles
+  io.perf_rtcore.asCacheResidentHits := rtAsCacheResidentHits
+  io.perf_rtcore.asCachePendingMerges := rtAsCachePendingMerges
+  io.perf_rtcore.asCacheMisses := rtAsCacheMisses
+  io.perf_rtcore.asCacheRefills := rtAsCacheRefills
+  io.perf_rtcore.asCacheEvictions := rtAsCacheEvictions
+  io.perf_rtcore.box4Issued := rtBox4Issued
+  io.perf_rtcore.box4Results := rtBox4Results
+  io.perf_rtcore.triangleIssued := rtTriangleIssued
+  io.perf_rtcore.triangleResults := rtTriangleResults
+  io.perf_rtcore.triangleResolveIssued := rtTriangleResolveIssued
+  io.perf_rtcore.triangleResolveResults := rtTriangleResolveResults
+  io.perf_rtcore.stackPushes := rtStackPushes
+  io.perf_rtcore.stackPops := rtStackPops
+  if (PMU_DETAILED) {
+    io.perf_rtcore.detailed.get := rtcore.io.perf.detailed.get
+    io.perf_rtcore.detailed.get.enabled := io.perfEnable
+    io.perf_rtcore.detailed.get.clear := io.perfReset || reset.asBool
   }
 
   io.perf_pipeline.foreach { perf =>
@@ -568,6 +1168,9 @@ class pipe() extends Module{
     perf.computeIssued := computeIssued
     perf.memIssued := memIssued
     perf.ctrlIssued := ctrlIssued
+  }
+  } else {
+    io.perf_rtcore := 0.U.asTypeOf(new RtCorePerfCounters)
   }
 
   issue_stall:=(~issueX.io.in.ready).asBool | (~issueV.io.in.ready).asBool//scoreb.io.delay | issue.io.in.ready

@@ -6,8 +6,56 @@ export MAKEFLAGS += +r
 
 RELEASE ?= 0
 SAVABLE ?= 0
-TRACE ?= 1
+TRACE ?= $(VLIB_TRACE)
 PREFIX ?= $(CURDIR)/install
+# Full FST support substantially increases generated C++ size and simulation
+# cost.  Keep normal RTL regressions waveform-free; request it explicitly for
+# waveform debugging with `make ... VLIB_TRACE=1`.
+VLIB_TRACE ?= 0
+ifneq ($(filter 1 yes true on,$(TRACE)),)
+override TRACE := 1
+else
+override TRACE := 0
+endif
+# RTCore command/completion printf probes are selected during Chisel
+# elaboration.  They need a distinct generated RTL directory, just like PMU
+# modes, so a diagnostic build cannot silently reuse the normal model.
+VLIB_RTCORE_TRACE ?= 0
+# Deep RTCore probes include per-lane ray payloads and node decisions.  They
+# are intentionally separate from the compact command/completion trace.
+VLIB_RTCORE_DEEP_TRACE ?= 0
+# Record trace logs world-ray handoff, node visits and hit-record updates. It avoids
+# per-node Box4 output, keeping recursive-ray differentials practical.
+VLIB_RTCORE_RECORD_TRACE ?= 0
+# SFU floating-point probes are also elaboration-time printf logic. Keep them
+# separate from RTCore traces so a narrow arithmetic audit cannot reuse or
+# overwrite another diagnostic model.
+VLIB_SFU_TRACE ?= 0
+# Ordinary vector-FPU probes are likewise elaboration-time printf logic.  Keep
+# their emitted RTL separate from both the normal and SFU-audit variants.
+VLIB_FPU_TRACE ?= 0
+# PMU structure is selected during Chisel elaboration.  Keep every mode in a
+# separate generated-model directory: otherwise `make` can accidentally reuse
+# a basic/detailed Verilator model for an `off` regression (or vice versa).
+ifeq ($(origin VLIB_PMU_MODE),undefined)
+VLIB_PMU_MODE := $(if $(VENTUS_PMU_MODE),$(VENTUS_PMU_MODE),off)
+endif
+ifneq ($(filter $(VLIB_PMU_MODE),off basic detailed),$(VLIB_PMU_MODE))
+$(error VLIB_PMU_MODE must be one of off, basic, detailed; got '$(VLIB_PMU_MODE)')
+endif
+export VENTUS_PMU_MODE = $(VLIB_PMU_MODE)
+# This value is sampled by Chisel during elaboration.  An explicitly requested
+# latency therefore needs a separate generated RTL directory; otherwise Make
+# can silently reuse a dut.v generated with the default latency.
+VLIB_EXTMEM_LATENCY := $(strip $(VENTUS_RTL_EXTMEM_LATENCY))
+ifneq ($(VLIB_EXTMEM_LATENCY),)
+export VENTUS_RTL_EXTMEM_LATENCY = $(VLIB_EXTMEM_LATENCY)
+endif
+export VENTUS_RTCORE_TRACE = $(VLIB_RTCORE_TRACE)
+export VENTUS_RTCORE_DEEP_TRACE = $(VLIB_RTCORE_DEEP_TRACE)
+export VENTUS_RTCORE_RECORD_TRACE = $(VLIB_RTCORE_RECORD_TRACE)
+export VENTUS_SFU_TRACE = $(VLIB_SFU_TRACE)
+export VENTUS_FPU_TRACE = $(VLIB_FPU_TRACE)
 
 export RTL_GVM_ENABLED = false
 VLIB_MILL = ./mill --no-server
@@ -78,8 +126,33 @@ VLIB_VARIANT_KEY = rtl-$(VLIB_BUILD_TYPE)-$(VLIB_VARIANT_FEATURES)
 #=====================================================================
 
 VLIB_DIR_SCALA = ../ventus/src
-VLIB_DIR_BUILD = build/libVentusRTL
-VLIB_GEN_DIR = build/generated/rtl
+# RTCore printf probes change Chisel output, while ``--trace-fst`` changes the
+# generated Verilator model. Namespace both forms of diagnostic elaboration.
+VLIB_ELAB_FLAVOR = $(VLIB_PMU_MODE)
+ifneq ($(VLIB_EXTMEM_LATENCY),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-lat$(VLIB_EXTMEM_LATENCY)
+endif
+ifneq ($(filter 1 yes true on,$(VLIB_RTCORE_TRACE)),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-rtcoretrace
+endif
+ifneq ($(filter 1 yes true on,$(VLIB_RTCORE_DEEP_TRACE)),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-rtcoredeeptrace
+endif
+ifneq ($(filter 1 yes true on,$(VLIB_RTCORE_RECORD_TRACE)),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-rtcorerecordtrace
+endif
+ifneq ($(filter 1 yes true on,$(VLIB_SFU_TRACE)),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-sfutrace
+endif
+ifneq ($(filter 1 yes true on,$(VLIB_FPU_TRACE)),)
+VLIB_ELAB_FLAVOR := $(VLIB_ELAB_FLAVOR)-fputrace
+endif
+VLIB_BUILD_FLAVOR = $(VLIB_ELAB_FLAVOR)
+ifeq ($(TRACE),1)
+VLIB_BUILD_FLAVOR := $(VLIB_BUILD_FLAVOR)-trace
+endif
+VLIB_DIR_BUILD = build/libVentusRTL-$(VLIB_BUILD_FLAVOR)
+VLIB_GEN_DIR = build/generated/rtl-$(VLIB_ELAB_FLAVOR)
 VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
 VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
 VLIB_PMU_SNAPSHOT_INC = $(VLIB_GEN_DIR)/pmu_snapshot_copy.inc
@@ -139,7 +212,7 @@ VLIB_VERILATOR_FLAGS += -DPRINTF_COND=1
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE_MEM_INIT
 VLIB_VERILATOR_FLAGS += -DRANDOMIZE_REG_INIT
-# Make waveforms
+# Make waveforms only in an explicit waveform-debug build.
 ifeq ($(TRACE),1)
 VLIB_VERILATOR_FLAGS += --trace-fst
 endif
@@ -202,7 +275,7 @@ $(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
 
 $(VLIB_PMU_SNAPSHOT_INC): $(VLIB_PARAMS_JSON) gen_pmu_snapshot_inc.py
 	mkdir -p $(dir $@)
-	python3 gen_pmu_snapshot_inc.py $< $@
+	python3 gen_pmu_snapshot_inc.py $< $@ $(VLIB_PMU_MODE)
 
 $(VLIB_MODEL_IDENTITY_CPP) $(VLIB_MODEL_IDENTITY_JSON) &: $(VLIB_MODEL_INPUT_FILES)
 	mkdir -p $(VLIB_MODEL_IDENTITY_DIR)
@@ -221,7 +294,11 @@ verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC)
+# Depend on Scala directly as well as dut.v.  With grouped generated outputs,
+# GNU make otherwise decides whether libVdut.a is stale before the dut.v
+# recipe advances its timestamp, requiring a second invocation after every
+# Chisel change.
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_PMU_SNAPSHOT_INC) $(VLIB_SRC_SCALA) rt_detailed_pmu.hpp ventus_rtlsim_impl.hpp ventus_rtlsim.h
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 

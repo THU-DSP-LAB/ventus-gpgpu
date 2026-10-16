@@ -32,3 +32,38 @@ class InstClassPerfCounters extends Bundle {
   val memIssued = UInt(64.W)
   val ctrlIssued = UInt(64.W)
 }
+
+/** RTcore command-boundary and internal-work counters. */
+class RtCorePerfCounters extends Bundle {
+  val detailed = if (top.parameters.PMU_DETAILED) Some(new rtcore.RtDetailedSignals) else None
+  val traverseIssued = UInt(64.W)
+  val traverseActiveLanes = UInt(64.W)
+  val completionCount = UInt(64.W)
+  val completionLanes = UInt(64.W)
+  val releaseIssued = UInt(64.W)
+  val activeSessionCycles = UInt(64.W)
+  val commandBackpressureCycles = UInt(64.W)
+  val completionBackpressureCycles = UInt(64.W)
+  val releaseBackpressureCycles = UInt(64.W)
+  val localSramReadRequests = UInt(64.W)
+  val localSramWriteRequests = UInt(64.W)
+  val localSramReadResponses = UInt(64.W)
+  val localSramBackpressureCycles = UInt(64.W)
+  val raySetupOutputs = UInt(64.W)
+  val asLineAcquires = UInt(64.W)
+  val asLineReady = UInt(64.W)
+  val asAcquireBackpressureCycles = UInt(64.W)
+  val asCacheResidentHits = UInt(64.W)
+  val asCachePendingMerges = UInt(64.W)
+  val asCacheMisses = UInt(64.W)
+  val asCacheRefills = UInt(64.W)
+  val asCacheEvictions = UInt(64.W)
+  val box4Issued = UInt(64.W)
+  val box4Results = UInt(64.W)
+  val triangleIssued = UInt(64.W)
+  val triangleResults = UInt(64.W)
+  val triangleResolveIssued = UInt(64.W)
+  val triangleResolveResults = UInt(64.W)
+  val stackPushes = UInt(64.W)
+  val stackPops = UInt(64.W)
+}

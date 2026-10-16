@@ -41,14 +41,22 @@ const std::unordered_map<std::string, uint32_t> rtl_parameters = {
     return cpp_code
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        raise SystemExit(f"Usage: {sys.argv[0]} <input-parameters.json> <output-rtl_parameters.cpp>")
+    if len(sys.argv) not in (3, 4):
+        raise SystemExit(f"Usage: {sys.argv[0]} <input-parameters.json> <output-rtl_parameters.cpp> [output-header]")
 
     skip_keys = set("l2cache_cache l2cache_micro l2cache_micro_l l2cache_params l2cache_params_l".split())
 
     # 读取 JSON 文件
     with open(sys.argv[1], 'r') as f:
         data = json.load(f)
+
+    if len(sys.argv) == 4:
+        num_sm = data.get("num_sm")
+        if type(num_sm) is not int or num_sm not in (1, 2):
+            raise SystemExit("nocache host interfaces support num_sm=1 or 2")
+        with open(sys.argv[3], 'w') as f:
+            f.write("// Generated from parameters.json; do not edit.\n#pragma once\n"
+                    f"#define VENTUS_RTL_NUM_SM {num_sm}\n")
 
     # 将 JSON 转换为 C++ 代码
     cpp_code = json_to_cpp(data, skip_keys=skip_keys)

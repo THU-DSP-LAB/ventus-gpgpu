@@ -38,6 +38,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
     val in_d =Decoupled(new TLBundleD_lite_plus(params))
     val out_a =Decoupled(new TLBundleA_lite(params))
     val out_d=Flipped(Decoupled(new TLBundleD_lite(params)))
+    val observation = if (top.parameters.PMU_DETAILED) Some(Output(new top.L2Observation)) else None
   })
 
 
@@ -586,5 +587,20 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   bankedStore.io.sourceD_wadr <> sourceD.io.bs_wadr
   bankedStore.io.sourceD_wdat := sourceD.io.bs_wdat
   sourceD.io.bs_rdat := bankedStore.io.sourceD_rdat
+  if (top.parameters.PMU_DETAILED) {
+    val d = io.observation.get
+    d.enabled := false.B; d.clear := reset.asBool
+    d.request := io.in_a.fire
+    d.requestBlocked := io.in_a.valid && !io.in_a.ready
+    d.response := io.in_d.fire
+    d.responseBlocked := io.in_d.valid && !io.in_d.ready
+    d.memoryRequest := io.out_a.fire
+    d.memoryRequestBlocked := io.out_a.valid && !io.out_a.ready
+    d.memoryResponse := io.out_d.fire
+    d.memoryResponseBlocked := io.out_d.valid && !io.out_d.ready
+    d.directoryHit := directory.io.result.fire && !directory.io.result.bits.flush && directory.io.result.bits.hit
+    d.directoryMiss := directory.io.result.fire && !directory.io.result.bits.flush && !directory.io.result.bits.hit
+    d.directoryBlocked := directory.io.result.valid && !directory.io.result.ready
+  }
 
 }

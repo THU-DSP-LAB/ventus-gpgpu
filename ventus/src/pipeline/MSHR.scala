@@ -50,18 +50,19 @@ class MSHRv2 extends Module{
     when(io.from_dcache.fire){
       when(io.from_addr.fire){
         state := s_add
-      }.elsewhen(io.to_pipe.ready && currentMask(io.from_dcache.bits.instrId)===io.from_dcache.bits.activeMask.asUInt){
+      }.elsewhen(used(io.from_dcache.bits.instrId) &&
+        currentMask(io.from_dcache.bits.instrId)===io.from_dcache.bits.activeMask.asUInt){
         state := s_out
       }.otherwise{state := s_idle}
-    }.elsewhen(complete.orR&&io.to_pipe.ready){
+    }.elsewhen(complete.orR){
       state := s_out
     }.otherwise{
       state := s_idle
     }
   }.elsewhen(state===s_out){
-    when(io.to_pipe.ready && complete.bitSet(valid_entry, false.B).orR){state:=s_out}.otherwise{state:=s_idle}
+    when(io.to_pipe.fire){state:=s_idle}.otherwise{state:=s_out}
   }.elsewhen(state===s_add){
-    when(io.to_pipe.ready && complete.orR){state:=s_out}.otherwise{state:=s_idle}
+    when(complete.orR){state:=s_out}.otherwise{state:=s_idle}
   }.otherwise{state:=s_idle}
 
   switch(state){

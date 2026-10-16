@@ -456,8 +456,11 @@ class instDemux extends Module{
   val priorityXorV = RegInit(true.B)
   priorityXorV := ~priorityXorV
   val outReady1 = VecInit(io.out.map(_.ready)).asUInt
-  val outX_sel = Wire(UInt(num_collectorUnit.W))
-  val outV_sel = Wire(UInt(num_collectorUnit.W))
+  // PriorityEncoder returns a collector index, not a one-hot mask.  Keeping
+  // it at the Vec index width avoids a spuriously wide dynamic selector.
+  val collectorIndexWidth = math.max(1, log2Ceil(num_collectorUnit))
+  val outX_sel = Wire(UInt(collectorIndexWidth.W))
+  val outV_sel = Wire(UInt(collectorIndexWidth.W))
   val outV_sel_oh = Wire(UInt(num_collectorUnit.W))
   val outReady2 = Wire(UInt(num_collectorUnit.W))
 
@@ -683,4 +686,3 @@ class operandCollector extends Module{
   io.out(0) <> issueUnit.io.out_v
   io.out(1) <> issueUnit.io.out_x
 }
-

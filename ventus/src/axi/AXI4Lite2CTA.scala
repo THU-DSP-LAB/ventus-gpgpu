@@ -95,6 +95,10 @@ class AXI4Lite2CTA(val addrWidth:Int, val busWidth:Int) extends Module{
   io.data.bits.host_vgpr_size_per_wf:=regs(8)
   io.data.bits.host_sgpr_size_per_wf:=regs(9)
   io.data.bits.host_gds_baseaddr:=regs(10)
+  io.data.bits.host_rt_spill_pool_base := 0.U
+  io.data.bits.host_rt_spill_slots_per_core := 0.U
+  io.data.bits.host_rt_spill_per_core_stride := 0.U
+  io.data.bits.host_rt_spill_dispatch_epoch := 0.U
   io.data.bits.host_pds_baseaddr:=regs(11)
   io.data.bits.host_csr_knl:=regs(12)
   io.data.bits.host_kernel_size_x:=regs(13)
@@ -233,4 +237,3 @@ class AXIwrapper_test(val addrWidth:Int, val busWidth:Int) extends Module{
   axiAdapter.io.data<>cta_module.io.in
   axiAdapter.io.rsp<>cta_module.io.out
 }
-

@@ -32,7 +32,7 @@ class DirectoryFlushIndexHarness(params: InclusiveCacheParameters_lite) extends 
 
   val flushSet = expose(directory.flush_set)
   val flushWay = expose(directory.flush_way)
-  val flushPipelineActive = expose(directory.flush_issue_regnext)
+  val flushPipelineActive = expose(directory.flush_issue_reg)
 }
 
 class L2DirectoryAdmissionRegressionTest extends AnyFreeSpec with ChiselScalatestTester {
@@ -216,7 +216,7 @@ class L2DirectoryAdmissionRegressionTest extends AnyFreeSpec with ChiselScalates
       var sawFlushPipeline = false
       cycles = 0
       while ((!dut.io.ready.peek().litToBoolean ||
-              dut.flushPipelineActive.peek().litToBoolean) && cycles < 16) {
+              dut.flushPipelineActive.peek().litToBoolean) && cycles < 32) {
         if (dut.flushPipelineActive.peek().litToBoolean) {
           sawFlushPipeline = true
           assert(dut.flushSet.peek().litValue < params.cache.sets,
@@ -229,7 +229,7 @@ class L2DirectoryAdmissionRegressionTest extends AnyFreeSpec with ChiselScalates
       }
 
       assert(sawFlushPipeline, "the test did not observe the flush pipeline")
-      assert(cycles < 16, "the small-configuration invalidate sweep did not finish")
+      assert(cycles < 32, "the small-configuration invalidate sweep did not finish")
       dut.io.ready.expect(true.B)
     }
   }

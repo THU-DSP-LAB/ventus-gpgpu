@@ -117,6 +117,66 @@ Run with `--help` to view all options. Commonly used ones include:
 
 In `ventus_args.txt`, parameters such as `--kernel`, `--sim-time-max`, and `--dump-mem` are commonly used. Refer to existing examples in the repository for guidance.
 
+### RT traversal overflow stacks
+
+Each RTCore retains 32 private lane stacks of depth32 and shares four overflow
+stacks of depth32. Each entry contains a 32-bit node ref and its object-ray tag
+(528 bytes of additional raw data in total, excluding owner/count logic).
+A lane may own at most one overflow stack: the hard limit is depth64, not160.
+Free banks are assigned to requesting lanes in ascending lane order. The last
+overflow pop releases the bank for allocation on the following cycle; masked
+clear and reset also reclaim ownership. Main-stack data is never shifted.
+
+Push is now partially accepted: `push.fire` means that `pushAcceptedMask`
+identifies the lanes actually written, not that every requested lane succeeded.
+The Scheduler advances deferred-child counters, acknowledges BLAS roots and
+counts PMU pushes only for accepted lanes. A lane waiting for a bank must not
+block other lanes. `pushWouldOverflow` may be true during a partial acceptance.
+The hard capacity remains finite: exhausted lanes stall without dropping nodes;
+this is not an unbounded traversal or a deadlock-proof spill mechanism. Mesa's
+matching traversal-stack budget is 64; its separate Embree topology-depth
+guard remains 32.
+
+From `gpgpu`, run `./mill -i 'ventus[6.4.0].tests.testOnly' rtcore.RtTraversalStackTest`.
+Tests cover tagged LIFO, four-bank contention, partial push, disjoint pop,
+depth64 refusal despite free banks, and reclamation after pop/clear/reset.
+
+### RT detailed PMU node phases
+
+Detailed PMU also tracks each valid node visit by lane from stack pop through
+AS acquire, first ready metadata, and table consumption. Histograms are
+`node_{pop_to_acquire,acquire_to_ready,ready_to_serve,total}_cycles`; matching
+`*_lane_cycles` counters are their weighted sums. The phases partition
+`state_5_lane_cycles` at a drained snapshot. `node_path_{resident,merge,miss}`,
+`node_kind_{1,2,3,4}` (Box4, Triangle, Instance, AABB), and combined prefixes
+provide the same breakdown. Headers are excluded. Ready means the first
+cycle the lane can see the returned line, not the injection edge; a resident
+hit normally takes one cycle from acquire to ready. Consume is IU admission
+for Box4/Triangle, not IU result completion. Unmatched and unfinished counters
+must be checked before interpreting completed-request distributions.
+
+These observers exist only in detailed mode and never drive DUT inputs.
+Run `python3 sim-verilator/tests/test_detailed_pmu.py` from the gpgpu repository
+to check the host collector without rebuilding the full model.
+
+### RT RayLoad phases
+
+Detailed PMU splits RT Local ray loading into the shared fifteen-field gather
+and the subsequent per-lane delivery/setup path.  `rayload_command_to_gather`
+is emitted once per fresh/restart command; its `*_lane_cycles` companion weighs
+that common wait by the command active-lane count.  Per-lane
+`rayload_gather_to_lane_out` and `rayload_lane_out_to_setup_write` complete the
+partition through the prepared-ray write.  All keys are also emitted with
+`rayload_fresh_` or `rayload_restart_` prefixes.  Read request/response field
+and latency histograms make Local-SRAM protocol stalls distinguishable from
+RaySetup queueing; unmatched/unfinished counters must remain zero before using
+the distributions.
+
+### RT Local SRAM backpressure regression
+
+Run `python3 sim-verilator/tests/test_rt_local_sram.py --rtl sim-verilator/build/generated/rtl-detailed/dut.v` from the gpgpu repository (substitute the actual elaboration flavor).
+This compiles only `RtLocalSram` from the full-app RTL and checks stalled read responses and cross-warp isolation. Keep this test in addition to ChiselTest: its legacy memory emitter can preserve disabled-read data where the full-app CIRCT emitter produces an undefined value.
+
 ### Generating New `.metadata` and `.data` Files
 
 When running OpenCL programs with the [full toolchain](https://github.com/THU-DSP-LAB/ventus-env), POCL automatically exports `.metadata` and `.data` files.

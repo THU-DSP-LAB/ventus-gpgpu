@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Vdut.h"
+#include "rtl_parameters.hpp"
 #include "cta_sche_wrapper.hpp"
 #include "physical_mem.hpp"
 #include "ventus_rtlsim.h"
@@ -37,7 +38,7 @@ struct ventus_rtlsim_pmu_storage_t {
 
 using vaddr_t = uint32_t;
 constexpr unsigned NUM_THREAD = 32;
-constexpr unsigned NUM_SM = 2;
+constexpr unsigned NUM_SM = VENTUS_RTL_NUM_SM;
 
 struct dcache_reqrsp_t {
     uint8_t sm_id;

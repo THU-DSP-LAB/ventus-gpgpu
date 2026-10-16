@@ -2,6 +2,16 @@
 
 #include <stddef.h>
 
+_Static_assert(
+    offsetof(ventus_kernel_metadata_t, rtSpillPoolBase) >
+        offsetof(ventus_kernel_metadata_t, buffer_allocsize),
+    "all backends must retain the RT metadata suffix"
+);
+_Static_assert(sizeof(ventus_rtlsim_rtcore_pmu_t) == 30 * sizeof(uint64_t),
+               "RTcore PMU layout changed");
+static ventus_rtlsim_rtcore_pmu_view_t (*const rtcore_pmu_api)(const ventus_rtlsim_t *) =
+    ventus_rtlsim_get_rtcore_pmu;
+
 _Static_assert(VENTUS_PMEM_REGION_BUFFER == 0, "buffer region ABI changed");
 _Static_assert(VENTUS_PMEM_REGION_PDS == 1, "PDS region ABI changed");
 _Static_assert(

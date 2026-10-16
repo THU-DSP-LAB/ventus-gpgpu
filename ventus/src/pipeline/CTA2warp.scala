@@ -15,6 +15,7 @@ import chisel3.util._
 import top.parameters._
 
 class CTAreqData extends Bundle{
+  val rtSpillPool = new rtcore.RtSpillPoolDescriptor
   val dispatch2cu_wg_wf_count        = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)      // num of WF in this WG
   val dispatch2cu_wf_size_dispatch   = UInt(log2Ceil(CTA_SCHE_CONFIG.GPU.NUM_THREAD+1).W)     // num of thread in this WF
   val dispatch2cu_sgpr_base_dispatch = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)    // sGPR base addr of this WF

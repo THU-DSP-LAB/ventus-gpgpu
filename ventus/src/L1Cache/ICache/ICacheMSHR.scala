@@ -211,7 +211,7 @@ if(MMU_ENABLED) {
   io.miss2mem.valid := !has_send2mem(hasSendStatus.io.next) && entry_valid(hasSendStatus.io.next)
   val miss2mem_fire = io.miss2mem.valid && io.miss2mem.ready
 
-  for (i <- 0 to NMshrEntry){
+  for (i <- 0 until NMshrEntry){
     when(miss2mem_fire && i.U === hasSendStatus.io.next){
       has_send2mem(i.U) := true.B
     }.elsewhen((missRsqBusy || io.missRspIn.fire) && io.missRspOut.fire && subentryStatus.io.used===1.U && i.U === entryMatchMissRsp){

@@ -6,19 +6,28 @@ import mmu.SV32.{asidLen, paLen, vaLen}
 // TODO: MOVE parameters to `ventus/top'
 
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
-  def num_sm = 2
+  def num_sm = 1
   var num_warp = 8
   var num_thread = 32
   val SINGLE_INST: Boolean = false
-  // Keep the historical trace-on default while allowing long RTL workloads
-  // to elaborate without per-instruction trace state and printf traffic.
+  val GVM_ENABLED: Boolean = sys.env.getOrElse("RTL_GVM_ENABLED", "false").toBoolean
+  // Ordinary RTL runs can omit instruction metadata. GVM callbacks consume
+  // spike_info (including barrier completion), so GVM must retain it.
   val SPIKE_OUTPUT: Boolean =
-    sys.env.getOrElse("RTL_SPIKE_OUTPUT", "true").toBoolean
+    GVM_ENABLED || sys.env.getOrElse("RTL_SPIKE_OUTPUT", "false").toBoolean
   val INST_CNT: Boolean = true
   val INST_CNT_2: Boolean = false
-  val PMU_PIPELINE: Boolean = true
-  val PMU_INST_CLASS: Boolean = true
-  val GVM_ENABLED: Boolean = sys.env.getOrElse("RTL_GVM_ENABLED", "false").toBoolean
+  val PMU_MODE: String = sys.env.getOrElse("VENTUS_PMU_MODE", "off")
+  require(Set("off", "basic", "detailed").contains(PMU_MODE),
+    s"VENTUS_PMU_MODE must be off, basic, or detailed (got $PMU_MODE)")
+  val PMU_ENABLED: Boolean = PMU_MODE != "off"
+  val PMU_DETAILED: Boolean = PMU_MODE == "detailed"
+  val PMU_PIPELINE: Boolean = PMU_ENABLED
+  val PMU_INST_CLASS: Boolean = PMU_ENABLED
+  // Per-transaction traces are elaboration-time diagnostics.  Keep them out
+  // of the normal release model: stdout traffic dominates larger RTL runs.
+  val L1C_TRACE: Boolean = sys.env.getOrElse("VENTUS_RTL_L1C_TRACE", "false").toBoolean
+  val PDS_TRACE: Boolean = sys.env.getOrElse("VENTUS_RTL_PDS_TRACE", "false").toBoolean
   val MMU_ENABLED: Boolean = false
   val DCACHE_DEBUG: Boolean = false
   def MMU_ASID_WIDTH = mmu.SV32.asidLen
@@ -76,7 +85,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def lsu_num_entry_each_warp = 4 //blocking for each warp
 
-  def lsu_nMshrEntry = num_warp // less than num_warp
+  def lsu_nMshrEntry = num_warp
 
   def dcache_NSets: Int = 32
 
@@ -156,6 +165,17 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def l2cache_writeBytes: Int = 1
 
   def l2cache_memCycles: Int = 32
+
+  // The Verilator simulation memory model uses this fixed delay for non-LDS
+  // responses.  It is intentionally explicit so performance artifacts carry
+  // a reproducible off-chip-memory assumption.
+  def rtl_external_mem_latency: Int = {
+    // This environment knob is sampled during RTL elaboration, not at
+    // simulation runtime; benchmark builds therefore need a fresh elaboration.
+    val latency = sys.env.get("VENTUS_RTL_EXTMEM_LATENCY").map(_.toInt).getOrElse(100)
+    require(latency >= 0, "VENTUS_RTL_EXTMEM_LATENCY must be non-negative")
+    latency
+  }
 
   def l2cache_portFactor: Int = 2
 
