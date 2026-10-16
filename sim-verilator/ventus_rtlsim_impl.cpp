@@ -627,7 +627,13 @@ ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_t::rtcore_pmu_view() const {
 }
 
 void ventus_rtlsim_t::update_pmu_watchdog() {
-    if (config.hang_timeout == 0 || step_status.error || step_status.time_exceed || step_status.idle) {
+    // Capabilities are fixed by the loaded RTL model. With PMU off, zero issue
+    // counts mean unavailable counters, not a stalled kernel. Cache the lookup
+    // rather than searching the parameter map on every simulation step.
+    static const bool has_issue_counters =
+        rtl_parameter_u32("PMU_PIPELINE") || rtl_parameter_u32("PMU_INST_CLASS");
+    if (!has_issue_counters || config.hang_timeout == 0 || step_status.error ||
+        step_status.time_exceed || step_status.idle) {
         last_pmu_progress_time = contextp->time();
         last_pmu_progress_value = 0;
         return;

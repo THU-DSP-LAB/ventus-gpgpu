@@ -77,6 +77,7 @@ clean-git:
 
 check-rtlsim-build-config:
 	python3 -m unittest discover -s sim-verilator/tests -p test_ci_build_configuration.py
+	python3 -m unittest discover -s sim-verilator/tests -p test_pmu_watchdog.py
 
 check-rtlsim-public-abi: check-rtlsim-build-config
 	$(CC) -std=c11 -fsyntax-only -Isim-verilator $(PUBLIC_ABI_COMPILE_TEST)
