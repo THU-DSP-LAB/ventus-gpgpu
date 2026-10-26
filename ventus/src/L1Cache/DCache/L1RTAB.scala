@@ -26,10 +26,12 @@ class WSHRIdxUpdate (implicit p: Parameters) extends DCacheBundle{
   val RTABIdx = UInt(log2Up(NRTABs).W)
 }
 
-class L1RTAB(implicit p: Parameters) extends DCacheModule {
+class L1RTAB(val waitForReplayResult: Boolean = true)(implicit p: Parameters) extends DCacheModule {
   val io = IO(new Bundle {
     //to coreReq_pipe0
     val coreReq_replay      = DecoupledIO(new DCacheCoreReq) // insert core Req to pipe line st0
+    // bits=true: the replay parked again; bits=false: it completed st1.
+    val replayResult = if (waitForReplayResult) Some(Flipped(Valid(Bool()))) else None
     //to coreReq-io
     val RTAB_full           = Output(Bool())
     val RTAB_almost_full    = Output(Bool()) // can't take st0 request if there is st1 request
@@ -76,6 +78,11 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   val ptr_w_2 = Wire(UInt(log2Up(NRTABs).W)) // when need to fill 2 entry in one cycle
   ptr_w_2 := ptr + 1.U//PriorityEncoder(Reverse(Cat(EntryValid.map(!_))) ^ ptr_wOH)
   val ptrEnqValid = Wire(Bool())
+  val replayInFlight = if (waitForReplayResult) RegInit(false.B) else false.B
+  val replayParked = io.replayResult.map(r => r.valid && r.bits).getOrElse(false.B)
+  val enqueueSt1 = io.RTABReq_st1.valid && !replayParked
+  // A retried uncached eviction still belongs to the retained head.
+  io.RTABpushedIdx := Mux(replayParked, ptr_r, ptr_w)
 
   val blockAddrMatchInRTAB = Wire(Vec(NRTABs, Bool()))
   val mshrIdxMatch  =  Wire(Vec(NRTABs, Bool()))
@@ -105,7 +112,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
                                    io.RTABReq_st1.bits.ReqType === WriteMissFillWait),
                                   io.RTABReq_st1.bits.fillAlreadyCommitted, false.B)
   // RTAB push req st1
-  when(io.RTABReq_st1.valid && !io.RTABReq_st0.valid){ //st1 request but no st0 hit
+  when(enqueueSt1 && !io.RTABReq_st0.valid){ //st1 request but no st0 hit
     Req_access(ptr_w) := io.RTABReq_st1.bits.CoreReqData
     Replay_type(ptr_w) := io.RTABReq_st1.bits.ReqType
     wshr_idx(ptr_w) := io.RTABReq_st1.bits.wshrIdx
@@ -113,7 +120,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     EntryValid(ptr_w) := true.B
     fillCommitted(ptr_w) := enqFillCommitted_init   // bfs4096-009: st1 enq 写 ptr_w → 按 RMFW? 初始化(覆盖三入队分支)
     ptr := ptr_w + 1.U
-  }.elsewhen(io.RTABReq_st1.valid && (bAMatch_st0) ){ //st1 request and st0 hit in RTAB entry
+  }.elsewhen(enqueueSt1 && (bAMatch_st0) ){ //st1 request and st0 hit in RTAB entry
     //st1
     Req_access(ptr_w) := io.RTABReq_st1.bits.CoreReqData
     Replay_type(ptr_w) := io.RTABReq_st1.bits.ReqType
@@ -130,7 +137,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     RTABlink_idx(bAMatchIdx) := Cat(1.U,ptr_w_2)
     EntryValid(ptr_w_2) := true.B
     fillCommitted(ptr_w_2) := false.B   // bfs4096-009: ptr_w_2 恒为 st0 hitRTAB link entry，非 RMFW，清 0
-  }.elsewhen(io.RTABReq_st1.valid && (bAMatch_st1) && io.RTABReq_st0.valid){ //st1 request and st0 hit in st1 req
+  }.elsewhen(enqueueSt1 && (bAMatch_st1) && io.RTABReq_st0.valid){ //st1 request and st0 hit in st1 req
     Req_access(ptr_w) := io.RTABReq_st1.bits.CoreReqData
     Replay_type(ptr_w) := io.RTABReq_st1.bits.ReqType
     wshr_idx(ptr_w) := io.RTABReq_st1.bits.wshrIdx
@@ -158,7 +165,9 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   }
 
   //update wshrIdx when Replay type is Ucached hit dirty
-  when(io.pushedWSHRIdxUpdate.valid){
+  when(io.pushedWSHRIdxUpdate.valid &&
+       EntryValid(io.pushedWSHRIdxUpdate.bits.RTABIdx) &&
+       Replay_type(io.pushedWSHRIdxUpdate.bits.RTABIdx) === UCacheHitDirty){
     wshr_idx(io.pushedWSHRIdxUpdate.bits.RTABIdx) := io.pushedWSHRIdxUpdate.bits.wshrIdx
   }
 
@@ -196,11 +205,28 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   val LinkPtr = Wire(UInt(log2Up(NRTABs).W))
   LinkPtr := RTABlink_idx(popPtr)(log2Up(NRTABs)-1,0)
   //val popReqAllClear = !(hit_mshr(popPtr) || hit_wshr(popPtr) || hit_RTAB(popPtr) || mshr_full(popPtr)) && EntryValid(popPtr)
-  when(io.coreReq_replay.fire){
+  // Issuing a replay does not complete its ordering obligation: st1 may
+  // discover another WSHR/MSHR/fill hazard and park it again. Retain the head
+  // and its dependent links until st1 confirms completion.
+  val replayCompleted = io.replayResult.map(r => r.valid && !r.bits)
+    .getOrElse(io.coreReq_replay.fire)
+  if (waitForReplayResult) {
+    when(io.coreReq_replay.fire) { replayInFlight := true.B }
+    when(io.replayResult.get.valid) {
+      assert(replayInFlight, "replay result must own the retained RTAB head")
+      replayInFlight := false.B
+    }
+  }
+  when(replayCompleted){
     ptr_r := ptr_r+1.U
     EntryValid(popPtr) := false.B
     when(RTABlink_idx(popPtr).head(1) === 1.U){
       Replay_type(LinkPtr) := 0.U
+      RTABlink_idx(popPtr) := 0.U
+    }.elsewhen(io.RTABReq_st0.valid && bAMatch_st0 && bAMatchIdx === popPtr){
+      // A new dependent can arrive in the same cycle that st1 completes
+      // this retained head. Its link is not yet visible in RTABlink_idx.
+      Replay_type(ptr_w) := 0.U
       RTABlink_idx(popPtr) := 0.U
     }
 
@@ -212,9 +238,17 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
     when(io.fillCommit_valid && EntryValid(i) &&
          ((Replay_type(i) === ReadMissFillWait) || (Replay_type(i) === WriteMissFillWait)) &&  // btree-003: 写侧并列
          (io.fillCommit_blockAddr === Cat(Req_access(i).tag, Req_access(i).setIdx)) &&
-         !(io.RTABReq_st1.valid && (ptr_w === i.U))){
+         !(enqueueSt1 && (ptr_w === i.U))){
       fillCommitted(i) := true.B
     }
+  }
+  when(replayParked) {
+    assert(io.RTABReq_st1.valid, "parked replay must provide its new wait condition")
+    Req_access(popPtr) := io.RTABReq_st1.bits.CoreReqData
+    Replay_type(popPtr) := io.RTABReq_st1.bits.ReqType
+    wshr_idx(popPtr) := io.RTABReq_st1.bits.wshrIdx
+    mshr_idx(popPtr) := io.RTABReq_st1.bits.mshrIdx
+    fillCommitted(popPtr) := enqFillCommitted_init
   }
   val injectCoreReq_valid = Wire(Bool())
   when(Replay_type(popPtr) === 0.U && EntryValid(popPtr)){
@@ -238,7 +272,7 @@ class L1RTAB(implicit p: Parameters) extends DCacheModule {
   }.otherwise{
     injectCoreReq_valid := false.B
   }
-  io.coreReq_replay.valid := injectCoreReq_valid
+  io.coreReq_replay.valid := injectCoreReq_valid && !replayInFlight
   io.coreReq_replay.bits := Req_access(popPtr)
 
 }

@@ -14,6 +14,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 typedef struct ventus_rtlsim_t ventus_rtlsim_t;
 typedef uint64_t paddr_t;
@@ -42,6 +43,11 @@ typedef struct ventus_kernel_metadata_t {
     uint64_t* buffer_base;         // 各buffer的基址。第一块buffer是给硬件用的metadata
     uint64_t* buffer_size;      // 各buffer的size，以Bytes为单位。实际使用的大小，用于初始化.data
     uint64_t* buffer_allocsize; // 各buffer的size，以Bytes为单位。分配的大小
+    // Driver-private RT spill descriptor, never copied into CSR_KNL/PDS.
+    uint64_t rtSpillPoolBase;
+    uint32_t rtSpillSlotsPerCore;
+    uint32_t rtSpillPerCoreStride;
+    uint32_t rtSpillDispatchEpoch;
 } ventus_kernel_metadata_t;
 
 typedef struct {
@@ -132,6 +138,39 @@ typedef struct {
 } ventus_rtlsim_dcache_pmu_t;
 
 typedef struct {
+    uint64_t traverse_issued;
+    uint64_t traverse_active_lanes;
+    uint64_t completion_count;
+    uint64_t completion_lanes;
+    uint64_t release_issued;
+    uint64_t active_session_cycles;
+    uint64_t command_backpressure_cycles;
+    uint64_t completion_backpressure_cycles;
+    uint64_t release_backpressure_cycles;
+    uint64_t local_sram_read_requests;
+    uint64_t local_sram_write_requests;
+    uint64_t local_sram_read_responses;
+    uint64_t local_sram_backpressure_cycles;
+    uint64_t ray_setup_outputs;
+    uint64_t as_line_acquires;
+    uint64_t as_line_ready;
+    uint64_t as_acquire_backpressure_cycles;
+    uint64_t as_cache_resident_hits;
+    uint64_t as_cache_pending_merges;
+    uint64_t as_cache_misses;
+    uint64_t as_cache_refills;
+    uint64_t as_cache_evictions;
+    uint64_t box4_issued;
+    uint64_t box4_results;
+    uint64_t triangle_issued;
+    uint64_t triangle_results;
+    uint64_t triangle_resolve_issued;
+    uint64_t triangle_resolve_results;
+    uint64_t stack_pushes;
+    uint64_t stack_pops;
+} ventus_rtlsim_rtcore_pmu_t;
+
+typedef struct {
     uint32_t num_sm;
     bool has_dcache;
     const ventus_rtlsim_pipeline_pmu_t *pipeline;
@@ -139,6 +178,10 @@ typedef struct {
     const ventus_rtlsim_dcache_pmu_t *dcache;
 } ventus_rtlsim_pmu_t;
 
+typedef struct {
+    uint32_t num_sm;
+    const ventus_rtlsim_rtcore_pmu_t *rtcore;
+} ventus_rtlsim_rtcore_pmu_view_t;
 typedef enum {
     VENTUS_PMEM_REGION_BUFFER = 0,
     VENTUS_PMEM_REGION_PDS = 1,
@@ -193,6 +236,10 @@ DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
 // Return a read-only view of the latest PMU counters sampled after the most recent step().
 // The pointed-to storage is owned by sim and may change after the next ventus_rtlsim_step().
 DLL_PUBLIC ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim);
+// Optional RTcore PMU extension.  Older and no-cache backends may not export it.
+DLL_PUBLIC ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_get_rtcore_pmu(const ventus_rtlsim_t* sim);
+/** Optional additive diagnostics API; preserves existing snapshot struct ABI. */
+DLL_PUBLIC int ventus_rtlsim_dump_extended_pmu(const ventus_rtlsim_t* sim, FILE* stream);
 
 // Calculate 1 unit-time of simulation.
 // Return the result of this step: ok, error, time_exceed, or idle.

@@ -48,7 +48,10 @@ trait HasL1CacheParameters extends HasRVGParameters{
   def NMshrEntry: Int = 4// replace
   def NMshrSubEntry: Int = 4// replace
   def bABits = TagBits+SetIdxBits
-  def tIBits = WIdBits+NLanes*(BlockOffsetBits+1+BytesOfWord)
+  // DCache completions are keyed by the LSU-private MSHR slot.  This can be
+  // wider than the architectural warp ID when LSU has more entries than warps.
+  def DCacheInstrIdBits = math.max(WIdBits, log2Up(lsu_nMshrEntry))
+  def tIBits = DCacheInstrIdBits+NLanes*(BlockOffsetBits+1+BytesOfWord)
 
   //for addr with full width or just block addr
   def get_tag(addr: UInt) = (addr >> (addr.getWidth-TagBits)).asUInt

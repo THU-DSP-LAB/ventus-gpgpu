@@ -115,6 +115,13 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
   io.bs_radr.bits.set  := s1_req.set
   io.bs_radr.bits.mask := s1_req.mask
 
+  // BankedStore's synchronous read is valid one cycle after admission.
+  // Keep that response until the owning transaction retires; disabled SRAM
+  // reads have no retention contract, and A/D may remain backpressured.
+  val readResponseValid = RegNext(io.bs_radr.fire, false.B)
+  val readResponseData = RegEnable(io.bs_rdat.data, readResponseValid)
+  val readData = Mux(readResponseValid, io.bs_rdat.data, readResponseData)
+
   val about_to_not_busy = ((stateReg === stage_3) && io.a.fire) || ((stateReg === stage_4) && Mux((!s_final_req.hit && (s_final_req.opcode === PutFullData || s_final_req.opcode === PutPartialData)), io.a.fire && io.d.fire, io.d.fire)) || ((stateReg === stage_8) && io.d.fire) ||
     ((stateReg === stage_7) && io.a.fire)
   io.req.ready  := !busy// || about_to_not_busy
@@ -295,7 +302,7 @@ val mshr_wait_reg =RegInit(false.B)
   io.d.bits.source  :=s_final_req.source
   io.d.bits.opcode  :=Mux(s_final_req.opcode===Get,AccessAckData,Mux(s_final_req.last_flush,HintAck,AccessAck))
   io.d.bits.size    := s_final_req.size
-  io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, io.bs_rdat.data,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //Mux(s_final_req.opcode===Get,io.bs_rdat.data,0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况直接返回0
+  io.d.bits.data    :=Mux(s_final_req.opcode===Get,Mux(s_final_req.hit, readData,s_final_req.data),0.U.asTypeOf(io.bs_rdat.data)) //要求应该是读的情况，写的情况直接返回0
   io.d.bits.address      := params.expandAddress(s_final_req.tag,s_final_req.l2cidx, s_final_req.set,s_final_req.offset)
 ////将读出的数据返回给sourceA
   io.d.bits.param := 0.U
@@ -304,7 +311,7 @@ val mshr_wait_reg =RegInit(false.B)
   io.a.valid      :=(stateReg===stage_4 || stateReg===stage_7 || stateReg===stage_3) && ((!s_final_req.hit ||s_final_req.opcode===Hint) && (s_final_req.dirty || s_final_req.opcode===PutFullData ||s_final_req.opcode===PutPartialData))// !s_final_req.hit && (!sourceA_sent) && s_final_req.dirty//(s1_req.opcode===PutFullData ||s1_req.opcode=== PutPartialData)  &&(!sourceA_sent)  //todo for miss kickout dirty cacheline no writethrough , write/read miss kickout dirty ,write allocate
   io.a.bits       := s_final_req
 
-  io.a.bits.data  := Mux((s_final_req.opcode===PutFullData ||s_final_req.opcode=== PutPartialData),s_final_req.data,io.bs_rdat.data) // should be victim data 写miss的数据也经过这个地方转给sourceA
+  io.a.bits.data  := Mux((s_final_req.opcode===PutFullData ||s_final_req.opcode=== PutPartialData),s_final_req.data,readData) // should be victim data 写miss的数据也经过这个地方转给sourceA
   io.a.bits.opcode:= PutFullData
   // srad-006 root-fix: dirty-victim writeback 强制 opcode=PutFullData(上行)却**没 override mask** →
   // 沿用触发它的 refill-Get 的 don't-care mask（0x1111=每 word 仅 byte0）→ 写回 WG49 脏 sign-mask

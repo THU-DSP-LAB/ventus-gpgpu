@@ -58,6 +58,10 @@ class host2CTA_data extends Bundle{
   val host_pds_size_per_wf  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_PDS_MAX+1).W)
   val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_rt_spill_pool_base = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_rt_spill_slots_per_core = UInt(32.W)
+  val host_rt_spill_per_core_stride = UInt(32.W)
+  val host_rt_spill_dispatch_epoch = UInt(32.W)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
   val host_kernel_dim       = UInt(2.W) // how many dimension does this kernel have
   val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
@@ -73,8 +77,28 @@ class CTAinterface extends Module{
     val warp2CTA = Vec(NUMBER_CU,Flipped(DecoupledIO(new CTArspData)))
   })
   val cta_sche = Module(new cta_scheduler_top)
+  // Driver serialises dispatches using this pool; keep the descriptor stable
+  // across all WG admissions until the next dispatch epoch.
+  val rtSpillPool = RegInit(0.U.asTypeOf(new rtcore.RtSpillPoolDescriptor))
+  when(io.host2CTA.fire) {
+    rtSpillPool.spillPoolBase := io.host2CTA.bits.host_rt_spill_pool_base
+    rtSpillPool.slotsPerCore := io.host2CTA.bits.host_rt_spill_slots_per_core
+    rtSpillPool.perCoreStride := io.host2CTA.bits.host_rt_spill_per_core_stride
+    rtSpillPool.dispatchEpoch := io.host2CTA.bits.host_rt_spill_dispatch_epoch
+  }
   cta_sche.io.host_wg_new.valid <> io.host2CTA.valid
   cta_sche.io.host_wg_new.ready <> io.host2CTA.ready
+  // Register-file addressing discards the bank bits of the allocation base.
+  // Reject unpadded host allocations before they can alias another WG.
+  when(io.host2CTA.fire) {
+    val req = io.host2CTA.bits
+    assert(req.host_sgpr_size_per_wf % num_bank.U === 0.U, "SGPR stride must be bank aligned")
+    assert(req.host_vgpr_size_per_wf % num_bank.U === 0.U, "VGPR stride must be bank aligned")
+    assert(req.host_sgpr_size_total === req.host_sgpr_size_per_wf * req.host_num_wf,
+      "SGPR total must equal padded stride times warp count")
+    assert(req.host_vgpr_size_total === req.host_vgpr_size_per_wf * req.host_num_wf,
+      "VGPR total must equal padded stride times warp count")
+  }
   cta_sche.io.host_wg_new.bits.wg_id              := io.host2CTA.bits.host_wg_id
   cta_sche.io.host_wg_new.bits.num_wf             := io.host2CTA.bits.host_num_wf
   cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wf_size
@@ -109,6 +133,7 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_done.ready := io.CTA2host.ready
 
   for (i <- 0 until NUMBER_CU){
+    io.CTA2warp(i).bits.rtSpillPool := rtSpillPool
     io.CTA2warp(i).valid := cta_sche.io.cu_wf_new(i).valid
     io.CTA2warp(i).bits.dispatch2cu_wg_wf_count := cta_sche.io.cu_wf_new(i).bits.num_wf
     io.CTA2warp(i).bits.dispatch2cu_wf_size_dispatch   := cta_sche.io.cu_wf_new(i).bits.num_thread_per_wf
@@ -358,6 +383,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   for (i <- 0 until NSms) {
     io.pmu.pipeline(i) := sm_wrapper(i).pipeline_perf.getOrElse(0.U.asTypeOf(new PipelinePerfCounters))
     io.pmu.instClass(i) := sm_wrapper(i).inst_class_perf.getOrElse(0.U.asTypeOf(new InstClassPerfCounters))
+    io.pmu.rtcore(i) := sm_wrapper(i).rtcore_perf
     io.pmu.dcache.get(i) := sm_wrapper(i).dcache_perf
   }
 
@@ -395,6 +421,13 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   val l1dTotalMiss = l1dReadMiss + l1dWriteMiss
   val l1dTotalHit = l1dTotalReq - l1dTotalMiss
 
+  if (PMU_DETAILED) {
+    for (i <- 0 until NL2Cache) {
+      io.pmu.l2.get(i) := l2cache(i).observation.get
+      io.pmu.l2.get(i).enabled := sm_wrapper(0).perfEnable
+      io.pmu.l2.get(i).clear := sm_wrapper(0).perfReset || reset.asBool
+    }
+  }
   val pmuActiveCycles = sumPipelinePerfCounter(_.activeCycles)
   val pmuTotalScalarIssued = sumPipelinePerfCounter(_.totalScalarIssued)
   val pmuTotalVectorIssued = sumPipelinePerfCounter(_.totalVectorIssued)
@@ -606,7 +639,7 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     printf(p"[TESTCASE TOTAL] [L1D PERF] memRspPipe decoupled cyc  : ${summaryL1dMemRspPipeDecoupled}\n")
   }
 
-  if (SPIKE_OUTPUT) {
+  if (L1C_TRACE) {
     for(i <- 0 until NL2Cache){
       val port = l2cache(i).in_a
       val cache_id: UInt = port.bits.source(l1cache_sourceBits)
@@ -637,6 +670,7 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
     val dcache_perf = Output(new DCachePerfCounters)
     val pipeline_perf = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
     val inst_class_perf = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
+    val rtcore_perf = Output(new RtCorePerfCounters)
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
     val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
     val l2tlbReq = if(MMU_ENABLED) Some(Vec(num_cache_in_sm, DecoupledIO(new Bundle{
@@ -663,6 +697,7 @@ class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) ext
   io.inst_cnt2.foreach( _ := pipe.io.inst_cnt2.getOrElse(0.U))
   io.pipeline_perf.foreach(_ := pipe.io.perf_pipeline.getOrElse(0.U.asTypeOf(new PipelinePerfCounters)))
   io.inst_class_perf.foreach(_ := pipe.io.perf_inst_class.getOrElse(0.U.asTypeOf(new InstClassPerfCounters)))
+  io.rtcore_perf := pipe.io.perf_rtcore
   val cnt=Counter(10)
   when(cnt.value<5.U){cnt.inc()}
   when(cnt.value===5.U){pipe.io.pc_reset:=false.B}

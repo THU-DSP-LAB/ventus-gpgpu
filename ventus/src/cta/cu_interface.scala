@@ -81,6 +81,10 @@ class cu_interface extends Module {
   val splitter_num_thread = Reg(UInt(log2Ceil(NUM_THREAD_PER_WG_MAX+1).W))  // number of active thread left in this WG
   fifo.io.deq.ready := (splitter_cnt === 1.U) && wf_sent
   assert(splitter_cnt === 0.U || fifo.io.deq.valid)
+  when(splitter_load_new) {
+    assert(fifo.io.deq.bits.start_pc =/= 0.U,
+      "CTA splitter received a workgroup with an invalid start PC")
+  }
   if(DEBUG) { // It's required that since fifo.deq.valid, fifo.deq will not change until fire
     val fifo_deq = Reg(fifo.io.deq.bits.cloneType)
     val fifo_deq_no_data = RegInit(true.B)
@@ -245,6 +249,20 @@ class cu_interface extends Module {
   ))
   val pds_bytes_per_wg = fifo.io.deq.bits.num_pds_per_wf * fifo.io.deq.bits.num_wf
   val wg_slot_linear = fifo.io.deq.bits.cu_id * NUM_WG_SLOT.U + fifo.io.deq.bits.wg_slot_id
+  // Compact full-app witness for the private-memory slot mapping.  This is
+  // deliberately paired with RTCORE_TRACE rather than the much noisier LSU
+  // PDS transaction trace: one line per resident workgroup is enough to
+  // verify that RTL CSR_PDS and the GVM sidecar agree on slot_linear.
+  if (sys.env.get("VENTUS_RTCORE_TRACE").contains("1")) {
+    when(splitter_load_new) {
+      printf(p"[RTCORE trace] dispatch sm=${Decimal(fifo.io.deq.bits.cu_id)}" +
+        p" wg=${Decimal(fifo.io.deq.bits.wg_id)} slot=${Decimal(fifo.io.deq.bits.wg_slot_id)}" +
+        p" slot_linear=${Decimal(wg_slot_linear)}" +
+        p" pds=0x${Hexadecimal(fifo.io.deq.bits.pds_base + wg_slot_linear * pds_bytes_per_wg)}" +
+        p" csr_knl=0x${Hexadecimal(fifo.io.deq.bits.csr_kernel)}" +
+        p" pds_wg_bytes=0x${Hexadecimal(pds_bytes_per_wg)}\n")
+    }
+  }
   splitter_pds_addr := MuxCase(splitter_pds_addr, Seq(
     // PDS pool is organized by resident WG slot: slot_linear = cu_id * NUM_WG_SLOT + wg_slot_id.
     splitter_load_new -> (fifo.io.deq.bits.pds_base + wg_slot_linear * pds_bytes_per_wg),
@@ -259,6 +277,12 @@ class cu_interface extends Module {
 
   for(i <- 0 until NUM_CU) {
     io.cu_wf_new(i).valid := (splitter_cnt =/= 0.U) && threadIdxL_ctrl_ok && threadIdxG_ctrl_ok && (fifo.io.deq.bits.cu_id === i.U)
+    when(io.cu_wf_new(i).fire) {
+      assert(splitter_sgpr_addr % top.parameters.num_bank.U === 0.U,
+        "SGPR allocation base must be bank aligned")
+      assert(splitter_vgpr_addr % top.parameters.num_bank.U === 0.U,
+        "VGPR allocation base must be bank aligned")
+    }
     io.cu_wf_new(i).bits.viewAsSupertype(new ctainfo_host_to_cu {}) := fifo.io.deq.bits
     io.cu_wf_new(i).bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {}) := fifo.io.deq.bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {})
     io.cu_wf_new(i).bits.num_thread_per_wf := Mux(splitter_num_thread > fifo.io.deq.bits.num_thread_per_wf, fifo.io.deq.bits.num_thread_per_wf, splitter_num_thread)

@@ -73,9 +73,10 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   // The MSHR class's `InstrIdBits` parameter (formerly `WIdBits` in V1 cache era) sets
   // the width of MSHRmissReq/RspOut.instrId. V2 carries an MSHR index in this field, not
   // a warp id; see L1MSHR.scala and bugs/bfs4096-003/phase_4_report.md. Pass
-  // max(WIdBits, log2Up(NMshrEntry)) so NMshrEntry can exceed num_warp.
-  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(WIdBits, log2Up(NMshrEntry)), NMshrEntry, NMshrSubEntry, asidLen))
-  val SMshrAccess = Module(new SpecialMSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(WIdBits, log2Up(NMshrEntry)), NMshrEntry, asidLen))
+  // max(DCacheInstrIdBits, log2Up(NMshrEntry)) so the LSU-private MSHR and
+  // DCache MSHR may each exceed num_warp without truncating a completion tag.
+  val MshrAccess = Module(new MSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(DCacheInstrIdBits, log2Up(NMshrEntry)), NMshrEntry, NMshrSubEntry, asidLen))
+  val SMshrAccess = Module(new SpecialMSHR(bABits = bABits, tIWidth = tIBits, InstrIdBits = math.max(DCacheInstrIdBits, log2Up(NMshrEntry)), NMshrEntry, asidLen))
   val DataAccesses = Seq.tabulate(BlockWords) { i =>
     Module(new SRAMTemplate(
       gen=UInt(8.W),
@@ -135,10 +136,10 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   val perfBankEn = Module(new getDataAccessBankEn(NBank = BlockWords, NLane = NLanes))
   val replaceReadResp = RegNext(memRspPipe.io.dAReplace_rReq_valid, false.B)
   val replaceDataValid = RegInit(false.B)
-  val replaceDataReg = Reg(Vec(BlockWords, UInt(WordLength.W)))
-  val replaceAddrReg = Reg(UInt(WordLength.W))
+  val replaceDataReg = RegInit(VecInit(Seq.fill(BlockWords)(0.U(WordLength.W))))
+  val replaceAddrReg = RegInit(0.U(WordLength.W))
   // bfs4096-001 partial-write clobber fix: 与 data / addr 一起 hold victim 的字节级 dirty mask。
-  val replaceMaskReg = Reg(UInt((BlockWords * BytesOfWord).W))
+  val replaceMaskReg = RegInit(0.U((BlockWords * BytesOfWord).W))
   // L1TagAccess.io.{a_addrReplacement_st1, replace_dirty_mask_st1, asidReplacement_st1}
   // 后缀虽是 _st1 实为 SRAM r.resp.data 直出 wire，与 replaceReadResp 同步在 cycle N+1
   // 出值，本 when 块直接抓即可——若再 RegNext 等于退到 cycle N（SRAM resp 未出，
@@ -242,6 +243,7 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   TagAccess.io.probeRead.bits         := coreReqPipe.io.Probe_tA
   TagAccess.io.probeRead.valid        := st0_fire
   ReplayTable.io.RTABReq_st0     <> coreReqPipe.io.Req_st0_RTAB
+  ReplayTable.io.replayResult.get <> coreReqPipe.io.replayResult
   TagAccess.io.invalidateAll     := coreReqPipe.io.invalidate_tA
   TagAccess.io.flushChoosen.get  := coreReqPipe.io.flushDirty_tA
   // lud-001 v6 Path A (改动 3b): flush PutPart fire + clear identity 连线 CoreReqPipe → L1TagAccess
@@ -367,7 +369,7 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   val coreRsp_st2_valid_from_memReq = Wire(Bool())
   val waitTLB = if(MMU_ENABLED) Some(RegInit(0.U(2.W))) else None
   val waitTLBnext = if(MMU_ENABLED) Some(Wire(UInt(2.W))) else None
-  val memReq_st3 = Reg(new DCacheMemReq)
+  val memReq_st3 = RegInit(0.U.asTypeOf(new DCacheMemReq))
   val memReq_st3_ready_tlb = if(MMU_ENABLED) Some(Wire(Bool())) else None
   val memReq_st3_valid_tlb = if(MMU_ENABLED) Some(Wire(Bool())) else None
 
@@ -375,13 +377,13 @@ class DataCachev2(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
   // memReq_st3_addr: 最终真正发到总线上的地址。
   // 在开启 TLB 时，主体字段可先锁存，物理地址要等 TLB 返回后再写入该寄存器；
   // 在不开 TLB 时，它与当前拍锁存到 memReq_st3.a_addr 的值保持一致，但仍单独保留以统一两种路径。
-  val memReq_st3_addr = if(MMU_ENABLED) Some(Reg(UInt(paLen.W))) else Some(Reg(UInt(vaLen.W)))
+  val memReq_st3_addr = if(MMU_ENABLED) Some(RegInit(0.U(paLen.W))) else Some(RegInit(0.U(vaLen.W)))
   // memReq_st3_source: 表示与 memReq_st3 / memReq_st3_addr 对应的“同一条 staged memReq”的 source。
   // 在不开 TLB 时，如果继续把 source 放在 memReq_st3.a_source 中，并且同样只在 memReq_Q.io.deq.fire 时锁存，
   // 功能上也可以等价；这里独立成寄存器，是为了明确它和 a_addr 一样属于 st3 已锁存请求，
   // 避免从 memReq_Q.io.deq.bits 这个 live queue head 直接读取 source，造成地址 / source 串线。
   // Keep TL source aligned with the separately staged request address.
-  val memReq_st3_source = Reg(UInt(io.memReq.get.bits.a_source.getWidth.W))
+  val memReq_st3_source = RegInit(0.U(io.memReq.get.bits.a_source.getWidth.W))
   val a_op_st3 = memReq_Q.io.deq.bits.a_opcode//memReq_Q.io.deq.bits.a_opcode
   val a_op_st3_isFlush = a_op_st3 === 5.U
   val memReqIsWrite_st3 = (a_op_st3 === TLAOp_PutFull) || ((a_op_st3 === TLAOp_PutPart) && memReq_Q.io.deq.bits.a_param === 0.U)

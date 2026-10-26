@@ -60,6 +60,7 @@ VLIB_DIR_BUILD = build/libVentusGVM
 VLIB_GEN_DIR = build/generated/gvm
 VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
 VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
+VLIB_RTL_PARAMS_HPP = $(VLIB_GEN_DIR)/rtl_parameters.hpp
 VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug
 VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release
 ifeq ($(RELEASE),1)
@@ -136,6 +137,7 @@ endif
 VLIB_CFLAGS += -fPIC
 VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
+VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_CXXFLAGS += -DENABLE_GVM=1
 #VLIB_CXXFLAGS += -fsanitize=address,undefined
@@ -171,17 +173,17 @@ $(VLIB_SRC_V) $(VLIB_PARAMS_JSON) &: $(VLIB_SRC_SCALA)
 	mv $(VLIB_SRC_V_DIR)/GPGPU_top_nocache.sv $(VLIB_SRC_V)
 	find $(VLIB_SRC_V_DIR) -name "*.sv" -type f -exec sed -i '1i\`define PRINTF_COND 1' {} \;
 
-$(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
+$(VLIB_RTL_PARAMS_CPP) $(VLIB_RTL_PARAMS_HPP) &: $(VLIB_PARAMS_JSON) json2cpp.py
 	mkdir -p $(dir $@)
-	python3 json2cpp.py $< $@
+	python3 json2cpp.py $< $(VLIB_RTL_PARAMS_CPP) $(VLIB_RTL_PARAMS_HPP)
 
 verilog: $(VLIB_SRC_V)
 
-verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX)
+verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_RTL_PARAMS_HPP) ventus_rtlsim.h ../sim-verilator/ventus_rtlsim.h
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
-$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
+$(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX) $(VLIB_RTL_PARAMS_HPP) ventus_rtlsim.h ../sim-verilator/ventus_rtlsim.h
 	@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
@@ -208,7 +210,7 @@ install: $(VLIB_TARGET)
 	install -d $(PREFIX)/lib
 	install -m 644 $(VLIB_TARGET) $(PREFIX)/lib/lib$(VLIB_TARGET_NAME)-nocache.so
 	install -d $(PREFIX)/include
-	install -m 644 ventus_rtlsim.h $(PREFIX)/include/
+	install -m 644 ../sim-verilator/ventus_rtlsim.h $(PREFIX)/include/
 
 clean-lib:
 	-rm -f $(VLIB_DIR_BUILDOBJ_DEBUG)/*.a $(VLIB_DIR_BUILDOBJ_DEBUG)/*.o $(VLIB_DIR_BUILDOBJ_DEBUG)/*.so

@@ -118,7 +118,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   // bypass for dual-port SRAMs
   require(!bypassWrite || bypassWrite && !singlePort)
   def need_bypass(wen: Bool, waddr: UInt, wmask: UInt, ren: Bool, raddr: UInt) : UInt = {
-    val need_check = RegNext(ren && wen)
+    val need_check = RegNext(ren && wen, false.B)
     val waddr_reg = RegNext(waddr)
     val raddr_reg = RegNext(raddr)
     require(wmask.getWidth == way)
@@ -136,7 +136,7 @@ class SRAMTemplate[T <: Data](gen: T, set: Int, way: Int = 1,
   }
 
   // hold read data for SRAMs
-  val rdata = (if (holdRead) HoldUnless(mem_rdata, RegNext(realRen))
+  val rdata = (if (holdRead) HoldUnless(mem_rdata, RegNext(realRen, false.B))
               else mem_rdata).map(_.asTypeOf(gen))
 
   io.r.resp.data := VecInit(rdata)
@@ -161,6 +161,6 @@ class SRAMTemplateWithArbiter[T <: Data](nRead: Int, gen: T, set: Int, way: Int 
 
   // latch read results
   io.r.map{ case r => {
-    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire))
+    r.resp.data := HoldUnless(ram.io.r.resp.data, RegNext(r.req.fire, false.B))
   }}
 }

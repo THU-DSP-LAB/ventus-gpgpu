@@ -338,7 +338,9 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
         // Dcache rsp
         //
         dut->io_dcache_rsp_0_valid = false;
+#if VENTUS_RTL_NUM_SM > 1
         dut->io_dcache_rsp_1_valid = false;
+#endif
         if (!dcache_queue.empty()) {
             auto& rsp = dcache_queue.front();
             if (rsp->sm_id == 0) {
@@ -346,11 +348,13 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
                 if (dut->io_dcache_rsp_0_ready && dut->io_dcache_rsp_0_valid) {
                     dcache_queue.pop();
                 }
+#if VENTUS_RTL_NUM_SM > 1
             } else if (rsp->sm_id == 1) {
                 dcache_rsp_sm1(dut, rsp);
                 if (dut->io_dcache_rsp_1_ready && dut->io_dcache_rsp_1_valid) {
                     dcache_queue.pop();
                 }
+#endif
             } else {
                 SPDLOG_LOGGER_ERROR(logger, "Unknown sm_id {} in dcache_response", rsp->sm_id);
                 sim_got_error = true;
@@ -361,7 +365,9 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
         // Icache rsp
         //
         dut->io_icache_0_rsp_valid = false;
+#if VENTUS_RTL_NUM_SM > 1
         dut->io_icache_1_rsp_valid = false;
+#endif
         if (!icache_queue.empty()) {
             auto& rsp = icache_queue.front();
             if (rsp->sm_id == 0) {
@@ -369,11 +375,13 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
                 if (dut->io_icache_0_rsp_ready && dut->io_icache_0_rsp_valid) {
                     icache_queue.pop();
                 }
+#if VENTUS_RTL_NUM_SM > 1
             } else if (rsp->sm_id == 1) {
                 icache_rsp_sm1(dut, rsp);
                 if (dut->io_icache_1_rsp_ready && dut->io_icache_1_rsp_valid) {
                     icache_queue.pop();
                 }
+#endif
             } else {
                 SPDLOG_LOGGER_ERROR(logger, "Unknown sm_id {} in icache_response", rsp->sm_id);
                 sim_got_error = true;
@@ -557,13 +565,21 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
 
 void ventus_rtlsim_t::sample_pmu_snapshot() {
     COPY_PIPELINE_PMU(0);
-    COPY_PIPELINE_PMU(1);
     COPY_INST_CLASS_PMU(0);
+#if VENTUS_RTL_NUM_SM > 1
+    COPY_PIPELINE_PMU(1);
     COPY_INST_CLASS_PMU(1);
+#endif
 }
 
 void ventus_rtlsim_t::update_pmu_watchdog() {
-    if (config.hang_timeout == 0 || step_status.error || step_status.time_exceed || step_status.idle) {
+    // Capabilities are fixed by the loaded RTL model. With PMU off, zero issue
+    // counts mean unavailable counters, not a stalled kernel. Cache the lookup
+    // rather than searching the parameter map on every simulation step.
+    static const bool has_issue_counters =
+        rtl_parameter_u32("PMU_PIPELINE") || rtl_parameter_u32("PMU_INST_CLASS");
+    if (!has_issue_counters || config.hang_timeout == 0 || step_status.error ||
+        step_status.time_exceed || step_status.idle) {
         last_pmu_progress_time = contextp->time();
         last_pmu_progress_value = 0;
         return;
@@ -838,6 +854,7 @@ std::vector<std::unique_ptr<icache_reqrsp_t>> get_icache_req(Vdut* dut) {
         req->addr = dut->io_icache_0_req_bits_a_addr;
         reqs.push_back(std::move(req));
     }
+#if VENTUS_RTL_NUM_SM > 1
     dut->io_icache_1_req_ready = true;
     if (dut->io_icache_1_req_valid) {
         auto req = std::make_unique<icache_reqrsp_t>();
@@ -846,6 +863,7 @@ std::vector<std::unique_ptr<icache_reqrsp_t>> get_icache_req(Vdut* dut) {
         req->addr = dut->io_icache_1_req_bits_a_addr;
         reqs.push_back(std::move(req));
     }
+#endif
     return reqs;
 }
 
@@ -890,7 +908,9 @@ std::vector<std::unique_ptr<icache_reqrsp_t>> get_icache_req(Vdut* dut) {
         dut->io_icache_##sm_id_##_rsp_bits_d_data_31 = rsp->data[31];                                                  \
     } while (0)
 void icache_rsp_sm0(Vdut* dut, const std::unique_ptr<icache_reqrsp_t>& rsp) { SET_ICACHE_RSP_SM(0, dut, rsp); }
+#if VENTUS_RTL_NUM_SM > 1
 void icache_rsp_sm1(Vdut* dut, const std::unique_ptr<icache_reqrsp_t>& rsp) { SET_ICACHE_RSP_SM(1, dut, rsp); }
+#endif
 
 // clang-format off
 std::vector<std::unique_ptr<dcache_reqrsp_t>> get_dcache_req(Vdut* dut) {
@@ -951,7 +971,9 @@ do { \
     reqs.push_back(std::move(req)); \
 } while(0)
     GET_DCACHE_REQ_SM(0);
+#if VENTUS_RTL_NUM_SM > 1
     GET_DCACHE_REQ_SM(1);
+#endif
     return reqs;
 #undef GET_DCACHE_REQ_SM
 #undef GET_DCACHE_REQ_THREAD
@@ -1008,8 +1030,10 @@ void dcache_rsp_sm0(Vdut* dut, const std::unique_ptr<dcache_reqrsp_t>& rsp) {
     assert(rsp->sm_id == 0);
     SET_DCACHE_RSP_SM(0);
 }
+#if VENTUS_RTL_NUM_SM > 1
 void dcache_rsp_sm1(Vdut* dut, const std::unique_ptr<dcache_reqrsp_t>& rsp) {
     assert(dut && rsp);
     assert(rsp->sm_id == 1);
     SET_DCACHE_RSP_SM(1);
 }
+#endif

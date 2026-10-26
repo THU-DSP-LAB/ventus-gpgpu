@@ -417,8 +417,9 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
     pmu_snapshot.pipeline.resize(pmu_num_sm);
     pmu_snapshot.inst_class.resize(pmu_num_sm);
     pmu_snapshot.dcache.resize(pmu_num_sm);
+    pmu_snapshot.rtcore.resize(pmu_num_sm);
 
-    // waveform traces (FST)
+    // Waveform traces are available only in a model built with VLIB_TRACE=1.
 #if VM_TRACE
     if (config.waveform.enable) {
         tfp = new VerilatedFstC;
@@ -440,6 +441,8 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_, bool in
     }
 #else
     tfp = nullptr;
+    if (config.waveform.enable)
+        logger->warn("waveform requested from a no-trace RTL model; rebuild with VLIB_TRACE=1");
 #endif
 
     // push into global instances, prepare cleanup at exit
@@ -470,6 +473,9 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     //
     // clock step
     //
+    // Observe settled low-phase ready/valid BEFORE the rising-edge evaluation.
+    // Sampling after eval can observe the next transaction instead of the one consumed.
+    if (dut->clock == 0) sample_detailed_pmu();
     contextp->timeInc(HALF_CYCLE_TIME);
     dut->clock = !dut->clock;
 
@@ -616,8 +622,18 @@ ventus_rtlsim_pmu_t ventus_rtlsim_t::pmu_view() const {
     };
 }
 
+ventus_rtlsim_rtcore_pmu_view_t ventus_rtlsim_t::rtcore_pmu_view() const {
+    return {pmu_snapshot.num_sm, pmu_snapshot.rtcore.data()};
+}
+
 void ventus_rtlsim_t::update_pmu_watchdog() {
-    if (config.hang_timeout == 0 || step_status.error || step_status.time_exceed || step_status.idle) {
+    // Capabilities are fixed by the loaded RTL model. With PMU off, zero issue
+    // counts mean unavailable counters, not a stalled kernel. Cache the lookup
+    // rather than searching the parameter map on every simulation step.
+    static const bool has_issue_counters =
+        rtl_parameter_u32("PMU_PIPELINE") || rtl_parameter_u32("PMU_INST_CLASS");
+    if (!has_issue_counters || config.hang_timeout == 0 || step_status.error ||
+        step_status.time_exceed || step_status.idle) {
         last_pmu_progress_time = contextp->time();
         last_pmu_progress_value = 0;
         return;
@@ -652,6 +668,30 @@ void ventus_rtlsim_t::update_pmu_watchdog() {
         "l1d_req={}",
         idle_time, contextp->time(), issued, mem_issued, dcache_req
     );
+    for (uint32_t i = 0; i < pmu_snapshot.num_sm; i++) {
+        const auto& pipe = pmu_snapshot.pipeline[i];
+        const auto& inst = pmu_snapshot.inst_class[i];
+        const auto& l1d = pmu_snapshot.dcache[i];
+        const auto& rt = pmu_snapshot.rtcore[i];
+        logger->critical(
+            "PMU watchdog SM{}: pipe={{active={}, scalar={}, vector={}, data_dep_stall={}, barrier_stall={}, "
+            "frontend_stall={}, lsu_backpressure={}, ibuffer_full={}}} "
+            "inst={{compute={}, mem={}, ctrl={}}} "
+            "l1d={{req={}, read_miss={}, write_miss={}, primary_full={}, secondary_full={}, mshr_full_cycles={}, "
+            "rtab_replays={}, bank_conflict_cycles={}}} "
+            "rt={{traverse={}/{}, completion={}/{}, release={}, active_session_cycles={}, command_backpressure={}}}",
+            i,
+            pipe.active_cycles, pipe.total_scalar_issued, pipe.total_vector_issued,
+            pipe.data_dep_stall_cycles, pipe.barrier_stall_cycles, pipe.frontend_stall_cycles,
+            pipe.lsu_backpressure_cycles, pipe.ibuffer_full_cycles,
+            inst.compute_issued, inst.mem_issued, inst.ctrl_issued,
+            l1d.total_req, l1d.read_miss, l1d.write_miss, l1d.read_primary_full_miss,
+            l1d.read_secondary_full_miss, l1d.mshr_full_cycles, l1d.rtab_replays,
+            l1d.bank_conflict_cycles,
+            rt.traverse_issued, rt.traverse_active_lanes, rt.completion_count, rt.completion_lanes,
+            rt.release_issued, rt.active_session_cycles, rt.command_backpressure_cycles
+        );
+    }
 }
 
 int ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
@@ -711,8 +751,10 @@ int ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
 
     delete dut;
     delete cta;
+    #if VM_TRACE
     if (tfp)
         delete tfp;
+    #endif
     dut = nullptr;
     cta = nullptr;
     tfp = nullptr;

@@ -206,7 +206,7 @@ $(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
 
 $(VLIB_PMU_SNAPSHOT_INC): $(VLIB_PARAMS_JSON) gen_pmu_snapshot_inc.py
 	mkdir -p $(dir $@)
-	python3 gen_pmu_snapshot_inc.py $< $@
+	python3 gen_pmu_snapshot_inc.py $< $@ $(if $(VENTUS_PMU_MODE),$(VENTUS_PMU_MODE),off)
 
 $(VLIB_MODEL_IDENTITY_CPP) $(VLIB_MODEL_IDENTITY_JSON) &: $(VLIB_SRC_V) $(VLIB_MODEL_INPUT_FILES)
 	mkdir -p $(VLIB_MODEL_IDENTITY_DIR)

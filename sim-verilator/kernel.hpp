@@ -48,6 +48,10 @@ public:
     uint32_t get_csr_baseaddr() const { return m_metadata.metaDataBaseAddr; }
     uint32_t get_gds_baseaddr() const { return 0; } // TODO
     uint32_t get_pds_baseaddr() const { return m_metadata.pdsBaseAddr; }
+    uint32_t get_rt_spill_pool_base() const { return m_metadata.rtSpillPoolBase; }
+    uint32_t get_rt_spill_slots_per_core() const { return m_metadata.rtSpillSlotsPerCore; }
+    uint32_t get_rt_spill_per_core_stride() const { return m_metadata.rtSpillPerCoreStride; }
+    uint32_t get_rt_spill_dispatch_epoch() const { return m_metadata.rtSpillDispatchEpoch; }
     uint32_t get_num_pds_per_thread() const { return m_metadata.pdsSize; }
     dim3_t get_num_thread_local_3d() const {
         return { static_cast<uint32_t>(m_metadata.num_thread_local[0]),

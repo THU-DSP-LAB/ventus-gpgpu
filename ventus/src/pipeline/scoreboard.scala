@@ -15,6 +15,16 @@ import chisel3.util.{Decoupled, DecoupledIO, MuxLookup, Queue, UIntToOH}
 import top.parameters._
 import IDecode._
 
+object RtOp {
+  val width = 3
+  val none = 0.U(width.W)
+  val traverse = 1.U(width.W)
+  val release = 2.U(width.W)
+  val localLoad = 3.U(width.W)
+  val localStore = 4.U(width.W)
+  val groupTraverse = 5.U(width.W)
+}
+
 
 class CtrlSigs extends Bundle {
   val inst = UInt(32.W)
@@ -40,6 +50,10 @@ class CtrlSigs extends Bundle {
   val mem = Bool()
   val mul = Bool()
   val tc = Bool()
+  // RT control operations use the custom instruction opcode but are neither
+  // ALU nor LSU operations.  Keep their semantic opcode explicit rather than
+  // overloading a legacy custom signal.
+  val rtOp = UInt(RtOp.width.W)
   val disable_mask = Bool()
   val custom_signal_0 = Bool()
   val mem_cmd = UInt(2.W)
@@ -68,6 +82,17 @@ class scoreboardIO extends Bundle{
   val if_ctrl=Input(new CtrlSigs())
   val wb_v_ctrl=Input(new WriteVecCtrl())
   val wb_x_ctrl=Input(new WriteScalarCtrl())
+  // Diagnostic decomposition of delay.  Functional users need only `delay`,
+  // but exposing the terms lets the pipeline report a precise deadlock cause.
+  val stall_read1 = Output(Bool())
+  val stall_read2 = Output(Bool())
+  val stall_read3 = Output(Bool())
+  val stall_mask = Output(Bool())
+  val stall_write = Output(Bool())
+  val stall_branch = Output(Bool())
+  val stall_fence = Output(Bool())
+  val stall_opcol_v = Output(Bool())
+  val stall_opcol_x = Output(Bool())
   val if_fire=Input(Bool())
   val br_ctrl=Input(Bool())
   val fence_end=Input(Bool())
@@ -105,6 +130,14 @@ class Scoreboard extends Module{
   val OpColRegV=new ScoreboardUtil(1)
   val OpColRegX=new ScoreboardUtil(1)
   val fenceReg=new ScoreboardUtil(1) // after LSU rebuild, this could be cancelled.
+  if (sys.env.get("VENTUS_SCOREBOARD_TRACE").contains("1")) {
+    when(io.if_fire && io.if_ctrl.wxd && io.if_ctrl.reg_idxw === 13.U) {
+      printf(p"[SCOREBOARD a3] set pc=0x${Hexadecimal(io.if_ctrl.pc)} inst=0x${Hexadecimal(io.if_ctrl.inst)}\n")
+    }
+    when(io.wb_x_fire && io.wb_x_ctrl.wxd && io.wb_x_ctrl.reg_idxw === 13.U) {
+      printf(p"[SCOREBOARD a3] clear warp=${Decimal(io.wb_x_ctrl.warp_id)}\n")
+    }
+  }
   // TODO: CSR operation may cause unexpected situation.
   vectorReg.set(io.if_fire & io.if_ctrl.wvd,io.if_ctrl.reg_idxw)
   vectorReg.clear(io.wb_v_fire & io.wb_v_ctrl.wvd,io.wb_v_ctrl.reg_idxw)
@@ -131,6 +164,15 @@ class Scoreboard extends Module{
   val read_op_colV=OpColRegV.read(0.U)
   val read_op_colX=OpColRegX.read(0.U)
   val readf=io.ibuffer_if_ctrl.mem & fenceReg.read(0.U)
+  io.stall_read1 := read1
+  io.stall_read2 := read2
+  io.stall_read3 := read3
+  io.stall_mask := readm
+  io.stall_write := readw
+  io.stall_branch := readb
+  io.stall_fence := readf
+  io.stall_opcol_v := read_op_colV
+  io.stall_opcol_x := read_op_colX
   dontTouch(read1)
   dontTouch(read2)
   dontTouch(read3)
