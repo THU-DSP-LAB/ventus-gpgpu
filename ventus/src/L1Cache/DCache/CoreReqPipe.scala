@@ -100,6 +100,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // classification can change across a fill-release edge, after admission
     // has already allowed an st0 hit to consume that slot.
     val Req_st1_RTAB_reserve = Output(Bool())
+    val replayResult = Valid(Bool())
     val CheckReq_WSHR       = Output(new WSHRreq)
     // {S}MSHRmissReq.instrId width tracks both LSU and DCache MSHR spaces.
     // NMshrEntry > num_warp; see bugs/bfs4096-003/phase_4_report.md.
@@ -750,7 +751,7 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
     // an in-flight st1 request that was admitted past the DCachev2 allowIn1
     // gate before RTAB filled up could overwrite a live entry and bump ptr,
     // breaking the strict-FIFO invariant ptr_w == ptr_r at empty.
-    when(io.RTAB_full){
+    when(io.RTAB_full && !fromReplay_st1){
       st1_ready := false.B
     }.elsewhen(ReplayType === UCacheHitDirty){ // when hit in UCache and dirty, will write back to memory
       st1_ready := io.MissReq_Mem.ready && (evictstateReg === evictrsp)
@@ -804,6 +805,8 @@ class CoreReqPipe(implicit p: Parameters) extends DCacheModule{
 
   //RTAB req will deq st1 but not enq st2: except for uncache read hit dirty
   CoreReq_pipeReg_st0_st1.deq.ready := st1_ready
+  io.replayResult.valid := CoreReq_pipeReg_st0_st1.deq.fire && fromReplay_st1
+  io.replayResult.bits := io.Req_st1_RTAB.valid
   io.st1_valid := CoreReq_pipeReg_st0_st1.deq.valid
   io.st1_ready := CoreReq_pipeReg_st0_st1.deq.ready
 

@@ -324,7 +324,7 @@ class DataCache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends 
 
   val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits,AsidBits = asidLen,readOnly=false))
   val WshrAccess = Module(new DCacheWSHR(Depth = NWshrEntry))
-  val ReplayTable = Module(new L1RTAB())
+  val ReplayTable = Module(new L1RTAB(waitForReplayResult = false))
   val mshrProbeStatus = MshrAccess.io.probeOut_st1.probeStatus//Alias
   // ******     queues     ******
   val coreReq_Q = Module(new Queue(new DCacheCoreReq,entries = 1,flow=false,pipe=true))
