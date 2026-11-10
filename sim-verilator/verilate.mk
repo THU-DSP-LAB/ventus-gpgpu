@@ -130,7 +130,7 @@ VLIB_LDFLAGS += -fuse-ld=mold
 endif
 
 VLIB_VERILATOR_FLAGS += --threads $(VLIB_NPROC_SIM)
-VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
+# VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
 VLIB_VERILATOR_FLAGS += -j $(VLIB_NPROC_CPU)
 VLIB_VERILATOR_FLAGS += -CFLAGS "$(VLIB_CXXFLAGS)"
 VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS)"
@@ -151,18 +151,25 @@ rtl_parameters.cpp: parameters.json json2cpp.py
 verilog: $(VLIB_SRC_V)
 
 verilate: $(VLIB_SRC_V) $(VLIB_SRC_CXX)
-	@mkdir -p $(VLIB_DIR_BUILDOBJ)
+	+@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
 
 $(VLIB_VERILATOR_OUTPUT): $(VLIB_SRC_V) $(VLIB_SRC_CXX)
-	@mkdir -p $(VLIB_DIR_BUILDOBJ)
+	+@mkdir -p $(VLIB_DIR_BUILDOBJ)
 	+$(VLIB_VERILATOR) $(VLIB_VERILATOR_FLAGS) $(VLIB_VERILATOR_INPUT)
+
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+VLIB_LINK_LIBS = -lspdlog -lfmt -pthread -lpthread -lz -llz4
+else
+VLIB_LINK_LIBS = -lspdlog -lfmt -pthread -lpthread -lz -latomic -llz4
+endif
 
 $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic  
+	  $(VLIB_LINK_LIBS)
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/libVentusRTL.so
 
 lib: $(VLIB_TARGET)

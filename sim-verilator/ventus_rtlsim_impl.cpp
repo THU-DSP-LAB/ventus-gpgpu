@@ -16,7 +16,9 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <string>
+#ifdef __linux__
 #include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
 #include <utility>
 
@@ -434,6 +436,7 @@ void ventus_rtlsim_t::snapshot_fork() {
         logger->info("SNAPSHOT created, pid={}", child_pid);
     } else { // for the fork-child snapshot process
         snapshots.is_child = true;
+#ifdef __linux__
         // child process should exit when parent process exits
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) {
             perror("prctl(PR_SET_PDEATHSIG)");
@@ -453,6 +456,10 @@ void ventus_rtlsim_t::snapshot_fork() {
         assert(info.si_signo == SNAPSHOT_WAKEUP_SIGNAL);
         // main process invoked snapshot rollback
         snapshots.main_exit_time = (uint64_t)(info.si_value.sival_ptr);
+#else
+        logger->error("SNAPSHOT fork is only supported on Linux");
+        std::exit(EXIT_FAILURE);
+#endif
         logger->info(
             "SNAPSHOT is activated, sim_time = {}, origin process exited at time {}", contextp->time(),
             snapshots.main_exit_time
@@ -486,6 +493,7 @@ void ventus_rtlsim_t::snapshot_rollback(uint64_t time) {
         time % config.snapshot.time_interval + (snapshots.children_pid.size() - 1) * config.snapshot.time_interval,
         snapshots.children_pid.front()
     );
+#ifdef __linux__
     assert(sizeof(sigval_t) >= sizeof(contextp->time()));
     sigval_t sigval;
     sigval.sival_ptr = (void*)(contextp->time());
@@ -494,6 +502,9 @@ void ventus_rtlsim_t::snapshot_rollback(uint64_t time) {
     sigqueue(child, SNAPSHOT_WAKEUP_SIGNAL, sigval); // Activate the snapshot
     waitpid(child, NULL, 0);                         // Wait for snapshot finished
     snapshots.children_pid.pop_back();
+#else
+    logger->error("SNAPSHOT rollback is only supported on Linux");
+#endif
 }
 
 void ventus_rtlsim_t::snapshot_kill_all() {

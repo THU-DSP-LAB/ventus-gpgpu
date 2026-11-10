@@ -48,6 +48,7 @@ extern "C" void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollbac
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
 extern "C" uint64_t ventus_rtlsim_get_time(const ventus_rtlsim_t* sim) { return sim->contextp->time(); }
+double sc_time_stamp() { return 0; }
 extern "C" bool ventus_rtlsim_is_idle(const ventus_rtlsim_t* sim) { return sim->cta->is_idle(); }
 
 extern "C" void ventus_rtlsim_add_kernel__delay_data_loading(

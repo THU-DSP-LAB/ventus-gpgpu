@@ -61,11 +61,13 @@ endif
 CXXFLAGS += -std=c++20 -MMD -MP
 
 ifeq ($(RELEASE),1)
+ifneq ($(MOLD),)
 LDFLAGS += -fuse-ld=mold
+endif
 endif
 # shared library & link path
 LDFLAGS += -lspdlog -lfmt
-LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH))
+LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath,$(abspath $(VLIB_TARGET_PATH))
 
 #=====================================================================
 # Build rules and targets

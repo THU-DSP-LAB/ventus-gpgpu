@@ -18,6 +18,8 @@ out/
 *.DS_Store
 
 # verilog generate
+GPU.sv
+circt.anno.json
 GPGPU_top.v
 GPGPU_top.fir
 GPGPU_top.anno.json
