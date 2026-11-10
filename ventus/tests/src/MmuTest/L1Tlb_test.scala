@@ -88,7 +88,8 @@ class L1Tlb_test
     extends AnyFreeSpec
     with ChiselScalatestTester
     with MMUHelpers {
-  "L1TLB Main" in {
+  "L1TLB" - {
+    "Main" in {
     class L1TlbWrapper(SV: SVParam, nWays: Int) extends Module {
       val io = IO(new Bundle() {
         val in = Flipped(DecoupledIO(new L1TlbReq(SV)))
@@ -198,5 +199,41 @@ class L1Tlb_test
 
         d.clock.step(3)
       }
+    }
+
+    "L1TlbAutoForward (Issue #103) should forward VPN correctly to L2 TLB" in {
+      test(new L1TlbAutoForward(SV32.device)) { dut =>
+        dut.io.in.valid.poke(true.B)
+        dut.io.in.bits.asid.poke(1.U)
+        dut.io.in.bits.vaddr.poke("h80001234".U)
+        dut.io.out.ready.poke(true.B)
+        dut.io.l2_req.ready.poke(true.B)
+        dut.io.l2_rsp.valid.poke(false.B)
+
+        dut.clock.step(1)
+        dut.io.in.valid.poke(false.B)
+
+        // In s_l2tlb_req state, verify that vpn is 0x80001 (not 0x234)
+        assert(dut.io.l2_req.valid.peek().litToBoolean)
+        val vpn = dut.io.l2_req.bits.vpn.peek().litValue
+        assert(vpn == BigInt("80001", 16), s"Expected VPN 0x80001 but got 0x${vpn.toString(16)}")
+
+        // Wait until s_l2tlb_rsp
+        dut.clock.step(1)
+        assert(dut.io.l2_rsp.ready.peek().litToBoolean)
+
+        // Respond from L2 TLB
+        dut.io.l2_rsp.valid.poke(true.B)
+        dut.io.l2_rsp.bits.ppn.poke("h40000".U)
+        dut.clock.step(1)
+        dut.io.l2_rsp.valid.poke(false.B)
+
+        // Check reply in s_reply state
+        assert(dut.io.out.valid.peek().litToBoolean)
+        val paddr = dut.io.out.bits.paddr.peek().litValue
+        // PPN (0x40000) Cat offset (0x234) = 0x40000234
+        assert(paddr == BigInt("40000234", 16), s"Expected paddr 0x40000234 but got 0x${paddr.toString(16)}")
+      }
+    }
   }
 }
