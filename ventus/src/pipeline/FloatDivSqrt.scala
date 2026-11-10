@@ -142,7 +142,7 @@ class FloatDivSqrt extends FPUSubModule{
   val (aSign, aExp, aFrac) = decode(a, aIsSubnormalOrZero)
   val (bSign, bExp, bFrac) = decode(b, bIsSubnormalOrZero)
 
-  val resSign = Mux(isDiv, aSign ^ bSign, false.B);
+  val resSign = Mux(isDiv, aSign ^ bSign, aSign)
   val resSignReg = RegEnable(resSign, io.in.fire)
   val aExpReg = Reg(SInt(F_EXP_WIDTH.W))
   val aFracReg = Reg(UInt(F_FRAC_WIDTH.W))
@@ -259,22 +259,22 @@ class FloatDivSqrt extends FPUSubModule{
     rounding.io.out.fracCout
   )
   val isZeroResult = !(Cat(fracCout, fracRounded).orR)
-  val expRounded = Mux(denormShift > 0.S || isZeroResult,
+  val expRounded = Mux(denormShiftReg > 0.S || isZeroResult,
     0.S,
     aExpReg + Float32.expBias.toSInt
   ) + fracCout.toSInt
   val roundingInc = MuxLookup(rmReg, "b10".U(2.W))(Seq(
-    RDN -> Mux(resSign, "b11".U, "b00".U),
-    RUP -> Mux(resSign, "b00".U, "b11".U),
+    RDN -> Mux(resSignReg, "b11".U, "b00".U),
+    RUP -> Mux(resSignReg, "b00".U, "b11".U),
     RTZ -> "b00".U
   ))
-  val isDenormalFrac = (Cat(aFracReg, g, r, s) + roundingInc) < Cat(1.U(1.W), 0.U((F_FRAC_WIDTH+2).W))
+  val isDenormalFrac = (Cat(aFracReg, gReg, rReg, sReg) + roundingInc) < Cat(1.U(1.W), 0.U((F_FRAC_WIDTH+2).W))
   val common_underflow = (
-    denormShift > 1.S ||
-      denormShift===1.S && isDenormalFrac ||
+    denormShiftReg > 1.S ||
+      denormShiftReg===1.S && isDenormalFrac ||
       isZeroResult
     ) && common_inexact
-  val common_overflow = expOverflow(expRounded, F_FRAC_WIDTH)
+  val common_overflow = expOverflow(expRounded, Float32.expWidth)
   val overflowReg = RegEnable(!specialCase && common_overflow, state===s_round)
   val underflowReg = RegEnable(!specialCase && common_underflow, state===s_round)
   val inexactReg = RegEnable(!specialCase && (common_inexact || common_overflow || common_underflow), state===s_round)
