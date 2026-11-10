@@ -5,14 +5,14 @@ import chisel3.util._
 
 class AsidLookupEntry(SV: SVParam) extends Bundle{
   val asid = UInt(SV.asidLen.W)
-  val ptbr = UInt(SV.xLen.W)
+  val ptbr = UInt(SV.paLen.W)
   val valid = Bool()
 }
 
 class AsidLookup(SV: SVParam, nBanks: Int, nEntries: Int) extends Module{
   val io = IO(new Bundle{
     val lookup_req = Input(Vec(nBanks, UInt(SV.asidLen.W)))
-    val lookup_rsp = Output(Vec(nBanks, Valid(UInt(SV.xLen.W))))
+    val lookup_rsp = Output(Vec(nBanks, Valid(UInt(SV.paLen.W))))
     val fill_in = Flipped(ValidIO(new AsidLookupEntry(SV)))
     val flush_tlb = ValidIO(UInt(SV.asidLen.W))
   })
