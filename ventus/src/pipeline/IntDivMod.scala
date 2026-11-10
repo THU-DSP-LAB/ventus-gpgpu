@@ -43,7 +43,7 @@ class IntDivMod(xLen: Int) extends Module{
   // ---------------- pre phase -------------------
   val aLez = PriorityEncoder(unsignedAReg.asBools.reverse)
   val dLez = PriorityEncoder(unsignedDReg.asBools.reverse)
-  val iter = Mux(aLez > dLez, 0.U, dLez - aLez + 1.U)
+  val iter = Mux(aLez > dLez, 0.U, (Cat(0.U(1.W), dLez) - aLez) + 1.U)
 
   val aReg = RegInit(0.U((xLen+2).W))
   val dReg = RegInit(0.U((xLen+2).W))
@@ -53,7 +53,7 @@ class IntDivMod(xLen: Int) extends Module{
   val iterReg = RegEnable(iter, state===s_pre)
   val zeroQReg = RegEnable(unsignedAReg < unsignedDReg, state===s_pre)
 // ---------------- compute phase ---------------
-  val cnt = RegInit(0.U(log2Up(xLen).W))
+  val cnt = RegInit(0.U(log2Up(xLen + 1).W))
   val cnt_next = Mux(cnt===0.U, 0.U, cnt - 1.U)
 
   val Q = RegInit(0.U(xLen.W))
