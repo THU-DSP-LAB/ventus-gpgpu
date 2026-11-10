@@ -12,8 +12,12 @@ optional
 - [ccache](https://ccache.dev/)
 
 ```bash
+# Ubuntu
 sudo apt install verilator # check if version >=5.026
 sudo apt install ccache mold libspdlog-dev libfmt-dev
+
+# macOS (Homebrew)
+brew install verilator spdlog fmt lz4
 ```
 
 ## Usage - 中文
