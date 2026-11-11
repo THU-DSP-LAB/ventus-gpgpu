@@ -403,7 +403,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   fpu.io.rm := Mux(fpu.io.in.bits.ctrl.force_rm_rtz, RoundingMode.RTZ, csrfile.io.rm(0))
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
   sfu.io.rm := csrfile.io.rm(1)
-  csrfile.io.rm_wid(1):=sfu.io.in.bits.ctrl.wid
+  csrfile.io.rm_wid(1) := sfu.io.wid
   tensorcore.io.rm := csrfile.io.rm(2)
   csrfile.io.rm_wid(2):=tensorcore.io.in.bits.ctrl.wid
 
