@@ -601,7 +601,7 @@ class InstrDecodeV2 extends Module {
     c.sfu := s(18)
     c.wvd := s(19)
     c.readmask := s(20) //read mode is mask - for mask bitwise opcode ; for custom load/store -> addr add type & opc A3_SD type
-    c.writemask := 0.U//s(21) //write mode is mask - for mask bitwise opcode// c.writemask := s(21) //write mode is mask - for mask bitwise opcode
+    c.writemask := s(21) //write mode is mask - for mask bitwise opcode
     c.wxd := s(22)
     c.tc := s(23)
     c.disable_mask := s(24)
