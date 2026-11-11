@@ -555,7 +555,7 @@ class InstrDecodeV2 extends Module {
   }
 
   val ctrlSignals = (0 until num_fetch).map( i => {
-    val lut = Seq(IDecodeLUT_IMF.table, IDecodeLUT_V.table, IDecodeLUT_VL.table, IDecodeLUT_VC.table).map { t =>
+    val lut = Seq(IDecodeLUT_IMF.table, IDecodeLUT_V.table, IDecodeLUT_VL.table, IDecodeLUT_VC.table, IDecodeLUT_A.table).map { t =>
       ListLookup(io.inst(i), IDecode.default, t)
     }
     ListLookup(io.inst(i)(6, 0), lut(0),
@@ -565,7 +565,8 @@ class InstrDecodeV2 extends Module {
         BitPat("b0?00111") -> lut(2),
         BitPat("b0101011") -> lut(2),
         BitPat("b1011011") -> lut(3),
-        BitPat("b0001011") -> lut(3)
+        BitPat("b0001011") -> lut(3),
+        BitPat("b0101111") -> lut(4)
       ))
   })
   (ctrlSignals zip io.control).zipWithIndex.foreach{ case((s, c), i) =>
