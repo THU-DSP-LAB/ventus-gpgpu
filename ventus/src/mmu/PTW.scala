@@ -82,7 +82,7 @@ import MMUParam._
 
 class PTW_Req(SV: SVParam) extends Bundle{
   val vpn = UInt(SV.vpnLen.W)
-  val paddr = UInt(SV.xLen.W)
+  val paddr = UInt(SV.paLen.W)
   val curlevel = UInt(log2Ceil(SV.levels + 1).W)
   val source = UInt(depth_ptw_source.W)
 }
@@ -95,7 +95,7 @@ class PTW_Rsp(SV: SVParam) extends Bundle with L2TlbParam {
 }
 
 class Cache_Req(SV: SVParam) extends Bundle{
-  val addr = UInt(SV.xLen.W)
+  val addr = UInt(SV.paLen.W)
   val source = UInt(depth_mem_source.W)
 }
 

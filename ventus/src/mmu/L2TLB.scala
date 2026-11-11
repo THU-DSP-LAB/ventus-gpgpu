@@ -203,12 +203,12 @@ class L2TlbRsp(SV: SVParam)(implicit param: Option[L1Cache.HasRVGParameters]) ex
 }
 
 class L2TlbMemReq_Test(SV: SVParam, sectors: Int) extends Bundle{
-  val addr = UInt(SV.xLen.W)
+  val addr = UInt(SV.paLen.W)
   val data = UInt((SV.xLen * sectors).W)
   val op = UInt(2.W) // 10: read, 01: write
 }
 class L2TlbMemRsp_Test(SV: SVParam, sectors: Int) extends Bundle{
-  val addr = UInt(SV.xLen.W)
+  val addr = UInt(SV.paLen.W)
   val data = UInt((SV.xLen * sectors).W)
   val op = UInt(2.W)
 }
@@ -243,7 +243,7 @@ class L2TLB(
       case None => Vec(nBanks, DecoupledIO(new Cache_Rsp(SV)))
     })
     val asid_req = Output(Vec(nBanks, UInt(SV.asidLen.W)))
-    val ptbr_rsp = Flipped(Vec(nBanks, Valid(UInt(SV.xLen.W))))
+    val ptbr_rsp = Flipped(Vec(nBanks, Valid(UInt(SV.paLen.W))))
   })
 
   val storageArray = Seq.fill(nBanks)(Module(new L2TlbStorage(SV)))
