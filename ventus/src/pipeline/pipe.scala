@@ -400,9 +400,14 @@ class pipe(val sm_id: Int = 0) extends Module{
   issueX.io.out_warpscheduler <> warp_sche.io.warp_control
   issueV.io.out_warpscheduler.ready := false.B
 
-  fpu.io.rm := Mux(fpu.io.in.bits.ctrl.force_rm_rtz, RoundingMode.RTZ, csrfile.io.rm(0))
+  val fpu_inst_rm = fpu.io.in.bits.ctrl.inst(14, 12)
+  val fpu_static_rm = !fpu.io.in.bits.ctrl.isvec && fpu_inst_rm =/= 7.U
+  fpu.io.rm := Mux(fpu.io.in.bits.ctrl.force_rm_rtz, RoundingMode.RTZ,
+               Mux(fpu_static_rm, fpu_inst_rm, csrfile.io.rm(0)))
   csrfile.io.rm_wid(0):=fpu.io.in.bits.ctrl.wid
-  sfu.io.rm := csrfile.io.rm(1)
+  val sfu_inst_rm = sfu.io.in.bits.ctrl.inst(14, 12)
+  val sfu_static_rm = !sfu.io.in.bits.ctrl.isvec && sfu_inst_rm =/= 7.U
+  sfu.io.rm := Mux(sfu_static_rm, sfu_inst_rm, csrfile.io.rm(1))
   csrfile.io.rm_wid(1):=sfu.io.in.bits.ctrl.wid
   tensorcore.io.rm := csrfile.io.rm(2)
   csrfile.io.rm_wid(2):=tensorcore.io.in.bits.ctrl.wid
