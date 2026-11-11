@@ -807,6 +807,7 @@ class SFUexe extends Module{
   val io = IO(new Bundle {
     val in = Flipped(DecoupledIO(new vExeData()))
     val rm = Input(UInt(3.W))
+    val wid = Output(UInt(depth_warp.W))
     val out_x = DecoupledIO(new WriteScalarCtrl())
     val out_v = DecoupledIO(new WriteVecCtrl)
   })
@@ -816,6 +817,8 @@ class SFUexe extends Module{
   val state=RegInit(s_idle)
 
   val data_buffer=Queue(io.in,1)
+  val rm_snapshot = RegEnable(io.rm, io.in.fire)
+  io.wid := Mux(state =/= s_idle, data_buffer.bits.ctrl.wid, io.in.bits.ctrl.wid)
   val mask=RegInit(0.U(num_thread.W))
   val num_grp = num_thread/num_sfu
   val mask_grp=Wire(Vec((num_grp),(Bool())))
@@ -887,7 +890,8 @@ class SFUexe extends Module{
     floatDiv(i).in.bits.b := i_data2(i)
     floatDiv(i).in.bits.c := i_data3(i)}}
     intDiv(i).in.bits.signed := !i_ctrl.alu_fn(1)
-    floatDiv(i).in.bits.rm := io.rm
+    val eff_rm = Mux(!i_ctrl.isvec && i_ctrl.inst(14, 12) =/= 7.U, i_ctrl.inst(14, 12), rm_snapshot)
+    floatDiv(i).in.bits.rm := eff_rm
     floatDiv(i).in.bits.op := i_ctrl.alu_fn(2, 0)
 
     intDiv(i).in.valid := !i_ctrl.fp & i_valid
