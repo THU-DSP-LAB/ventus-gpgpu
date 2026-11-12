@@ -43,7 +43,7 @@ class IntDivMod(xLen: Int) extends Module{
   // ---------------- pre phase -------------------
   val aLez = PriorityEncoder(unsignedAReg.asBools.reverse)
   val dLez = PriorityEncoder(unsignedDReg.asBools.reverse)
-  val iter = Mux(aLez > dLez, 0.U, dLez - aLez + 1.U)
+  val iter = Mux(aLez > dLez, 0.U(6.W), (Cat(0.U(1.W), dLez) - Cat(0.U(1.W), aLez) + 1.U)(5, 0))
 
   val aReg = RegInit(0.U((xLen+2).W))
   val dReg = RegInit(0.U((xLen+2).W))
@@ -51,9 +51,14 @@ class IntDivMod(xLen: Int) extends Module{
   val dNorm = Cat(0.U(1.W), (unsignedDReg<<dLez)(xLen-1, 0), 0.U(1.W))
   val dNegNorm = Cat(1.U(1.W), (((~unsignedDReg).asUInt + 1.U)<<dLez)(xLen-1, 0), 0.U(1.W))
   val iterReg = RegEnable(iter, state===s_pre)
-  val zeroQReg = RegEnable(unsignedAReg < unsignedDReg, state===s_pre)
+  val zeroQReg = RegInit(false.B)
+  when(io.in.fire){
+    zeroQReg := false.B
+  }.elsewhen(state === s_pre){
+    zeroQReg := unsignedAReg < unsignedDReg
+  }
 // ---------------- compute phase ---------------
-  val cnt = RegInit(0.U(log2Up(xLen).W))
+  val cnt = RegInit(0.U(log2Up(xLen + 1).W))
   val cnt_next = Mux(cnt===0.U, 0.U, cnt - 1.U)
 
   val Q = RegInit(0.U(xLen.W))
@@ -73,8 +78,8 @@ class IntDivMod(xLen: Int) extends Module{
   val signedQ = Mux(qSignReg, (~commonQReg).asUInt + 1.U, commonQReg)
   val signedR = Mux(rSignReg, (~commonRReg).asUInt + 1.U, commonRReg)
   val specialQ = Mux(divByZeroReg, (-1).S(xLen.W).asUInt, Mux(overflowReg, Cat(1.U(1.W), 0.U((xLen-1).W)), 0.U(xLen.W)))
-  // divByZero|zeroDivSth -> overflow
-  val specialR = Mux(divByZeroReg||zeroQReg, rawAReg, 0.U(xLen.W))
+  // divByZero|zeroDivSth -> overflow; overflow (INT_MIN / -1) produces remainder 0
+  val specialR = Mux(overflowReg, 0.U(xLen.W), Mux(divByZeroReg||zeroQReg, rawAReg, 0.U(xLen.W)))
 
   io.out.bits.q := Mux(divByZeroReg||zeroQReg||overflowReg, specialQ, signedQ)
   io.out.bits.r := Mux(divByZeroReg||zeroQReg||overflowReg, specialR, signedR)
