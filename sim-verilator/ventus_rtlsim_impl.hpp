@@ -23,6 +23,9 @@ extern const std::unordered_map<std::string, int> rtl_parameters;
 #include "gvm.hpp"
 #endif // ENABLE_GVM
 
+#ifndef SIGRTMIN
+#define SIGRTMIN SIGUSR1
+#endif
 #define SNAPSHOT_WAKEUP_SIGNAL SIGRTMIN
 struct snapshot_record_t {
     pid_t pid;

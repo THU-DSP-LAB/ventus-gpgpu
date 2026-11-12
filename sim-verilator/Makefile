@@ -63,7 +63,7 @@ LDFLAGS += -fuse-ld=mold
 endif
 # shared library & link path
 LDFLAGS += -lspdlog -lfmt
-LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH))
+LDFLAGS += -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) -Wl,-rpath,$(abspath $(VLIB_TARGET_PATH))
 
 #=====================================================================
 # Build rules and targets
@@ -96,7 +96,7 @@ $(FORK_SNAPSHOT_TEST): tests/fork_snapshot_test.cpp ventus_rtlsim.h $(VLIB_TARGE
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++20 -g -O1 -I. tests/fork_snapshot_test.cpp \
 	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
-	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+	  -Wl,-rpath,$(abspath $(VLIB_TARGET_PATH)) -o $@
 
 test-fork-snapshot: $(FORK_SNAPSHOT_TEST)
 	$(FORK_SNAPSHOT_TEST) invalid
@@ -107,7 +107,7 @@ $(PERSISTENT_STATE_TEST): tests/persistent_state_test.cpp ventus_rtlsim.h $(VLIB
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++20 -g -O1 -I. tests/persistent_state_test.cpp \
 	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
-	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+	  -Wl,-rpath,$(abspath $(VLIB_TARGET_PATH)) -o $@
 
 test-persistent-state: $(PERSISTENT_STATE_TEST)
 	$(PERSISTENT_STATE_TEST) save
@@ -127,7 +127,7 @@ $(PMEM_REGION_TEST): tests/pmem_region_test.cpp standalone_pmem_regions.hpp vent
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++20 -g -O1 -I. tests/pmem_region_test.cpp \
 	  -L$(VLIB_TARGET_PATH) -l$(VLIB_TARGET_NAME) \
-	  -Wl,-rpath=$(abspath $(VLIB_TARGET_PATH)) -o $@
+	  -Wl,-rpath,$(abspath $(VLIB_TARGET_PATH)) -o $@
 
 test-pmem-region: $(PMEM_REGION_TEST)
 	$(PMEM_REGION_TEST)

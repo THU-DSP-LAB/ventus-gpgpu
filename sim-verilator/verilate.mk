@@ -47,6 +47,12 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 MOLD = $(shell which mold)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+LIBATOMIC :=
+else
+LIBATOMIC := -latomic
+endif
 VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
 # Verilated model parallelism is part of both the object layout and the
@@ -169,6 +175,9 @@ VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
 VLIB_CXXFLAGS += -I$(abspath .)
 VLIB_LDFLAGS += -lc
+ifeq ($(UNAME_S),Darwin)
+VLIB_LDFLAGS += -Wl,-undefined,dynamic_lookup
+endif
 ifeq ($(VLIB_HAS_SYSTEM_LZ4),1)
 VLIB_LDLIBS += -llz4
 else
@@ -229,7 +238,7 @@ $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic $(VLIB_LDLIBS)
+	  -lspdlog -lfmt -pthread -lpthread -lz $(LIBATOMIC) $(VLIB_LDLIBS)
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/lib$(VLIB_TARGET_NAME).so
 
 lib: $(VLIB_TARGET)
