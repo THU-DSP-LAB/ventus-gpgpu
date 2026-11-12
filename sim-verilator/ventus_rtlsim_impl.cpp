@@ -23,8 +23,27 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <string>
+#ifdef __linux__
 #include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
+#ifndef __linux__
+#include <signal.h>
+typedef union sigval sigval_t;
+static inline int sigwaitinfo(const sigset_t *set, siginfo_t *info) {
+    int sig = 0;
+    if (sigwait(set, &sig) != 0) return -1;
+    if (info) {
+        memset(info, 0, sizeof(*info));
+        info->si_signo = sig;
+    }
+    return sig;
+}
+static inline int sigqueue(pid_t pid, int sig, const union sigval value) {
+    (void)value;
+    return kill(pid, sig);
+}
+#endif
 #include <utility>
 
 #ifdef ENABLE_GVM
@@ -761,10 +780,12 @@ void ventus_rtlsim_t::snapshot_fork() {
     } else { // for the fork-child snapshot process
         snapshots.is_child = true;
         // child process should exit when parent process exits
+#ifdef __linux__
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) {
             perror("prctl(PR_SET_PDEATHSIG)");
             std::exit(EXIT_FAILURE);
         }
+#endif
         if (getppid() == 1) { // parent process already exited
             std::exit(EXIT_FAILURE);
         }
