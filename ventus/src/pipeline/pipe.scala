@@ -159,6 +159,7 @@ class pipe(val sm_id: Int = 0) extends Module{
   warp_sche.io.issued_warp.bits:=exe_dataX.io.enq.bits.ctrl.wid // not used
   warp_sche.io.issued_warp.valid:=exe_dataX.io.enq.fire // not used
   warp_sche.io.scoreboard_busy:=(VecInit(scoreb.map(_.delay))).asUInt
+  warp_sche.io.lsu_idle := lsu.io.fence_end
 
   csrfile.io.CTA2csr:=warp_sche.io.CTA2csr
   operand_collector.io.sgpr_base:=csrfile.io.sgpr_base
