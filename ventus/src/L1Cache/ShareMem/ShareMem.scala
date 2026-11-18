@@ -72,7 +72,7 @@ class SharedMemory(implicit p: Parameters) extends ShareMemModule{
   // ******     important submodules     ******
   val BankConfArb = Module(new BankConflictArbiter)
   //val TagAccess = Module(new L1TagAccess(set=NSets, way=NWays, tagBits=TagBits))
-  val DataCorssBarForWrite = Module(new DataCrossbar)
+  val DataCorssBarForWrite = Module(new DataCrossbarWrite)
   val DataCorssBarForRead = Module(new DataCrossbar)
   /*val EntryValidArray = RegInit(
     VecInit(Seq.fill(NSets)(
