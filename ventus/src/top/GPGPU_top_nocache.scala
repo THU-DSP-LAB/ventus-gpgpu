@@ -6,9 +6,11 @@ import L1Cache.MyConfig
 import L1Cache.ICache.{InstructionCache, ICacheMemReq_p, ICacheMemRsp, ICacheBundle}
 import pipeline.{CTAreqData, CTArspData, CTA2warp, pipe}
 import pipeline.{ICachePipeReq_np, ICachePipeRsp_np, DCacheCoreReq_np, DCacheCoreRsp_np}
+import pipeline.{InstClassPerfCounters, PipelinePerfCounters}
 import L1Cache.ShareMem.SharedMemory
 import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public, Instantiate}
 import config.config.Parameters
+import gvm._
 
 class SMIO_icache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extends ICacheBundle {
   val req = DecoupledIO(new ICacheMemReq_p(SV.getOrElse(mmu.SV32)))
@@ -16,14 +18,19 @@ class SMIO_icache(SV: Option[mmu.SVParam] = None)(implicit p: Parameters) extend
 }
 
 @instantiable
-class SM_wrapper_nocache(val sm_id: Int = 0) extends Module {
+class SM_wrapper_nocache() extends Module {
   val param = (new MyConfig).toInstance
+  @public val sm_id = IO(Input(UInt(8.W)))
   @public val io = IO(new Bundle{
     val CTAreq = Flipped(Decoupled(new CTAreqData))
     val CTArsp = Decoupled(new CTArspData)
     val icache = new SMIO_icache()(param)
     val dcache_req = DecoupledIO(new DCacheCoreReq_np)
     val dcache_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
+    val perfEnable = Input(Bool())
+    val perfReset = Input(Bool())
+    val pipeline_perf = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
+    val inst_class_perf = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
     val icache_invalidate = Input(Bool())
   })
 
@@ -31,7 +38,12 @@ class SM_wrapper_nocache(val sm_id: Int = 0) extends Module {
   cta2warp.io.CTAreq :<>= io.CTAreq
   io.CTArsp :<>= cta2warp.io.CTArsp
 
-  val pipe = Module(new pipe(sm_id))
+  val pipe = Module(new pipe())
+  pipe.sm_id := sm_id
+  pipe.io.perfEnable := io.perfEnable
+  pipe.io.perfReset := io.perfReset
+  io.pipeline_perf.foreach(_ := pipe.io.perf_pipeline.getOrElse(0.U.asTypeOf(new PipelinePerfCounters)))
+  io.inst_class_perf.foreach(_ := pipe.io.perf_inst_class.getOrElse(0.U.asTypeOf(new InstClassPerfCounters)))
 
   val cnt = Counter(10)
   when(cnt.value < 5.U) { cnt.inc() }
@@ -81,6 +93,29 @@ class SM_wrapper_nocache(val sm_id: Int = 0) extends Module {
   icache.io.memRsp :<>= io.icache.rsp
   io.dcache_req :<>= pipe.io.dcache_req
   pipe.io.dcache_rsp :<>= io.dcache_rsp
+  pipe.io.dcache_flush_done := io.dcache_req.fire && io.dcache_req.bits.isKernelFlush
+
+  if(GVM_ENABLED){
+    val WF_ID_WIDTH = log2Ceil(num_warp_in_a_block)
+    val gvm_cta2warp = Module(new GvmDutCta2Warp)
+    gvm_cta2warp.io.clock := clock
+    gvm_cta2warp.io.reset := reset.asBool
+    gvm_cta2warp.io.warp_req_fire := cta2warp.io.warpReq.fire
+    gvm_cta2warp.io.software_wg_id := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wg_id.pad(32)
+    gvm_cta2warp.io.software_warp_id :=
+      cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(WF_ID_WIDTH - 1, 0).pad(32)
+    gvm_cta2warp.io.sm_id := sm_id
+    gvm_cta2warp.io.hardware_warp_id := cta2warp.io.warpReq.bits.wid.pad(32)
+    gvm_cta2warp.io.sgpr_base := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_sgpr_base_dispatch.pad(32)
+    gvm_cta2warp.io.vgpr_base := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_vgpr_base_dispatch.pad(32)
+    gvm_cta2warp.io.wg_slot_id_in_warp_sche :=
+      cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(TAG_WIDTH - 1, WF_ID_WIDTH)
+    gvm_cta2warp.io.lds_base := Cat(
+      LDS_BASE.U(32.W)(31, LDS_ID_WIDTH + 1),
+      cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_lds_base_dispatch
+    )
+    gvm_cta2warp.io.rtl_num_thread := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_size_dispatch.pad(32)
+  }
 }
 
 class GPGPU_top_nocache() extends Module {
@@ -92,19 +127,94 @@ class GPGPU_top_nocache() extends Module {
     val icache = Vec(num_sm, new SMIO_icache()(param))
     val dcache_req = Vec(num_sm, DecoupledIO(new DCacheCoreReq_np))
     val dcache_rsp = Vec(num_sm, Flipped(DecoupledIO(new DCacheCoreRsp_np)))
+    val perfDump = Input(Bool())
+    val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = false))
     val icache_invalidate = Input(Bool())
   })
   val cta = Module(new CTAinterface)
-  val sm_wrapper_inst = Seq.tabulate(num_sm) { i => Instantiate(new SM_wrapper_nocache(i)) }
+  val sm_wrapper_inst = Seq.tabulate(num_sm) { i => Instantiate(new SM_wrapper_nocache()) }
+  sm_wrapper_inst.zipWithIndex.foreach { case (sm, i) => sm.sm_id := i.U }
   val sm_wrapper = VecInit.tabulate(num_sm) { i => sm_wrapper_inst(i).io }
 
   cta.io.host2CTA :<>= io.host_req
   io.host_rsp :<>= cta.io.CTA2host
 
+  def sumPipelinePerfCounter(select: PipelinePerfCounters => UInt): UInt = {
+    if (PMU_PIPELINE) sm_wrapper.map(sm => select(sm.pipeline_perf.get)).reduce(_ + _) else 0.U(64.W)
+  }
+  def sumInstClassPerfCounter(select: InstClassPerfCounters => UInt): UInt = {
+    if (PMU_INST_CLASS) sm_wrapper.map(sm => select(sm.inst_class_perf.get)).reduce(_ + _) else 0.U(64.W)
+  }
+
+  val pmuActiveCycles = sumPipelinePerfCounter(_.activeCycles)
+  val pmuTotalScalarIssued = sumPipelinePerfCounter(_.totalScalarIssued)
+  val pmuTotalVectorIssued = sumPipelinePerfCounter(_.totalVectorIssued)
+  val pmuExecHazardX = sumPipelinePerfCounter(_.execStructuralHazardCyclesX)
+  val pmuExecHazardV = sumPipelinePerfCounter(_.execStructuralHazardCyclesV)
+  val pmuDataDepStall = sumPipelinePerfCounter(_.dataDepStallCycles)
+  val pmuBarrierStall = sumPipelinePerfCounter(_.barrierStallCycles)
+  val pmuCtrlFlushCnt = sumPipelinePerfCounter(_.controlHazardFlushCount)
+  val pmuFrontendStall = sumPipelinePerfCounter(_.frontendStallCycles)
+  val pmuLsuBackpressure = sumPipelinePerfCounter(_.lsuBackpressureCycles)
+  val pmuIbufferFullCycles = sumPipelinePerfCounter(_.ibufferFullCycles)
+  val pmuComputeIssued = sumInstClassPerfCounter(_.computeIssued)
+  val pmuMemIssued = sumInstClassPerfCounter(_.memIssued)
+  val pmuCtrlIssued = sumInstClassPerfCounter(_.ctrlIssued)
+  val pmuTotalIssued = pmuTotalScalarIssued + pmuTotalVectorIssued
+
+  val perfWindowStarted = RegInit(false.B)
+  val perfWindowPrinted = RegInit(false.B)
+  val programId = RegInit(0.U(32.W))
+  val totalProgramWindows = RegInit(0.U(32.W))
+  val totalActiveCycles = RegInit(0.U(64.W))
+  val totalScalarIssued = RegInit(0.U(64.W))
+  val totalVectorIssued = RegInit(0.U(64.W))
+  val totalExecHazardX = RegInit(0.U(64.W))
+  val totalExecHazardV = RegInit(0.U(64.W))
+  val totalDataDepStall = RegInit(0.U(64.W))
+  val totalBarrierStall = RegInit(0.U(64.W))
+  val totalCtrlFlushCnt = RegInit(0.U(64.W))
+  val totalFrontendStall = RegInit(0.U(64.W))
+  val totalLsuBackpressure = RegInit(0.U(64.W))
+  val totalIbufferFullCycles = RegInit(0.U(64.W))
+  val totalComputeIssued = RegInit(0.U(64.W))
+  val totalMemIssued = RegInit(0.U(64.W))
+  val totalCtrlIssued = RegInit(0.U(64.W))
+  val perfStartPulse = io.host_req.fire && !perfWindowStarted
+  val perfDumpPulse = io.perfDump && perfWindowStarted && !perfWindowPrinted
+  when(perfStartPulse){
+    perfWindowStarted := true.B
+    perfWindowPrinted := false.B
+  }.elsewhen(perfDumpPulse){
+    perfWindowStarted := false.B
+    perfWindowPrinted := true.B
+    programId := programId + 1.U
+    totalProgramWindows := totalProgramWindows + 1.U
+    totalActiveCycles := totalActiveCycles + pmuActiveCycles
+    totalScalarIssued := totalScalarIssued + pmuTotalScalarIssued
+    totalVectorIssued := totalVectorIssued + pmuTotalVectorIssued
+    totalExecHazardX := totalExecHazardX + pmuExecHazardX
+    totalExecHazardV := totalExecHazardV + pmuExecHazardV
+    totalDataDepStall := totalDataDepStall + pmuDataDepStall
+    totalBarrierStall := totalBarrierStall + pmuBarrierStall
+    totalCtrlFlushCnt := totalCtrlFlushCnt + pmuCtrlFlushCnt
+    totalFrontendStall := totalFrontendStall + pmuFrontendStall
+    totalLsuBackpressure := totalLsuBackpressure + pmuLsuBackpressure
+    totalIbufferFullCycles := totalIbufferFullCycles + pmuIbufferFullCycles
+    totalComputeIssued := totalComputeIssued + pmuComputeIssued
+    totalMemIssued := totalMemIssued + pmuMemIssued
+    totalCtrlIssued := totalCtrlIssued + pmuCtrlIssued
+  }
+
   for (i <- 0 until num_sm) {
     sm_wrapper(i).CTAreq :<>= cta.io.CTA2warp(i)
     cta.io.warp2CTA(i) :<>= sm_wrapper(i).CTArsp
 
+    sm_wrapper(i).perfEnable := perfWindowStarted || perfStartPulse
+    sm_wrapper(i).perfReset := perfStartPulse
+    io.pmu.pipeline(i) := sm_wrapper(i).pipeline_perf.getOrElse(0.U.asTypeOf(new PipelinePerfCounters))
+    io.pmu.instClass(i) := sm_wrapper(i).inst_class_perf.getOrElse(0.U.asTypeOf(new InstClassPerfCounters))
     io.icache(i).req :<>= sm_wrapper(i).icache.req
     sm_wrapper(i).icache.rsp :<>= io.icache(i).rsp
     sm_wrapper(i).icache_invalidate := io.icache_invalidate
@@ -113,6 +223,78 @@ class GPGPU_top_nocache() extends Module {
     sm_wrapper(i).dcache_rsp :<>= io.dcache_rsp(i)
   }
 
+  def includeCurrentWindow(total: UInt, current: UInt): UInt = {
+    total + Mux(perfDumpPulse, current, 0.U(total.getWidth.W))
+  }
+
+  val summaryProgramWindows = includeCurrentWindow(totalProgramWindows, 1.U(32.W))
+  val summaryActiveCycles = includeCurrentWindow(totalActiveCycles, pmuActiveCycles)
+  val summaryScalarIssued = includeCurrentWindow(totalScalarIssued, pmuTotalScalarIssued)
+  val summaryVectorIssued = includeCurrentWindow(totalVectorIssued, pmuTotalVectorIssued)
+  val summaryExecHazardX = includeCurrentWindow(totalExecHazardX, pmuExecHazardX)
+  val summaryExecHazardV = includeCurrentWindow(totalExecHazardV, pmuExecHazardV)
+  val summaryDataDepStall = includeCurrentWindow(totalDataDepStall, pmuDataDepStall)
+  val summaryBarrierStall = includeCurrentWindow(totalBarrierStall, pmuBarrierStall)
+  val summaryCtrlFlushCnt = includeCurrentWindow(totalCtrlFlushCnt, pmuCtrlFlushCnt)
+  val summaryFrontendStall = includeCurrentWindow(totalFrontendStall, pmuFrontendStall)
+  val summaryLsuBackpressure = includeCurrentWindow(totalLsuBackpressure, pmuLsuBackpressure)
+  val summaryIbufferFullCycles = includeCurrentWindow(totalIbufferFullCycles, pmuIbufferFullCycles)
+  val summaryComputeIssued = includeCurrentWindow(totalComputeIssued, pmuComputeIssued)
+  val summaryMemIssued = includeCurrentWindow(totalMemIssued, pmuMemIssued)
+  val summaryCtrlIssued = includeCurrentWindow(totalCtrlIssued, pmuCtrlIssued)
+  val summaryTotalIssued = summaryScalarIssued + summaryVectorIssued
+  val summaryTotalClassIssued = summaryComputeIssued + summaryMemIssued + summaryCtrlIssued
+
+  when(perfDumpPulse){
+    printf(p"\n[PROGRAM ${programId}] [PMU] first-kernel-start -> last-kernel-end summary (nocache)\n")
+    if (PMU_PIPELINE) {
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] active cycles       : ${pmuActiveCycles}\n")
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] scalar issued       : ${pmuTotalScalarIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] vector issued       : ${pmuTotalVectorIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] total issued        : ${pmuTotalIssued}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] exec hazard X          : ${pmuExecHazardX}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] exec hazard V          : ${pmuExecHazardV}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] data dependency        : ${pmuDataDepStall}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] barrier stall cycles   : ${pmuBarrierStall}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] control flush events   : ${pmuCtrlFlushCnt}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] frontend stall cycles  : ${pmuFrontendStall}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] lsu backpressure cyc   : ${pmuLsuBackpressure}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] ibuffer full cycles    : ${pmuIbufferFullCycles}\n")
+    }
+    if (PMU_INST_CLASS) {
+      printf(p"[PROGRAM ${programId}] [INST CLASS] compute issued    : ${pmuComputeIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST CLASS] mem issued        : ${pmuMemIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST CLASS] ctrl issued       : ${pmuCtrlIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST CLASS] total class issued: ${pmuComputeIssued + pmuMemIssued + pmuCtrlIssued}\n")
+    }
+  }
+  when((perfDumpPulse || io.perfDumpSummary) && summaryProgramWindows =/= 0.U){
+    printf(p"\n[TESTCASE TOTAL] [PMU] accumulated summary across ${summaryProgramWindows} program windows (nocache)\n")
+    if (PMU_PIPELINE) {
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] active cycles       : ${summaryActiveCycles}\n")
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] scalar issued       : ${summaryScalarIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] vector issued       : ${summaryVectorIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] total issued        : ${summaryTotalIssued}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] exec hazard X          : ${summaryExecHazardX}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] exec hazard V          : ${summaryExecHazardV}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] data dependency        : ${summaryDataDepStall}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] barrier stall cycles   : ${summaryBarrierStall}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] control flush events   : ${summaryCtrlFlushCnt}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] frontend stall cycles  : ${summaryFrontendStall}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] lsu backpressure cyc   : ${summaryLsuBackpressure}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] ibuffer full cycles    : ${summaryIbufferFullCycles}\n")
+    }
+    if (PMU_INST_CLASS) {
+      printf(p"[TESTCASE TOTAL] [INST CLASS] compute issued    : ${summaryComputeIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST CLASS] mem issued        : ${summaryMemIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST CLASS] ctrl issued       : ${summaryCtrlIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST CLASS] total class issued: ${summaryTotalClassIssued}\n")
+    }
+  }
+
+}
+
+object nocacheParamToJson extends App {
   import top.ParametersToJson
-  ParametersToJson.saveToJson("sim-verilator-nocache/parameters.json")
+  ParametersToJson.saveToJson(BuildOutputArgs.paramsJson(args))
 }

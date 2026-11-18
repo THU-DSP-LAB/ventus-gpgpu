@@ -84,6 +84,9 @@ class GPGPU_SimTop extends Module {
   val io = IO(new Bundle {
     val host_req = Flipped(DecoupledIO(new host2CTA_data))
     val host_rsp = DecoupledIO(new CTA2host_data)
+    val perfDump = Input(Bool())
+    val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val mem = new Mem_SimIO(DATA_BYTE_LEN, ADDR_WIDTH = parameters.MEM_ADDR_WIDTH)
     val cnt = Output(UInt(32.W))
     val icache_invalidate = Input(Bool())
@@ -95,6 +98,9 @@ class GPGPU_SimTop extends Module {
 
   io.host_req <> gpgpu.io.host_req
   io.host_rsp <> gpgpu.io.host_rsp
+  gpgpu.io.perfDump := io.perfDump
+  gpgpu.io.perfDumpSummary := io.perfDumpSummary
+  io.pmu := gpgpu.io.pmu
   io.cnt <> gpgpu.io.cnt
   //io.inst_cnt <> gpgpu.io.inst_cnt
 
@@ -105,17 +111,60 @@ class GPGPU_SimTop extends Module {
 }
 
 object emitVerilog extends App {
+  val output = BuildOutputArgs.emitVerilog(args)
   chisel3.emitVerilog(
     //new GPGPU_SimWrapper(FakeCache = false),
     new GPGPU_SimTop,
-    Array("--target-dir", "sim-verilator/", "--target", "verilog")
+    Array("--target-dir", output.targetDir, "--target", "verilog")
   )
   import top.ParametersToJson
-  ParametersToJson.saveToJson("sim-verilator/parameters.json")
+  ParametersToJson.saveToJson(output.paramsJson)
 }
 
 object paramToJson extends App {
   import top.ParametersToJson
-  ParametersToJson.saveToJson("sim-verilator/parameters.json")
+  ParametersToJson.saveToJson(BuildOutputArgs.paramsJson(args))
 }
 
+final case class EmitVerilogOutput(targetDir: String, paramsJson: String)
+
+object BuildOutputArgs {
+  private val TargetDirFlag = "--target-dir"
+  private val ParamsJsonFlag = "--params-json"
+
+  def emitVerilog(args: Array[String]): EmitVerilogOutput = {
+    val parsed = parse(args)
+    EmitVerilogOutput(
+      required(parsed, TargetDirFlag),
+      required(parsed, ParamsJsonFlag)
+    )
+  }
+
+  def paramsJson(args: Array[String]): String = {
+    required(parse(args), ParamsJsonFlag)
+  }
+
+  private def parse(args: Array[String]): Map[String, String] = {
+    var parsed = Map.empty[String, String]
+    var index = 0
+
+    while (index < args.length) {
+      args(index) match {
+        case TargetDirFlag | ParamsJsonFlag =>
+          if (index + 1 >= args.length) {
+            sys.error(s"Missing value for ${args(index)}")
+          }
+          parsed = parsed.updated(args(index), args(index + 1))
+          index += 2
+        case other =>
+          sys.error(s"Unsupported argument: $other")
+      }
+    }
+
+    parsed
+  }
+
+  private def required(parsed: Map[String, String], flag: String): String = {
+    parsed.getOrElse(flag, sys.error(s"Missing required argument: $flag"))
+  }
+}

@@ -64,6 +64,8 @@ trait HasL1CacheParameters extends HasRVGParameters{
 
   def get_offsets(addr: UInt)= addr(BlockOffsetBits + WordOffsetBits-1,0)//blockOffset + workOffset
   def get_blockAddr(addr: UInt) = (addr >> (WordLength-(TagBits+SetIdxBits))).asUInt//tag + setIdx
+  def get_ID(source:UInt) = source(SetIdxBits+log2Up(NMshrEntry)-1,SetIdxBits)
+  def get_Type(source:UInt)  = source(SetIdxBits+log2Up(NMshrEntry)+2,SetIdxBits+log2Up(NMshrEntry))
 
   def get_EntryIdx(source:UInt) = source(WIdBits+log2Up(NMshrEntry)-1,WIdBits)
 }

@@ -70,12 +70,21 @@ bool Cta::apply_to_dut(Vdut* dut) {
         uint32_t idx_in_kernel = kernel->get_next_wg_idx_in_kernel();
         dim3_t kernel_size_3d = kernel->get_num_wg_3d();
         dut->io_host_req_bits_host_wg_id = kernel->get_next_wgid();
-        // TODO: temporary solution, need to be fixed
-        // RTL uses kernel_size_3d as wg_id_3d currently
+        dut->io_host_req_bits_host_kernel_size_x = kernel_size_3d.x;
+        dut->io_host_req_bits_host_kernel_size_y = kernel_size_3d.y;
+        dut->io_host_req_bits_host_kernel_size_z = kernel_size_3d.z;
         dim3_t wgidx_3d = kernel->get_next_wg_idx3d_in_kernel();
-        dut->io_host_req_bits_host_kernel_size_3d_0 = wgidx_3d.x;
-        dut->io_host_req_bits_host_kernel_size_3d_1 = wgidx_3d.y;
-        dut->io_host_req_bits_host_kernel_size_3d_2 = wgidx_3d.z;
+        dut->io_host_req_bits_host_wgIdx_x = wgidx_3d.x;
+        dut->io_host_req_bits_host_wgIdx_y = wgidx_3d.y;
+        dut->io_host_req_bits_host_wgIdx_z = wgidx_3d.z;
+        auto threadIdx_offset = kernel->get_threadIdx_offset_3d();
+        dut->io_host_req_bits_host_threadIdx_global_offset_x = threadIdx_offset.x;
+        dut->io_host_req_bits_host_threadIdx_global_offset_y = threadIdx_offset.y;
+        dut->io_host_req_bits_host_threadIdx_global_offset_z = threadIdx_offset.z;
+        auto num_thread_local = kernel->get_num_thread_local_3d();
+        dut->io_host_req_bits_host_num_thread_per_wg_x = num_thread_local.x;
+        dut->io_host_req_bits_host_num_thread_per_wg_y = num_thread_local.y;
+        dut->io_host_req_bits_host_num_thread_per_wg_z = num_thread_local.z;
         dut->io_host_req_bits_host_num_wf = kernel->get_num_wf();
         dut->io_host_req_bits_host_wf_size = kernel->get_num_thread();
         dut->io_host_req_bits_host_lds_size_total = kernel->get_num_lds();
@@ -87,8 +96,8 @@ bool Cta::apply_to_dut(Vdut* dut) {
         dut->io_host_req_bits_host_start_pc = kernel->get_start_pc();
         dut->io_host_req_bits_host_csr_knl = kernel->get_csr_baseaddr();
         dut->io_host_req_bits_host_gds_baseaddr = kernel->get_gds_baseaddr();
-        dut->io_host_req_bits_host_pds_baseaddr = kernel->get_pds_baseaddr()
-            + idx_in_kernel * kernel->get_num_wf() * kernel->get_num_thread() * kernel->get_num_pds_per_thread();
+        // PDS base is a pool base. CU interface maps WG to a resident slot.
+        dut->io_host_req_bits_host_pds_baseaddr = kernel->get_pds_baseaddr();
         dut->io_host_req_bits_host_gds_size_total = 0; // useless
         return true;
     }

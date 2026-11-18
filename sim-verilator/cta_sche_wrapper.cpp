@@ -3,6 +3,7 @@
 #include <cassert>
 #include <memory>
 #include <spdlog/logger.h>
+#include <verilated_save.h>
 
 Cta::Cta(std::shared_ptr<spdlog::logger> logger_)
     : m_kernel_idx_dispatching(-1)
@@ -41,6 +42,27 @@ bool Cta::wg_get_info(std::string& kernel_name, uint32_t& kernel_id, uint32_t& w
 
 bool Cta::is_idle() const { return m_kernels.size() == 0; }
 
+bool Cta::save_idle(VerilatedSerialize& output) const {
+    if (!m_kernels.empty() || m_kernel_idx_dispatching != -1) {
+        return false;
+    }
+    output << static_cast<uint32_t>(UINT32_MAX) << m_kernel_id_next << m_kernel_wgid_base_next;
+    return true;
+}
+
+bool Cta::restore_idle(VerilatedDeserialize& input) {
+    uint32_t dispatching = 0;
+    uint32_t kernel_id_next = 0;
+    uint32_t kernel_wgid_base_next = 0;
+    input >> dispatching >> kernel_id_next >> kernel_wgid_base_next;
+    if (!m_kernels.empty() || m_kernel_idx_dispatching != -1 || dispatching != UINT32_MAX) {
+        return false;
+    }
+    m_kernel_id_next = kernel_id_next;
+    m_kernel_wgid_base_next = kernel_wgid_base_next;
+    return true;
+}
+
 bool Cta::apply_to_dut(Vdut* dut) {
     assert(m_kernel_idx_dispatching < 0 || m_kernel_idx_dispatching < m_kernels.size());
     std::shared_ptr<Kernel> kernel = (m_kernel_idx_dispatching == -1) ? nullptr : m_kernels[m_kernel_idx_dispatching];
@@ -70,12 +92,21 @@ bool Cta::apply_to_dut(Vdut* dut) {
         uint32_t idx_in_kernel = kernel->get_next_wg_idx_in_kernel();
         dim3_t kernel_size_3d = kernel->get_num_wg_3d();
         dut->io_host_req_bits_host_wg_id = kernel->get_next_wgid();
-        // TODO: temporary solution, need to be fixed
-        // RTL uses kernel_size_3d as wg_id_3d currently
+        dut->io_host_req_bits_host_kernel_size_x = kernel_size_3d.x;
+        dut->io_host_req_bits_host_kernel_size_y = kernel_size_3d.y;
+        dut->io_host_req_bits_host_kernel_size_z = kernel_size_3d.z;
         dim3_t wgidx_3d = kernel->get_next_wg_idx3d_in_kernel();
-        dut->io_host_req_bits_host_kernel_size_3d_0 = wgidx_3d.x;
-        dut->io_host_req_bits_host_kernel_size_3d_1 = wgidx_3d.y;
-        dut->io_host_req_bits_host_kernel_size_3d_2 = wgidx_3d.z;
+        dut->io_host_req_bits_host_wgIdx_x = wgidx_3d.x;
+        dut->io_host_req_bits_host_wgIdx_y = wgidx_3d.y;
+        dut->io_host_req_bits_host_wgIdx_z = wgidx_3d.z;
+        auto threadIdx_offset = kernel->get_threadIdx_offset_3d();
+        dut->io_host_req_bits_host_threadIdx_global_offset_x = threadIdx_offset.x;
+        dut->io_host_req_bits_host_threadIdx_global_offset_y = threadIdx_offset.y;
+        dut->io_host_req_bits_host_threadIdx_global_offset_z = threadIdx_offset.z;
+        auto num_thread_local = kernel->get_num_thread_local_3d();
+        dut->io_host_req_bits_host_num_thread_per_wg_x = (num_thread_local.x > 0) ? num_thread_local.x : 1;
+        dut->io_host_req_bits_host_num_thread_per_wg_y = (num_thread_local.y > 0) ? num_thread_local.y : 1;
+        dut->io_host_req_bits_host_num_thread_per_wg_z = (num_thread_local.z > 0) ? num_thread_local.z : 1;
         dut->io_host_req_bits_host_num_wf = kernel->get_num_wf();
         dut->io_host_req_bits_host_wf_size = kernel->get_num_thread();
         dut->io_host_req_bits_host_lds_size_total = kernel->get_num_lds();
@@ -87,8 +118,8 @@ bool Cta::apply_to_dut(Vdut* dut) {
         dut->io_host_req_bits_host_start_pc = kernel->get_start_pc();
         dut->io_host_req_bits_host_csr_knl = kernel->get_csr_baseaddr();
         dut->io_host_req_bits_host_gds_baseaddr = kernel->get_gds_baseaddr();
-        dut->io_host_req_bits_host_pds_baseaddr = kernel->get_pds_baseaddr()
-            + idx_in_kernel * kernel->get_num_wf() * kernel->get_num_thread() * kernel->get_num_pds_per_thread();
+        // PDS base is a pool base. CU interface maps WG to a resident slot.
+        dut->io_host_req_bits_host_pds_baseaddr = kernel->get_pds_baseaddr();
         dut->io_host_req_bits_host_gds_size_total = 0; // useless
         return true;
     }

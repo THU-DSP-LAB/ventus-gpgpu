@@ -82,18 +82,20 @@ class Writeback(num_x:Int,num_v:Int) extends Module{
   if(GVM_ENABLED){
     val gvm_x_wb = Module(new GvmDutXRegWriteback)
     gvm_x_wb.io.clock := clock
-    gvm_x_wb.io.fire := RegNext(io.out_x.fire) // bit
-    gvm_x_wb.io.sm_id := RegNext(io.out_x.bits.spike_info.get.sm_id.pad(32))
-    gvm_x_wb.io.rd := RegNext(io.out_x.bits.wb_wxd_rd) // int
-    gvm_x_wb.io.is_scalar_wb := RegNext(io.out_x.bits.wxd) // bit
-    gvm_x_wb.io.reg_idx := RegNext(io.out_x.bits.reg_idxw.pad(32))
-    gvm_x_wb.io.hardware_warp_id := RegNext(io.out_x.bits.warp_id.pad(32))
-    gvm_x_wb.io.pc := RegNext(io.out_x.bits.spike_info.get.pc) // int
-    gvm_x_wb.io.inst := RegNext(io.out_x.bits.spike_info.get.inst) // int
-    gvm_x_wb.io.dispatch_id := RegNext(io.out_x.bits.spike_info.get.dispatch_id.get) // int
+    gvm_x_wb.io.reset := reset.asBool
+    gvm_x_wb.io.fire := RegNext(io.out_x.fire, false.B) // bit
+    gvm_x_wb.io.sm_id := RegNext(io.out_x.bits.spike_info.get.sm_id.pad(32), 0.U(32.W))
+    gvm_x_wb.io.rd := RegNext(io.out_x.bits.wb_wxd_rd, 0.U(xLen.W)) // int
+    gvm_x_wb.io.is_scalar_wb := RegNext(io.out_x.bits.wxd, false.B) // bit
+    gvm_x_wb.io.reg_idx := RegNext(io.out_x.bits.reg_idxw.pad(32), 0.U(32.W))
+    gvm_x_wb.io.hardware_warp_id := RegNext(io.out_x.bits.warp_id.pad(32), 0.U(32.W))
+    gvm_x_wb.io.pc := RegNext(io.out_x.bits.spike_info.get.pc, 0.U(xLen.W)) // int
+    gvm_x_wb.io.inst := RegNext(io.out_x.bits.spike_info.get.inst, 0.U(32.W)) // int
+    gvm_x_wb.io.dispatch_id := RegNext(io.out_x.bits.spike_info.get.dispatch_id.get, 0.U(32.W)) // int
 
     val gvm_v_wb = Module(new GvmDutVRegWriteback)
     gvm_v_wb.io.clock := clock
+    gvm_v_wb.io.reset := reset.asBool
     gvm_v_wb.io.fire := io.out_v.fire // bit
     gvm_v_wb.io.sm_id := io.out_v.bits.spike_info.get.sm_id.pad(32)
     gvm_v_wb.io.rd := io.out_v.bits.wb_wvd_rd.asUInt // UInt - 向量数据转换为一维信号

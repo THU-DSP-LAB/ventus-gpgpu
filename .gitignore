@@ -1,4 +1,5 @@
 out/
+build/
 .bsp/
 .idea/
 .mill-bin/
@@ -22,5 +23,13 @@ GPGPU_top.v
 GPGPU_top.fir
 GPGPU_top.anno.json
 sim-verilator/verilog-out/
+GPU.sv
+__pycache__/
+skills
+sim-verilator-nocache/verilog-out/
 
 gen_fpga_verilog/
+ventus/src/L1Cache/DCache/AGENT_CONTEXT/
+
+# Codex CLI marker file
+.codex

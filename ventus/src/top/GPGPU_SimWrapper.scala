@@ -11,7 +11,7 @@ import L2cache._
 import config.config._
 import mmu.AsidLookupEntry
 import parameters.num_warp
-import parameters.{INST_CNT, INST_CNT_2, num_warp}
+import parameters._
 
 class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = false) extends Module {
   val io = IO(new Bundle {
@@ -19,7 +19,7 @@ class DecoupledPipe[T <: Data](dat: T, latency: Int = 1, insulate: Boolean = fal
     val deq = DecoupledIO(dat)
   })
   val valids = io.enq.valid +: Seq.fill(latency)(RegInit(false.B))
-  io.enq.ready := RegNext(io.deq.ready)
+  io.enq.ready := RegNext(io.deq.ready, false.B)
   for (i <- 1 to latency) {
     when(!(!io.deq.ready && valids.drop(i).reduce(_ && _))) {
       valids(i) := valids(i - 1)
@@ -66,7 +66,7 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
       beatBytes = (l2cache_BlockWords << 2),
       l2cs = num_l2cache
     ),
-    InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm,num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets),
+    InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm,num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets,atuns_NInfWriteEntry),
     false,
     MMU_ENABLED
   )
@@ -76,6 +76,9 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
     val host_rsp = DecoupledIO(new CTA2host_data)
     val out_a = Decoupled(new TLBundleA_lite(l2cache_params))           // L2 cache request
     val out_d = Flipped(Decoupled(new TLBundleD_lite(l2cache_params)))  // L2 cache response
+    val perfDump = Input(Bool())
+    val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val asid_fill = if(MMU_ENABLED) Some(Flipped(ValidIO(new AsidLookupEntry(SV.getOrElse(mmu.SV32))))) else None
     val cnt = Output(UInt(32.W))
     val inst_cnt = if(INST_CNT) Some(Output(Vec(num_sm, UInt(32.W)))) else None
@@ -94,6 +97,9 @@ class GPGPU_SimWrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = Non
   GPU.suggestName("GPU")
 
   GPU.io.cycle_cnt := counter.value
+  GPU.io.perfDump := io.perfDump
+  GPU.io.perfDumpSummary := io.perfDumpSummary
+  io.pmu := GPU.io.pmu
   if(MMU_ENABLED){
     GPU.io.asid_fill.foreach{ _ <> io.asid_fill.get }
   }

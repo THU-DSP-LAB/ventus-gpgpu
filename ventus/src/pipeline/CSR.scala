@@ -41,6 +41,17 @@ object CSR{
   val csr_print = 0x80b.U(12.W)
   val rpc = 0x80c.U(12.W)
 
+  val global_id_x = 0x80d.U(12.W)
+  val global_id_y = 0x80e.U(12.W)
+  val global_id_z = 0x80f.U(12.W)
+  val global_linear_id = 0x810.U(12.W)
+  val local_id_x = 0x811.U(12.W)
+  val local_id_y = 0x812.U(12.W)
+  val local_id_z = 0x813.U(12.W)
+
+
+
+
   // Vector csr address
   val vstart = 0x008.U(12.W)
   val vxsat = 0x009.U(12.W)
@@ -90,6 +101,8 @@ class CSRFile extends Module {
     val in1 = Input(UInt(xLen.W))
     val write = Input(Bool())
     val wb_wxd_rd  = Output(UInt(xLen.W))
+    val wb_wvd_rd  = Output(Vec(num_thread,UInt(xLen.W)))
+    val wb_isvec   = Output(Bool())
     val frm = Output(UInt(3.W))
     val CTA2csr = Flipped(ValidIO(new warpReqData))
     val sgpr_base = Output(UInt((SGPR_ID_WIDTH + 1).W))
@@ -98,6 +111,7 @@ class CSRFile extends Module {
     val lsu_tid = Output(UInt(xLen.W))
     val lsu_pds = Output(UInt(xLen.W))
     val lsu_numw= Output(UInt(xLen.W))
+    val lsu_numt= Output(UInt(xLen.W))
   })
 
   // Machine Trap-Vector Base-Address Register (mtvec)
@@ -171,6 +185,14 @@ class CSRFile extends Module {
   val csr_print = RegInit(0.U(32.W))
   val rpc=RegInit(0.U(32.W))
 
+  val global_id_x = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_id_y = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_id_z = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val global_linear_id = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id_x       = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id_y       = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+  val local_id_z       = RegInit(VecInit(Seq.fill(num_thread)(0.U(xLen.W))))
+
   val sgpr_base_dispatch = Reg(UInt((SGPR_ID_WIDTH + 1).W))
   val vgpr_base_dispatch = Reg(UInt((VGPR_ID_WIDTH + 1).W))
   io.sgpr_base:=sgpr_base_dispatch
@@ -206,13 +228,14 @@ class CSRFile extends Module {
   val csr_addr = io.ctrl.inst(31,20)
   val csr_input = io.in1
   val csr_rdata = Wire(UInt(xLen.W))
-
+  val csr_rdata_v =Wire(Vec(num_thread,UInt(xLen.W)))
   val wdata=Wire(UInt(xLen.W))
   wdata:=csr_rdata
   io.wb_wxd_rd:=wdata
-
+  io.wb_wvd_rd:=csr_rdata_v
   io.simt_rpc:=rpc
-
+  io.wb_isvec:= (csr_addr===CSR.global_id_x) || (csr_addr===CSR.global_id_y) || (csr_addr===CSR.global_id_z) ||
+    (csr_addr===CSR.local_id_x) ||(csr_addr===CSR.local_id_y) ||(csr_addr===CSR.local_id_z) ||(csr_addr===CSR.global_linear_id)
   val wen=io.ctrl.csr.orR&io.write
   val csr_wdata = MuxLookup(io.ctrl.csr, 0.U)(
     Seq(
@@ -251,7 +274,18 @@ class CSRFile extends Module {
     BitPat(CSR.rpc)->rpc
   )
 
+  val csrFile_v= Seq(
+    BitPat(CSR.global_id_x) -> global_id_x.asUInt,
+    BitPat(CSR.global_id_y) -> global_id_y.asUInt,
+    BitPat(CSR.global_id_z) -> global_id_z.asUInt,
+    BitPat(CSR.global_linear_id) -> global_linear_id.asUInt,
+    BitPat(CSR.local_id_x) -> local_id_x.asUInt,
+    BitPat(CSR.local_id_y) -> local_id_y.asUInt,
+    BitPat(CSR.local_id_z) -> local_id_z.asUInt,
+  )
+
   csr_rdata := Lookup(csr_addr, 0.U(xLen.W), csrFile).asUInt
+  csr_rdata_v:=Lookup(csr_addr, VecInit.fill(num_thread)(0.U(xLen.W)).asUInt, csrFile_v).asTypeOf(Vec(num_thread, UInt(xLen.W)))
   val AVL=csr_input
 
     when(wen){
@@ -308,19 +342,31 @@ class CSRFile extends Module {
     wg_id_y:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_y_dispatch
     wg_id_z:=io.CTA2csr.bits.CTAdata.dispatch2cu_wgid_z_dispatch
     wg_id:=io.CTA2csr.bits.CTAdata.dispatch2cu_wg_id
+    for (i <-0 until num_thread){
+      global_id_x(i)      := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_x(i)
+      global_id_y(i)      := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_y(i)
+      global_id_z(i)      := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_z(i)
+      local_id_x(i)       := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_x(i)
+      local_id_y(i)       := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_y(i)
+      local_id_z(i)       := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_local_z(i)
+      global_linear_id(i) := io.CTA2csr.bits.CTAdata.dispatch2cu_threadIdx_global_linear(i)
+    }
+
 
     threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_warp-1,0)<<depth_thread//threadid:=io.CTA2csr.bits.CTAdata.dispatch2cu_wf_tag_dispatch(depth_thread-1,0)<<depth_thread
   }
   //todo check function of this signals//fix by rk
-  io.lsu_tid := wf_tag_dispatch * num_thread.asUInt
+  io.lsu_tid := wf_tag_dispatch * wf_size_dispatch
   io.lsu_pds := pds_baseaddr
   io.lsu_numw := wg_wf_count
+  io.lsu_numt := wf_size_dispatch
 }
 
 class CSRexe extends Module {
   val io = IO(new Bundle {
     val in = Flipped(Decoupled(new csrExeData))
     val out = Decoupled(new WriteScalarCtrl())
+    val out_v =Decoupled(new WriteVecCtrl())
     val rm_wid = Input(Vec(3,UInt(depth_warp.W)))
     val rm = Output(Vec(3,UInt(3.W)))
     val CTA2csr = Flipped(ValidIO(new warpReqData))
@@ -332,6 +378,7 @@ class CSRexe extends Module {
     val lsu_tid = Output(UInt(xLen.W))
     val lsu_pds = Output(UInt(xLen.W))
     val lsu_numw= Output(UInt(xLen.W))
+    val lsu_numt= Output(UInt(xLen.W))
     val simt_rpc = Output(UInt(xLen.W))
   })
   val vCSR=VecInit(Seq.fill(num_warp)(Module(new CSRFile).io))
@@ -349,22 +396,36 @@ class CSRexe extends Module {
   io.lsu_tid:=vCSR(io.lsu_wid).lsu_tid
   io.lsu_pds:=vCSR(io.lsu_wid).lsu_pds
   io.lsu_numw:=vCSR(io.lsu_wid).lsu_numw
+  io.lsu_numt:=vCSR(io.lsu_wid).lsu_numt
   io.simt_rpc:=vCSR(io.simt_wid).simt_rpc
 
   vCSR(io.in.bits.ctrl.wid).write:=io.in.fire
   vCSR(io.CTA2csr.bits.wid).CTA2csr.valid:=io.CTA2csr.valid
   val result=Module(new Queue(new WriteScalarCtrl,1,pipe=true))
+  val result_v=Module(new Queue(new WriteVecCtrl,1,pipe=true))
   result.io.deq<>io.out
 
-  io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid
-  result.io.enq.valid:=io.in.fire
+  io.in.ready:=result.io.enq.ready & !io.CTA2csr.valid & result_v.io.enq.ready
+
+  result.io.enq.valid:=io.in.fire & !vCSR(io.in.bits.ctrl.wid).wb_isvec
   result.io.enq.bits:=0.U.asTypeOf(new WriteScalarCtrl)
   result.io.enq.bits.reg_idxw:=io.in.bits.ctrl.reg_idxw
-  result.io.enq.bits.wxd:=io.in.bits.ctrl.wxd
+  result.io.enq.bits.wxd:= !vCSR(io.in.bits.ctrl.wid).wb_isvec
   result.io.enq.bits.wb_wxd_rd:=vCSR(io.in.bits.ctrl.wid).wb_wxd_rd
   result.io.enq.bits.warp_id:=io.in.bits.ctrl.wid
 
+  result_v.io.deq <> io.out_v
+
+  result_v.io.enq.valid := io.in.fire & vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result_v.io.enq.bits := 0.U.asTypeOf(new WriteVecCtrl)
+  result_v.io.enq.bits.reg_idxw := io.in.bits.ctrl.reg_idxw
+  result_v.io.enq.bits.wvd := vCSR(io.in.bits.ctrl.wid).wb_isvec
+  result_v.io.enq.bits.wb_wvd_rd := vCSR(io.in.bits.ctrl.wid).wb_wvd_rd
+  result_v.io.enq.bits.warp_id := io.in.bits.ctrl.wid
+  result_v.io.enq.bits.wvd_mask:= VecInit.fill(num_thread)(true.B)
+
   if(SPIKE_OUTPUT) result.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
+  if(SPIKE_OUTPUT) result_v.io.enq.bits.spike_info.get:=io.in.bits.ctrl.spike_info.get
   (0 until 3).foreach(x=>{
     io.rm(x):=vCSR(io.rm_wid(x)).frm
   })

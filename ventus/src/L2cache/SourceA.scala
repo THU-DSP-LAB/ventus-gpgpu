@@ -29,6 +29,18 @@ class TLBundleA_lite(params: InclusiveCacheParameters_lite) extends Bundle
   val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
+class TLBundleA_lite_custom(params: InclusiveCacheParameters_lite) extends Bundle
+{
+  val opcode = UInt(params.op_bits.W)
+  val size =UInt(params.size_bits.W)
+  val source =UInt(params.source_bits_custom.W)
+  val address= UInt(params.addressBits.W)
+  val mask =UInt((params.cache.beatBytes/params.micro.writeBytes).W)
+  val data=UInt(params.data_bits.W)
+  val param =UInt(3.W)
+  val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
+}
+
 
 
 

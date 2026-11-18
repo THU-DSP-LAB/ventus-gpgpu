@@ -23,7 +23,7 @@ import parameters.num_warp
 
 class GPGPU_ExtMemWrapper(C: TestCase#Props) extends Module{
   val L1param = (new MyConfig).toInstance
-  val L2param =InclusiveCacheParameters_lite(CacheParameters(2,l2cache_NSets,l2cache_NWays,num_l2cache,blockBytes=(l2cache_BlockWords<<2),beatBytes=(l2cache_BlockWords<<2)),InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets),false, MMU_ENABLED)
+  val L2param =InclusiveCacheParameters_lite(CacheParameters(2,l2cache_NSets,l2cache_NWays,num_l2cache,blockBytes=(l2cache_BlockWords<<2),beatBytes=(l2cache_BlockWords<<2)),InclusiveCacheMicroParameters(l2cache_writeBytes,l2cache_memCycles,l2cache_portFactor,num_warp,num_sm,num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets,atuns_NInfWriteEntry),false, MMU_ENABLED)
 
   val io = IO(new Bundle{})
 
@@ -33,6 +33,8 @@ class GPGPU_ExtMemWrapper(C: TestCase#Props) extends Module{
   //todo multiple l2c
   cpu_test.io.host2cta<>GPU.io.host_req
   cpu_test.io.cta2host<>GPU.io.host_rsp
+  GPU.io.perfDump := false.B
+  GPU.io.perfDumpSummary := false.B
   for(i<-0 until num_l2cache){
     ExtMem(i).memReq <> GPU.io.out_a(i)
     GPU.io.out_d(i) <> ExtMem(i).memRsp

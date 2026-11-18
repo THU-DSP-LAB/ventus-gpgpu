@@ -11,7 +11,7 @@
 package top
 import L1Cache.MyConfig
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
-import parameters.{MMU_ENABLED, dcache_MshrEntry, dcache_NSets, l2cache_BlockWords, l2cache_NSets, l2cache_NWays, l2cache_memCycles, l2cache_portFactor, l2cache_writeBytes, num_cluster, num_l2cache, num_sm, num_sm_in_cluster, num_warp}
+import parameters.{atuns_NInfWriteEntry, MMU_ENABLED, dcache_MshrEntry, dcache_NSets, l2cache_BlockWords, l2cache_NSets, l2cache_NWays, l2cache_memCycles, l2cache_portFactor, l2cache_writeBytes, num_cluster, num_l2cache, num_sm, num_sm_in_cluster, num_warp}
 import pipeline.Scoreboard
 import circt.stage.ChiselStage
 
@@ -21,7 +21,7 @@ import circt.stage.ChiselStage
 //}
 object GPGPU_gen extends App{
   val L1param = (new MyConfig).toInstance
-  val L2param = InclusiveCacheParameters_lite(CacheParameters(2, l2cache_NSets, l2cache_NWays, blockBytes = (l2cache_BlockWords << 2), beatBytes = (l2cache_BlockWords << 2),l2cs = num_l2cache), InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets), false, MMU_ENABLED)
+  val L2param = InclusiveCacheParameters_lite(CacheParameters(2, l2cache_NSets, l2cache_NWays, blockBytes = (l2cache_BlockWords << 2), beatBytes = (l2cache_BlockWords << 2),l2cs = num_l2cache), InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster,num_cluster,dcache_MshrEntry,dcache_NSets,atuns_NInfWriteEntry), false, MMU_ENABLED)
   ChiselStage.emitSystemVerilogFile(new GPGPU_top()(L1param, SV = Some(mmu.SV32)),
     firtoolOpts = Array(
       "--disable-mem-randomization",
