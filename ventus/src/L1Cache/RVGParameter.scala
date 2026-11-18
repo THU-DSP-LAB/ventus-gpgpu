@@ -28,7 +28,9 @@ case class RVGParameters
   WordLength: Int = xLen,
   BlockWords: Int = dcache_BlockWords,
   NCacheInSM: Int = num_cache_in_sm,
-  NL2Cache: Int = num_l2cache
+  NL2Cache: Int = num_l2cache,
+  NResTabEntry: Int = atuns_NResTabEntry,
+  NInfWriteEntry: Int = atuns_NInfWriteEntry
 )
 
 trait HasRVGParameters {
@@ -51,8 +53,9 @@ trait HasRVGParameters {
   def NCluster = RVGParams.NCluster
   def NL2Cache = RVGParams.NL2Cache
 
-  def NResTabEntry = 16
-  def NInfWriteEntry = 16
+  def NResTabEntry = RVGParams.NResTabEntry
+  def NInfWriteEntry =  RVGParams.NInfWriteEntry
+  def InfWriteEntryBits = log2Up(NInfWriteEntry)
 }
 
 abstract class RVGBundle(implicit val p: Parameters) extends Bundle with HasRVGParameters

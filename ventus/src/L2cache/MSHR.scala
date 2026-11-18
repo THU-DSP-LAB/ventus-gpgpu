@@ -27,6 +27,13 @@ class ScheduleRequest(params:InclusiveCacheParameters_lite) extends Bundle
   val dir = Decoupled(new DirectoryWrite_lite(params))
 
 }
+
+object MSHROwnership {
+  def apply(requestValid: Bool, scheduleAValid: Bool, scheduleDirValid: Bool, evictReadPending: Bool): Bool = {
+    requestValid || scheduleAValid || scheduleDirValid || evictReadPending
+  }
+}
+
 class  Status(params:InclusiveCacheParameters_lite)extends  DirectoryResult_lite(params)
 {
 

@@ -44,6 +44,7 @@ class DCacheCoreReq_np extends Bundle{
   val data = Vec(num_thread, UInt(xLen.W))
   val opcode = UInt(3.W)
   val param= UInt(4.W)
+  val isKernelFlush = Bool()
   val spike_info=if(SPIKE_OUTPUT) Some(new cache_spike_info(mmu.SV32)) else None
 }
 
@@ -68,7 +69,7 @@ class ShareMemCoreReq_np extends Bundle{
   val instrId = UInt(log2Up(lsu_nMshrEntry).W)
   val isWrite = Bool()//Vec(NLanes, Bool())
   //val tag = UInt(dcache_TagBits.W)
-  val setIdx = UInt(dcache_SetIdxBits.W)
+  val setIdx = UInt(log2Ceil(sharedmem_depth).W)
   val perLaneAddr = Vec(num_thread, new ShareMemPerLaneAddr_np)
   val data = Vec(num_thread, UInt(xLen.W))
 }
@@ -116,20 +117,22 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     val csr_wid = Output(UInt(depth_warp.W))
     val csr_pds = Input(UInt(xLen.W))
     val csr_numw = Input(UInt(xLen.W))
+    val csr_numt = Input(UInt(xLen.W))
     val csr_tid = Input(UInt(xLen.W))
     val to_mshr = DecoupledIO(new Bundle{
       val tag = new MshrTag
     })
     val idx_entry = Input(UInt(log2Up(lsu_nMshrEntry).W))
     val flush_dcache = Flipped(DecoupledIO(Bool()))
+    val flush_dcache_done = Input(Bool())
     val to_dcache = DecoupledIO(new DCacheCoreReq_np)
     val to_shared = DecoupledIO(new ShareMemCoreReq_np)
   })
-  val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2:: Nil = Enum(6)
+  val s_idle :: s_save :: s_shared :: s_dcache ::s_dcache_1::s_dcache_2::s_flush_wait:: Nil = Enum(7)
   val cnt = new Counter(n = num_thread)
   val state = RegInit(init = s_idle)
 
-  val reg_save = Reg(new vExeData)
+  val reg_save = RegInit(0.U.asTypeOf(new vExeData))
   val is_flush = RegInit(false.B)
   io.csr_wid:=reg_save.ctrl.wid
   //val rdy_fromFIFO = Reg(Bool())
@@ -144,10 +147,15 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 
   // Address Calculate & Analyze, Comb Logic @reg_save
   (0 until num_thread).foreach( x => {
+    val privateByteOffset = reg_save.in1(x) + reg_save.in2(x)
+    val wordBaseOffset = Cat(privateByteOffset(31,2), 0.U(2.W))
+    val byteLaneOffset = Mux(reg_save.ctrl.mem_whb === MEM_W, 0.U, privateByteOffset(1,0))
+    val pdsWordStride = wordBaseOffset * io.csr_numw * io.csr_numt
+    val pdsLaneSlot = Cat(io.csr_tid + x.asUInt, 0.U(2.W))
     addr(x) :=  Mux(reg_save.ctrl.isvec & reg_save.ctrl.disable_mask,
                   Mux(reg_save.ctrl.is_vls12,
                     reg_save.in1(x)+reg_save.in2(x),
-                    (reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+                    byteLaneOffset + pdsLaneSlot + io.csr_pds + pdsWordStride
                   ),
                   Mux(reg_save.ctrl.isvec,
                     reg_save.in1(x) + Mux(reg_save.ctrl.mop===0.U,
@@ -169,7 +177,10 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   addr_wire:=addr(PriorityEncoder(reg_save.mask.asUInt))
   val tag = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1, xLen-1-dcache_TagBits+1), 0.U(dcache_TagBits.W))
   val setIdx = Mux(reg_save.mask.asUInt=/=0.U, addr_wire(xLen-1-dcache_TagBits, xLen-1-dcache_TagBits-dcache_SetIdxBits+1), 0.U(dcache_SetIdxBits.W))
-
+  val setIdx_shared = Mux(reg_save.mask.asUInt=/=0.U, 
+                        addr_wire(log2Ceil(sharedmem_depth) + dcache_BlockOffsetBits + dcache_WordOffsetBits - 1, 
+                                  dcache_BlockOffsetBits + dcache_WordOffsetBits), 
+                        0.U)
   val same_tag = Wire(Vec(num_thread, Bool()))
     (0 until num_thread).foreach( x =>
       same_tag(x) := Mux(reg_save.mask(x), addr(x)(xLen-1, xLen-1-dcache_TagBits-dcache_SetIdxBits+1)===Cat(tag, setIdx), false.B)
@@ -213,7 +224,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   io.to_shared.bits.instrId := reg_entryID
   // |reg_save| -> |addr & mask| -> |PriorityEncoder| -> |tag & idx| -> |io.to_dcache.bits|
   //io.to_shared.bits.tag := tag
-  io.to_shared.bits.setIdx := setIdx
+  io.to_shared.bits.setIdx := setIdx_shared
   (0 until num_thread).foreach(x => {
     io.to_shared.bits.perLaneAddr(x).blockOffset := blockOffset(x)
     io.to_shared.bits.perLaneAddr(x).wordOffset1H := wordOffset1H(x)
@@ -238,7 +249,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   }
   val opcode_wire =Wire(UInt(3.W))
   val param_wire_alt =Wire(UInt(4.W))
-  param_wire_alt := Mux(reg_save.ctrl.alu_fn===FN_SWAP,16.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
+  param_wire_alt := Mux(reg_save.ctrl.alu_fn===FN_SWAP,15.U,Mux(reg_save.ctrl.alu_fn===FN_AMOADD,0.U,Mux(reg_save.ctrl.alu_fn===FN_XOR,1.U,
     Mux(reg_save.ctrl.alu_fn===FN_AND,3.U,Mux(reg_save.ctrl.alu_fn===FN_OR,2.U,Mux(reg_save.ctrl.alu_fn===FN_MIN,4.U,
     Mux(reg_save.ctrl.alu_fn===FN_MAX,5.U,Mux(reg_save.ctrl.alu_fn===FN_MINU,6.U,Mux(reg_save.ctrl.alu_fn===FN_MAXU,7.U,1.U)))))))))
   val param_wire=Wire(UInt(4.W))
@@ -268,6 +279,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
   }
   io.to_dcache.bits.opcode :=opcode_wire// fence=invalidate, atomic will split to maximum 3 instructions
   io.to_dcache.bits.param :=param_wire
+  io.to_dcache.bits.isKernelFlush := is_flush
 
   (0 until num_thread).foreach(x => {
     io.to_dcache.bits.perLaneAddr(x).blockOffset := blockOffset(x)
@@ -321,7 +333,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
     is (s_dcache) {
       when(is_flush) {
         when(io.to_dcache.fire) {
-          state := s_idle
+          state := Mux(io.flush_dcache_done, s_idle, s_flush_wait)
         }.otherwise {
           state := state
         }
@@ -386,6 +398,9 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
         when(io.to_mshr.fire){reg_entryID := io.idx_entry}  // get entryID from MSHR
       }
     }
+    is(s_flush_wait){
+      when(io.flush_dcache_done){state := s_idle}
+    }
     is (s_shared){
       // Maybe Nothing here :-)
       when(io.to_shared.fire){                                      // request is sent
@@ -430,13 +445,19 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
         printf(common_prefix + p"lsu.w x ${reg_save.ctrl.reg_idx2} op ${reg_save.ctrl.mop} ${Hexadecimal(reg_save.in3(0))} @ ${Hexadecimal(reg_save.in1(0))}+${Hexadecimal(reg_save.in2(0))}\n")
       }
     } .otherwise {
-      val addr_print: Printable = addr.reverse.map { x => p" ${Hexadecimal(x)}" }.reduceOption(_ + _).getOrElse(p"")
+      // 打印格式带 lane index "[lN]=ADDR"，便于 debug 时直接读 lane→paddr 对应关系
+      val addr_print: Printable = addr.zipWithIndex.reverse.map { case (x, i) =>
+        p" [l${i}]=${Hexadecimal(x)}"
+      }.reduceOption(_ + _).getOrElse(p"")
       when(reg_save.ctrl.mem_cmd === IDecode.M_XRD) {
         printf(common_prefix + p"lsu.r v${reg_save.ctrl.reg_idx3} op ${reg_save.ctrl.mop} @" + addr_print + p"\n")
       } .elsewhen(reg_save.ctrl.mem_cmd === IDecode.M_XWR) {
         val idx = Mux(reg_save.ctrl.disable_mask, reg_save.ctrl.reg_idx2, reg_save.ctrl.reg_idxw)
-        val in3_print: Printable = reg_save.in3.reverse.map { x => p"${Hexadecimal(x)} " }.reduceOption(_ + _).getOrElse(p"")
-        printf(common_prefix + p"lsu.w v${idx} op ${reg_save.ctrl.mop} mask ${Binary(reg_save.mask.asUInt)} " + in3_print + p"@" + addr_print + p"\n")
+        // store 把 data 与 addr 同 lane 配对："[lN]=DATA@ADDR"
+        val store_print: Printable = reg_save.in3.zip(addr).zipWithIndex.reverse.map { case ((d, a), i) =>
+          p" [l${i}]=${Hexadecimal(d)}@${Hexadecimal(a)}"
+        }.reduceOption(_ + _).getOrElse(p"")
+        printf(common_prefix + p"lsu.w v${idx} op ${reg_save.ctrl.mop} mask ${Binary(reg_save.mask.asUInt)}" + store_print + p"\n")
       }
     }
   }
@@ -474,7 +495,7 @@ class AddrCalculate(val sharedmemory_maxsize: UInt = 4096.U(32.W)) extends Modul
 //         }
 //         log_str += p"@"
 //         when(false.B){
-//           //(reg_save.in1(x) + reg_save.in2(x))(1,0) + (Cat((io.csr_tid + x.asUInt),0.U(2.W) ) ) + io.csr_pds + (((Cat((reg_save.in1(x)+reg_save.in2(x))(31,2),0.U(2.W)))*io.csr_numw)<<depth_thread) 
+//           // PDS: csr_pds + align4(offset) * csr_numw * csr_numt + (csr_tid + lane) * 4 + byte_lane
 //         }.otherwise{
 //           //(reg_save.in1 zip reg_save.in2).reverse.foreach(x => printf(p" ${Hexadecimal(x._1)}+${Hexadecimal(x._2)}"))
 //           addr.reverse.foreach{ x =>
@@ -539,10 +560,12 @@ class LSUexe() extends Module{
     val shared_rsp = Flipped(DecoupledIO(new DCacheCoreRsp_np))
     val fence_end = Output(UInt(num_warp.W))
     val flush_dcache = Flipped(DecoupledIO(Bool()))
+    val flush_dcache_done = Input(Bool())
 
     val csr_wid = Output(UInt(depth_warp.W))
     val csr_pds = Input(UInt(xLen.W))
     val csr_numw = Input(UInt(xLen.W))
+    val csr_numt = Input(UInt(xLen.W))
     val csr_tid = Input(UInt(xLen.W))
   })
   val sharedmemory_addr_max = sharemem_size.U(32.W)
@@ -555,7 +578,8 @@ class LSUexe() extends Module{
   AddrCalc.io.from_fifo <> InputFIFO.io.deq
   io.dcache_req <> AddrCalc.io.to_dcache
   io.shared_req <> AddrCalc.io.to_shared
-  AddrCalc.io.flush_dcache <> io.flush_dcache
+  io.flush_dcache <> AddrCalc.io.flush_dcache
+  AddrCalc.io.flush_dcache_done := io.flush_dcache_done
 
   val rspArbiter = Module(new Arbiter(new DCacheCoreRsp_np, n = 2))
   rspArbiter.io.in(1) <> io.shared_rsp
@@ -582,6 +606,7 @@ class LSUexe() extends Module{
   AddrCalc.io.csr_tid:=io.csr_tid
   AddrCalc.io.csr_pds:=io.csr_pds
   AddrCalc.io.csr_numw:=io.csr_numw
+  AddrCalc.io.csr_numt:=io.csr_numt
 }
 
 class ShiftBoard(val depth:Int) extends Module{

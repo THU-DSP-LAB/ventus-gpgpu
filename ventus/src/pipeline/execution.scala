@@ -753,6 +753,7 @@ class FPUexe(softThread: Int = num_thread, hardThread: Int = num_thread) extends
   })
   class TestFPUCtrl(depth_warp: Int, num_thread: Int, SPIKE_OUTPUT: Boolean)
     extends FPUv2.utils.TestFPUCtrl(depth_warp, num_thread){
+    override val regIndex = UInt(8.W)
     val spike_info = if(SPIKE_OUTPUT) Some(new InstWriteBack) else None
   }
   val fpu = Module(new FPUv2.VectorFPU(8, 24, softThread, hardThread, new TestFPUCtrl(depth_warp, num_thread,SPIKE_OUTPUT=SPIKE_OUTPUT)))

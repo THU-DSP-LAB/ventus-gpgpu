@@ -9,8 +9,8 @@
 	url = https://github.com/ucb-bar/berkeley-hardfloat.git
 [submodule "dependencies/fpuv2"]
 	path = dependencies/fpuv2
-	url = https://github.com/liuxd17thu/fpuv2.git
+	url = https://github.com/THU-DSP-LAB/fpuv2.git
 	branch = chisel6
 [submodule "dependencies/Membox2.Scala"]
 	path = dependencies/Membox2.Scala
-	url = https://github.com/liuxd17thu/Membox2.Scala.git
+	url = https://github.com/THU-DSP-LAB/Membox2.Scala.git

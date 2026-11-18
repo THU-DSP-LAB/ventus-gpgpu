@@ -75,7 +75,7 @@ int main(int argc, char* argv[]) {
     const ventus_rtlsim_step_result_t* result;
     while (1) {
         result = ventus_rtlsim_step(sim);
-        if (result->error || result->idle || result->time_exceed) {
+        if (result->error || result->idle || result->time_exceed || result->hang) {
             break;
         }
     }

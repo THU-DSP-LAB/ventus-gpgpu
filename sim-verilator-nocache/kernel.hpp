@@ -49,6 +49,21 @@ public:
     uint32_t get_gds_baseaddr() const { return 0; } // TODO
     uint32_t get_pds_baseaddr() const { return m_metadata.pdsBaseAddr; }
     uint32_t get_num_pds_per_thread() const { return m_metadata.pdsSize; }
+    dim3_t get_num_thread_local_3d() const {
+        return { static_cast<uint32_t>(m_metadata.num_thread_local[0]),
+                 static_cast<uint32_t>(m_metadata.num_thread_local[1]),
+                 static_cast<uint32_t>(m_metadata.num_thread_local[2]) };
+    }
+    dim3_t get_num_thread_global_3d() const {
+        return { static_cast<uint32_t>(m_metadata.num_thread_global[0]),
+                 static_cast<uint32_t>(m_metadata.num_thread_global[1]),
+                 static_cast<uint32_t>(m_metadata.num_thread_global[2]) };
+    }
+    dim3_t get_threadIdx_offset_3d() const {
+        return { static_cast<uint32_t>(m_metadata.threadIdxOffset[0]),
+                 static_cast<uint32_t>(m_metadata.threadIdxOffset[1]),
+                 static_cast<uint32_t>(m_metadata.threadIdxOffset[2]) };
+    }
 
     // 判断一个线程块是否属于本kernel
     bool is_wg_belonging(uint32_t wg_id, uint32_t* wg_idx_in_kernel = nullptr) const;

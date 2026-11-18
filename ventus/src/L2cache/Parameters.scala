@@ -121,6 +121,7 @@ case class InclusiveCacheMicroParameters(
   num_cluster:Int,
   NMshrEntry:Int,
   NSets:Int,
+  NInfWriteEntry:Int,
   dirReg:     Boolean = false,
   innerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.none, // or none
   outerBuf:   InclusiveCachePortParameters = InclusiveCachePortParameters.full)   // or flowAE
@@ -157,6 +158,7 @@ case class InclusiveCacheParameters_lite(
   // the additional 1-bit at LSB is used for specifying TLB/L1Cache
   // automatically removed when L2Cache responsing to L1Cache
   val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1
+  val source_bits_custom=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1 +log2Ceil(micro.NInfWriteEntry) + 2
   val data_bits=(cache.beatBytes)*8
   val mask_bits=cache.beatBytes/micro.writeBytes
   val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
@@ -263,6 +265,135 @@ case class InclusiveCacheParameters_lite(
     cover(cond, "CCACHE_L" + cache.level + "_" + label, "MemorySystem;;" + desc)
 }
 
+
+
+case class InclusiveCacheParameters_lite_custom(
+  cache: CacheParameters,
+  micro: InclusiveCacheMicroParameters,
+  control: Boolean,
+  mmu: Boolean)
+{
+
+  require (cache.ways > 1)
+  require (cache.sets > 1 && isPow2(cache.sets))
+//  require (micro.writeBytes <= inner.manager.beatBytes)
+//  require (micro.writeBytes <= outer.manager.beatBytes)
+//  require (inner.manager.beatBytes <= cache.blockBytes)
+//  require (outer.manager.beatBytes <= cache.blockBytes)
+
+  // Require that all cached address ranges have contiguous blocks
+
+  // If we are the first level cache, we do not need to support inner-BCE
+  val op_bits = 3
+  val param_bits = 3
+  // the additional 1-bit at LSB is used for specifying TLB/L1Cache
+  // automatically removed when L2Cache responsing to L1Cache
+  val source_bits=3+log2Up(micro.NMshrEntry)+log2Up(micro.NSets)+log2Ceil(micro.num_sm_in_cluster)+log2Ceil(micro.num_cluster)+1 +1 +2 + log2Ceil(micro.NInfWriteEntry)
+  val data_bits=(cache.beatBytes)*8
+  val mask_bits=cache.beatBytes/micro.writeBytes
+  val size_bits=log2Ceil(cache.beatBytes) //todo 设计有问题
+  // Provision enough resources to achieve full throughput with missing single-beat accesses
+  val mshrs = InclusiveCacheParameters.all_mshrs(cache, micro)
+  val secondary = max(mshrs, micro.memCycles - mshrs)
+  val putLists = micro.memCycles // allow every request to be single beat
+  val putBeats = max(2*cache.blockBeats, micro.memCycles)
+  val relLists = 2
+  val relBeats = relLists*cache.blockBeats
+
+//  val flatAddresses = AddressSet.unify(outer.manager.managers.flatMap(_.address))
+//  val pickMask = AddressDecoder(flatAddresses.map(Seq(_)), flatAddresses.map(_.mask).reduce(_|_))
+  def hasData(x:DecoupledIO[TLBundleA_lite]): Bool={
+  x.bits.opcode===0.U || x.bits.opcode=== 1.U
+}
+  def bitOffsets(x: BigInt, offset: Int = 0, tail: List[Int] = List.empty[Int]): List[Int] =
+    if (x == 0) tail.reverse else bitOffsets(x >> 1, offset + 1, if ((x & 1) == 1) offset :: tail else tail)
+//  val addressMapping = bitOffsets(pickMask)
+  val addressBits = if(mmu) 34 else 32
+
+  // println(s"addresses: ${flatAddresses} => ${pickMask} => ${addressBits}")
+
+//  val allClients = inner.client.clients.size
+//  val clientBitsRaw = inner.client.clients.filter(_.supports.probe).size
+//  val clientBits = max(1, clientBitsRaw)
+//  val stateBits = 2
+
+  val wayBits    = log2Ceil(cache.ways)
+  val setBits    = log2Ceil(cache.sets)
+  val offsetBits = log2Ceil(cache.blockBytes)
+  val l2cBits    = log2Ceil(cache.l2cs)
+  val tagBits    = addressBits - setBits - offsetBits - l2cBits
+  val putBits    = log2Ceil(putLists)
+
+  require (tagBits > 0)
+  require (offsetBits > 0)
+  val beatBytes= cache.beatBytes
+  val innerBeatBits = offsetBits - log2Ceil(beatBytes)
+  val outerBeatBits = offsetBits - log2Ceil(beatBytes)
+  val innerMaskBits = beatBytes / micro.writeBytes
+  val outerMaskBits = beatBytes / micro.writeBytes
+
+//  def clientBit(source: UInt): UInt = {
+//    if (clientBitsRaw == 0) {
+//      UInt(0)
+//    } else {
+//      Cat(inner.client.clients.filter(_.supports.probe).map(_.sourceId.contains(source)).reverse)
+//    }
+//  }
+//
+//  def clientSource(bit: UInt): UInt = {
+//    if (clientBitsRaw == 0) {
+//      UInt(0)
+//    } else {
+//      Mux1H(bit, inner.client.clients.filter(_.supports.probe).map(c => UInt(c.sourceId.start)))
+//    }
+//  }
+
+  def parseAddress(x: UInt): (UInt, UInt, UInt, UInt) = {
+    val offset = x
+    val set = offset >> offsetBits
+    val l2c = set >> setBits
+    val tag = l2c >> l2cBits
+    (tag(tagBits-1, 0), if(l2cBits !=0) l2c(l2cBits-1,0) else 0.U,set(setBits-1, 0), offset(offsetBits-1, 0))
+  }
+
+  def widen(x: UInt, width: Int): UInt = {
+    val y = x | 0.U(width.W)
+    //assert (y >> width === UInt(0))
+    y(width-1, 0)
+  }
+
+  def expandAddress(tag: UInt, l2c:UInt, set: UInt, offset: UInt): UInt = {
+    val base = if(l2cBits != 0) Cat(widen(tag, tagBits), widen(l2c,l2cBits), widen(set, setBits), widen(offset, offsetBits))
+    else Cat(widen(tag, tagBits), widen(set, setBits), widen(offset, offsetBits))
+    var bits = Array.fill(addressBits) { 0.U(1.W) }
+ //   addressMapping.zipWithIndex.foreach { case (a, i) => bits(a) = base(i,i) }
+    base
+  }
+
+//  def restoreAddress(expanded: UInt): UInt = {
+//    val missingBits = flatAddresses
+//      .map { a => (a.widen(pickMask).base, a.widen(~pickMask)) } // key is the bits to restore on match
+//      .groupBy(_._1)
+//      .mapValues(_.map(_._2))
+//    val muxMask = AddressDecoder(missingBits.values.toList)
+//    val mux = missingBits.toList.map { case (bits, addrs) =>
+//      val widen = addrs.map(_.widen(~muxMask))
+//      val matches = AddressSet
+//        .unify(widen.distinct)
+//        .map(_.contains(expanded))
+//        .reduce(_ || _)
+//      (matches, UInt(bits))
+//    }
+//    expanded | Mux1H(mux)
+//  }
+
+  def dirReg[T <: Data](x: T, en: Bool = true.B): T = {
+    if (micro.dirReg) RegEnable(x, en) else x
+  }
+
+  def ccover(cond: Bool, label: String, desc: String)(implicit sourceInfo: SourceInfo) =
+    cover(cond, "CCACHE_L" + cache.level + "_" + label, "MemorySystem;;" + desc)
+}
 
 case class InclusiveCacheParameters(
   cache:  CacheParameters,

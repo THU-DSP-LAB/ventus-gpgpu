@@ -68,6 +68,17 @@ class DataCrossbar(implicit p: Parameters) extends ShareMemModule {
   }
 }
 
+class DataCrossbarWrite(implicit p: Parameters) extends ShareMemModule {
+  val io=IO(new Bundle {
+    val DataIn = Input(Vec(NLanes, UInt(WordLength.W)))
+    val DataOut = Output(Vec(NBanks, UInt(WordLength.W)))
+    val Select1H = Input(Vec(NBanks, UInt(NLanes.W)))
+  })
+  (0 until NBanks).foreach{ iofB =>
+      io.DataOut(iofB):= Mux1H(io.Select1H(iofB), io.DataIn)
+  }
+}
+
 class AddrBundle1T(implicit p: Parameters) extends ShareMemBundle {
   val bankOffset = if(BlockOffsetBits-BankIdxBits>0) Some(UInt((BlockOffsetBits-BankIdxBits).W)) else None
   val wordOffset1H = UInt(BytesOfWord.W)
@@ -110,10 +121,14 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
 
     val bankConflict = Output(Bool())
     val bankConflict_isWrite = Output(Bool())
+    val grantValid = Output(Bool())
+    val grantReady = Input(Bool())
+    val busy = Output(Bool())
+    val reqReady = Output(Bool())
   })
   //announcement
   val bankConflict = Wire(Bool())
-  val bankConflict_reg = RegNext(bankConflict,false.B)
+  val pendingValid = RegInit(false.B)
   val conflictReqIsW_reg = Reg(Bool())
   val perLaneReq = Wire(Vec(NLanes, new coreReqArb1T))
   val perLaneConflictReq_reg = Reg(Vec(NLanes, new coreReqArb1T))
@@ -131,7 +146,7 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
 
   //**************detect bank conflict**************
   val bankIdx = Wire(Vec(NLanes, UInt(BankIdxBits.W)))
-  val isWrite: Bool = Mux(bankConflict_reg,conflictReqIsW_reg,io.coreReqArb.isWrite)
+  val isWrite: Bool = Mux(pendingValid,conflictReqIsW_reg,io.coreReqArb.isWrite)
   val laneActiveMask = Wire(Vec(NLanes, Bool()))
   val bankIdx1H = Wire(Vec(NLanes, UInt(NBanks.W)))
   val bankIdxMasked = Wire(Vec(NLanes, UInt(NBanks.W)))
@@ -139,7 +154,7 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
     laneActiveMask(i) := perLaneConflictReq(i).activeMask
     bankIdx(i) := perLaneConflictReq(i).bankIdx
     bankIdx1H(i) := UIntToOH(bankIdx(i))
-    bankIdxMasked(i) := bankIdx1H(i) & Fill(NLanes, laneActiveMask(i))}
+    bankIdxMasked(i) := bankIdx1H(i) & Fill(NBanks, laneActiveMask(i))}
   val perBankReq_Bin = Wire(Vec(NBanks, UInt(NLanes.W)))//transpose of bankIdxMasked
   val perBankReqCount = Wire(Vec(NBanks, UInt((log2Up(NLanes)+1).W)))
   (0 until NBanks).foreach{ i =>
@@ -156,26 +171,35 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
   */
   val perBankReqConflict = Wire(Vec(NBanks, Bool()))
   perBankReqConflict := perBankReqCount.map(_>1.U)
-  bankConflict := Cat(perBankReqConflict).orR && (io.coreReqArb.enable || bankConflict_reg)
+  val grantValid = pendingValid || io.coreReqArb.enable
+  val grantFire = grantValid && io.grantReady
+  bankConflict := Cat(perBankReqConflict).orR && grantValid
   //TODO is there a better logic detecting bankConflict?
 
   //**************reserve conflict req**************
   val perBankActiveLaneWhenConflict1H = Wire(Vec(NBanks, UInt(NLanes.W)))
   perBankActiveLaneWhenConflict1H := perBankReq_Bin.map(Cat(_)).map(PriorityEncoderOH(_))
   val ActiveLaneWhenConflict1H = Wire(Vec(NLanes, Bool()))
-  (0 until NBanks).foreach{ i =>
+  (0 until NLanes).foreach{ i =>
     ActiveLaneWhenConflict1H(i) := Cat(perBankActiveLaneWhenConflict1H.map(_(i))).orR}
   val ReserveLaneWhenConflict1H = VecInit(((~Cat(ActiveLaneWhenConflict1H)).asUInt & Cat(laneActiveMask)).asBools.reverse)
 
-  perLaneConflictReq := Mux(bankConflict_reg,perLaneConflictReq_reg,perLaneReq)
+  perLaneConflictReq := Mux(pendingValid,perLaneConflictReq_reg,perLaneReq)
   //to determine current arb source: during a conflict, use Reg, otherwise use Input
   (0 until NLanes).foreach{ i =>
-    when(ReserveLaneWhenConflict1H(i)){
+    when(grantFire && ReserveLaneWhenConflict1H(i)){
       perLaneConflictReq_reg(i).bankIdx := perLaneConflictReq(i).bankIdx
       perLaneConflictReq_reg(i).AddrBundle := perLaneConflictReq(i).AddrBundle}
-    perLaneConflictReq_reg(i).activeMask := ReserveLaneWhenConflict1H(i)
+    when(grantFire){
+      perLaneConflictReq_reg(i).activeMask := ReserveLaneWhenConflict1H(i)
+    }
   }
-  when(bankConflict){conflictReqIsW_reg := io.coreReqArb.isWrite}
+  when(grantFire){
+    pendingValid := Cat(ReserveLaneWhenConflict1H).orR
+    when(!pendingValid){
+      conflictReqIsW_reg := io.coreReqArb.isWrite
+    }
+  }
 
   //**************output to AddrCrossbar**************
   io.addrCrsbarOut := L2BCrossbar(NBanks,perBankActiveLaneWhenConflict1H,VecInit(perLaneConflictReq.map(_.AddrBundle)))
@@ -188,6 +212,9 @@ class BankConflictArbiter(implicit p: Parameters) extends ShareMemModule{
   io.dataArrayEn := perBankActiveLaneWhenConflict1H.map(_.orR)
   io.bankConflict := bankConflict//to pull down coreReq.ready
   io.bankConflict_isWrite := isWrite
+  io.grantValid := grantValid
+  io.busy := pendingValid
+  io.reqReady := !pendingValid && io.grantReady
 
   //**************output to coreRsp****************
   io.activeLane := ActiveLaneWhenConflict1H

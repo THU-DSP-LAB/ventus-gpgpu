@@ -17,6 +17,7 @@ struct Cta2WarpData {
   uint32_t sgpr_base;
   uint32_t vgpr_base;
   uint32_t wg_slot_id_in_warp_sche;
+  uint32_t lds_base;
   uint32_t num_thread_in_warp;
 };
 extern std::vector<Cta2WarpData> g_cta2warp_data;
@@ -45,15 +46,20 @@ struct XRegWritebackData {
   uint32_t dispatch_id;
 };
 extern std::vector<XRegWritebackData> g_xreg_wb_data;
-struct XRegData {
+struct WarpXRegInitData {
   uint32_t sm_id;
-  uint32_t bank_id;
-  uint32_t num_bank;
-  uint32_t num_sgpr_slots;
-  std::vector<uint32_t> bank_data;
+  uint32_t hardware_warp_id;
+  std::vector<uint32_t> xreg_data;
 };
-extern std::vector<XRegData> g_xreg_data;
+extern std::vector<WarpXRegInitData> g_warp_xreg_init_data;
+struct WarpVRegInitData {
+  uint32_t sm_id;
+  uint32_t hardware_warp_id;
+  std::vector<std::vector<uint32_t>> vreg_data;
+};
+extern std::vector<WarpVRegInitData> g_warp_vreg_init_data;
 extern uint32_t g_sgprUsage; // num of sgpr used in one warp
+extern uint32_t g_vgprUsage; // num of vgpr used in one warp
 
 // VReg Writeback
 struct VRegWritebackData {
@@ -78,3 +84,5 @@ struct BarDoneData {
   uint32_t dispatch_id;
 };
 extern std::vector<BarDoneData> g_bar_done_data;
+
+void gvm_clear_global_trace_buffers();

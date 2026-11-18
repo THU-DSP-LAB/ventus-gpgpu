@@ -16,8 +16,9 @@ import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 // ⬑ = continuing from above, 接续上文
 // =
 
-class io_cuinterface2rt extends Bundle with ctainfo_alloc_to_cuinterface {
+class io_cuinterface2rt extends Bundle with ctainfo_alloc_to_cuinterface_to_rt {
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
+  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)       // Number of wavefront in this cta
 }
 
 class io_ram[T <: Data](LEN: Int, gen: T) extends Bundle {
@@ -619,9 +620,9 @@ class resource_table_ram(NUM_RESOURCE: Int, NUM_WG_SLOT: Int = CONFIG.GPU.NUM_WG
  */
 class resource_table_top(val NUM_CU_PER_GROUP: Int = 1) extends Module {
   // Constants used in IO
-  val NUM_LDS = CONFIG.WG.NUM_LDS_MAX
-  val NUM_SGPR = CONFIG.WG.NUM_SGPR_MAX
-  val NUM_VGPR = CONFIG.WG.NUM_VGPR_MAX
+  val NUM_LDS  = CONFIG.GPU.NUM_LDS
+  val NUM_SGPR = CONFIG.GPU.NUM_SGPR
+  val NUM_VGPR = CONFIG.GPU.NUM_VGPR
   // IO
   val io = IO(new Bundle{
     val alloc = Flipped(DecoupledIO(new io_alloc2rt))           // alloc   request from Allocator

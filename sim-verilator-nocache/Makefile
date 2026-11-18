@@ -38,6 +38,7 @@ OBJ_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.o)
 DEP_CXX = $(SRC_CXX:%.cpp=$(DIR_BUILDOBJ)/%.d)
 
 APP = $(DIR_BUILDOBJ)/sim-VentusRTL
+PMEM_READ_TEST = $(DIR_BUILDOBJ)/pmem_read_test
 
 #=====================================================================
 # Include Ventus RTL library build rules
@@ -91,7 +92,15 @@ gdb: $(APP)
 	gdb --tui $(APP)
 	@echo
 
-.PHONY: lib run gdb
+$(PMEM_READ_TEST): tests/pmem_read_test.cpp physical_mem.cpp physical_mem.hpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=c++20 -g -O1 -I. tests/pmem_read_test.cpp physical_mem.cpp \
+	  -lspdlog -lfmt -o $@
+
+test-pmem-read: $(PMEM_READ_TEST)
+	$(PMEM_READ_TEST)
+
+.PHONY: lib run gdb test-pmem-read
 
 #=====================================================================
 # Other targets

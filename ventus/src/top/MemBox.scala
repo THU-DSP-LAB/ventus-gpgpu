@@ -17,6 +17,16 @@ object helper{
 
 class MetaData{
   var asid: BigInt = 0
+  var num_thread_per_wg_x: BigInt=0
+  var num_thread_per_wg_y: BigInt=0
+  var num_thread_per_wg_z: BigInt=0
+  var num_wg_x: BigInt=0
+  var num_wg_y: BigInt=0
+  var num_wg_z: BigInt=0
+  var threadID_globaloffset_x: BigInt=0
+  var threadID_globaloffset_y: BigInt=0
+  var threadID_globaloffset_z: BigInt=0
+  var kernel_dim: BigInt=0
   var kernel_id: BigInt = 0
   var kernel_size: Array[BigInt] = Array(0, 0, 0)
   var wf_size: BigInt = 0
@@ -53,9 +63,21 @@ class MetaData{
       _.host_gds_baseaddr -> 0.U,
       _.host_pds_baseaddr -> (pdsBaseAddr + blockID * pdsSize * wf_size * wg_size).U,
       _.host_csr_knl -> metaDataBaseAddr.U,
-      _.host_kernel_size_3d -> Vec(3, UInt(WG_SIZE_X_WIDTH.W)).Lit(0 -> i.U, 1 -> j.U, 2 -> k.U),
+      _.host_wgIdx_x -> i.U,
+      _.host_wgIdx_y -> j.U,
+      _.host_wgIdx_z -> k.U,
       _.host_pds_size_per_wf -> 0.U,
-      _.host_asid -> asid.U
+      _.host_asid -> asid.U,
+      _.host_num_thread_per_wg_x      -> num_thread_per_wg_x.U    ,
+      _.host_num_thread_per_wg_y      -> num_thread_per_wg_y.U    ,
+      _.host_num_thread_per_wg_z      -> num_thread_per_wg_z.U    ,
+      _.host_kernel_size_x            -> num_wg_x.U               ,
+      _.host_kernel_size_y            -> num_wg_y.U               ,
+      _.host_kernel_size_z            -> num_wg_z.U               ,
+      _.host_threadIdx_global_offset_x-> threadID_globaloffset_x.U,
+      _.host_threadIdx_global_offset_y-> threadID_globaloffset_y.U,
+      _.host_threadIdx_global_offset_z-> threadID_globaloffset_z.U,
+      _.host_kernel_dim               -> kernel_dim.U,
     )
     hostReq
   }
@@ -74,6 +96,8 @@ object MetaData{
     }
     new MetaData{
       parseHex(buf, 64) // skip start_pc = 0x80000000
+
+      
       kernel_id = parseHex(buf, 64)
       kernel_size = kernel_size.map{ _ => parseHex(buf, 64) }
       wf_size = parseHex(buf, 64)
@@ -84,7 +108,23 @@ object MetaData{
       sgprUsage = parseHex(buf, 64)
       vgprUsage = parseHex(buf, 64)
       pdsBaseAddr = parseHex(buf, 64)
+      
+      kernel_dim = parseHex(buf, 64)
+      num_thread_per_wg_x = parseHex(buf, 64)
+      num_thread_per_wg_y = parseHex(buf, 64)
+      num_thread_per_wg_z = parseHex(buf, 64)
+
+
+      num_wg_x = parseHex(buf, 64)
+      num_wg_y = parseHex(buf, 64)
+      num_wg_z = parseHex(buf, 64)
+
+      threadID_globaloffset_x = parseHex(buf, 64)
+      threadID_globaloffset_y = parseHex(buf, 64)
+      threadID_globaloffset_z = parseHex(buf, 64)
       num_buffer = parseHex(buf, 64)
+
+
       for( i <- 0 until num_buffer.toInt){
         val parsed = parseHex(buf, 64)
         if(parsed < BigInt("80000000", 16) && parsed >= BigInt("70000000", 16))

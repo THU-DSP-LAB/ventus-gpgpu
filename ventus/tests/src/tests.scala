@@ -10,6 +10,7 @@
  * See the Mulan PSL v2 for more details. */
 package play
 
+import L1Cache.DCache.L1RTAB
 import L1Cache.MyConfig
 import L2cache.TLBundleD_lite
 import chisel3._

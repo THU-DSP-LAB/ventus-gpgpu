@@ -31,6 +31,7 @@ class branch_join_stack(val depth:Int) extends Module{
     val jump = Output(Bool())
     val newPC = Output(UInt(32.W))
     val newMask = Output(UInt(num_thread.W))
+    val empty = Output(Bool())
   })
   val rd_ptr  = RegInit(0.U(log2Ceil(depth+1).W))
   val wr_ptr  = RegInit(0.U(log2Ceil(depth+1).W))
@@ -43,6 +44,7 @@ class branch_join_stack(val depth:Int) extends Module{
   is_pop_underflow := wr_ptr === 0.U //(log2Ceil(depth+1).W)) // when TOS reconvergence PC = executing PC, can pop the entry
   is_pop := is_pop_pc && !is_pop_underflow
   io.jump := is_pop && io.pop                          // else when they don't match, do nothing
+  io.empty := wr_ptr === 0.U
 
   wr_ptr_add1 := wr_ptr + 1.U
   when(io.push){
@@ -74,6 +76,10 @@ class branch_join(val depth_stack: Int) extends Module{
     val CurSig = Output(UInt(sig_length.W))
     val PrevSig = Output(UInt(sig_length.W))
     val missTableTrigger = Output(Bool())
+    val initMask = Flipped(ValidIO(new Bundle {
+      val warp_id = UInt(depth_warp.W)
+      val thread_mask = UInt(num_thread.W)
+    })) // 新warp初始化时设置初始mask（可以非全1）
   })
   val opcode = Wire(UInt(1.W))
   val warp_id = Wire(UInt(depth_warp.W))
@@ -256,11 +262,17 @@ class branch_join(val depth_stack: Int) extends Module{
     }
   }.elsewhen(opcode === 1.U && branch_ctl_buf.valid && popjump){
     thread_masks(warp_id) := popMask
+  } .elsewhen (io.initMask.valid) {
+    thread_masks(io.initMask.bits.warp_id) := io.initMask.bits.thread_mask
   }
   io.out_mask := thread_masks(io.input_wid)
   // prefetch invalidate
   io.CurSig := 0.U
   io.PrevSig := 0.U
   io.missTableTrigger := false.B
+
+  when(io.initMask.valid) {
+    assert(bjstack(io.initMask.bits.warp_id).empty, "SIMTstack should be empty when initMask is valid")
+  }
 }
 

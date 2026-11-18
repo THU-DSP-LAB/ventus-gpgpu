@@ -13,10 +13,12 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.loadMemoryFromFile
+import chisel3.experimental.hierarchy.{Definition, Instance, instantiable, public, Instantiate}
 import parameters._
 import L1Cache.ICache._
 import L1Cache._
 import L1Cache.DCache._
+import L1Cache.AtomicUnit._
 import L1Cache.ShareMem._
 import config.config._
 import pipeline._
@@ -30,12 +32,23 @@ import scala.Option.option2Iterable
 import gvm._
 
 class host2CTA_data extends Bundle{
-  val host_wg_id            = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
-  val host_num_wf           = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)
-  val host_wf_size          = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_MAX+1).W)
-  val host_start_pc         = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
-  val host_kernel_asid      = (UInt(KNL_ASID_WIDTH.W))
-  val host_kernel_size_3d   = Vec(3, UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WG_DIM_MAX+1).W))
+  val host_wg_id                = UInt(CTA_SCHE_CONFIG.WG.WG_ID_WIDTH)
+  val host_num_wf               = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_WF_MAX+1).W)
+  val host_wf_size              = UInt(log2Ceil(CTA_SCHE_CONFIG.GPU.NUM_THREAD+1).W)
+  val host_start_pc             = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
+  val host_kernel_asid          = UInt(KNL_ASID_WIDTH.W)
+  val host_kernel_size_x        = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val host_kernel_size_y        = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val host_kernel_size_z        = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX+1).W)
+  val host_wgIdx_x              = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_wgIdx_y              = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_wgIdx_z              = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_num_thread_per_wg_x  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val host_num_thread_per_wg_y  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val host_num_thread_per_wg_z  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_THREAD_PER_WG_MAX+1).W)
+  val host_threadIdx_global_offset_x = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_threadIdx_global_offset_y = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
+  val host_threadIdx_global_offset_z = UInt(log2Ceil(CTA_SCHE_CONFIG.KERNEL.NUM_WG_MAX).W)
   val host_csr_knl          = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_vgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_VGPR_MAX+1).W)
   val host_sgpr_size_total  = UInt(log2Ceil(CTA_SCHE_CONFIG.WG.NUM_SGPR_MAX+1).W)
@@ -46,6 +59,7 @@ class host2CTA_data extends Bundle{
   val host_pds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_baseaddr     = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)
   val host_gds_size_total   = UInt(CTA_SCHE_CONFIG.GPU.MEM_ADDR_WIDTH)  // Useless ?
+  val host_kernel_dim       = UInt(2.W) // how many dimension does this kernel have
   val host_asid             = UInt(CTA_SCHE_CONFIG.GPU.ASID_WIDTH)
 }
 class CTA2host_data extends Bundle{
@@ -65,9 +79,18 @@ class CTAinterface extends Module{
   cta_sche.io.host_wg_new.bits.num_wf             := io.host2CTA.bits.host_num_wf
   cta_sche.io.host_wg_new.bits.num_thread_per_wf  := io.host2CTA.bits.host_wf_size
   cta_sche.io.host_wg_new.bits.start_pc           := io.host2CTA.bits.host_start_pc
-  cta_sche.io.host_wg_new.bits.num_wg_x           := io.host2CTA.bits.host_kernel_size_3d(0)
-  cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_3d(1)
-  cta_sche.io.host_wg_new.bits.num_wg_z           := io.host2CTA.bits.host_kernel_size_3d(2)
+  cta_sche.io.host_wg_new.bits.num_wg_x           := io.host2CTA.bits.host_kernel_size_x
+  cta_sche.io.host_wg_new.bits.num_wg_y           := io.host2CTA.bits.host_kernel_size_y
+  cta_sche.io.host_wg_new.bits.num_wg_z           := io.host2CTA.bits.host_kernel_size_z
+  cta_sche.io.host_wg_new.bits.wgIdx_x            := io.host2CTA.bits.host_wgIdx_x
+  cta_sche.io.host_wg_new.bits.wgIdx_y            := io.host2CTA.bits.host_wgIdx_y
+  cta_sche.io.host_wg_new.bits.wgIdx_z            := io.host2CTA.bits.host_wgIdx_z
+  cta_sche.io.host_wg_new.bits.num_thread_per_wg_x:= io.host2CTA.bits.host_num_thread_per_wg_x
+  cta_sche.io.host_wg_new.bits.num_thread_per_wg_y:= io.host2CTA.bits.host_num_thread_per_wg_y
+  cta_sche.io.host_wg_new.bits.num_thread_per_wg_z:= io.host2CTA.bits.host_num_thread_per_wg_z
+  cta_sche.io.host_wg_new.bits.threadIdx_in_grid_offset_x := io.host2CTA.bits.host_threadIdx_global_offset_x
+  cta_sche.io.host_wg_new.bits.threadIdx_in_grid_offset_y := io.host2CTA.bits.host_threadIdx_global_offset_y
+  cta_sche.io.host_wg_new.bits.threadIdx_in_grid_offset_z := io.host2CTA.bits.host_threadIdx_global_offset_z
   cta_sche.io.host_wg_new.bits.pds_base           := io.host2CTA.bits.host_pds_baseaddr
   cta_sche.io.host_wg_new.bits.num_pds_per_wf     := io.host2CTA.bits.host_pds_size_per_wf
   cta_sche.io.host_wg_new.bits.csr_kernel         := io.host2CTA.bits.host_csr_knl
@@ -94,12 +117,19 @@ class CTAinterface extends Module{
     io.CTA2warp(i).bits.dispatch2cu_vgpr_base_dispatch := cta_sche.io.cu_wf_new(i).bits.vgpr_base
     io.CTA2warp(i).bits.dispatch2cu_wf_tag_dispatch    := cta_sche.io.cu_wf_new(i).bits.wf_tag
     io.CTA2warp(i).bits.dispatch2cu_start_pc_dispatch  := cta_sche.io.cu_wf_new(i).bits.start_pc
-    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch := cta_sche.io.cu_wf_new(i).bits.gds_base
-    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch := cta_sche.io.cu_wf_new(i).bits.pds_base
-    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch := cta_sche.io.cu_wf_new(i).bits.csr_kernel
-    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_x
-    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_y
-    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch := cta_sche.io.cu_wf_new(i).bits.num_wg_z
+    io.CTA2warp(i).bits.dispatch2cu_gds_base_dispatch  := cta_sche.io.cu_wf_new(i).bits.gds_base
+    io.CTA2warp(i).bits.dispatch2cu_pds_base_dispatch  := cta_sche.io.cu_wf_new(i).bits.pds_base
+    io.CTA2warp(i).bits.dispatch2cu_csr_knl_dispatch   := cta_sche.io.cu_wf_new(i).bits.csr_kernel
+    io.CTA2warp(i).bits.dispatch2cu_wgid_x_dispatch    := cta_sche.io.cu_wf_new(i).bits.wgIdx_x
+    io.CTA2warp(i).bits.dispatch2cu_wgid_y_dispatch    := cta_sche.io.cu_wf_new(i).bits.wgIdx_y
+    io.CTA2warp(i).bits.dispatch2cu_wgid_z_dispatch    := cta_sche.io.cu_wf_new(i).bits.wgIdx_z
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_local_x  := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_wg_x
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_local_y  := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_wg_y
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_local_z  := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_wg_z
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_x := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid_x
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_y := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid_y
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_z := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid_z
+    io.CTA2warp(i).bits.dispatch2cu_threadIdx_global_linear := cta_sche.io.cu_wf_new(i).bits.threadIdx_in_grid
     io.CTA2warp(i).bits.dispatch2cu_wg_id := cta_sche.io.cu_wf_new(i).bits.wg_id
     (io.CTA2warp(i).bits.dispatch2cu_knl_asid, cta_sche.io.cu_wf_new(i).bits.asid_kernel) match {
       case (Some(dispatch), Some(asid)) =>
@@ -133,6 +163,8 @@ class GPGPU_axi_top extends Module{
   gpgpu_top.io.host_req<>axi_lite_adapter.io.data
   gpgpu_top.io.host_rsp<>axi_lite_adapter.io.rsp
   gpgpu_top.io.cycle_cnt:=0.U
+  gpgpu_top.io.perfDump:=false.B
+  gpgpu_top.io.perfDumpSummary:=false.B
   gpgpu_top.io.icache_invalidate:=false.B
 }
 class GPGPU_axi_adapter_top extends Module{
@@ -158,15 +190,21 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
     val inst_cnt = if(INST_CNT) Some(Output(Vec(NSms, UInt(32.W)))) else None
     val inst_cnt2 = if(INST_CNT_2) Some(Output(Vec(NSms, Vec(2, UInt(32.W))))) else None
     val cycle_cnt = Input(UInt(20.W))
+    val perfDump = Input(Bool())
+    val perfDumpSummary = Input(Bool())
+    val pmu = Output(new GpuPmuSnapshot(includeDCache = true))
     val asid_fill = if(MMU_ENABLED) Some(Input(Flipped(ValidIO(new mmu.AsidLookupEntry(SV.get))))) else None
     val icache_invalidate = Input(Bool())
   })
   val cta = Module(new CTAinterface)
-  val sm_wrapper=VecInit((0 until NSms).map(i => Module(new SM_wrapper(FakeCache, i, SV)).io))
+  val sm_wrapper_inst = Seq.tabulate(NSms) { i => Instantiate(new SM_wrapper(FakeCache, SV)) }
+  sm_wrapper_inst.zipWithIndex.foreach{ case (inst, i) => inst.sm_id := i.U }
+  val sm_wrapper = VecInit.tabulate(NSms)(i => sm_wrapper_inst(i).io)
   val l2cache=VecInit(Seq.fill(NL2Cache)( Module(new Scheduler(l2cache_params)).io))
   val sm2clusterArb = VecInit(Seq.fill(NCluster)(Module(new SM2clusterArbiter(l2cache_params_l)).io))
   val l2distribute = VecInit(Seq.fill(NCluster)(Module(new l2Distribute(l2cache_params_l)).io))
   val cluster2l2Arb = VecInit(Seq.fill(NL2Cache)(Module(new cluster2L2Arbiter(l2cache_params_l,l2cache_params)).io))
+  val atomicunit = VecInit(Seq.fill(NL2Cache)( Module(new AtomicUnit(l2cache_params)).io))
  // val sm2L2Arb = Module(new SM2L2Arbiter(l2cache_params))
 
   for (i<- 0 until NCluster) {
@@ -200,8 +238,14 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   MMU_ENABLED match {
     case false => {
       for(i <- 0 until NL2Cache){
-        l2cache(i).in_a <> cluster2l2Arb(i).memReqOut
-        cluster2l2Arb(i).memRspIn <> l2cache(i).in_d
+        atomicunit(i).L12ATUmemReq.bits := cluster2l2Arb(i).memReqOut.bits
+        atomicunit(i).L12ATUmemReq.valid := cluster2l2Arb(i).memReqOut.valid
+        cluster2l2Arb(i).memReqOut.ready := atomicunit(i).L12ATUmemReq.ready
+        l2cache(i).in_a <> atomicunit(i).ATU2L2memReq
+        cluster2l2Arb(i).memRspIn <> atomicunit(i).ATU2L1memRsp
+        atomicunit(i).L22ATUmemRsp.bits := l2cache(i).in_d.bits
+        atomicunit(i).L22ATUmemRsp.valid := l2cache(i).in_d.valid
+        l2cache(i).in_d.ready := atomicunit(i).L22ATUmemRsp.ready
 
         for(j <- 0 until NCluster){
           cluster2l2Arb(i).memReqVecIn(j) <> l2distribute(j).memReqVecOut(i)
@@ -311,29 +355,288 @@ class GPGPU_top(implicit p: Parameters, FakeCache: Boolean = false, SV: Option[m
   io.host_req<>cta.io.host2CTA
   io.inst_cnt.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt.getOrElse(0.U)})
   io.inst_cnt2.foreach(_.zipWithIndex.foreach{case (l,r) => l := sm_wrapper(r).inst_cnt2.getOrElse(0.U)})
+  for (i <- 0 until NSms) {
+    io.pmu.pipeline(i) := sm_wrapper(i).pipeline_perf.getOrElse(0.U.asTypeOf(new PipelinePerfCounters))
+    io.pmu.instClass(i) := sm_wrapper(i).inst_class_perf.getOrElse(0.U.asTypeOf(new InstClassPerfCounters))
+    io.pmu.dcache.get(i) := sm_wrapper(i).dcache_perf
+  }
 
-  for(i <- 0 until NL2Cache){
-    val port = l2cache(i).in_a
-    val cache_id: UInt = port.bits.source(l1cache_sourceBits)
-    val sm_id: UInt = if (NSmInCluster == 1) {
-      0.U
-    } else {
-      port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
+  def sumPerfCounter(select: DCachePerfCounters => UInt): UInt = {
+    sm_wrapper.map(sm => select(sm.dcache_perf)).reduce(_ + _)
+  }
+  def sumPipelinePerfCounter(select: PipelinePerfCounters => UInt): UInt = {
+    if (PMU_PIPELINE) sm_wrapper.map(sm => select(sm.pipeline_perf.get)).reduce(_ + _) else 0.U(64.W)
+  }
+  def sumInstClassPerfCounter(select: InstClassPerfCounters => UInt): UInt = {
+    if (PMU_INST_CLASS) sm_wrapper.map(sm => select(sm.inst_class_perf.get)).reduce(_ + _) else 0.U(64.W)
+  }
+  def percentOf(numer: UInt, denom: UInt): UInt = {
+    Mux(denom === 0.U, 0.U(32.W), ((numer * 100.U) / denom)(31, 0))
+  }
+
+  val l1dTotalReq = sumPerfCounter(_.totalReq)
+  val l1dReadReq = sumPerfCounter(_.readReq)
+  val l1dWriteReq = sumPerfCounter(_.writeReq)
+  val l1dReadMiss = sumPerfCounter(_.readMiss)
+  val l1dWriteMiss = sumPerfCounter(_.writeMiss)
+  val l1dReadPrimaryMiss = sumPerfCounter(_.readPrimaryMiss)
+  val l1dReadSecondaryMiss = sumPerfCounter(_.readSecondaryMiss)
+  val l1dReadPrimaryFullMiss = sumPerfCounter(_.readPrimaryFullMiss)
+  val l1dReadSecondaryFullMiss = sumPerfCounter(_.readSecondaryFullMiss)
+  val l1dWriteFreshMiss = sumPerfCounter(_.writeFreshMiss)
+  val l1dWriteInflightMiss = sumPerfCounter(_.writeInflightMiss)
+  val l1dReplacement = sumPerfCounter(_.replacements)
+  val l1dDirtyWriteback = sumPerfCounter(_.dirtyWritebacks)
+  val l1dMshrFullCycles = sumPerfCounter(_.mshrFullCycles)
+  val l1dRtabReplays = sumPerfCounter(_.rtabReplays)
+  val l1dBankConflictCycles = sumPerfCounter(_.bankConflictCycles)
+  val l1dCoreReqPipePipelined = sumPerfCounter(_.coreReqPipePipelinedCycles)
+  val l1dMemRspPipeDecoupled = sumPerfCounter(_.memRspPipeDecoupledCycles)
+  val l1dTotalMiss = l1dReadMiss + l1dWriteMiss
+  val l1dTotalHit = l1dTotalReq - l1dTotalMiss
+
+  val pmuActiveCycles = sumPipelinePerfCounter(_.activeCycles)
+  val pmuTotalScalarIssued = sumPipelinePerfCounter(_.totalScalarIssued)
+  val pmuTotalVectorIssued = sumPipelinePerfCounter(_.totalVectorIssued)
+  val pmuExecHazardX = sumPipelinePerfCounter(_.execStructuralHazardCyclesX)
+  val pmuExecHazardV = sumPipelinePerfCounter(_.execStructuralHazardCyclesV)
+  val pmuDataDepStall = sumPipelinePerfCounter(_.dataDepStallCycles)
+  val pmuBarrierStall = sumPipelinePerfCounter(_.barrierStallCycles)
+  val pmuCtrlFlushCnt = sumPipelinePerfCounter(_.controlHazardFlushCount)
+  val pmuFrontendStall = sumPipelinePerfCounter(_.frontendStallCycles)
+  val pmuLsuBackpressure = sumPipelinePerfCounter(_.lsuBackpressureCycles)
+  val pmuIbufferFullCycles = sumPipelinePerfCounter(_.ibufferFullCycles)
+
+  val pmuComputeIssued = sumInstClassPerfCounter(_.computeIssued)
+  val pmuMemIssued = sumInstClassPerfCounter(_.memIssued)
+  val pmuCtrlIssued = sumInstClassPerfCounter(_.ctrlIssued)
+  val pmuTotalIssued = pmuTotalScalarIssued + pmuTotalVectorIssued
+
+  val perfWindowStarted = RegInit(false.B)
+  val perfWindowPrinted = RegInit(false.B)
+  val programId = RegInit(0.U(32.W))
+  val totalProgramWindows = RegInit(0.U(32.W))
+  val totalActiveCycles = RegInit(0.U(64.W))
+  val totalScalarIssued = RegInit(0.U(64.W))
+  val totalVectorIssued = RegInit(0.U(64.W))
+  val totalExecHazardX = RegInit(0.U(64.W))
+  val totalExecHazardV = RegInit(0.U(64.W))
+  val totalDataDepStall = RegInit(0.U(64.W))
+  val totalBarrierStall = RegInit(0.U(64.W))
+  val totalCtrlFlushCnt = RegInit(0.U(64.W))
+  val totalFrontendStall = RegInit(0.U(64.W))
+  val totalLsuBackpressure = RegInit(0.U(64.W))
+  val totalIbufferFullCycles = RegInit(0.U(64.W))
+  val totalComputeIssued = RegInit(0.U(64.W))
+  val totalMemIssued = RegInit(0.U(64.W))
+  val totalCtrlIssued = RegInit(0.U(64.W))
+  val totalL1dReq = RegInit(0.U(64.W))
+  val totalL1dHit = RegInit(0.U(64.W))
+  val totalL1dReadPrimaryMiss = RegInit(0.U(64.W))
+  val totalL1dReadSecondaryMiss = RegInit(0.U(64.W))
+  val totalL1dReadPrimaryFullMiss = RegInit(0.U(64.W))
+  val totalL1dReadSecondaryFullMiss = RegInit(0.U(64.W))
+  val totalL1dWriteFreshMiss = RegInit(0.U(64.W))
+  val totalL1dWriteInflightMiss = RegInit(0.U(64.W))
+  val totalL1dReplacement = RegInit(0.U(64.W))
+  val totalL1dDirtyWriteback = RegInit(0.U(64.W))
+  val totalL1dMshrFullCycles = RegInit(0.U(64.W))
+  val totalL1dRtabReplays = RegInit(0.U(64.W))
+  val totalL1dBankConflictCycles = RegInit(0.U(64.W))
+  val totalL1dCoreReqPipePipelined = RegInit(0.U(64.W))
+  val totalL1dMemRspPipeDecoupled = RegInit(0.U(64.W))
+  val perfStartPulse = io.host_req.fire && !perfWindowStarted
+  val perfDumpPulse = io.perfDump && perfWindowStarted && !perfWindowPrinted
+  when(perfStartPulse){
+    perfWindowStarted := true.B
+    perfWindowPrinted := false.B
+  }.elsewhen(perfDumpPulse){
+    perfWindowStarted := false.B
+    perfWindowPrinted := true.B
+    programId := programId + 1.U
+    totalProgramWindows := totalProgramWindows + 1.U
+    totalActiveCycles := totalActiveCycles + pmuActiveCycles
+    totalScalarIssued := totalScalarIssued + pmuTotalScalarIssued
+    totalVectorIssued := totalVectorIssued + pmuTotalVectorIssued
+    totalExecHazardX := totalExecHazardX + pmuExecHazardX
+    totalExecHazardV := totalExecHazardV + pmuExecHazardV
+    totalDataDepStall := totalDataDepStall + pmuDataDepStall
+    totalBarrierStall := totalBarrierStall + pmuBarrierStall
+    totalCtrlFlushCnt := totalCtrlFlushCnt + pmuCtrlFlushCnt
+    totalFrontendStall := totalFrontendStall + pmuFrontendStall
+    totalLsuBackpressure := totalLsuBackpressure + pmuLsuBackpressure
+    totalIbufferFullCycles := totalIbufferFullCycles + pmuIbufferFullCycles
+    totalComputeIssued := totalComputeIssued + pmuComputeIssued
+    totalMemIssued := totalMemIssued + pmuMemIssued
+    totalCtrlIssued := totalCtrlIssued + pmuCtrlIssued
+    totalL1dReq := totalL1dReq + l1dTotalReq
+    totalL1dHit := totalL1dHit + l1dTotalHit
+    totalL1dReadPrimaryMiss := totalL1dReadPrimaryMiss + l1dReadPrimaryMiss
+    totalL1dReadSecondaryMiss := totalL1dReadSecondaryMiss + l1dReadSecondaryMiss
+    totalL1dReadPrimaryFullMiss := totalL1dReadPrimaryFullMiss + l1dReadPrimaryFullMiss
+    totalL1dReadSecondaryFullMiss := totalL1dReadSecondaryFullMiss + l1dReadSecondaryFullMiss
+    totalL1dWriteFreshMiss := totalL1dWriteFreshMiss + l1dWriteFreshMiss
+    totalL1dWriteInflightMiss := totalL1dWriteInflightMiss + l1dWriteInflightMiss
+    totalL1dReplacement := totalL1dReplacement + l1dReplacement
+    totalL1dDirtyWriteback := totalL1dDirtyWriteback + l1dDirtyWriteback
+    totalL1dMshrFullCycles := totalL1dMshrFullCycles + l1dMshrFullCycles
+    totalL1dRtabReplays := totalL1dRtabReplays + l1dRtabReplays
+    totalL1dBankConflictCycles := totalL1dBankConflictCycles + l1dBankConflictCycles
+    totalL1dCoreReqPipePipelined := totalL1dCoreReqPipePipelined + l1dCoreReqPipePipelined
+    totalL1dMemRspPipeDecoupled := totalL1dMemRspPipeDecoupled + l1dMemRspPipeDecoupled
+  }
+  sm_wrapper.foreach { sm =>
+    sm.perfEnable := perfWindowStarted || perfStartPulse
+    sm.perfReset := perfStartPulse
+  }
+
+  def includeCurrentWindow(total: UInt, current: UInt): UInt = {
+    total + Mux(perfDumpPulse, current, 0.U(total.getWidth.W))
+  }
+
+  val summaryProgramWindows = includeCurrentWindow(totalProgramWindows, 1.U(32.W))
+  val summaryActiveCycles = includeCurrentWindow(totalActiveCycles, pmuActiveCycles)
+  val summaryScalarIssued = includeCurrentWindow(totalScalarIssued, pmuTotalScalarIssued)
+  val summaryVectorIssued = includeCurrentWindow(totalVectorIssued, pmuTotalVectorIssued)
+  val summaryExecHazardX = includeCurrentWindow(totalExecHazardX, pmuExecHazardX)
+  val summaryExecHazardV = includeCurrentWindow(totalExecHazardV, pmuExecHazardV)
+  val summaryDataDepStall = includeCurrentWindow(totalDataDepStall, pmuDataDepStall)
+  val summaryBarrierStall = includeCurrentWindow(totalBarrierStall, pmuBarrierStall)
+  val summaryCtrlFlushCnt = includeCurrentWindow(totalCtrlFlushCnt, pmuCtrlFlushCnt)
+  val summaryFrontendStall = includeCurrentWindow(totalFrontendStall, pmuFrontendStall)
+  val summaryLsuBackpressure = includeCurrentWindow(totalLsuBackpressure, pmuLsuBackpressure)
+  val summaryIbufferFullCycles = includeCurrentWindow(totalIbufferFullCycles, pmuIbufferFullCycles)
+  val summaryComputeIssued = includeCurrentWindow(totalComputeIssued, pmuComputeIssued)
+  val summaryMemIssued = includeCurrentWindow(totalMemIssued, pmuMemIssued)
+  val summaryCtrlIssued = includeCurrentWindow(totalCtrlIssued, pmuCtrlIssued)
+  val summaryL1dReq = includeCurrentWindow(totalL1dReq, l1dTotalReq)
+  val summaryL1dHit = includeCurrentWindow(totalL1dHit, l1dTotalHit)
+  val summaryL1dReadPrimaryMiss = includeCurrentWindow(totalL1dReadPrimaryMiss, l1dReadPrimaryMiss)
+  val summaryL1dReadSecondaryMiss = includeCurrentWindow(totalL1dReadSecondaryMiss, l1dReadSecondaryMiss)
+  val summaryL1dReadPrimaryFullMiss = includeCurrentWindow(totalL1dReadPrimaryFullMiss, l1dReadPrimaryFullMiss)
+  val summaryL1dReadSecondaryFullMiss = includeCurrentWindow(totalL1dReadSecondaryFullMiss, l1dReadSecondaryFullMiss)
+  val summaryL1dWriteFreshMiss = includeCurrentWindow(totalL1dWriteFreshMiss, l1dWriteFreshMiss)
+  val summaryL1dWriteInflightMiss = includeCurrentWindow(totalL1dWriteInflightMiss, l1dWriteInflightMiss)
+  val summaryL1dReplacement = includeCurrentWindow(totalL1dReplacement, l1dReplacement)
+  val summaryL1dDirtyWriteback = includeCurrentWindow(totalL1dDirtyWriteback, l1dDirtyWriteback)
+  val summaryL1dMshrFullCycles = includeCurrentWindow(totalL1dMshrFullCycles, l1dMshrFullCycles)
+  val summaryL1dRtabReplays = includeCurrentWindow(totalL1dRtabReplays, l1dRtabReplays)
+  val summaryL1dBankConflictCycles = includeCurrentWindow(totalL1dBankConflictCycles, l1dBankConflictCycles)
+  val summaryL1dCoreReqPipePipelined = includeCurrentWindow(totalL1dCoreReqPipePipelined, l1dCoreReqPipePipelined)
+  val summaryL1dMemRspPipeDecoupled = includeCurrentWindow(totalL1dMemRspPipeDecoupled, l1dMemRspPipeDecoupled)
+  val summaryTotalIssued = summaryScalarIssued + summaryVectorIssued
+  val summaryTotalClassIssued = summaryComputeIssued + summaryMemIssued + summaryCtrlIssued
+
+  when(perfDumpPulse){
+    printf(p"\n[PROGRAM ${programId}] [PMU] first-kernel-start -> last-kernel-end summary\n")
+
+    if (PMU_PIPELINE) {
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] active cycles       : ${pmuActiveCycles}\n")
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] scalar issued       : ${pmuTotalScalarIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] vector issued       : ${pmuTotalVectorIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST+CYCLE] total issued        : ${pmuTotalIssued}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] exec hazard X          : ${pmuExecHazardX}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] exec hazard V          : ${pmuExecHazardV}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] data dependency        : ${pmuDataDepStall}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] barrier stall cycles   : ${pmuBarrierStall}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] control flush events   : ${pmuCtrlFlushCnt}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] frontend stall cycles  : ${pmuFrontendStall}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] lsu backpressure cyc   : ${pmuLsuBackpressure}\n")
+      printf(p"[PROGRAM ${programId}] [STALL] ibuffer full cycles    : ${pmuIbufferFullCycles}\n")
     }
-    when(port.fire){
-      printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
+    if (PMU_INST_CLASS) {
+      printf(p"[PROGRAM ${programId}] [INST CLASS] compute issued    : ${pmuComputeIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST CLASS] mem issued        : ${pmuMemIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST CLASS] ctrl issued       : ${pmuCtrlIssued}\n")
+      printf(p"[PROGRAM ${programId}] [INST CLASS] total class issued: ${pmuComputeIssued + pmuMemIssued + pmuCtrlIssued}\n")
+    }
+    printf(p"[PROGRAM ${programId}] [L1D PERF] total requests      : ${l1dTotalReq}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] hit rate            : ${percentOf(l1dTotalHit, l1dTotalReq)}% (${l1dTotalHit}/${l1dTotalReq})\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] read primary miss   : ${l1dReadPrimaryMiss}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] read secondary miss : ${l1dReadSecondaryMiss}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] read pf miss        : ${l1dReadPrimaryFullMiss}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] read sf miss        : ${l1dReadSecondaryFullMiss}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] write fresh miss    : ${l1dWriteFreshMiss}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] write inflight miss : ${l1dWriteInflightMiss}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] replacements        : ${l1dReplacement}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] dirty writebacks    : ${l1dDirtyWriteback}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] MSHR full cycles    : ${l1dMshrFullCycles}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] RTAB replays        : ${l1dRtabReplays}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] bank conflict cyc   : ${l1dBankConflictCycles}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] coreReqPipe pipelined cyc : ${l1dCoreReqPipePipelined}\n")
+    printf(p"[PROGRAM ${programId}] [L1D PERF] memRspPipe decoupled cyc  : ${l1dMemRspPipeDecoupled}\n")
+  }
+  when((perfDumpPulse || io.perfDumpSummary) && summaryProgramWindows =/= 0.U){
+    printf(p"\n[TESTCASE TOTAL] [PMU] accumulated summary across ${summaryProgramWindows} program windows\n")
+
+    if (PMU_PIPELINE) {
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] active cycles       : ${summaryActiveCycles}\n")
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] scalar issued       : ${summaryScalarIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] vector issued       : ${summaryVectorIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST+CYCLE] total issued        : ${summaryTotalIssued}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] exec hazard X          : ${summaryExecHazardX}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] exec hazard V          : ${summaryExecHazardV}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] data dependency        : ${summaryDataDepStall}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] barrier stall cycles   : ${summaryBarrierStall}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] control flush events   : ${summaryCtrlFlushCnt}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] frontend stall cycles  : ${summaryFrontendStall}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] lsu backpressure cyc   : ${summaryLsuBackpressure}\n")
+      printf(p"[TESTCASE TOTAL] [STALL] ibuffer full cycles    : ${summaryIbufferFullCycles}\n")
+    }
+    if (PMU_INST_CLASS) {
+      printf(p"[TESTCASE TOTAL] [INST CLASS] compute issued    : ${summaryComputeIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST CLASS] mem issued        : ${summaryMemIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST CLASS] ctrl issued       : ${summaryCtrlIssued}\n")
+      printf(p"[TESTCASE TOTAL] [INST CLASS] total class issued: ${summaryTotalClassIssued}\n")
+    }
+    printf(p"[TESTCASE TOTAL] [L1D PERF] total requests      : ${summaryL1dReq}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] hit rate            : ${percentOf(summaryL1dHit, summaryL1dReq)}% (${summaryL1dHit}/${summaryL1dReq})\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] read primary miss   : ${summaryL1dReadPrimaryMiss}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] read secondary miss : ${summaryL1dReadSecondaryMiss}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] read pf miss        : ${summaryL1dReadPrimaryFullMiss}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] read sf miss        : ${summaryL1dReadSecondaryFullMiss}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] write fresh miss    : ${summaryL1dWriteFreshMiss}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] write inflight miss : ${summaryL1dWriteInflightMiss}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] replacements        : ${summaryL1dReplacement}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] dirty writebacks    : ${summaryL1dDirtyWriteback}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] MSHR full cycles    : ${summaryL1dMshrFullCycles}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] RTAB replays        : ${summaryL1dRtabReplays}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] bank conflict cyc   : ${summaryL1dBankConflictCycles}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] coreReqPipe pipelined cyc : ${summaryL1dCoreReqPipePipelined}\n")
+    printf(p"[TESTCASE TOTAL] [L1D PERF] memRspPipe decoupled cyc  : ${summaryL1dMemRspPipeDecoupled}\n")
+  }
+
+  if (SPIKE_OUTPUT) {
+    for(i <- 0 until NL2Cache){
+      val port = l2cache(i).in_a
+      val cache_id: UInt = port.bits.source(l1cache_sourceBits)
+      val sm_id: UInt = if (NSmInCluster == 1) {
+        0.U
+      } else {
+        port.bits.source(l1cache_sourceBits + log2Up(NSmInCluster), l1cache_sourceBits + 1)
+      }
+      when(port.fire){
+        printf(p"[L1C] #${io.cycle_cnt} SM ${sm_id} CACHE ${cache_id} ADDR ${Hexadecimal(port.bits.address)}\n")
+      }
     }
   }
 }
 
-class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVParam] = None) extends Module{
+@instantiable
+class SM_wrapper(FakeCache: Boolean = false, SV: Option[mmu.SVParam] = None) extends Module{
   val param = (new MyConfig).toInstance
   class MMU_RVGParam(implicit val p: Parameters) extends HasRVGParameters
-  val io = IO(new Bundle{
+  @public val sm_id = IO(Input(UInt(8.W)))
+  @public val io = IO(new Bundle{
     val CTAreq=Flipped(Decoupled(new CTAreqData))
     val CTArsp=(Decoupled(new CTArspData))
     val memRsp = Flipped(DecoupledIO(new L1CacheMemRsp()(param)))
     val memReq = DecoupledIO(new L1CacheMemReq)
+    val perfEnable = Input(Bool())
+    val perfReset = Input(Bool())
+    val dcache_perf = Output(new DCachePerfCounters)
+    val pipeline_perf = if(PMU_PIPELINE) Some(Output(new PipelinePerfCounters)) else None
+    val inst_class_perf = if(PMU_INST_CLASS) Some(Output(new InstClassPerfCounters)) else None
     val inst = if (SINGLE_INST) Some(Flipped(DecoupledIO(UInt(32.W)))) else None
     val inst_cnt = if(INST_CNT) Some(Output(UInt(32.W))) else if(INST_CNT_2) Some(Output(Vec(2, UInt(32.W)))) else None
     val l2tlbReq = if(MMU_ENABLED) Some(Vec(num_cache_in_sm, DecoupledIO(new Bundle{
@@ -351,10 +654,15 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   val cta2warp=Module(new CTA2warp)
   cta2warp.io.CTAreq<>io.CTAreq
   cta2warp.io.CTArsp<>io.CTArsp
-  val pipe=Module(new pipe(sm_id))
+  val pipe=Module(new pipe())
+  pipe.sm_id := sm_id
+  pipe.io.perfEnable := io.perfEnable
+  pipe.io.perfReset := io.perfReset
   pipe.io.pc_reset:=true.B
   io.inst_cnt.foreach(_ := pipe.io.inst_cnt.getOrElse(0.U))
   io.inst_cnt2.foreach( _ := pipe.io.inst_cnt2.getOrElse(0.U))
+  io.pipeline_perf.foreach(_ := pipe.io.perf_pipeline.getOrElse(0.U.asTypeOf(new PipelinePerfCounters)))
+  io.inst_class_perf.foreach(_ := pipe.io.perf_inst_class.getOrElse(0.U.asTypeOf(new InstClassPerfCounters)))
   val cnt=Counter(10)
   when(cnt.value<5.U){cnt.inc()}
   when(cnt.value===5.U){pipe.io.pc_reset:=false.B}
@@ -411,13 +719,14 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   icache.io.externalFlushPipe.bits.warpid :=pipe.io.externalFlushPipe.bits
   icache.io.externalFlushPipe.valid :=pipe.io.externalFlushPipe.valid
 
-  val dcache = Module(new DataCache(SV)(param))
+  val dcache = Module(new DataCachev2(SV)(param))
   // **** dcache memRsp ****
   dcache.io.memRsp.valid := l1Cache2L2Arb.io.memRspVecOut(1).valid
   dcache.io.memRsp.bits.d_source := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_source
   dcache.io.memRsp.bits.d_addr := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_addr
   dcache.io.memRsp.bits.d_data := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_data
   dcache.io.memRsp.bits.d_opcode := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_opcode
+  dcache.io.memRsp.bits.d_param := l1Cache2L2Arb.io.memRspVecOut(1).bits.d_param
   l1Cache2L2Arb.io.memRspVecOut(1).ready := dcache.io.memRsp.ready
   // ***********************
   // **** dcache memReq ****
@@ -431,6 +740,10 @@ class SM_wrapper(FakeCache: Boolean = false, sm_id: Int = 0, SV: Option[mmu.SVPa
   pipe.io.dcache_rsp.bits.activeMask:=dcache.io.coreRsp.bits.activeMask
   //pipe.io.dcache_rsp.bits.isWrite:=dcache.io.coreRsp.bits.isWrite
   dcache.io.coreRsp.ready:=pipe.io.dcache_rsp.ready
+  pipe.io.dcache_flush_done := dcache.io.kernelFlushDone
+  dcache.io.perfEnable := io.perfEnable
+  dcache.io.perfReset := io.perfReset
+  io.dcache_perf := dcache.io.perf
 
   assert(num_cache_in_sm == 2, "Now only support 2 L1 Caches(one L1I and one L1D) in a single SM")
 if(MMU_ENABLED) {
@@ -502,14 +815,19 @@ if(MMU_ENABLED) {
     val gvm_cta2warp = Module(new GvmDutCta2Warp)
     // CTA 调度器向 SM 分配 warp 时，获取软硬件 warp 对应关系、寄存器起始地址、wg_slot id in warp_scheduler
     gvm_cta2warp.io.clock := clock
+    gvm_cta2warp.io.reset := reset.asBool
     gvm_cta2warp.io.warp_req_fire := cta2warp.io.warpReq.fire
     gvm_cta2warp.io.software_wg_id := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wg_id.pad(32)
     gvm_cta2warp.io.software_warp_id := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(WF_ID_WIDTH-1,0).pad(32)
-    gvm_cta2warp.io.sm_id := sm_id.U(32.W)
+    gvm_cta2warp.io.sm_id := sm_id
     gvm_cta2warp.io.hardware_warp_id := cta2warp.io.warpReq.bits.wid.pad(32)
     gvm_cta2warp.io.sgpr_base := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_sgpr_base_dispatch.pad(32)
     gvm_cta2warp.io.vgpr_base := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_vgpr_base_dispatch.pad(32)
     gvm_cta2warp.io.wg_slot_id_in_warp_sche := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_tag_dispatch(TAG_WIDTH-1, WF_ID_WIDTH)
+    gvm_cta2warp.io.lds_base := Cat(
+      LDS_BASE.U(32.W)(31, LDS_ID_WIDTH + 1),
+      cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_lds_base_dispatch
+    )
     gvm_cta2warp.io.rtl_num_thread := cta2warp.io.warpReq.bits.CTAdata.dispatch2cu_wf_size_dispatch.pad(32)
   }
 }
@@ -556,6 +874,7 @@ class SM2clusterArbiter(L2param: InclusiveCacheParameters_lite)(implicit p: Para
     io.memRspVecOut(i).bits.d_source:=io.memRspIn.bits.source
     io.memRspVecOut(i).bits.d_addr:=io.memRspIn.bits.address
     io.memRspVecOut(i).bits.d_opcode:= io.memRspIn.bits.opcode
+    io.memRspVecOut(i).bits.d_param:= io.memRspIn.bits.param
     if(NSmInCluster == 1){
       io.memRspVecOut(i).valid := io.memRspIn.valid
     } else if(NSmInCluster == 2){
@@ -684,13 +1003,17 @@ class CPUtest(C: TestCase#Props) extends Module{
   io.host2cta.bits.host_gds_baseaddr := sharemem_size.U
   io.host2cta.bits.host_pds_baseaddr := sharemem_size.U
   io.host2cta.bits.host_csr_knl:=10.U
-  io.host2cta.bits.host_kernel_size_3d:=0.U.asTypeOf(io.host2cta.bits.host_kernel_size_3d)
+  io.host2cta.bits.host_kernel_size_x := 0.U
+  io.host2cta.bits.host_kernel_size_y := 0.U
+  io.host2cta.bits.host_kernel_size_z := 0.U
 
   val cnt=Counter(16)
   io.host2cta.bits.host_wg_id:=Cat(cnt.value + 3.U,0.U(CU_ID_WIDTH.W))
   //io.host2cta.bits.host_pds_baseaddr:=cnt.value << 10
   io.host2cta.bits.host_csr_knl:=cnt.value
-  io.host2cta.bits.host_kernel_size_3d:=VecInit(Seq(cnt.value,cnt.value+1.U,cnt.value+2.U))
+  io.host2cta.bits.host_wgIdx_x := cnt.value
+  io.host2cta.bits.host_wgIdx_y := cnt.value + 1.U
+  io.host2cta.bits.host_wgIdx_z := cnt.value + 2.U
   when(cnt.value < num_of_block){
     io.host2cta.valid:=true.B
     when(io.host2cta.ready){cnt.inc()}
