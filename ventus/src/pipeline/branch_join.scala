@@ -56,7 +56,7 @@ class branch_join_stack(val depth:Int) extends Module{
     stack_mem(wr_ptr).newMask      := io.threadMask
   }.elsewhen(io.jump){
     wr_ptr := wr_ptr - 1.U
-    rd_ptr := rd_ptr - 1.U
+    rd_ptr := Mux(rd_ptr === 0.U, 0.U, rd_ptr - 1.U)
   }
   io.newPC := stack_mem(rd_ptr).jumpPC
   io.newMask := stack_mem(rd_ptr).newMask
@@ -115,16 +115,17 @@ class branch_join(val depth_stack: Int) extends Module{
   PC_branch := branch_ctl_buf.bits.PC_branch
   PC_execute := branch_ctl_buf.bits.PC_execute
   warp_id  := branch_ctl_buf.bits.wid
-  if_mask_buf.ready := fetch_ctl_buf.io.enq.ready //true.B//if_mask_buf.valid
+  val branch_can_fire = branch_ctl_buf.valid && (opcode === 0.U) && (branch_ctl_buf.bits.wid === if_mask_buf.bits.wid) && fetch_ctl_buf.io.enq.ready
+  if_mask_buf.ready := branch_can_fire
   //PC_reconv_buf.ready := fetch_ctl_buf.io.enq.ready
   io.complete.valid := (if_mask_buf.fire & opcode === 0.U & branch_ctl_buf.valid & takeif)
 
   io.complete.bits := branch_ctl_buf.bits.wid
 
   when(fetch_ctl_buf.io.enq.ready) {
-    when(branch_ctl_buf.valid & (opcode === 0.U) & (branch_ctl_buf.bits.wid === if_mask_buf.bits.wid)) {
-      branch_ctl_buf.ready := if_mask_buf.fire
-      PC_reconv_buf.ready := if_mask_buf.fire
+    when(branch_can_fire) {
+      branch_ctl_buf.ready := if_mask_buf.valid
+      PC_reconv_buf.ready := if_mask_buf.valid
     }.elsewhen(branch_ctl_buf.valid & (opcode === 1.U)) {
       branch_ctl_buf.ready := true.B
       PC_reconv_buf.ready := true.B
@@ -254,7 +255,7 @@ class branch_join(val depth_stack: Int) extends Module{
         thread_masks(warp_id) := else_mask
       }
     }
-  }.elsewhen(opcode === 1.U && branch_ctl_buf.valid && popjump){
+  }.elsewhen(opcode === 1.U && branch_ctl_buf.fire && popjump){
     thread_masks(warp_id) := popMask
   }
   io.out_mask := thread_masks(io.input_wid)
