@@ -120,15 +120,20 @@ class warp_scheduler extends Module{
   val warp_bar_belong=RegInit(VecInit(Seq.fill(num_block)(0.U(num_warp.W))))
 
 
-  when(io.warpReq.fire){
+  when(io.warpReq.fire && io.warpRsp.fire && (new_wg_id === end_wg_id)){
+    warp_bar_belong(new_wg_id) := (warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+    when(!warp_bar_lock(new_wg_id)) {
+      warp_bar_cur(new_wg_id) := 0.U
+      warp_bar_exp(new_wg_id) := (1.U << new_wg_wf_count).asUInt - 1.U
+    }
+  }.elsewhen(io.warpReq.fire){
     warp_bar_belong(new_wg_id):=warp_bar_belong(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt  //显示warp中有哪些属于wg
 //    warp_bar_exp(new_wg_id):= warp_bar_exp(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     when(!warp_bar_lock(new_wg_id)) {
       warp_bar_cur(new_wg_id) := 0.U
       warp_bar_exp(new_wg_id) := (1.U << new_wg_wf_count).asUInt - 1.U  // init to 1 for all future wfs in wg
     }
-  }
-  when(io.warpRsp.fire){
+  }.elsewhen(io.warpRsp.fire){
 //    warp_bar_exp(end_wg_id):=warp_bar_exp(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
     warp_bar_belong(end_wg_id):=warp_bar_belong(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
@@ -154,11 +159,13 @@ class warp_scheduler extends Module{
     }
   }
   // collect endprg in one wg and issue flush request
-  when(io.warpReq.fire){
+  when(io.warpReq.fire && io.warpRsp.fire && (new_wg_id === end_wg_id)){
+    warp_endprg_cnt(new_wg_id) := (warp_endprg_cnt(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
+    warp_wg_valid(new_wg_id) := true.B
+  }.elsewhen(io.warpReq.fire){
     warp_endprg_cnt(new_wg_id):=warp_endprg_cnt(new_wg_id) | (1.U<<io.warpReq.bits.wid).asUInt
     warp_wg_valid(new_wg_id):=true.B
-  }
-  when(io.warpRsp.fire){
+  }.elsewhen(io.warpRsp.fire){
     warp_endprg_cnt(end_wg_id) := warp_endprg_cnt(end_wg_id) & (~(1.U<<io.warpRsp.bits.wid)).asUInt
   }
   for(i<-0 until num_block){
