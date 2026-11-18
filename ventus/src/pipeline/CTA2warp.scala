@@ -54,7 +54,7 @@ class CTA2warp extends Module{
   val idx_using = RegInit(0.U(num_warp.W))  // current active warps in sm
 
   io.CTAreq.ready:=(~idx_using.andR)
-  val data = Reg(Vec(num_warp,UInt(TAG_WIDTH.W))) // every hw_warp record its wg&wf id
+  val data = RegInit(VecInit(Seq.fill(num_warp)(0.U(TAG_WIDTH.W)))) // every hw_warp record its wg&wf id
   io.wg_id_tag:=data(io.wg_id_lookup)
   val idx_next_allocate = PriorityEncoder(~idx_using)
   //idx_using:=Mux(io.warpRsp.fire&io.CTAreq.fire,idx_using&(~(1.U<<io.warpRsp.bits.wid)).asUInt&(1.U<<idx_next_allocate).asUInt,
@@ -68,12 +68,18 @@ class CTA2warp extends Module{
   io.warpReq.bits.CTAdata:=io.CTAreq.bits
   io.warpReq.bits.wid:=idx_next_allocate
 
-  // TODO: Fix warp_scheduler warpRsp IO logic, which always requires ready=1
-  // WorkAround: warp_scheduler requires io.wrapRsp.ready=1, use a large enough FIFO to satisfy it temporarily
-  val CTArsp_fifo = Queue(io.warpRsp, 16)
+  // Capture the completed warp tag into the FIFO at completion time so that
+  // any subsequent re-allocation of wid by CTAreq before CTArsp dequeues does not
+  // corrupt the tag reported back to the dispatcher.
+  val warpRspTagged = Wire(Decoupled(new CTArspData))
+  warpRspTagged.valid := io.warpRsp.valid
+  io.warpRsp.ready := warpRspTagged.ready
+  warpRspTagged.bits.cu2dispatch_wf_tag_done := data(io.warpRsp.bits.wid)
+
+  val CTArsp_fifo = Queue(warpRspTagged, 16)
   assert(io.warpRsp.ready, "warpRsp port requires ready=1, this FIFO is used to satisfy it, but not enough")
 
   CTArsp_fifo.ready := io.CTArsp.ready
-  io.CTArsp.bits.cu2dispatch_wf_tag_done := data(CTArsp_fifo.bits.wid)
+  io.CTArsp.bits := CTArsp_fifo.bits
   io.CTArsp.valid := CTArsp_fifo.valid
 }
