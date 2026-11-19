@@ -23,8 +23,45 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <string>
+#ifdef __linux__
 #include <sys/prctl.h>
+#endif
 #include <sys/wait.h>
+#ifndef __linux__
+#include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstring>
+typedef union sigval sigval_t;
+static inline int sigqueue(pid_t pid, int sig, const union sigval value) {
+    char path[64];
+    std::snprintf(path, sizeof(path), "/tmp/ventus_sigval_%d", static_cast<int>(pid));
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd >= 0) {
+        write(fd, &value, sizeof(value));
+        close(fd);
+    }
+    return kill(pid, sig);
+}
+static inline int sigwaitinfo(const sigset_t *set, siginfo_t *info) {
+    int sig = 0;
+    if (sigwait(set, &sig) != 0) return -1;
+    if (info) {
+        std::memset(info, 0, sizeof(*info));
+        info->si_signo = sig;
+        char path[64];
+        std::snprintf(path, sizeof(path), "/tmp/ventus_sigval_%d", static_cast<int>(getpid()));
+        int fd = open(path, O_RDONLY);
+        if (fd >= 0) {
+            read(fd, &info->si_value, sizeof(info->si_value));
+            close(fd);
+            unlink(path);
+        }
+    }
+    return sig;
+}
+#endif
 #include <utility>
 
 #ifdef ENABLE_GVM
@@ -761,10 +798,12 @@ void ventus_rtlsim_t::snapshot_fork() {
     } else { // for the fork-child snapshot process
         snapshots.is_child = true;
         // child process should exit when parent process exits
+#ifdef __linux__
         if (prctl(PR_SET_PDEATHSIG, SIGKILL) == -1) {
             perror("prctl(PR_SET_PDEATHSIG)");
             std::exit(EXIT_FAILURE);
         }
+#endif
         if (getppid() == 1) { // parent process already exited
             std::exit(EXIT_FAILURE);
         }

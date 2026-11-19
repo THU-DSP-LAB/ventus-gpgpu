@@ -51,6 +51,12 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 MOLD = $(shell which mold)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+LIBATOMIC :=
+else
+LIBATOMIC := -latomic
+endif
 VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
 VLIB_NPROC_CPU ?= $(shell nproc)
@@ -234,7 +240,7 @@ $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic $(VLIB_LDLIBS) \
+	  -lspdlog -lfmt -pthread -lpthread -lz $(LIBATOMIC) $(VLIB_LDLIBS) \
 	  -lgvmref -L$(GVM_REF_DIR) -Wl,--enable-new-dtags -Wl,-rpath,'$$ORIGIN'
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/libVentusGVM.so
 
