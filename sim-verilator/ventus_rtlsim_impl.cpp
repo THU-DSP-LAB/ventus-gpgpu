@@ -29,19 +29,37 @@
 #include <sys/wait.h>
 #ifndef __linux__
 #include <signal.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cstdio>
+#include <cstring>
 typedef union sigval sigval_t;
+static inline int sigqueue(pid_t pid, int sig, const union sigval value) {
+    char path[64];
+    std::snprintf(path, sizeof(path), "/tmp/ventus_sigval_%d", static_cast<int>(pid));
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd >= 0) {
+        write(fd, &value, sizeof(value));
+        close(fd);
+    }
+    return kill(pid, sig);
+}
 static inline int sigwaitinfo(const sigset_t *set, siginfo_t *info) {
     int sig = 0;
     if (sigwait(set, &sig) != 0) return -1;
     if (info) {
-        memset(info, 0, sizeof(*info));
+        std::memset(info, 0, sizeof(*info));
         info->si_signo = sig;
+        char path[64];
+        std::snprintf(path, sizeof(path), "/tmp/ventus_sigval_%d", static_cast<int>(getpid()));
+        int fd = open(path, O_RDONLY);
+        if (fd >= 0) {
+            read(fd, &info->si_value, sizeof(info->si_value));
+            close(fd);
+            unlink(path);
+        }
     }
     return sig;
-}
-static inline int sigqueue(pid_t pid, int sig, const union sigval value) {
-    (void)value;
-    return kill(pid, sig);
 }
 #endif
 #include <utility>

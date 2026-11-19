@@ -84,13 +84,20 @@ run: $(APP)
 	$(APP)
 	@echo
 
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+ASAN_LEAK_OPTION :=
+else
+ASAN_LEAK_OPTION := ASAN_OPTIONS=detect_leaks=1
+endif
+
 $(METADATA_PARSER_TEST): tests/metadata_parser_test.cpp kernel.cpp kernel.hpp ventus_rtlsim.h
 	@mkdir -p $(dir $@)
 	$(CXX) -std=c++20 -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer \
 	  -I. tests/metadata_parser_test.cpp kernel.cpp -lspdlog -lfmt -o $@
 
 test-metadata-parser: $(METADATA_PARSER_TEST)
-	ASAN_OPTIONS=detect_leaks=1 $(METADATA_PARSER_TEST)
+	$(ASAN_LEAK_OPTION) $(METADATA_PARSER_TEST)
 
 $(FORK_SNAPSHOT_TEST): tests/fork_snapshot_test.cpp ventus_rtlsim.h $(VLIB_TARGET)
 	@mkdir -p $(dir $@)
