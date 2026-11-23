@@ -80,6 +80,11 @@ class DirectoryResult_lite_victim(params: InclusiveCacheParameters_lite) extends
   val victim_tag =UInt(params.tagBits.W)
 }
 
+class ResvClear_lite(params: InclusiveCacheParameters_lite) extends Bundle {
+  val set = UInt(params.setBits.W)
+  val way = UInt(params.wayBits.W)
+}
+
 class Directory_test(params: InclusiveCacheParameters_lite) extends Module
 {
   val io = IO(new Bundle {
@@ -91,6 +96,8 @@ class Directory_test(params: InclusiveCacheParameters_lite) extends Module
     val invalidate =Input(Bool())
     val tag_match = Input(Bool())
     val flush_invalidate_src=Input(UInt(params.source_bits.W))
+    val hit_resv_clear = Flipped(Valid(new ResvClear_lite(params)))
+    val write_hit_hazard = Output(Bool())
  //   val finish_issue =Output(Bool())
   })
 
@@ -309,4 +316,38 @@ for(i<- 0 until params.cache.sets){
   io.result.bits.l2cidx := Mux(flush_issue_regnext, 0.U, read_bits_reg.l2cidx)
   io.result.bits.param  := Mux(flush_issue_regnext, 0.U, read_bits_reg.param)
   io.result.bits.spike_info.foreach( _ := read_bits_reg.spike_info.getOrElse(0.U) )
+
+  val hitUsesWay = io.result.bits.opcode === Get ||
+                   io.result.bits.opcode === PutFullData ||
+                   io.result.bits.opcode === PutPartialData
+  val will_resv_hit = io.result.fire && io.result.bits.hit && !io.result.bits.flush && hitUsesWay
+
+  val W_HITREF = 4
+  val hitRefCount = RegInit(VecInit(Seq.fill(params.cache.sets)(
+                      VecInit(Seq.fill(params.cache.ways)(0.U(W_HITREF.W))))))
+
+  val writeHitsHeldWay = hitRefCount(io.write.bits.set)(io.write.bits.way).orR
+  val writeSharesResultSet = io.result.valid && (io.result.bits.set === io.write.bits.set)
+  io.write_hit_hazard := writeHitsHeldWay || writeSharesResultSet
+
+  for (i <- 0 until params.cache.sets) {
+    for (w <- 0 until params.cache.ways) {
+      val setInc = Mux(will_resv_hit &&
+                    io.result.bits.set === i.asUInt &&
+                    io.result.bits.way === w.asUInt, 1.U(W_HITREF.W), 0.U(W_HITREF.W))
+      val clrDec = Mux(io.hit_resv_clear.valid &&
+                    io.hit_resv_clear.bits.set === i.asUInt &&
+                    io.hit_resv_clear.bits.way === w.asUInt, 1.U(W_HITREF.W), 0.U(W_HITREF.W))
+      when(!wipeDone) {
+        hitRefCount(i)(w) := 0.U
+      }.otherwise {
+        val cur = hitRefCount(i)(w)
+        hitRefCount(i)(w) := (cur +& setInc - clrDec)(W_HITREF-1, 0)
+        assert(!(setInc.orR && cur === ((1 << W_HITREF) - 1).U),
+               s"HITREF_OVERFLOW set=$i way=$w (hitRefCount saturated, W_HITREF too small)")
+        assert(!(clrDec.orR && cur === 0.U),
+               s"HITREF_UNDERFLOW set=$i way=$w (clear without matching set)")
+      }
+    }
+  }
 }

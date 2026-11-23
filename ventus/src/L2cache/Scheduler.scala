@@ -123,12 +123,13 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   
   schedule.a.bits.source := mshr_select
   val write_buffer =Module(new Queue(new FullRequest(params),8,false,true))
+  val fillCommitAllowed = !directory.io.write_hit_hazard
   mshrs.zipWithIndex.foreach { case (m, i) =>
     m.io.sinkd.valid := sinkD.io.resp.valid && (sinkD.io.resp.bits.source === i.asUInt)&&(sinkD.io.resp.bits.opcode===AccessAckData)
     m.io.sinkd.bits  := sinkD.io.resp.bits
     m.io.schedule.a.ready  := sourceA.io.req.ready&&(mshr_select===i.asUInt) && !write_buffer.io.deq.valid
     m.io.schedule.d.ready  := sourceD.io.req.ready&&(mshr_select===i.asUInt)&& requests.io.valid(i)
-    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt)
+    m.io.schedule.dir.ready:= directory.io.write.ready&&(mshr_select===i.asUInt) && fillCommitAllowed
     m.io.valid      := requests.io.valid(i) //用于在refill的时候拉低mshr的sourced
     m.io.mshr_wait  := sourceD.io.mshr_wait
     m.io.merge.valid:= m.io.schedule.d.valid && ((requests.io.data.opcode===PutFullData) ||(requests.io.data.opcode===PutPartialData)) &&(mshr_select===i.asUInt)
@@ -224,7 +225,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
 
   directory.io.read.valid := request.valid && !(request.bits.opcode === Hint) && mshr_free && requests.io.push.ready && directory.io.ready && !(issue_flush_invalidate)
   directory.io.read.bits := request.bits
-  directory.io.write.valid := schedule.dir.valid //&& !schedule.dir.bits.is_writemiss //事实上对于writemiss没有写dir
+  directory.io.write.valid := schedule.dir.valid && fillCommitAllowed
   directory.io.tag_match :=tagMatches.orR
   directory.io.write.bits.way := schedule.dir.bits.way
   directory.io.write.bits.set := schedule.dir.bits.set
@@ -232,6 +233,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   directory.io.invalidate := request.fire && (request.bits.opcode === Hint) && (request.bits.param === 1.U) //will issue until all resource is ready(i.e. MSHR & Put Buffer Drain)
   directory.io.flush := request.fire && (request.bits.opcode === Hint) && (request.bits.param === 0.U)
   directory.io.flush_invalidate_src:= request.bits.source
+  directory.io.hit_resv_clear := sourceD.io.hit_done
   requests.io.pop.valid := requests.io.valid(mshr_select)&&schedule.d.valid&&sourceD.io.req.ready
   requests.io.pop.bits  := mshr_select
 
@@ -273,7 +275,7 @@ class Scheduler(params: InclusiveCacheParameters_lite) extends Module
   sourceD.io.req.bits.param :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.param,schedule.d.bits.param)
   sourceD.io.req.bits.l2cidx :=Mux(!schedule.d.valid ,dir_result_buffer.io.deq.bits.l2cidx,schedule.d.bits.l2cidx)
   sourceD.io.req.bits.spike_info.foreach( _ := DontCare )
-  bankedStore.io.sinkD_adr.valid := schedule.dir.valid     //now managed by MSHR
+  bankedStore.io.sinkD_adr.valid := directory.io.write.fire
   bankedStore.io.sinkD_adr.bits.set := schedule.dir.bits.set
   bankedStore.io.sinkD_adr.bits.way := schedule.dir.bits.way
   bankedStore.io.sinkD_adr.bits.mask:= ~(0.U(params.mask_bits.W))
