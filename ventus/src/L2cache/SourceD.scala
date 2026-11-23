@@ -57,6 +57,7 @@ class SourceD(params: InclusiveCacheParameters_lite) extends Module
     val mshr_wait = Output(Bool())
 
     val finish_issue = Output(Bool())
+    val hit_done = Valid(new ResvClear_lite(params))
   })
 
 
@@ -278,4 +279,11 @@ val mshr_wait_reg =RegInit(false.B)
   io.a.bits.opcode:= PutFullData
 
   io.finish_issue := io.d.valid && s_final_req.last_flush
+
+  val hitClrOpcode = s_final_req.opcode === Get ||
+                     s_final_req.opcode === PutFullData ||
+                     s_final_req.opcode === PutPartialData
+  io.hit_done.valid     := io.d.fire && s_final_req.hit && hitClrOpcode
+  io.hit_done.bits.set  := s_final_req.set
+  io.hit_done.bits.way  := s_final_req.way
 }
