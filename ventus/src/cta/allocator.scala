@@ -7,6 +7,7 @@ package cta
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.experimental.VecLiterals.{AddObjectLiteralConstructor, AddVecLiteralConstructor}
+import chisel3.experimental.dataview._
 import chisel3.util._
 import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
@@ -15,7 +16,7 @@ import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 // rt = resource table
 // =
 
-class io_alloc2cuinterface extends Bundle with ctainfo_alloc_to_cuinterface {
+class io_alloc2cuinterface extends Bundle with ctainfo_alloc_to_cuinterface with ctainfo_host_to_alloc_to_cu {
   val wg_id: Option[UInt] = if(CONFIG.DEBUG) Some(UInt(CONFIG.WG.WG_ID_WIDTH)) else None
 }
 class io_rt2cuinterface extends Bundle with ctainfo_alloc_to_cu {
@@ -43,7 +44,9 @@ class io_alloc2rt extends Bundle {
 }
 
 // IO from Resource table to Allocator, dealloc request for WG/WF slot
-class io_rt2dealloc extends Bundle with ctainfo_alloc_to_cuinterface
+class io_rt2dealloc extends Bundle with ctainfo_alloc_to_cuinterface_to_rt {
+  val num_wf = UInt(log2Ceil(CONFIG.WG.NUM_WF_MAX+1).W)       // Number of wavefront in this cta
+}
 
 /**
  * Resource table cache writer in allocator
@@ -101,9 +104,9 @@ class rtcache_writer(NUM_RESOURCE: Int, NUM_RT_RESULT: Int = CONFIG.RESOURCE_TAB
 
 class allocator extends Module {
   // Constants used in IO
-  val NUM_LDS = CONFIG.WG.NUM_LDS_MAX
-  val NUM_SGPR = CONFIG.WG.NUM_SGPR_MAX
-  val NUM_VGPR = CONFIG.WG.NUM_VGPR_MAX
+  val NUM_LDS  = CONFIG.GPU.NUM_LDS
+  val NUM_SGPR = CONFIG.GPU.NUM_SGPR
+  val NUM_VGPR = CONFIG.GPU.NUM_VGPR
   // IO
   val io = IO(new Bundle {
     val wgbuffer_wg_new = Flipped(DecoupledIO(new io_buffer2alloc))   // get new WG from WG buffer
@@ -125,28 +128,45 @@ class allocator extends Module {
   assert(NUM_CU % RESOURCE_CHECK_CU_STEP == 0)
 
   // =
+  // Main FSM - define
+  // =
+
+  object FSM extends ChiselEnum {
+    val IDLE, CU_PREFER, RESOURCE_CHECK, ALLOC, REJECT= Value
+  }
+  val fsm_next = Wire(FSM())
+  val fsm = RegNext(fsm_next, FSM.IDLE)
+  val fsm_r1 = RegNext(fsm, FSM.IDLE)
+
+  //
+  // Some signal/reg declaration
+  //
+  val wg = Reg(io.wgbuffer_wg_new.bits.cloneType) // WG info got from wg_buffer
+  val alloc_task_ok = Wire(Bool())                // FSM 'alloc' state tasks finished
+
+  // =
   // Auxiliary function 1: resource table cache & its writer
   // =
 
   val rtcache_lds = RegInit(
-    VecInit.fill(NUM_CU)((new datatype_rtcache(NUM_RESOURCE = CONFIG.WG.NUM_LDS_MAX , NUM_RT_RESULT = NUM_RT_RESULT)).Lit(
-      c => c.size -> Vec.Lit((CONFIG.WG.NUM_LDS_MAX.U +: Seq.fill(NUM_RT_RESULT-1)(0.U(log2Ceil(CONFIG.WG.NUM_LDS_MAX+1).W))):_*),
+    VecInit.fill(NUM_CU)((new datatype_rtcache(NUM_RESOURCE = CONFIG.GPU.NUM_LDS , NUM_RT_RESULT = NUM_RT_RESULT)).Lit(
+      c => c.size -> Vec.Lit((CONFIG.GPU.NUM_LDS.U +: Seq.fill(NUM_RT_RESULT-1)(0.U(log2Ceil(CONFIG.GPU.NUM_LDS+1).W))):_*),
     ))
   )
   val rtcache_sgpr = RegInit(
-    VecInit.fill(NUM_CU)(new datatype_rtcache(NUM_RESOURCE = CONFIG.WG.NUM_SGPR_MAX, NUM_RT_RESULT = NUM_RT_RESULT).Lit(
-      c => c.size -> Vec.Lit((CONFIG.WG.NUM_SGPR_MAX.U +: Seq.fill(NUM_RT_RESULT-1)(0.U(log2Ceil(CONFIG.WG.NUM_SGPR_MAX+1).W))):_*),
+    VecInit.fill(NUM_CU)(new datatype_rtcache(NUM_RESOURCE = CONFIG.GPU.NUM_SGPR, NUM_RT_RESULT = NUM_RT_RESULT).Lit(
+      c => c.size -> Vec.Lit((CONFIG.GPU.NUM_SGPR.U +: Seq.fill(NUM_RT_RESULT-1)(0.U(log2Ceil(CONFIG.GPU.NUM_SGPR+1).W))):_*),
     ))
   )
   val rtcache_vgpr = RegInit(
-    VecInit.fill(NUM_CU)(new datatype_rtcache(NUM_RESOURCE = CONFIG.WG.NUM_VGPR_MAX, NUM_RT_RESULT = NUM_RT_RESULT).Lit(
-      c => c.size -> Vec.Lit((CONFIG.WG.NUM_VGPR_MAX.U +: Seq.fill(NUM_RT_RESULT-1)(0.U(log2Ceil(CONFIG.WG.NUM_VGPR_MAX+1).W))):_*),
+    VecInit.fill(NUM_CU)(new datatype_rtcache(NUM_RESOURCE = CONFIG.GPU.NUM_VGPR, NUM_RT_RESULT = NUM_RT_RESULT).Lit(
+      c => c.size -> Vec.Lit((CONFIG.GPU.NUM_VGPR.U +: Seq.fill(NUM_RT_RESULT-1)(0.U(log2Ceil(CONFIG.GPU.NUM_VGPR+1).W))):_*),
     ))
   )
 
-  val writer_lds = Module(new rtcache_writer(NUM_RESOURCE = CONFIG.WG.NUM_LDS_MAX, NUM_RT_RESULT = NUM_RT_RESULT))
-  val writer_sgpr = Module(new rtcache_writer(NUM_RESOURCE = CONFIG.WG.NUM_SGPR_MAX, NUM_RT_RESULT = NUM_RT_RESULT))
-  val writer_vgpr = Module(new rtcache_writer(NUM_RESOURCE = CONFIG.WG.NUM_VGPR_MAX, NUM_RT_RESULT = NUM_RT_RESULT))
+  val writer_lds = Module(new rtcache_writer(NUM_RESOURCE = CONFIG.GPU.NUM_LDS, NUM_RT_RESULT = NUM_RT_RESULT))
+  val writer_sgpr = Module(new rtcache_writer(NUM_RESOURCE = CONFIG.GPU.NUM_SGPR, NUM_RT_RESULT = NUM_RT_RESULT))
+  val writer_vgpr = Module(new rtcache_writer(NUM_RESOURCE = CONFIG.GPU.NUM_VGPR, NUM_RT_RESULT = NUM_RT_RESULT))
   when(writer_lds.io.rtcache_wr_en)  { rtcache_lds(writer_lds.io.rtcache_wr_cuid)   := writer_lds.io.rtcache_wr_data  }
   when(writer_sgpr.io.rtcache_wr_en) { rtcache_sgpr(writer_sgpr.io.rtcache_wr_cuid) := writer_sgpr.io.rtcache_wr_data }
   when(writer_vgpr.io.rtcache_wr_en) { rtcache_vgpr(writer_vgpr.io.rtcache_wr_cuid) := writer_vgpr.io.rtcache_wr_data }
@@ -166,15 +186,75 @@ class allocator extends Module {
   val wgslot_id_1H = Reg(UInt(CONFIG.GPU.NUM_WG_SLOT.W)) // generated WG slot ID, 1-hot encoded
 
   // =
-  // Main FSM - define
+  // Auxiliary function 3: thread-index calculating pipeline
+  // - threadIdx_in_grid_base_{x,y,z} = wgIdx_{x,y,z} * num_thread_per_wg_{x,y,z} (FSM.CALC0~2)
+  // - num_thread_in_grid_{x,y} = num_wg_{x,y} * num_thread_per_wg_{x,y} (FSM.CALC0~1)
+  // - num_thread_in_grid_{x*y} (FSM.CALC2)
+  // It's assumed that the hardware multiplier has 1 cycle latency
   // =
+  import pipeline.ArrayMulDataModule
+  import scala.math.max
 
-  object FSM extends ChiselEnum {
-    val IDLE, CU_PREFER, RESOURCE_CHECK, ALLOC, REJECT= Value
+  object THREADIDX_FSM extends ChiselEnum {
+    val IDLE_CALC0, CALC1_STORE0, CALC2_STORE1, STORE2, OK = Value
   }
-  val fsm_next = Wire(FSM())
-  val fsm = RegNext(fsm_next, FSM.IDLE)
-  val fsm_r1 = RegNext(fsm, FSM.IDLE)
+  val threadIdx_fsm = RegInit(THREADIDX_FSM.IDLE_CALC0)
+  val threadIdx_result_base_x = Reg(io.cuinterface_wg_new.bits.threadIdx_in_grid_base_x.cloneType)
+  val threadIdx_result_base_y = Reg(io.cuinterface_wg_new.bits.threadIdx_in_grid_base_y.cloneType)
+  val threadIdx_result_base_z = Reg(io.cuinterface_wg_new.bits.threadIdx_in_grid_base_z.cloneType)
+  val threadIdx_result_gsize_x  = Reg(io.cuinterface_wg_new.bits.num_thread_per_grid_x.cloneType)
+  val threadIdx_result_gsize_xy = Reg(io.cuinterface_wg_new.bits.num_thread_per_grid_xy.cloneType)
+
+  val threadIdx_mul1 = Module(new ArrayMulDataModule(max(io.wgbuffer_wg_new.bits.wgIdx_x.getWidth, io.wgbuffer_wg_new.bits.num_thread_per_wg_x.getWidth) + 1))
+  val threadIdx_mul2 = Module(new ArrayMulDataModule(log2Ceil(CONFIG.KERNEL.NUM_THREAD_PER_KNL_MAX) + 1))
+  threadIdx_mul1.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
+  threadIdx_mul1.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
+  threadIdx_mul2.io.regEnables(0) := (threadIdx_fsm =/= THREADIDX_FSM.OK) && (fsm =/= FSM.IDLE && fsm =/= FSM.REJECT)
+  threadIdx_mul2.io.regEnables(1) := false.B // Check: What is this port used for? Chisel optimize this IO-port out.
+  threadIdx_mul1.io.a := DontCare
+  threadIdx_mul1.io.b := DontCare
+  threadIdx_mul2.io.a := DontCare
+  threadIdx_mul2.io.b := DontCare
+  switch(threadIdx_fsm) {
+    is(THREADIDX_FSM.IDLE_CALC0) {
+      threadIdx_mul1.io.a := wg.wgIdx_x
+      threadIdx_mul1.io.b := wg.num_thread_per_wg_x // WG threadIdx-global base x
+      threadIdx_mul2.io.a := wg.num_wg_x
+      threadIdx_mul2.io.b := wg.num_thread_per_wg_x // num_thread_per_grid_x
+    }
+    is(THREADIDX_FSM.CALC1_STORE0) {
+      threadIdx_mul1.io.a := wg.wgIdx_y
+      threadIdx_mul1.io.b := wg.num_thread_per_wg_y // WG threadIdx-global base y
+      threadIdx_mul2.io.a := wg.num_wg_y
+      threadIdx_mul2.io.b := wg.num_thread_per_wg_y // num_thread_per_grid_y
+    }
+    is(THREADIDX_FSM.CALC2_STORE1) {
+      threadIdx_mul1.io.a := wg.wgIdx_z
+      threadIdx_mul1.io.b := wg.num_thread_per_wg_z // WG threadIdx-global base z
+      threadIdx_mul2.io.a := threadIdx_result_gsize_x
+      threadIdx_mul2.io.b := threadIdx_mul2.io.result // num_thread_per_grid_{x * y}
+    }
+  }
+
+  // multiply results store
+  when(threadIdx_fsm === THREADIDX_FSM.CALC1_STORE0) {
+    threadIdx_result_base_x := threadIdx_mul1.io.result
+    threadIdx_result_gsize_x := threadIdx_mul2.io.result
+  }
+  when(threadIdx_fsm === THREADIDX_FSM.CALC2_STORE1) { threadIdx_result_base_y := threadIdx_mul1.io.result }
+  when(threadIdx_fsm === THREADIDX_FSM.STORE2) {
+    threadIdx_result_base_z := threadIdx_mul1.io.result
+    threadIdx_result_gsize_xy := threadIdx_mul2.io.result
+  }
+
+  // control logic
+  threadIdx_fsm := MuxLookup(threadIdx_fsm, THREADIDX_FSM.IDLE_CALC0)(Seq(
+    THREADIDX_FSM.IDLE_CALC0   -> Mux(fsm =/= FSM.IDLE  , THREADIDX_FSM.CALC1_STORE0, THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.CALC1_STORE0 -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.CALC2_STORE1, THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.CALC2_STORE1 -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.STORE2      , THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.STORE2       -> Mux(fsm =/= FSM.REJECT, THREADIDX_FSM.OK          , THREADIDX_FSM.IDLE_CALC0),
+    THREADIDX_FSM.OK           -> Mux(fsm === FSM.REJECT || alloc_task_ok, THREADIDX_FSM.IDLE_CALC0, threadIdx_fsm),
+  ))
 
   // =
   // Main FSM - actions
@@ -184,7 +264,7 @@ class allocator extends Module {
   val resource_check_result = Wire(Vec(RESOURCE_CHECK_CU_STEP, Bool()))
 
   // IDLE -> CU_PREFER: get WG from wg_buffer
-  val wg = RegEnable(io.wgbuffer_wg_new.bits, io.wgbuffer_wg_new.fire)
+  when(io.wgbuffer_wg_new.fire) { wg := io.wgbuffer_wg_new.bits }
   io.wgbuffer_wg_new.ready := WireInit(fsm === FSM.IDLE)
 
   // used in sub-fsm RESOURCE_CHECK, counting how many CU have already been checked
@@ -283,7 +363,7 @@ class allocator extends Module {
   val alloc_task_rt = Wire(Bool())          // send alloc request to Resource table
   val alloc_task_wgram2 = Wire(Bool())      // send wgram read request to wgbuffer
   val alloc_task_cuinterface = Wire(Bool()) // send newly-allocated WG info to CU interface
-  val alloc_task_ok = alloc_task_rt && alloc_task_wgram2 && alloc_task_cuinterface
+  alloc_task_ok := alloc_task_rt && alloc_task_wgram2 && alloc_task_cuinterface
 
   // ALLOC task0: wgslot & wfslot update, always finishes in the first cycle of FSM.ALLOC
   io.rt_dealloc.ready := !(fsm === FSM.ALLOC && fsm =/= fsm_r1) || (io.rt_dealloc.bits.cu_id === cu)
@@ -327,13 +407,18 @@ class allocator extends Module {
   // ALLOC task 3: send wg info to the next pipeline stage, which will finally send it to CU interface
   val alloc_task_cuinterface_reg = RegInit(false.B)
   val cuinterface_buf = Module(new Queue(new io_alloc2cuinterface, entries=1, pipe=true))
-  cuinterface_buf.io.enq.valid := (fsm === FSM.ALLOC) && !alloc_task_cuinterface_reg
+  cuinterface_buf.io.enq.valid := (fsm === FSM.ALLOC && threadIdx_fsm === THREADIDX_FSM.OK) && !alloc_task_cuinterface_reg
   cuinterface_buf.io.enq.bits.cu_id := cu
   cuinterface_buf.io.enq.bits.wg_slot_id := wgslot_id
-  cuinterface_buf.io.enq.bits.num_wf := wg.num_wf
   cuinterface_buf.io.enq.bits.lds_dealloc_en := (wg.num_lds =/= 0.U)
   cuinterface_buf.io.enq.bits.sgpr_dealloc_en := (wg.num_sgpr =/= 0.U)
   cuinterface_buf.io.enq.bits.vgpr_dealloc_en := (wg.num_vgpr =/= 0.U)
+  cuinterface_buf.io.enq.bits.threadIdx_in_grid_base_x := threadIdx_result_base_x
+  cuinterface_buf.io.enq.bits.threadIdx_in_grid_base_y := threadIdx_result_base_y
+  cuinterface_buf.io.enq.bits.threadIdx_in_grid_base_z := threadIdx_result_base_z
+  cuinterface_buf.io.enq.bits.num_thread_per_grid_x  := threadIdx_result_gsize_x
+  cuinterface_buf.io.enq.bits.num_thread_per_grid_xy := threadIdx_result_gsize_xy
+  cuinterface_buf.io.enq.bits.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {}) := wg.viewAsSupertype(new ctainfo_host_to_alloc_to_cu {})
   if(CONFIG.DEBUG) {cuinterface_buf.io.enq.bits.wg_id.get := wg.wg_id.get}
   alloc_task_cuinterface_reg := Mux(fsm === FSM.ALLOC, alloc_task_cuinterface_reg || (cuinterface_buf.io.enq.fire && !alloc_task_ok), false.B )
   alloc_task_cuinterface := alloc_task_cuinterface_reg || cuinterface_buf.io.enq.fire

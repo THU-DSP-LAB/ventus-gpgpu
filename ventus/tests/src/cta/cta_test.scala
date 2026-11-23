@@ -3,8 +3,9 @@ package play.cta
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util._
-import chiseltest._
-import org.scalatest.freespec.AnyFreeSpec
+import chisel3.simulator.EphemeralSimulator._
+//import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.flatspec.AnyFlatSpec
 import cta._
 import top.parameters.{CTA_SCHE_CONFIG => CONFIG}
 
@@ -26,12 +27,24 @@ class Test(val len: Int) {
   class TestIn(testlen: Int) {
     val random = Random
     val csr = Seq.tabulate(testlen){i => random.nextInt().abs}
+    val num_thread_per_wg_x = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_thread_per_wg_y = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_thread_per_wg_z = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_wg_x = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_wg_y = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val num_wg_z = Seq.tabulate(testlen){i => random.nextInt(4) + 1}
+    val wgIdx_x = Seq.tabulate(testlen){i => random.nextInt(num_wg_x(i))}
+    val wgIdx_y = Seq.tabulate(testlen){i => random.nextInt(num_wg_y(i))}
+    val wgIdx_z = Seq.tabulate(testlen){i => random.nextInt(num_wg_z(i))}
+    val threadIdx_offset_x = Seq.tabulate(testlen){i => 0}
+    val threadIdx_offset_y = Seq.tabulate(testlen){i => 0}
+    val threadIdx_offset_z = Seq.tabulate(testlen){i => 0}
     val wf_max = CONFIG.WG.NUM_WF_MAX                                           * 3 /  8
-    val wf = Seq.tabulate(testlen){i => random.nextInt(wf_max - 1) + 1}
+    val wf = Seq.tabulate(testlen){i => (num_thread_per_wg_x(i) * num_thread_per_wg_y(i) * num_thread_per_wg_z(i) + CONFIG.GPU.NUM_THREAD - 1) / CONFIG.GPU.NUM_THREAD}
     val lds = Seq.tabulate(testlen){i =>  random.nextInt(CONFIG.WG.NUM_LDS_MAX  * 3 / (8*wf(i))) * wf(i)}
     val sgpr = Seq.tabulate(testlen){i => random.nextInt(CONFIG.WG.NUM_SGPR_MAX * 3 / (8*wf(i)))}
     val vgpr = Seq.tabulate(testlen){i => random.nextInt(CONFIG.WG.NUM_VGPR_MAX * 3 / (8*wf(i)))}
-    val wf_time = Seq.tabulate(testlen){i => Seq.tabulate(wf(i)){j => 400 + random.nextInt(200)}}
+    val wf_time = Seq.tabulate(testlen){i => Seq.tabulate(wf(i)){j => 50 + random.nextInt(200)}}
   }
   class TestExec(testlen: Int) {
     val valid = Array.fill(testlen)(false)
@@ -48,6 +61,10 @@ class Test(val len: Int) {
 
 class Wf_slot {
   var valid: Boolean = false
+  val threadIdxL_3d = new Array[(Int,Int,Int)](CONFIG.GPU.NUM_THREAD)
+  val threadIdxL_1d = new Array[Int](CONFIG.GPU.NUM_THREAD)
+  val threadIdxG_3d = new Array[(Int,Int,Int)](CONFIG.GPU.NUM_THREAD)
+  val threadIdxG_1d = new Array[Int](CONFIG.GPU.NUM_THREAD)
   var wg_id: Int = _
   var wf_tag: Int = _
   var lds: (Int, Int) = _
@@ -67,6 +84,14 @@ class Wf_slot {
     vgpr = that.vgpr
     csr = that.csr
     time = that.time
+    for(i <- 0 until CONFIG.GPU.NUM_THREAD) {
+      threadIdxL_3d(i) = that.threadIdxL_3d(i)
+      threadIdxL_1d(i) = that.threadIdxL_1d(i)
+      threadIdxG_3d(i) = that.threadIdxG_3d(i)
+      threadIdxG_1d(i) = that.threadIdxG_1d(i)
+    }
+  }
+  def check(): Unit = {
   }
 }
 
@@ -82,15 +107,15 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
   var wf_new_last_sgpr: (Int,Int) = _
   var wf_new_last_vgpr: (Int,Int) = _
 
-  def update(): (Boolean, Int, Int) = {
+  def update(): (Boolean, Int, Int) = { // 仿真步进，判断哪些WF执行完毕，并返回其中一个
     var wf_finish = false
     var wf_tag = 0
     var wg_id = 0
     for(i <- 0 until NUM_WF_SLOT) {
       if(wf_slot(i).valid) {
         if(wf_slot(i).time > 0) {
-          wf_slot(i).time -= 1
-        } else {
+          wf_slot(i).time -= 1    // WF执行剩余时间--
+        } else { // 在执行完毕的WF中选择序号最靠前的一个返回给CTA_sche
           wf_tag = if(wf_finish) wf_tag else wf_slot(i).wf_tag
           wg_id = if(wf_finish) wg_id else wf_slot(i).wg_id
           wf_finish = true
@@ -100,8 +125,47 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
     (wf_finish, wg_id, wf_tag)
   }
   def wf_check(wf2: Wf_slot): Unit = {
+    val wg_id = wf2.wg_id
+    for(i <- 0 until CONFIG.GPU.NUM_THREAD - 1) {
+      if(wf2.threadIdxL_1d(i) + 1 != wf2.threadIdxL_1d(i+1)) { // threadIdxL_linear应当序号连续
+        throw new MyException(s"WF threadIdx-local-linear incorrect: ${wf2.threadIdxL_1d}")
+      }
+      if(wf2.wf_id != wf2.threadIdxL_1d(0) / CONFIG.GPU.NUM_THREAD) { // 首个threadIdxL应当与wf_id匹配
+        throw new MyException(s"WF ID ${wf2.wf_id} doesn't match local threadIdx-linear ${wf2.threadIdxL_1d(0)}~${wf2.threadIdxL_1d.last}")
+      }
+      // threadIdxL_{x,y,z}正确
+      val threadIdxL_x = (wf2.wf_id * CONFIG.GPU.NUM_THREAD + i) %  test.in.num_thread_per_wg_x(wf2.wg_id)
+      val threadIdxL_y = (wf2.wf_id * CONFIG.GPU.NUM_THREAD + i) /  test.in.num_thread_per_wg_x(wf2.wg_id) % test.in.num_thread_per_wg_y(wf2.wg_id)
+      val threadIdxL_z = (wf2.wf_id * CONFIG.GPU.NUM_THREAD + i) / (test.in.num_thread_per_wg_x(wf2.wg_id) * test.in.num_thread_per_wg_y(wf2.wg_id)) % test.in.num_thread_per_wg_z(wf2.wg_id)
+      if(wf2.threadIdxL_3d(i)._1 != threadIdxL_x || wf2.threadIdxL_3d(i)._2 != threadIdxL_y || wf2.threadIdxL_3d(i)._3 != threadIdxL_z ) {
+        throw new MyException(s"""local threadIdx-3d incorrect or don't match WF_ID ${wf2.wf_id}: ${wf2.threadIdxL_3d.mkString(" ")}
+                                    wg_id = ${wf2.wg_id}
+                                    num_thread_per_wg_{x,y,z} = (${test.in.num_thread_per_wg_x(wf2.wg_id)},${test.in.num_thread_per_wg_y(wf2.wg_id)},${test.in.num_thread_per_wg_z(wf2.wg_id)})
+                                    expect thread${i} threadIdxL_{x,y,z} = ($threadIdxL_x, $threadIdxL_y, $threadIdxL_z)
+                               """)
+      }
+      // threadIdxG_{x,y,z}正确
+      if(wf2.threadIdxG_3d(i)._1 != (test.in.wgIdx_x(wg_id) * test.in.num_thread_per_wg_x(wg_id) + wf2.threadIdxL_3d(i)._1 + test.in.threadIdx_offset_x(wg_id)) ||
+         wf2.threadIdxG_3d(i)._2 != (test.in.wgIdx_y(wg_id) * test.in.num_thread_per_wg_y(wg_id) + wf2.threadIdxL_3d(i)._2 + test.in.threadIdx_offset_y(wg_id)) ||
+         wf2.threadIdxG_3d(i)._3 != (test.in.wgIdx_z(wg_id) * test.in.num_thread_per_wg_z(wg_id) + wf2.threadIdxL_3d(i)._3 + test.in.threadIdx_offset_z(wg_id))
+      ) { throw new MyException(s"""global threadIdx-3d incorrect or don't match blockIdx ${(test.in.wgIdx_x(wg_id),test.in.wgIdx_y(wg_id),test.in.wgIdx_z(wg_id))} or offset
+                                    wg_id = ${wf2.wg_id}
+                                    num_thread_per_wg_{x,y,z} = (${test.in.num_thread_per_wg_x(wf2.wg_id)},${test.in.num_thread_per_wg_y(wf2.wg_id)},${test.in.num_thread_per_wg_z(wf2.wg_id)})
+                                    num_block_{x,y,z} = (${test.in.num_wg_x(wf2.wg_id)},${test.in.num_wg_y(wf2.wg_id)},${test.in.num_wg_z(wf2.wg_id)})
+                                    threadIdxG_{x,y,z} = ${wf2.threadIdxG_3d.mkString(" ")}
+                                 """) }
+      if(wf2.threadIdxG_1d(i) != (wf2.threadIdxG_3d(i)._1 - test.in.threadIdx_offset_x(wg_id)) +
+         (wf2.threadIdxG_3d(i)._2 - test.in.threadIdx_offset_y(wg_id))  * test.in.num_thread_per_wg_x(wg_id) * test.in.num_wg_x(wg_id) +
+         (wf2.threadIdxG_3d(i)._3 - test.in.threadIdx_offset_z(wg_id))  * test.in.num_thread_per_wg_x(wg_id) * test.in.num_wg_x(wg_id) * test.in.num_thread_per_wg_y(wg_id) * test.in.num_wg_y(wg_id)
+      ) {
+        throw new MyException(s"global threadIdx-1d ${wf2.threadIdxG_1d.mkString(" ")} not match threadIdxG_3d ${wf2.threadIdxG_3d.mkString(" ")} - offset ${(test.in.threadIdx_offset_x(wg_id),test.in.threadIdx_offset_y(wg_id),test.in.threadIdx_offset_z(wg_id))}")
+      }
+    }
+
+    // 检验新来的WF的LDS/sGPR/vGPR资源占用是否与其它WF有重叠
     wf_slot.foreach { wf1 =>
       if(wf1.valid) {
+        // |--------------------检验资源占用是否重叠--------------------|    |--旧WF对此资源的耗用为0时跳过检查--|   |-同WG的LDS共享，跳过检查-|
         if((wf1.lds._1  >= wf2.lds._1  && wf1.lds._1  <= wf2.lds._2 ) && (wf1.lds._1  != wf1.lds._2  + 1) && wf1.wg_id != wf2.wg_id) { throw new ResourceConflictException("LDS", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
         if((wf1.sgpr._1 >= wf2.sgpr._1 && wf1.sgpr._1 <= wf2.sgpr._2) && (wf1.sgpr._1 != wf1.sgpr._2 + 1)) { throw new ResourceConflictException("sGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
         if((wf1.vgpr._1 >= wf2.vgpr._1 && wf1.vgpr._1 <= wf2.vgpr._2) && (wf1.vgpr._1 != wf1.vgpr._2 + 1)) { throw new ResourceConflictException("vGPR", wf1.wg_id, wf1.wf_tag, wf2.wg_id, wf2.wf_tag) }
@@ -111,9 +175,9 @@ class Cu(val cu_id: Int, test: Test, NUM_WF_SLOT: Int = CONFIG.GPU.NUM_WF_SLOT) 
       }
     }
   }
-  def wf_new(wf: Wf_slot): Unit = {
+  def wf_new(wf: Wf_slot): Unit = { // 向CU中新增WF，WF信息已被从硬件信号转化为软件class
     if(wf.wg_id < 0 || wf.wg_id >= test.len) {throw new MyException(s"WG ID ERROR: ${wf.wg_id}, expect WG ID Max = ${test.len - 1}")}
-    wf_check(wf)
+    wf_check(wf) // 检测新WF的LDS/sGPR/vGPR资源分配无误
     wf.valid = true
 
     val wf_cnt = test.wg_exec.wf_cnt(wf.wg_id) + 1
@@ -216,16 +280,10 @@ class Gpu(val test: Test) {
   }
 }
 
-class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
-  "Test: CTA_scheduler" in {
-    test(new cta_scheduler_top()).withAnnotations(Seq(WriteFstAnnotation, VerilatorBackendAnnotation)) { dut =>
-    //test(new cta_scheduler_top()).withAnnotations(Seq(VerilatorBackendAnnotation)) { dut =>
-    //test(new cta_scheduler_top()).withAnnotations(Seq(WriteVcdAnnotation)) { dut =>
-    //test(new cta_scheduler_top()).withAnnotations(Seq()) { dut =>
-      dut.io.host_wg_new.initSource().setSourceClock(dut.clock)
-      dut.io.host_wg_done.initSink().setSinkClock(dut.clock)
-      dut.io.cu_wf_new.map(i => i.initSink().setSinkClock(dut.clock))
-      dut.io.cu_wf_done.map(i => i.initSource().setSinkClock(dut.clock))
+class RunCtaTests extends AnyFlatSpec {
+  behavior of "CTA_Scheduler"
+  it should "TestPass: CTA_scheduler" in {
+    simulate(new cta_scheduler_top()) { dut =>
 
       val testlen = TESTLEN
       val test = new Test(testlen)
@@ -248,71 +306,141 @@ class RunCtaTests extends AnyFreeSpec with ChiselScalatestTester {
         _.num_thread_per_wf -> 0.U,
         _.pds_base -> 0.U,
         _.start_pc -> 0.U,
-        _.num_wg_x -> 0.U,
-        _.num_wg_y -> 0.U,
-        _.num_wg_z -> 0.U,
-        _.asid_kernel.get -> 0.U,
+        _.num_wg_x -> (test.in.num_wg_x(i)).U,
+        _.num_wg_y -> (test.in.num_wg_y(i)).U,
+        _.num_wg_z -> (test.in.num_wg_z(i)).U,
+        //(_.asid_kernel.get) -> 0.U,
+        _.num_thread_per_wg_x -> (test.in.num_thread_per_wg_x(i)).U,
+        _.num_thread_per_wg_y -> (test.in.num_thread_per_wg_y(i)).U,
+        _.num_thread_per_wg_z -> (test.in.num_thread_per_wg_z(i)).U,
+        _.wgIdx_x -> (test.in.wgIdx_x(i)).U,
+        _.wgIdx_y -> (test.in.wgIdx_y(i)).U,
+        _.wgIdx_z -> (test.in.wgIdx_z(i)).U,
+        _.threadIdx_in_grid_offset_x -> (test.in.threadIdx_offset_x(i)).U,
+        _.threadIdx_in_grid_offset_y -> (test.in.threadIdx_offset_y(i)).U,
+        _.threadIdx_in_grid_offset_z -> (test.in.threadIdx_offset_z(i)).U,
       ) }
 
+      println("CTA Scheduler Simulation begin")
 
-
+      dut.reset.poke(true.B)
       dut.io.host_wg_done.ready.poke(false.B)
       dut.io.host_wg_new.valid.poke(false.B)
-      dut.clock.step(5)
+      for(i <- 0 until NUM_CU) {
+        dut.io.cu_wf_new(i).ready.poke(false.B)
+        dut.io.cu_wf_done(i).valid.poke(false.B)
+      }
+      dut.clock.step()
+      dut.clock.step()
+      dut.reset.poke(false.B)
+      dut.clock.step()
+      dut.clock.step()
 
+      var in_cnt = 0
+      var out_cnt = 0
       var cnt = 0
       var clk_cnt = 0
-      fork{       // Host_wg_new
-        dut.io.host_wg_new.enqueueSeq(testSeqIn)
-      } .fork {   // CU interface
-        while(cnt < testlen) {
-          val wf_done_seq = gpu.update()
-          for(i <- 0 until NUM_CU) {
-            dut.io.cu_wf_done(i).valid.poke(wf_done_seq(i)._1.asBool)
-            dut.io.cu_wf_done(i).bits.wf_tag.poke(wf_done_seq(i)._3.asUInt)
+      
+      while(out_cnt < testlen) {
+        //
+        // IO 1: Host interface - new WG dispatched to GPU/cta_sche
+        //
+        if(in_cnt < testlen) {
+          dut.io.host_wg_new.valid.poke(true.B)
+          
+          dut.io.host_wg_new.bits.wg_id.poke(in_cnt.U)
+          dut.io.host_wg_new.bits.csr_kernel.poke(test.in.csr(in_cnt).U(CONFIG.GPU.MEM_ADDR_WIDTH))
+          dut.io.host_wg_new.bits.num_sgpr_per_wf.poke(test.in.sgpr(in_cnt).U)
+          dut.io.host_wg_new.bits.num_vgpr_per_wf.poke(test.in.vgpr(in_cnt).U)
+          dut.io.host_wg_new.bits.num_pds_per_wf.poke(in_cnt.U)
+          dut.io.host_wg_new.bits.num_sgpr.poke((test.in.sgpr(in_cnt) * test.in.wf(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_vgpr.poke((test.in.vgpr(in_cnt) * test.in.wf(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_lds.poke(test.in.lds(in_cnt).U)
+          dut.io.host_wg_new.bits.num_wf.poke(test.in.wf(in_cnt).U)
+          dut.io.host_wg_new.bits.gds_base.poke(0.U)
+          dut.io.host_wg_new.bits.num_thread_per_wf.poke(0.U)
+          dut.io.host_wg_new.bits.pds_base.poke(0.U)
+          dut.io.host_wg_new.bits.start_pc.poke(0.U)
+          dut.io.host_wg_new.bits.num_wg_x.poke((test.in.num_wg_x(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_wg_y.poke((test.in.num_wg_y(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_wg_z.poke((test.in.num_wg_z(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_thread_per_wg_x.poke((test.in.num_thread_per_wg_x(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_thread_per_wg_y.poke((test.in.num_thread_per_wg_y(in_cnt)).U)
+          dut.io.host_wg_new.bits.num_thread_per_wg_z.poke((test.in.num_thread_per_wg_z(in_cnt)).U)
+          dut.io.host_wg_new.bits.wgIdx_x.poke((test.in.wgIdx_x(in_cnt)).U)
+          dut.io.host_wg_new.bits.wgIdx_y.poke((test.in.wgIdx_y(in_cnt)).U)
+          dut.io.host_wg_new.bits.wgIdx_z.poke((test.in.wgIdx_z(in_cnt)).U)
+          dut.io.host_wg_new.bits.threadIdx_in_grid_offset_x.poke((test.in.threadIdx_offset_x(in_cnt)).U)
+          dut.io.host_wg_new.bits.threadIdx_in_grid_offset_y.poke((test.in.threadIdx_offset_y(in_cnt)).U)
+          dut.io.host_wg_new.bits.threadIdx_in_grid_offset_z.poke((test.in.threadIdx_offset_z(in_cnt)).U)
+
+          //dut.io.host_wg_new.bits.poke(testSeqIn(in_cnt))
+          if(dut.io.host_wg_new.ready.peek().litToBoolean) {
+            in_cnt += 1
           }
-          for(i <- 0 until NUM_CU) {
-            // 这个循环不能与上一个融合，CU interface会从所有的wf_done(i).valid中Arbiter出一个作为处理对象
-            // 必须等所有wf_done(i).valid更新完毕后才能读取wf_done(i).ready
-            if(dut.io.cu_wf_done(i).valid.peek.litToBoolean && dut.io.cu_wf_done(i).ready.peek.litToBoolean) {
-              gpu.wf_done(cu_id = i, wf_tag = wf_done_seq(i)._3)
-            }
-          }
-          for(i <- 0 until NUM_CU) {
-            val wf_new = dut.io.cu_wf_new(i)
-            wf_new.ready.poke(Random.nextBoolean().B)
-            if(wf_new.valid.peek.litToBoolean && wf_new.ready.peek.litToBoolean) {
-              val wf = new Wf_slot
-              wf.wg_id = wf_new.bits.wg_id.peek.litValue.toInt
-              wf.lds =  (wf_new.bits.lds_base.peek.litValue.toInt , wf_new.bits.lds_base.peek.litValue.toInt  + test.in.lds(wf.wg_id)  - 1)
-              wf.sgpr = (wf_new.bits.sgpr_base.peek.litValue.toInt, wf_new.bits.sgpr_base.peek.litValue.toInt + test.in.sgpr(wf.wg_id) - 1)
-              wf.vgpr = (wf_new.bits.vgpr_base.peek.litValue.toInt, wf_new.bits.vgpr_base.peek.litValue.toInt + test.in.vgpr(wf.wg_id) - 1)
-              wf.wf_tag = wf_new.bits.wf_tag.peek.litValue.toInt
-              wf.csr = wf_new.bits.csr_kernel.peek.litValue.toInt
-              wf.time = test.in.wf_time(wf.wg_id)(wf.wf_id)
-              gpu.wf_new(cu_id = i, wf)
-            }
-          }
-          dut.clock.step()
+        } else dut.io.host_wg_new.valid.poke(false.B)
+
+        //
+        // IO 2: CU interface - finished WF return to cta_sche
+        //
+        val wf_done_seq = gpu.update()
+        for(i <- 0 until NUM_CU) {
+          dut.io.cu_wf_done(i).valid.poke(wf_done_seq(i)._1.asBool)
+          dut.io.cu_wf_done(i).bits.wf_tag.poke(wf_done_seq(i)._3.asUInt)
         }
-      } .fork {   // Host_wg_done
-        dut.clock.step(70)
-        while(cnt < testlen){
-          dut.io.host_wg_done.ready.poke((scala.util.Random.nextBoolean() && scala.util.Random.nextBoolean()).B)
-          if(dut.io.host_wg_done.valid.peek.litToBoolean && dut.io.host_wg_done.ready.peek.litToBoolean) {
-            val wg_id = dut.io.host_wg_done.bits.wg_id.peek.litValue.toInt
+        for(i <- 0 until NUM_CU) {
+          // 这个循环不能与上一个融合，CU interface会从所有的wf_done(i).valid中Arbiter出一个作为处理对象
+          // 必须等所有wf_done(i).valid更新完毕后才能读取wf_done(i).ready
+          if(dut.io.cu_wf_done(i).valid.peek().litToBoolean && dut.io.cu_wf_done(i).ready.peek().litToBoolean) {
+            gpu.wf_done(cu_id = i, wf_tag = wf_done_seq(i)._3)
+          }
+        }
+
+        //
+        // IO 3: CU interface - new WF dispatched to CU/SM
+        //
+        for(i <- 0 until NUM_CU) {
+          val wf_new = dut.io.cu_wf_new(i)
+          wf_new.ready.poke(Random.nextBoolean().B)
+          if(wf_new.valid.peek().litToBoolean && wf_new.ready.peek().litToBoolean) {
+            val wf = new Wf_slot
+            wf.wg_id = wf_new.bits.wg_id.peek().litValue.toInt
+            wf.lds =  (wf_new.bits.lds_base.peek().litValue.toInt , wf_new.bits.lds_base.peek().litValue.toInt  + test.in.lds(wf.wg_id)  - 1)
+            wf.sgpr = (wf_new.bits.sgpr_base.peek().litValue.toInt, wf_new.bits.sgpr_base.peek().litValue.toInt + test.in.sgpr(wf.wg_id) - 1)
+            wf.vgpr = (wf_new.bits.vgpr_base.peek().litValue.toInt, wf_new.bits.vgpr_base.peek().litValue.toInt + test.in.vgpr(wf.wg_id) - 1)
+            wf.wf_tag = wf_new.bits.wf_tag.peek().litValue.toInt
+            wf.csr = wf_new.bits.csr_kernel.peek().litValue.toInt
+            for(t <- 0 until CONFIG.GPU.NUM_THREAD) {
+              wf.threadIdxG_3d(t) = (wf_new.bits.threadIdx_in_grid_x(t).peek().litValue.toInt, wf_new.bits.threadIdx_in_grid_y(t).peek().litValue.toInt, wf_new.bits.threadIdx_in_grid_z(t).peek().litValue.toInt)
+              wf.threadIdxL_3d(t) = (wf_new.bits.threadIdx_in_wg_x(t).peek().litValue.toInt, wf_new.bits.threadIdx_in_wg_y(t).peek().litValue.toInt, wf_new.bits.threadIdx_in_wg_z(t).peek().litValue.toInt)
+              wf.threadIdxG_1d(t) = wf_new.bits.threadIdx_in_grid(t).peek().litValue.toInt
+              wf.threadIdxL_1d(t) = wf_new.bits.threadIdx_in_wg(t).peek().litValue.toInt
+            }
+            wf.time = test.in.wf_time(wf.wg_id)(wf.wf_id)
+            gpu.wf_new(cu_id = i, wf)
+          }
+        }
+
+        //
+        // IO 4: Host interface - finished WG return to host
+        //
+        if(clk_cnt > 70) {
+          dut.io.host_wg_done.ready.poke((scala.util.Random.nextBoolean()).B)
+          if(dut.io.host_wg_done.valid.peek().litToBoolean && dut.io.host_wg_done.ready.peek().litToBoolean) {
+            val wg_id = dut.io.host_wg_done.bits.wg_id.peek().litValue.toInt
             testOut_wg(wg_id) = true
-            println(s"WG ${dut.io.host_wg_done.bits.wg_id.peek.litValue} finished")
-            cnt = cnt + 1
+            println(s"WG ${dut.io.host_wg_done.bits.wg_id.peek().litValue} finished")
+            out_cnt = out_cnt + 1
           }
-          dut.clock.step()
         }
-      } .fork {
-        while(cnt < testlen) {
-          clk_cnt += 1
-          dut.clock.step()
-        }
-      }.join
+
+        //
+        // simulation clock
+        //
+        clk_cnt += 1
+        if(clk_cnt % 10000 == 0) { println(s"clock step ${clk_cnt} cycles") }
+        dut.clock.step()
+      }
 
       gpu.final_check()
       dut.clock.step(100)

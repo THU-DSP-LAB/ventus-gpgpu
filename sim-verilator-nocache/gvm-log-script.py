@@ -1,8 +1,38 @@
-# 从 GVM 的输出中提取 VREG 类型指令，添加到 gvm_care_insns.cpp 中
-# 使用方式 python3 gvm-extract-vreginsns.py --file gvm-out.log
+#!/usr/bin/env python3
+"""
+gvm-log-script.py
 
-import re
+功能:
+ 1. 从 GVM 日志中提取被忽略的向量指令，生成 C++ 白名单代码。
+ 2. 提取并去重 GVM 标量寄存器 `GVM ERROR[XREG]` 报错。
+ 3. 生成过滤掉标量 `GVM ERROR[XREG]` 报错后的原始日志内容。
+
+用法:
+    python3 gvm-log-script.py --input=gvm.log --output=output.log
+"""
+
 import argparse
+import re
+import sys
+from collections import OrderedDict
+
+# ==========================================
+# 常量定义
+# ==========================================
+
+# 标量寄存器不一致报错前缀，兼容旧/新两种格式
+XREG_ERROR_MARKERS = (
+    "GVM error: DUT and REF xreg mismatch",
+    "GVM ERROR[XREG]:",
+)
+# 旧格式: DUT = 0x..., REF = 0x...
+RE_DUT_REF_OLD = re.compile(r'DUT\s*=\s*(0x[0-9A-Fa-f]+)\s*,\s*REF\s*=\s*(0x[0-9A-Fa-f]+)')
+# 新格式: DUT rd: 0x..., REF rd: 0x...
+RE_DUT_REF_NEW = re.compile(r'DUT\s+rd:\s*(0x[0-9A-Fa-f]+)\s*,\s*REF\s+rd:\s*(0x[0-9A-Fa-f]+)')
+
+# ==========================================
+# 向量指令字典数据
+# ==========================================
 
 def get_ref():
     """
@@ -638,18 +668,47 @@ def get_ref():
     pattern = r'map_([01]{32}).*std::bitset<32>\("([01]{32})"\),\s*([A-Z0-9_]+)\)'
     return re.findall(pattern, data)
 
+# ==========================================
+# 功能函数
+# ==========================================
+
+def extract_unique_xreg_errors(lines):
+    """
+    提取并去重标量寄存器 `GVM ERROR[XREG]` 报错
+    返回 OrderedDict: key -> {'count': int, 'line': str}
+    """
+    results = OrderedDict()
+    for raw in lines:
+        line = raw.rstrip("\n")
+        if any(marker in line for marker in XREG_ERROR_MARKERS):
+            m = RE_DUT_REF_NEW.search(line)
+            if m is None:
+                m = RE_DUT_REF_OLD.search(line)
+            if m:
+                key = (m.group(1).lower(), m.group(2).lower())
+            else:
+                key = ("_LINE_", line)
+            if key in results:
+                results[key]['count'] += 1
+            else:
+                results[key] = {'count': 1, 'line': line}
+    return results
+
 def extract_vreg_warning_lines(data):
     """
-    从 data 中提取出所有包含指定关键字的行，
-    并从中提取出 insn（一个32bit数，以8位十六进制数字表示），返回 insn 的列表
-    示例行：
-    [RTL    debug]@1295 GVM warning in `gvm_t::getDutVRegWbFinish`: ignoring VReg Writeback from pc 0x8000023c, insn 0x8a0e6057
+    从 data 中提取被忽略的向量写回 warning，
+    并从中提取 insn（一个32bit数，以8位十六进制数字表示），返回 insn 列表
+    兼容旧/新两种 warning 格式，例如：
+    [RTL  warning]@6345 GVM WARN[VREG_IGNORED]: ignoring VReg writeback from pc 0x800002a0, insn 0x80d02072
     """
-    target = "GVM warning in `gvm_t::getDutVRegWbFinish`: ignoring VReg Writeback from"
+    targets = (
+        "GVM warning in `gvm_t::getDutVRegWbFinish`: ignoring VReg Writeback from",
+        "GVM WARN[VREG_IGNORED]: ignoring VReg writeback from",
+    )
     pattern = r'insn\s+0x([0-9a-fA-F]{8})'
     results = []
     for line in data.splitlines():
-        if target in line:
+        if any(target in line for target in targets):
             m = re.search(pattern, line)
             if m:
                 results.append(int(m.group(1), 16))
@@ -674,9 +733,10 @@ def collect_matching_instructions(warning_insns, ref_data):
 def output_instructions(matched):
     """
     将 matched 列表中的每个 (mask, value, name) 三元组转换为 C++ 程序的格式输出：
-      {0xMASK, 0xVALUE, "NAME"               },\
+      {0xMASK, 0xVALUE, "NAME"               },\\
     其中 MASK 和 VALUE 均以8位16进制表示，NAME字段左对齐，占22个字符宽度。
     """
+    insns = []
     for mask_str, value_str, name in matched:
         mask_int = int(mask_str, 2)
         value_int = int(value_str, 2)
@@ -684,23 +744,93 @@ def output_instructions(matched):
         line = "  {{0x{mask:08x}, 0x{value:08x}, \"{name:<22}\"}},\\".format(
             mask=mask_int, value=value_int, name=name
         )
-        print(line)
+        insns.append(line)
+    return insns
 
-if __name__ == '__main__':
-    ref = get_ref()
+def extract_vreg_whitelist_code(lines):
+    """
+    从日志行中提取向量指令白名单代码
+    """
+    # 将行列表合并为字符串，以便 extract_vreg_warning_lines 处理
+    data = "".join(lines)
+    
+    # 获取指令数据库
+    ref_data = get_ref()
+    
+    # 提取警告中的指令
+    warning_insns = extract_vreg_warning_lines(data)
+    
+    # 匹配指令
+    matched = collect_matching_instructions(warning_insns, ref_data)
+    
+    # 生成输出代码
+    return output_instructions(matched)
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--file', type=str, metavar='FILE',
-        help="指定要读取的文件名"
-    )
+def main():
+    parser = argparse.ArgumentParser(description="GVM 日志处理脚本：向量白名单提取、XREG 报错去重与日志过滤")
+    parser.add_argument("--input", required=True, help="输入 GVM 日志文件路径")
+    parser.add_argument("--output", required=True, help="输出处理结果文件路径")
     args = parser.parse_args()
-    if args.file:
-        try:
-            with open(args.file, 'r', encoding='utf8') as f:
-                data = f.read()
-            insns = extract_vreg_warning_lines(data)
-        except Exception as e:
-            print("读取文件失败:", e)
-    matched = collect_matching_instructions(insns, ref)
-    output_instructions(matched)
+
+    # 1. 读取日志文件
+    try:
+        with open(args.input, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except Exception as e:
+        print(f"Error reading input file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    # 2. 准备数据
+    
+    # 3. 执行处理
+    # A. 向量指令白名单
+    whitelist_code = extract_vreg_whitelist_code(lines)
+    
+    # B. 标量 XREG 报错去重
+    unique_errors = extract_unique_xreg_errors(lines)
+    
+    # C. 过滤后的日志（不包含标量 XREG 报错行）
+    filtered_log = [line for line in lines if not any(marker in line for marker in XREG_ERROR_MARKERS)]
+
+    # 4. 写入输出文件
+    try:
+        with open(args.output, "w", encoding="utf-8") as f:
+            # Section 1: 向量指令白名单
+            f.write("=======================================================\n")
+            f.write("SECTION 1: Vector Instruction Whitelist Candidates\n")
+            f.write("=======================================================\n")
+            if whitelist_code:
+                for code in whitelist_code:
+                    f.write(code + "\n")
+            else:
+                f.write("No ignored vector instructions found.\n")
+            f.write("\n\n")
+
+            # Section 2: 整合的标量寄存器报错
+            f.write("=======================================================\n")
+            f.write("SECTION 2: Unique Scalar Register (xreg) Errors\n")
+            f.write("=======================================================\n")
+            if unique_errors:
+                for key, info in unique_errors.items():
+                    count = info['count']
+                    line = info['line']
+                    f.write(f"[{count}] {line}\n")
+            else:
+                f.write("No scalar register errors found.\n")
+            f.write("\n\n")
+
+            # Section 3: 过滤后的日志
+            f.write("=======================================================\n")
+            f.write("SECTION 3: Filtered Log (Scalar Errors Removed)\n")
+            f.write("=======================================================\n")
+            for line in filtered_log:
+                f.write(line)
+                
+        print(f"Successfully processed log. Output written to: {args.output}")
+
+    except Exception as e:
+        print(f"Error writing output file: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()

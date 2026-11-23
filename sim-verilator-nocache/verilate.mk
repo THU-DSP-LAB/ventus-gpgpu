@@ -6,6 +6,10 @@ endif
 RELEASE ?= 0
 PREFIX ?= $(CURDIR)/install
 
+export RTL_GVM_ENABLED = false
+VLIB_MILL = ./mill --no-server
+VLIB_MILL_LOCK = ../build/mill-generate.lock
+
 #=====================================================================
 # Helpers
 #=====================================================================
@@ -40,6 +44,7 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 MOLD = $(shell which mold)
+VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
 #=====================================================================
 # Source file list and build directories
@@ -47,6 +52,9 @@ MOLD = $(shell which mold)
 
 VLIB_DIR_SCALA = ../ventus/src
 VLIB_DIR_BUILD = build/libVentusRTL
+VLIB_GEN_DIR = build/generated/rtl
+VLIB_PARAMS_JSON = $(VLIB_GEN_DIR)/parameters.json
+VLIB_RTL_PARAMS_CPP = $(VLIB_GEN_DIR)/rtl_parameters.cpp
 VLIB_DIR_BUILDOBJ_DEBUG = $(VLIB_DIR_BUILD)/debug
 VLIB_DIR_BUILDOBJ_RELEASE = $(VLIB_DIR_BUILD)/release
 ifeq ($(RELEASE),1)
@@ -56,9 +64,9 @@ VLIB_DIR_BUILDOBJ = $(VLIB_DIR_BUILDOBJ_DEBUG)
 endif
 
 VLIB_SRC_SCALA = $(shell find $(VLIB_DIR_SCALA) -name "*.scala")
-VLIB_SRC_V = dut.v
+VLIB_SRC_V = $(VLIB_GEN_DIR)/dut.v
 VLIB_SRC_CXX_EXPORT = ventus_rtlsim.cpp # API in these files will be exported to shared library
-VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp rtl_parameters.cpp $(VLIB_SRC_CXX_EXPORT)
+VLIB_SRC_CXX = kernel.cpp physical_mem.cpp cta_sche_wrapper.cpp ventus_rtlsim_impl.cpp $(VLIB_RTL_PARAMS_CPP) $(VLIB_SRC_CXX_EXPORT)
 VLIB_SRC_CXX_ABSPATH = $(abspath $(VLIB_SRC_CXX))
 VLIB_VERILATOR_INPUT = $(VLIB_SRC_V) $(VLIB_SRC_CXX_ABSPATH)
 VLIB_VERILATOR_OUTPUT = $(VLIB_DIR_BUILDOBJ)/libVdut.a
@@ -79,7 +87,6 @@ VLIB_OBJ_EXPORT = $(VLIB_SRC_CXX_EXPORT:%.cpp=$(VLIB_DIR_BUILDOBJ)/%.o)
 VLIB_NPROC_CPU = $(shell nproc)
 VLIB_NPROC_DUT = 8 # Depends on RTL circuit size, just try and find a verilator-allowed largest number
 VLIB_NPROC_SIM = $(call MIN_FUNC, $(VLIB_NPROC_CPU), $(VLIB_NPROC_DUT))
-VLIB_NPROC_TRACE_FST = $(call MIN_FUNC, $(VLIB_NPROC_SIM), 2)
 
 # Generate C++ in executable form
 VLIB_VERILATOR_FLAGS += -cc --build
@@ -122,15 +129,19 @@ VLIB_CXXFLAGS += $(VLIB_CFLAGS)
 VLIB_CXXFLAGS += -std=c++20
 VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_LDFLAGS += -lc
+ifeq ($(VLIB_HAS_SYSTEM_LZ4),1)
+VLIB_LDLIBS += -llz4
+else
+$(error System liblz4-dev is required for Verilator FST tracing)
+endif
 ifeq ($(MOLD),1)
 VLIB_LDFLAGS += -fuse-ld=mold
 endif
 
 VLIB_VERILATOR_FLAGS += --threads $(VLIB_NPROC_SIM)
-VLIB_VERILATOR_FLAGS += --trace-threads $(VLIB_NPROC_TRACE_FST)
 VLIB_VERILATOR_FLAGS += -j $(VLIB_NPROC_CPU)
 VLIB_VERILATOR_FLAGS += -CFLAGS "$(VLIB_CXXFLAGS)"
-VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS)"
+VLIB_VERILATOR_FLAGS += -LDFLAGS "$(VLIB_LDFLAGS) $(VLIB_LDLIBS)"
 VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 #=====================================================================
@@ -139,12 +150,16 @@ VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 default: lib
 
-$(VLIB_SRC_V) parameters.json &: $(VLIB_SRC_SCALA)
-	cd .. && ./mill ventus[6.4.0].runMain circt.stage.ChiselMain --module top.GPGPU_top_nocache --target chirrtl --target-dir sim-verilator-nocache
-	firtool --verilog GPGPU_top_nocache.fir -o $(VLIB_SRC_V)
+$(VLIB_SRC_V) $(VLIB_PARAMS_JSON) &: $(VLIB_SRC_SCALA)
+	mkdir -p $(VLIB_GEN_DIR)
+	mkdir -p $(dir $(VLIB_MILL_LOCK))
+	flock $(VLIB_MILL_LOCK) -c 'cd .. && $(VLIB_MILL) ventus[6.4.0].runMain top.nocacheParamToJson --params-json sim-verilator-nocache/$(VLIB_PARAMS_JSON)'
+	flock $(VLIB_MILL_LOCK) -c 'cd .. && $(VLIB_MILL) ventus[6.4.0].runMain circt.stage.ChiselMain --module top.GPGPU_top_nocache --target chirrtl --target-dir sim-verilator-nocache/$(VLIB_GEN_DIR)'
+	cd $(VLIB_GEN_DIR) && firtool --verilog GPGPU_top_nocache.fir -o dut.v
 
-rtl_parameters.cpp: parameters.json json2cpp.py
-	python3 json2cpp.py
+$(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
+	mkdir -p $(dir $@)
+	python3 json2cpp.py $< $@
 
 verilog: $(VLIB_SRC_V)
 
@@ -160,8 +175,8 @@ $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic  
-	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/libVentusRTL.so
+	  -lspdlog -lfmt -pthread -lpthread -lz -latomic $(VLIB_LDLIBS)
+	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/lib$(VLIB_TARGET_NAME).so
 
 lib: $(VLIB_TARGET)
 
@@ -176,7 +191,7 @@ info-verilator:
 
 install: $(VLIB_TARGET)
 	install -d $(PREFIX)/lib
-	install -m 644 $(VLIB_TARGET) $(PREFIX)/lib/
+	install -m 644 $(VLIB_TARGET) $(PREFIX)/lib/lib$(VLIB_TARGET_NAME)-nocache.so
 	install -d $(PREFIX)/include
 	install -m 644 ventus_rtlsim.h $(PREFIX)/include/
 
@@ -193,6 +208,6 @@ clean-verilated:
 	-rm -rf $(VLIB_DIR_BUILD)
 
 clean-verilog: clean-verilated
-	-rm -f $(VLIB_SRC_V)
+	-rm -rf $(VLIB_GEN_DIR)
 
 .PHONY: clean-lib clean-lib-dep clean-verilated clean-verilog info-verilator install

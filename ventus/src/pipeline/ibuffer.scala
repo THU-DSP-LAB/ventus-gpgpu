@@ -168,7 +168,7 @@ class InstrBufferV2 extends Module{
       }
     }
     io.in.ready := mask_next === 0.U && io.out.ready
-    io.out.valid := mask_reg =/= 0.U
+    io.out.valid := mask_reg =/= 0.U && !io.flush
     io.out.bits := control_reg(ptr)
     if (GVM_ENABLED) {
       io.out.bits.spike_info.get.dispatch_id.get := dispatchCounter
@@ -191,6 +191,7 @@ class InstrBufferV2 extends Module{
     val gvm_dispatch = Module(new GvmDutInsnDispatch)
     // 共有 num_warp 个 dispatch 通道
     gvm_dispatch.io.clock := clock
+    gvm_dispatch.io.reset := reset.asBool
     gvm_dispatch.io.dispatch_fire := VecInit(io.out.map(_.fire.asUInt)).asUInt
     gvm_dispatch.io.sm_id := VecInit(io.out.map(_.bits.spike_info.get.sm_id.pad(32))).asUInt
     gvm_dispatch.io.hardware_warp_id := VecInit.tabulate(num_warp)(i => i.U(32.W)).asUInt

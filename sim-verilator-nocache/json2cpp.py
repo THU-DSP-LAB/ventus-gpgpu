@@ -15,7 +15,9 @@ def to_int(value):
     return None  # 默认返回None
 
 # 函数：将 JSON 数据转换为 C++ 代码
-def json_to_cpp(json_data, skip_keys=set()):
+def json_to_cpp(json_data, skip_keys=None):
+    if skip_keys is None:
+        skip_keys = set()
     cpp_code = """
 #include <cstdint>
 #include <string>
@@ -39,16 +41,18 @@ const std::unordered_map<std::string, uint32_t> rtl_parameters = {
     return cpp_code
 
 if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        raise SystemExit(f"Usage: {sys.argv[0]} <input-parameters.json> <output-rtl_parameters.cpp>")
+
     skip_keys = set("l2cache_cache l2cache_micro l2cache_micro_l l2cache_params l2cache_params_l".split())
 
     # 读取 JSON 文件
-    json_file = 'parameters.json'  # JSON 文件路径
-    with open(json_file, 'r') as f:
+    with open(sys.argv[1], 'r') as f:
         data = json.load(f)
 
     # 将 JSON 转换为 C++ 代码
     cpp_code = json_to_cpp(data, skip_keys=skip_keys)
 
     # 输出 C++ 代码到文件
-    with open('rtl_parameters.cpp', 'w') as f:
+    with open(sys.argv[2], 'w') as f:
         f.write(cpp_code)

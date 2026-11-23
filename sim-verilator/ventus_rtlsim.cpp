@@ -1,6 +1,69 @@
 #include "ventus_rtlsim_impl.hpp"
-#include "gvmref_interface.h" // apis from spike repo
+#include "persistent_state.hpp"
+#ifdef ENABLE_GVM
+#include "gvmref_interface.h"
+#endif
 #include <ctime>
+#include <cstdlib>  // bfs4096-008 Phase 0.2: getenv/strtol for VENTUS_VERILATOR_SEED
+#include <cstdio>   // bfs4096-008 Phase 0.2: printf actual seed
+#include <cstring>
+
+namespace {
+bool validate_config(const ventus_rtlsim_config_t* config) {
+    if (config == nullptr) {
+        std::fprintf(stderr, "ventus_rtlsim_init: config is null\n");
+        return false;
+    }
+#if !VM_TRACE
+    if (config->waveform.enable || config->snapshot.enable) {
+        std::fprintf(
+            stderr,
+            "ventus_rtlsim_init: waveform and fork snapshot require a TRACE=1 library\n"
+        );
+        return false;
+    }
+#endif
+    if (config->waveform.enable
+        && (config->waveform.filename == nullptr || config->waveform.filename[0] == '\0')) {
+        std::fprintf(stderr, "ventus_rtlsim_init: waveform filename is empty\n");
+        return false;
+    }
+    if (!config->snapshot.enable) {
+        return true;
+    }
+    if (config->snapshot.time_interval == 0) {
+        std::fprintf(stderr, "ventus_rtlsim_init: snapshot interval must be greater than zero\n");
+        return false;
+    }
+    if (config->snapshot.num_max <= 0) {
+        std::fprintf(stderr, "ventus_rtlsim_init: snapshot count must be greater than zero\n");
+        return false;
+    }
+    if (config->snapshot.filename == nullptr || config->snapshot.filename[0] == '\0') {
+        std::fprintf(stderr, "ventus_rtlsim_init: snapshot waveform filename is empty\n");
+        return false;
+    }
+    if (config->waveform.enable
+        && std::strcmp(config->waveform.filename, config->snapshot.filename) == 0) {
+        std::fprintf(stderr, "ventus_rtlsim_init: waveform and snapshot filenames must differ\n");
+        return false;
+    }
+    return true;
+}
+
+int finish_impl(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
+    if (sim == nullptr) {
+        return -1;
+    }
+    const bool is_snapshot_child = sim->config.snapshot.enable && sim->snapshots.is_child;
+    const int result = sim->destructor(snapshot_rollback_forcing);
+    delete sim;
+    if (is_snapshot_child) {
+        std::_Exit(result == 0 ? EXIT_SUCCESS : EXIT_FAILURE);
+    }
+    return result;
+}
+} // namespace
 
 static char verilator_rand_seed_setting[128] = "+verilator+seed+10086";
 static char* verilator_runtime_args_default[] = { verilator_rand_seed_setting };
@@ -28,22 +91,65 @@ extern "C" void ventus_rtlsim_get_default_config(ventus_rtlsim_config_t* config)
     config->snapshot.filename = "logs/ventus_rtlsim.snapshot.fst";
     config->verilator.argc = 0;
     config->verilator.argv = nullptr;
+    config->hang_timeout = 0;
 
-    timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    snprintf(verilator_rand_seed_setting, sizeof(verilator_rand_seed_setting), "+verilator+seed+%ld", ts.tv_nsec);
+    // bfs4096-008 Phase 0.2: seed control —— 读 ENV VAR VENTUS_VERILATOR_SEED.
+    //   设了非空 → 用固定 seed (dive 可复现);  未设 → 保持原 nsec 随机 (default 行为不变).
+    //   总是打印实际 seed, 便于后续按 seed 复现 mismatch.
+    long verilator_seed_value;
+    const char* env_seed = getenv("VENTUS_VERILATOR_SEED");
+    if (env_seed != nullptr && env_seed[0] != '\0') {
+        verilator_seed_value = strtol(env_seed, nullptr, 0);
+        printf("[INFO] Verilator seed: %ld (from VENTUS_VERILATOR_SEED)\n", verilator_seed_value);
+    } else {
+        timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        verilator_seed_value = ts.tv_nsec;
+        printf("[INFO] Verilator seed: %ld (nsec random)\n", verilator_seed_value);
+    }
+    fflush(stdout);
+    snprintf(verilator_rand_seed_setting, sizeof(verilator_rand_seed_setting), "+verilator+seed+%ld", verilator_seed_value);
     config->verilator.argc = sizeof(verilator_runtime_args_default) / sizeof(verilator_runtime_args_default[0]);
     config->verilator.argv = (const char**)(verilator_runtime_args_default);
 }
 
 extern "C" ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* config) {
+    if (!validate_config(config)) {
+        return nullptr;
+    }
     ventus_rtlsim_t* sim = new ventus_rtlsim_t();
     sim->constructor(config);
     return sim;
 }
 extern "C" void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
-    sim->destructor(snapshot_rollback_forcing);
-    delete sim;
+    (void)finish_impl(sim, snapshot_rollback_forcing);
+}
+extern "C" int ventus_rtlsim_finish_checked(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing) {
+    return finish_impl(sim, snapshot_rollback_forcing);
+}
+extern "C" int ventus_rtlsim_save_state(ventus_rtlsim_t* sim, const char* directory) {
+    return ventus_persistent_state_save(sim, directory);
+}
+extern "C" ventus_rtlsim_t* ventus_rtlsim_restore_state(
+    const ventus_rtlsim_config_t* config, const char* directory) {
+    if (!validate_config(config)) {
+        return nullptr;
+    }
+    return ventus_persistent_state_restore(config, directory);
+}
+extern "C" uint32_t ventus_rtlsim_persistent_state_version() {
+#ifdef VENTUS_RTL_SAVABLE
+    return 1;
+#else
+    return 0;
+#endif
+}
+extern "C" void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim) { sim->dump_testcase_pmu_summary(); }
+extern "C" ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim) {
+    if (sim == nullptr) {
+        return {};
+    }
+    return sim->pmu_view();
 }
 extern "C" const ventus_rtlsim_step_result_t* ventus_rtlsim_step(ventus_rtlsim_t* sim) { return sim->step(); }
 extern "C" void ventus_rtlsim_icache_invalidate(ventus_rtlsim_t* sim) { sim->need_icache_invalidate = true; }
@@ -70,11 +176,56 @@ extern "C" bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base
     return sim->pmem->page_alloc(base);
 }
 extern "C" bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base) { return sim->pmem->page_free(base); }
+extern "C" bool ventus_rtlsim_pmem_region_register(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t requested_size,
+    uint64_t allocated_size, ventus_pmem_region_kind_t kind,
+    uint64_t allocation_id) {
+    if (sim == nullptr) {
+        return false;
+    }
+
+    PmemRegionKind internal_kind;
+    switch (kind) {
+    case VENTUS_PMEM_REGION_BUFFER:
+        internal_kind = PmemRegionKind::Buffer;
+        break;
+    case VENTUS_PMEM_REGION_PDS:
+        internal_kind = PmemRegionKind::Pds;
+        break;
+    default:
+        return false;
+    }
+
+    return sim->pmem->region_register({
+        base,
+        requested_size,
+        allocated_size,
+        internal_kind,
+        allocation_id,
+    });
+}
+extern "C" bool ventus_rtlsim_pmem_region_unregister(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t allocation_id) {
+    return sim != nullptr && sim->pmem->region_unregister(base, allocation_id);
+}
+extern "C" ventus_pmem_missing_read_stats_t ventus_rtlsim_pmem_missing_read_stats(
+    const ventus_rtlsim_t* sim) {
+    if (sim == nullptr) {
+        return {};
+    }
+    const auto stats = sim->pmem->missing_read_stats();
+    return {
+        stats.cold_page,
+        stats.pds_cold_page,
+        stats.allocation_padding,
+        stats.out_of_bounds,
+    };
+}
 extern "C" bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size) {
     return sim->pmem->write(dst, src, size);
 }
 extern "C" bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size) {
-    return sim->pmem->read(src, dst, size);
+    return sim->pmem->read_d2h(src, dst, size);
 }
 
 extern "C" int ventus_rtlsim_get_parameter(const char* name, uint32_t* out_value) {
@@ -96,6 +247,9 @@ extern "C" int fw_vt_dev_close() {
 extern "C" int fw_vt_buf_alloc(uint64_t size, uint64_t *vaddr, int BUF_TYPE, uint64_t taskID, uint64_t kernelID) {
     return gvmref_vt_buf_alloc(size, vaddr, BUF_TYPE, taskID, kernelID);
 }
+extern "C" int fw_vt_buf_alloc_fixed(uint64_t size, uint64_t fixed_vaddr, int BUF_TYPE, uint64_t taskID, uint64_t kernelID) {
+    return gvmref_vt_buf_alloc_fixed(size, fixed_vaddr, BUF_TYPE, taskID, kernelID);
+}
 extern "C" int fw_vt_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID) {
     return gvmref_vt_buf_free(size, vaddr, taskID, kernelID);
 }
@@ -107,6 +261,9 @@ extern "C" int fw_vt_copy_to_dev(uint64_t dev_vaddr,const void *src_addr, uint64
 }
 extern "C" int fw_vt_start(void* metaData, uint64_t taskID) {
     return gvmref_vt_start(metaData, taskID);
+}
+extern "C" int fw_vt_kernel_finish() {
+    return gvmref_vt_kernel_finish();
 }
 extern "C" int fw_vt_upload_kernel_file(const char* filename, int taskID) {
     return gvmref_vt_upload_kernel_file(filename, taskID);

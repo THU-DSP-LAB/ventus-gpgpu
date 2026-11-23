@@ -17,6 +17,11 @@ This project did not initially maintain a changelog. Starting from version [2.0.
 - Support for Chisel 6.4.0.
 - sim-verilator
   + support snapshots (inspired by xiangshan/difftest/[lightSSS](https://github.com/OpenXiangShan/difftest?tab=readme-ov-file#lightsss-a-lightweight-simulation-snapshot-mechanism))
+- Support hardware thread index calculation in CTA_scheduler
+  + threadIdx_local_{x,y,z,linear}: index in thread-block
+  + threadIdx_global_{x,y,z,linear}: index in thread-grid
+  + SM will save them into CSR
+  + preivously, these are calculated by software
 
 ### Removed
 

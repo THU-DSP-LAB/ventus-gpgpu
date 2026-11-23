@@ -2,17 +2,25 @@ package top
 
 import L2cache.{CacheParameters, InclusiveCacheMicroParameters, InclusiveCacheParameters_lite}
 import chisel3.util._
+import mmu.SV32.{asidLen, paLen, vaLen}
+// TODO: MOVE parameters to `ventus/top'
 
 object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, not the last idx.
   def num_sm = 2
   var num_warp = 8
   var num_thread = 32
   val SINGLE_INST: Boolean = false
-  val SPIKE_OUTPUT: Boolean = true
+  // Keep the historical trace-on default while allowing long RTL workloads
+  // to elaborate without per-instruction trace state and printf traffic.
+  val SPIKE_OUTPUT: Boolean =
+    sys.env.getOrElse("RTL_SPIKE_OUTPUT", "true").toBoolean
   val INST_CNT: Boolean = true
   val INST_CNT_2: Boolean = false
+  val PMU_PIPELINE: Boolean = true
+  val PMU_INST_CLASS: Boolean = true
   val GVM_ENABLED: Boolean = sys.env.getOrElse("RTL_GVM_ENABLED", "false").toBoolean
   val MMU_ENABLED: Boolean = false
+  val DCACHE_DEBUG: Boolean = false
   def MMU_ASID_WIDTH = mmu.SV32.asidLen
   val wid_to_check = 2
   def num_bank = 4                  // # of banks for register file
@@ -50,6 +58,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def addrLen = 32
 
+  def memReqLen = if(MMU_ENABLED) paLen else vaLen
+
   def num_block = 8// not bigger than num_warp
 
   def num_warp_in_a_block = num_warp
@@ -68,12 +78,24 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def lsu_nMshrEntry = num_warp // less than num_warp
 
-  def dcache_NSets: Int = 256
+  def dcache_NSets: Int = 32
 
   def dcache_NWays: Int = 2
 
   def dcache_BlockWords: Int = 32  // number of words per cacheline(block)
-  def dcache_wshr_entry: Int = 4
+  // WSHR tracks outstanding dirty writeback transactions awaiting AccessAck
+  // from L2. Too few entries cause a three-way livelock between L1
+  // WSHR / memReq_Q / memRspPipe.st1 under burst dirty evictions
+  // (slots saturate -> pushReq.ready=0 -> wshrPass=0 -> memReq_Q.deq.ready=0
+  // -> memRspPipe stuck on memReq state -> no WSHRPopReq -> WSHR cannot drain).
+  // 100% reproducible at depth=4 on bfs_4096 baseline; partial relief at
+  // depth=8 (peak hits 8/8 still triggers livelock after ~4.26 ms sim).
+  // See bugs/bfs4096-003/phase_4_report.md. Monitor `wshrMaxUsed` debug
+  // counter (DCacheWSHR.scala) to validate the budget under new workloads.
+  // CONSTRAINT: dcache_wshr_entry <= dcache_MshrEntry (Chisel assert in
+  // DCache.scala) -- WSHR pushedIdx is encoded into a_source sharing the
+  // MSHR-width source field.
+  def dcache_wshr_entry: Int = 16
 
   def dcache_SetIdxBits: Int = log2Ceil(dcache_NSets)
 
@@ -85,9 +107,38 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def dcache_TagBits = xLen - (dcache_SetIdxBits + dcache_BlockOffsetBits + dcache_WordOffsetBits)
 
-  def dcache_MshrEntry: Int = 4
+  // MSHR (Miss Status Holding Register) tracks outstanding read misses.
+  // Coupling constraint (after the V2 decoupling in this patch):
+  //   dcache_MshrEntry >= dcache_wshr_entry (Chisel assert in
+  //   DCache.scala:1037) -- a_source field width = 3 + log2Up(dcache_MshrEntry)
+  //   + log2Up(dcache_NSets), and the WSHR pushedIdx is encoded into the
+  //   same field at the MSHR-width slot (DCachev2.scala:571:
+  //   Cat("d0", WshrAccess.io.pushedIdx, setIdx)).
+  //
+  // Historical note: the MSHRmiss{Req,RspOut}.instrId field's declared width
+  // was `WIdBits = log2Up(num_warp)`, which used to alias MSHR idx with warp
+  // id (the V1 cache assumed 1 outstanding miss per warp). After the V2
+  // refactor the field carries the MSHR entry index, not a warp id, but the
+  // stale width pinned NMshrEntry <= num_warp. This patch passes
+  // `math.max(WIdBits, log2Up(NMshrEntry))` to MSHR/SpecialMSHR/MSHRmissRspOut
+  // at instantiation sites (DCachev2 / MemRspPipe / CoreReqPipe) so that
+  // NMshrEntry can grow past num_warp. Commit 2 renames the misnamed
+  // parameter to `InstrIdBits` for clarity.
+  //
+  // WARNING: setting dcache_MshrEntry=4 forces dcache_wshr_entry<=4, which
+  // re-triggers the WSHR-full livelock documented in
+  // bugs/bfs4096-003/phase_4_report.md. Keep both at 16 unless wshrMaxUsed
+  // counter shows you have headroom to shrink.
+  // Monitor `mshrMaxUsed` debug counter (L1MSHR.scala) to validate.
+  def dcache_MshrEntry: Int = 16
 
   def dcache_MshrSubEntry: Int = 2
+  def dcache_MshrSet: Int = 2
+  def dcache_MshrWay: Int = 4
+
+  def atuns_NInfWriteEntry: Int = 16
+  def atuns_NResTabEntry: Int = 16
+
   def num_sfu = (num_thread >> 2).max(1)
 
   def sharedmem_depth = 1024
@@ -96,7 +147,7 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
 
   def sharemem_size = sharedmem_depth * sharedmem_BlockWords * 4 //bytes
 
-  def l2cache_NSets: Int = 64
+  def l2cache_NSets: Int = 32
 
   def l2cache_NWays: Int = 16
 
@@ -111,8 +162,8 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def l1cache_sourceBits: Int = 3+log2Up(dcache_MshrEntry)+log2Up(dcache_NSets)
 
   def l2cache_cache = CacheParameters(2, l2cache_NWays, l2cache_NSets, num_l2cache, l2cache_BlockWords << 2, l2cache_BlockWords << 2)
-  def l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster,dcache_MshrEntry,dcache_NSets)
-  def l2cache_micro_l = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, 1,dcache_MshrEntry,dcache_NSets)
+  def l2cache_micro = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, num_cluster,dcache_MshrEntry,dcache_NSets,atuns_NInfWriteEntry)
+  def l2cache_micro_l = InclusiveCacheMicroParameters(l2cache_writeBytes, l2cache_memCycles, l2cache_portFactor, num_warp, num_sm, num_sm_in_cluster, 1,dcache_MshrEntry,dcache_NSets,atuns_NInfWriteEntry)
   def l2cache_params = InclusiveCacheParameters_lite(l2cache_cache, l2cache_micro, false, MMU_ENABLED)
   def l2cache_params_l = InclusiveCacheParameters_lite(l2cache_cache, l2cache_micro_l, false, MMU_ENABLED)
 
@@ -151,13 +202,15 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
   def WF_COUNT_WIDTH = log2Ceil(WF_COUNT_MAX + 1)
   def WF_COUNT_WIDTH_PER_WG = log2Ceil(WF_COUNT_PER_WG_MAX + 1)
   def TAG_WIDTH = CTA_SCHE_CONFIG.WG.WF_TAG_WIDTH_UINT
-  def NUM_WG_DIM = 1024
-  def NUM_WG_X = NUM_WG_DIM // max wg num in kernel
-  def NUM_WG_Y = NUM_WG_DIM
-  def NUM_WG_Z = NUM_WG_DIM
-  def WG_SIZE_X_WIDTH = log2Ceil(NUM_WG_X + 1)
-  def WG_SIZE_Y_WIDTH = log2Ceil(NUM_WG_Y + 1)
-  def WG_SIZE_Z_WIDTH = log2Ceil(NUM_WG_Z + 1)
+  def NUM_WG = (1 << 16) - 1   // max threadBlock num in each kernel(grid) (each dim)
+  def NUM_WG_X = NUM_WG   // max threadBlock num in each kernel(grid) (x dim)
+  def NUM_WG_Y = NUM_WG   // max threadBlock num in each kernel(grid) (y dim)
+  def NUM_WG_Z = NUM_WG   // max threadBlock num in each kernel(grid) (z dim)
+  def NUM_THREAD_PER_WG     = 1024             // max thread num in each threadBlock
+  def NUM_THREAD_PER_KNL = NUM_WG * NUM_THREAD_PER_WG
+  def WG_SIZE_X_WIDTH = log2Ceil(NUM_THREAD_PER_WG + 1)
+  def WG_SIZE_Y_WIDTH = log2Ceil(NUM_THREAD_PER_WG + 1)
+  def WG_SIZE_Z_WIDTH = log2Ceil(NUM_THREAD_PER_WG + 1)
 
   def KNL_ASID_WIDTH = MMU_ASID_WIDTH
 
@@ -171,15 +224,21 @@ object parameters { //notice log2Ceil(4) returns 2.that is ,n is the total num, 
       val NUM_THREAD = num_thread                  // Number of thread in each WF
       val MMU_ENABLE = MMU_ENABLED                 // if MMU will be used
       val ASID_WIDTH = MMU_ASID_WIDTH.W            // MMU ASID width
+      val NUM_SGPR = parameters.num_sgpr
+      val NUM_VGPR = parameters.num_vgpr
+      val NUM_LDS = sharemem_size
+    }
+    object KERNEL {
+      val NUM_WG_MAX = NUM_WG                      // Max number of wg in each kernel
+      val NUM_THREAD_PER_KNL_MAX = NUM_THREAD_PER_KNL
     }
     object WG {
       val WG_ID_WIDTH = parameters.WG_ID_WIDTH.W
-      val NUM_WG_DIM_MAX = NUM_WG_DIM              // Max number of wg in a single dimension in each kernel
-      val NUM_THREAD_MAX = GPU.NUM_THREAD          // Max number of thread in each wavefront(warp)
+      val NUM_THREAD_PER_WG_MAX   = NUM_THREAD_PER_WG   // Max number of thread in each **WG**
       val NUM_WF_MAX = num_warp_in_a_block         // Max number of wavefront in each workgroup(block)
       val NUM_LDS_MAX = sharemem_size              // Max number of LDS  occupied by a workgroup
-      val NUM_SGPR_MAX = num_sgpr                  // Max number of sgpr occupied by a workgroup
-      val NUM_VGPR_MAX = num_vgpr                  // Max number of vgpr occupied by a workgroup
+      val NUM_SGPR_MAX = 256                       // Max number of sgpr occupied by a workgroup
+      val NUM_VGPR_MAX = 256                       // Max number of vgpr occupied by a workgroup
       val NUM_PDS_MAX = 4096*num_thread            // Max number of PDS  occupied by a *wavefront*
       //val NUM_GDS_MAX = 1024                     // Max number of GDS  occupied by a workgroup, useless
 
@@ -306,28 +365,22 @@ object ParametersToJson {
    * @param pretty 是否格式化输出
    */
   def saveToJson(filename: String = "parameters.json", pretty: Boolean = true): Unit = {
+    val parameters = extractAllParameters()
+    val json = Json.obj(parameters.toSeq: _*) // convert to json
+
+    val jsonString = if (pretty) {
+      json.spaces2  // 使用2空格缩进的格式化输出
+    } else {
+      json.noSpaces // 紧凑输出
+    }
+
+    // save to json file
+    val writer = new PrintWriter(new File(filename))
     try {
-      val parameters = extractAllParameters()
-      val json = Json.obj(parameters.toSeq: _*) // convert to json
-      
-      val jsonString = if (pretty) {
-        json.spaces2  // 使用2空格缩进的格式化输出
-      } else {
-        json.noSpaces // 紧凑输出
-      }
-      
-      // save to json file
-      val writer = new PrintWriter(new File(filename))
-      try {
-        writer.write(jsonString)
-        writer.flush()
-      } finally {
-        writer.close()
-      }
-    } catch {
-      case e: Exception =>
-        println(s"❌ Error saving parameters to JSON file: ${e.getMessage}")
-        e.printStackTrace()
+      writer.write(jsonString)
+      writer.flush()
+    } finally {
+      writer.close()
     }
   }
   

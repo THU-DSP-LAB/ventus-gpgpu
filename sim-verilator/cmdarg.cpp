@@ -97,6 +97,12 @@ int parse_arg(
                 }
                 config->sim_time_max = simtime;
             }
+        } else if (args[argid] == "--hang-timeout") {
+            if (++argid >= args.size()) {
+                cmdarg_error(std::vector<std::string>(args.begin() + argid - 1, args.end()));
+            } else {
+                config->hang_timeout = std::stoull(args[argid]);
+            }
         } else if (args[argid] == "--waveform") {
             config->waveform.enable = true;
             config->waveform.time_begin = 0;
@@ -255,6 +261,7 @@ int cmdarg_help(int exit_id) {
         << "--dump-mem BEGIN,END uint,uint   // 仿真结束后打印指定的内存地址范围[BEGIN,END]，4字节对齐\n"
         << "--waveform                       // 导出仿真波形fst文件，默认位置logs/\n"
         << "--sim-time-max NUM   uint        // number of simulation cycles\n"
+        << "--hang-timeout NUM   uint        // 0 disables PMU watchdog; otherwise timeout in simulation time units\n"
         << "--snapshot INTERVAL  uint        // 每隔多少仿真时间生成一个快照，若为0则关闭快照功能\n"
         << std::endl;
     exit(exit_id);

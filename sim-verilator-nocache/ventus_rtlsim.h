@@ -18,7 +18,7 @@ extern "C" {
 typedef struct ventus_rtlsim_t ventus_rtlsim_t;
 typedef uint64_t paddr_t;
 
-typedef struct ventus_kernel_metadata_t { // 这个metadata是供驱动使用的，而不是给硬件的
+typedef struct ventus_kernel_metadata_t {
     // Additional data
     const char* name; // kernel name
     void* data;       // use this as you like, such as callback function argument
@@ -34,10 +34,13 @@ typedef struct ventus_kernel_metadata_t { // 这个metadata是供驱动使用的
     uint64_t pdsSize;          // 每个thread用到的private memory大小
     uint64_t sgprUsage;        // 每个wavefront(warp)使用的标量寄存器数目
     uint64_t vgprUsage;        // 每个wavefront(warp)(also thread)使用的向量寄存器数目
-    uint64_t pdsBaseAddr;  // private memory的基址，要转成每个workgroup的基地址， wf_size*wg_size*pdsSize
-    uint64_t num_buffer;   // buffer的数目，包括pc
-    uint64_t* buffer_base; // 各buffer的基址。第一块buffer是给硬件用的metadata
-    uint64_t* buffer_size; // 各buffer的size，以Bytes为单位。实际使用的大小，用于初始化.data
+    uint64_t pdsBaseAddr; // resident private-memory pool基址；每个驻留workgroup槽位步长为wf_size*wg_size*pdsSize
+    uint64_t num_thread_global[3]; // 全局三维thread数目
+    uint64_t num_thread_local[3];  // 线程块内三维thread数目
+    uint64_t threadIdxOffset[3];   // global threadIdx偏移量
+    uint64_t num_buffer;           // buffer的数目，包括pc
+    uint64_t* buffer_base;         // 各buffer的基址。第一块buffer是给硬件用的metadata
+    uint64_t* buffer_size;      // 各buffer的size，以Bytes为单位。实际使用的大小，用于初始化.data
     uint64_t* buffer_allocsize; // 各buffer的size，以Bytes为单位。分配的大小
 } ventus_kernel_metadata_t;
 
@@ -77,13 +80,78 @@ typedef struct {
         int argc;          // 注意argc可以为0
         const char** argv; // 共有argc个char*字符串，[0]成员不是程序名，而是首个verilator参数
     } verilator;
+    uint64_t hang_timeout; // 0 disables PMU progress watchdog; otherwise timeout in simulation time units.
 } ventus_rtlsim_config_t;
 
 typedef struct {
     bool error;       // Simulation got fatal error, or RTL $finish()
     bool time_exceed; // Simulation time exceeds limit
     bool idle;        // All given kernels has finished
+    bool hang;        // PMU progress watchdog detected no issue/memory progress for too long.
 } ventus_rtlsim_step_result_t;
+
+typedef struct {
+    uint64_t active_cycles;
+    uint64_t total_scalar_issued;
+    uint64_t total_vector_issued;
+    uint64_t exec_structural_hazard_cycles_x;
+    uint64_t exec_structural_hazard_cycles_v;
+    uint64_t data_dep_stall_cycles;
+    uint64_t barrier_stall_cycles;
+    uint64_t control_hazard_flush_count;
+    uint64_t frontend_stall_cycles;
+    uint64_t lsu_backpressure_cycles;
+    uint64_t ibuffer_full_cycles;
+} ventus_rtlsim_pipeline_pmu_t;
+
+typedef struct {
+    uint64_t compute_issued;
+    uint64_t mem_issued;
+    uint64_t ctrl_issued;
+} ventus_rtlsim_inst_class_pmu_t;
+
+typedef struct {
+    uint64_t total_req;
+    uint64_t read_req;
+    uint64_t write_req;
+    uint64_t read_miss;
+    uint64_t write_miss;
+    uint64_t read_primary_miss;
+    uint64_t read_secondary_miss;
+    uint64_t read_primary_full_miss;
+    uint64_t read_secondary_full_miss;
+    uint64_t write_fresh_miss;
+    uint64_t write_inflight_miss;
+    uint64_t replacements;
+    uint64_t dirty_writebacks;
+    uint64_t mshr_full_cycles;
+    uint64_t rtab_replays;
+    uint64_t bank_conflict_cycles;
+    uint64_t core_req_pipe_pipelined_cycles;
+    uint64_t mem_rsp_pipe_decoupled_cycles;
+} ventus_rtlsim_dcache_pmu_t;
+
+typedef struct {
+    uint32_t num_sm;
+    bool has_dcache;
+    const ventus_rtlsim_pipeline_pmu_t *pipeline;
+    const ventus_rtlsim_inst_class_pmu_t *inst_class;
+    const ventus_rtlsim_dcache_pmu_t *dcache;
+} ventus_rtlsim_pmu_t;
+
+// Public PMEM ABI types are shared by all RTL backends. The registration and
+// statistics entry points remain optional backend capabilities.
+typedef enum {
+    VENTUS_PMEM_REGION_BUFFER = 0,
+    VENTUS_PMEM_REGION_PDS = 1,
+} ventus_pmem_region_kind_t;
+
+typedef struct {
+    uint64_t cold_page;
+    uint64_t pds_cold_page;
+    uint64_t allocation_padding;
+    uint64_t out_of_bounds;
+} ventus_pmem_missing_read_stats_t;
 
 // =
 // API functions:
@@ -114,6 +182,11 @@ DLL_PUBLIC ventus_rtlsim_t* ventus_rtlsim_init(const ventus_rtlsim_config_t* con
 //   it will rollback to the oldest snapshot to find out what happened.
 // You can force the rollback by passing `snapshot_rollback_forcing = true`
 DLL_PUBLIC void ventus_rtlsim_finish(ventus_rtlsim_t* sim, bool snapshot_rollback_forcing);
+// Ask RTL to print the accumulated testcase PMU summary once.
+DLL_PUBLIC void ventus_rtlsim_dump_testcase_pmu(ventus_rtlsim_t* sim);
+// Return a read-only view of the latest PMU counters sampled after the most recent step().
+// The pointed-to storage is owned by sim and may change after the next ventus_rtlsim_step().
+DLL_PUBLIC ventus_rtlsim_pmu_t ventus_rtlsim_get_pmu(const ventus_rtlsim_t* sim);
 
 // Calculate 1 unit-time of simulation.
 // Return the result of this step: ok, error, time_exceed, or idle.
@@ -157,11 +230,33 @@ DLL_PUBLIC void ventus_rtlsim_add_kernel(
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_alloc(ventus_rtlsim_t* sim, paddr_t base);
 DLL_PUBLIC bool ventus_rtlsim_pmem_page_free(ventus_rtlsim_t* sim, paddr_t base);
 
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_register(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t requested_size,
+    uint64_t allocated_size, ventus_pmem_region_kind_t kind,
+    uint64_t allocation_id);
+DLL_PUBLIC bool ventus_rtlsim_pmem_region_unregister(
+    ventus_rtlsim_t* sim, paddr_t base, uint64_t allocation_id);
+DLL_PUBLIC ventus_pmem_missing_read_stats_t ventus_rtlsim_pmem_missing_read_stats(
+    const ventus_rtlsim_t* sim);
+
 // Physical memory read & write
 // copy data from host to device
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_h2d(ventus_rtlsim_t* sim, paddr_t dst, const void* src, uint64_t size);
 // copy data from device to host
 DLL_PUBLIC bool ventus_rtlsim_pmemcpy_d2h(ventus_rtlsim_t* sim, void* dst, paddr_t src, uint64_t size);
+
+#ifdef ENABLE_GVM
+DLL_PUBLIC int fw_vt_dev_open();
+DLL_PUBLIC int fw_vt_dev_close();
+DLL_PUBLIC int fw_vt_buf_alloc(uint64_t size, uint64_t *vaddr, int BUF_TYPE, uint64_t taskID, uint64_t kernelID);
+DLL_PUBLIC int fw_vt_buf_alloc_fixed(uint64_t size, uint64_t fixed_vaddr, int BUF_TYPE, uint64_t taskID, uint64_t kernelID);
+DLL_PUBLIC int fw_vt_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID);
+DLL_PUBLIC int fw_vt_one_buf_free(uint64_t size, uint64_t *vaddr, uint64_t taskID, uint64_t kernelID);
+DLL_PUBLIC int fw_vt_copy_to_dev(uint64_t dev_vaddr,const void *src_addr, uint64_t size, uint64_t taskID, uint64_t kernelID);
+DLL_PUBLIC int fw_vt_start(void* metaData, uint64_t taskID);
+DLL_PUBLIC int fw_vt_kernel_finish();
+DLL_PUBLIC int fw_vt_upload_kernel_file(const char* filename, int taskID);
+#endif // ENABLE_GVM
 
 #undef DLL_PUBLIC
 #undef DLL_LOCAL

@@ -18,11 +18,16 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
+#include <stdexcept>
 #include <string>
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <utility>
 #include <vector>
+
+#ifdef ENABLE_GVM
+#include "gvm.hpp"
+#endif // ENABLE_GVM
 
 constexpr uint64_t HALF_CYCLE_TIME = 5;
 
@@ -30,6 +35,14 @@ constexpr uint64_t HALF_CYCLE_TIME = 5;
 // cleanup at exit
 //
 static std::vector<ventus_rtlsim_t*> g_instances;
+
+static uint32_t rtl_parameter_u32(const char* name) {
+    auto it = rtl_parameters.find(name);
+    if (it == rtl_parameters.end() || it->second < 0) {
+        throw std::runtime_error(fmt::format("RTL parameter {} is missing or invalid", name));
+    }
+    return static_cast<uint32_t>(it->second);
+}
 
 // cleanup: mainly for Verilator FST waveform dump
 // tfp->close() is necessary to save complete waveform to file
@@ -77,7 +90,13 @@ constexpr unsigned log2Ceil(unsigned n) {
 }
 
 // 核心流水线与L1D之间的接口 opcode & param
-inline constexpr unsigned L1D_NUM_SET = 256;       // L1 D-cache的组数
+// NOTE: 即使 nocache 版本物理上没有 L1D 硬件，SM↔mem 的接口仍是 cache-line 风格
+//       (tag/setIdx/blockOffset)，host 在 get_dcache_req 之后必须按 RTL 实际参数反推
+//       byte 地址。下面三个常量必须与 rtl_parameters.cpp 中 dcache_NSets / dcache_NWays /
+//       dcache_BlockWords 一致；早期版本误把 NUM_SET 写成 256（RTL 实际为 32），
+//       会让 (tag<<8)<<5<<2 在 uint32_t 内溢出，命中错误的物理地址（如目标 0x90004000
+//       会被算成 0x80020000），表现为读到全 0 → 跳转到 PC=0 → UNDEFINED INSTRUCTION。
+inline constexpr unsigned L1D_NUM_SET = 32;        // L1 D-cache的组数（= rtl_parameters.dcache_NSets）
 inline constexpr unsigned L1D_NUM_WAY = 2;         // L1 D-cache的组相联度
 inline constexpr unsigned L1D_BLOCK_NUM_WORD = 32; // 每个cache block包含多少个32bit
 inline constexpr uint8_t L1D_OPCODE_READ = 0x0;
@@ -196,6 +215,9 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
             sinks.push_back(console_sink);
         }
         logger = std::make_shared<spdlog::logger>("VentusRTLsim_logger", sinks.begin(), sinks.end());
+#ifdef ENABLE_GVM
+        gvm.logger = logger;
+#endif // ENABLE_GVM
         logger->set_level(get_log_level(config.log.level));
         logger->flush_on(spdlog::level::err);
 
@@ -236,6 +258,19 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
     cta = new Cta(logger);
     pmem = std::make_unique<PhysicalMemory>(config.pmem.auto_alloc, config.pmem.pagesize, logger);
     need_icache_invalidate = false;
+    pmu_num_sm = rtl_parameter_u32("num_sm");
+    if (pmu_num_sm != NUM_SM) {
+        logger->critical(
+            "PMU snapshot code currently samples {} nocache SM counters, but RTL parameter num_sm={}. "
+            "Update nocache PMU sampling for the matching RTL parameters.",
+            NUM_SM, pmu_num_sm
+        );
+        std::abort();
+    }
+    pmu_snapshot.num_sm = pmu_num_sm;
+    pmu_snapshot.has_dcache = false;
+    pmu_snapshot.pipeline.resize(pmu_num_sm);
+    pmu_snapshot.inst_class.resize(pmu_num_sm);
 
     // waveform traces (FST)
     if (config.waveform.enable) {
@@ -260,6 +295,8 @@ void ventus_rtlsim_t::constructor(const ventus_rtlsim_config_t* config_) {
 
     // get ready to run
     snapshot_fork(); // initial snapshot at sim_time = 0
+    last_pmu_progress_time = contextp->time();
+    last_pmu_progress_value = 0;
     dut_reset();
 }
 
@@ -267,6 +304,7 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     step_status.error = contextp->gotFinish() || contextp->gotError();
     step_status.time_exceed = contextp->time() >= config.sim_time_max;
     step_status.idle = cta->is_idle();
+    step_status.hang = false;
     if (step_status.error || step_status.time_exceed) {
         return &step_status;
     }
@@ -288,6 +326,8 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
 
         // Thread-block return from GPU (stimuli)
         dut->io_host_rsp_ready = 1;
+        dut->io_perfDump = cta->is_idle();
+        dut->io_perfDumpSummary = need_perf_dump_summary;
 
         // Assert Verilated memory IO type: must be VlWide
         // static_assert(VlIsVlWide<std::decay<decltype(dut->io_mem_rd_data)>::type>::value, "Check io_mem type");
@@ -358,10 +398,10 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
                     }
                 }
             } else if (req->opcode == L1D_OPCODE_WRITE) {
-                SPDLOG_LOGGER_DEBUG(logger, 
-                    "L1D write: sm {} paddr=0x{:x}, mask=0x{:x}, data=0x{:x}",
-                    req->sm_id, paddr_base, req->mask.to_ulong(), fmt::join(req->data, ",")
-                );
+                // SPDLOG_LOGGER_DEBUG(logger,
+                //     "L1D write: sm {} paddr=0x{:x}, mask=0x{:x}, data=0x{:x}",
+                //     req->sm_id, paddr_base, req->mask.to_ulong(), fmt::join(req->data, ",")
+                // );
                 for (int i = 0; i < NUM_THREAD; i++) {
                     if (req->mask[i]) {
                         paddr_t paddr = paddr_base + (req->blockOffset[i] << 2);
@@ -437,6 +477,9 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
     //
     dut->eval();
     waveform_dump();
+    if (dut->clock == 1 && need_perf_dump_summary) {
+        need_perf_dump_summary = false;
+    }
 
     //
     // Clock output
@@ -463,18 +506,108 @@ const ventus_rtlsim_step_result_t* ventus_rtlsim_t::step() {
         }
     }
 
+#ifdef ENABLE_GVM
+    if (contextp->time() % 2 == 1) {
+        gvm.getDut();
+        if (gvm.gvmStep() != 0) {
+            sim_got_error = true;
+            logger->critical("GVM reported fatal mismatch, stopping simulation");
+        }
+    }
+#endif // ENABLE_GVM
+
     //
     // snapshot fork
     //
     step_status.error = sim_got_error || contextp->gotFinish() || contextp->gotError();
     step_status.time_exceed = contextp->time() >= config.sim_time_max;
     step_status.idle = cta->is_idle();
+    sample_pmu_snapshot();
+    update_pmu_watchdog();
     if (!step_status.time_exceed && !step_status.error && contextp->time() % config.snapshot.time_interval == 0) {
         snapshot_fork();
     }
 
     return &step_status;
 }
+
+#define COPY_PIPELINE_PMU(SM)                                                                                         \
+    do {                                                                                                              \
+        auto& dst = pmu_snapshot.pipeline[SM];                                                                        \
+        dst.active_cycles = dut->io_pmu_pipeline_##SM##_activeCycles;                                                 \
+        dst.total_scalar_issued = dut->io_pmu_pipeline_##SM##_totalScalarIssued;                                      \
+        dst.total_vector_issued = dut->io_pmu_pipeline_##SM##_totalVectorIssued;                                      \
+        dst.exec_structural_hazard_cycles_x = dut->io_pmu_pipeline_##SM##_execStructuralHazardCyclesX;                \
+        dst.exec_structural_hazard_cycles_v = dut->io_pmu_pipeline_##SM##_execStructuralHazardCyclesV;                \
+        dst.data_dep_stall_cycles = dut->io_pmu_pipeline_##SM##_dataDepStallCycles;                                  \
+        dst.barrier_stall_cycles = dut->io_pmu_pipeline_##SM##_barrierStallCycles;                                   \
+        dst.control_hazard_flush_count = dut->io_pmu_pipeline_##SM##_controlHazardFlushCount;                        \
+        dst.frontend_stall_cycles = dut->io_pmu_pipeline_##SM##_frontendStallCycles;                                 \
+        dst.lsu_backpressure_cycles = dut->io_pmu_pipeline_##SM##_lsuBackpressureCycles;                             \
+        dst.ibuffer_full_cycles = dut->io_pmu_pipeline_##SM##_ibufferFullCycles;                                     \
+    } while (false)
+
+#define COPY_INST_CLASS_PMU(SM)                                                                                       \
+    do {                                                                                                              \
+        auto& dst = pmu_snapshot.inst_class[SM];                                                                      \
+        dst.compute_issued = dut->io_pmu_instClass_##SM##_computeIssued;                                             \
+        dst.mem_issued = dut->io_pmu_instClass_##SM##_memIssued;                                                     \
+        dst.ctrl_issued = dut->io_pmu_instClass_##SM##_ctrlIssued;                                                   \
+    } while (false)
+
+void ventus_rtlsim_t::sample_pmu_snapshot() {
+    COPY_PIPELINE_PMU(0);
+    COPY_PIPELINE_PMU(1);
+    COPY_INST_CLASS_PMU(0);
+    COPY_INST_CLASS_PMU(1);
+}
+
+void ventus_rtlsim_t::update_pmu_watchdog() {
+    if (config.hang_timeout == 0 || step_status.error || step_status.time_exceed || step_status.idle) {
+        last_pmu_progress_time = contextp->time();
+        last_pmu_progress_value = 0;
+        return;
+    }
+
+    uint64_t issued = 0;
+    uint64_t mem_issued = 0;
+    for (uint32_t i = 0; i < pmu_snapshot.num_sm; i++) {
+        issued += pmu_snapshot.pipeline[i].total_scalar_issued + pmu_snapshot.pipeline[i].total_vector_issued;
+        mem_issued += pmu_snapshot.inst_class[i].mem_issued;
+    }
+    const uint64_t progress = issued + mem_issued;
+
+    if (progress != last_pmu_progress_value) {
+        last_pmu_progress_value = progress;
+        last_pmu_progress_time = contextp->time();
+        return;
+    }
+
+    const uint64_t idle_time = contextp->time() - last_pmu_progress_time;
+    if (idle_time < config.hang_timeout) {
+        return;
+    }
+
+    step_status.hang = true;
+    step_status.error = true;
+    logger->critical(
+        "PMU watchdog detected HANG: no issue/memory progress for {} time units, time={}, issued={}, mem_issued={}",
+        idle_time, contextp->time(), issued, mem_issued
+    );
+}
+
+ventus_rtlsim_pmu_t ventus_rtlsim_t::pmu_view() const {
+    return {
+        pmu_snapshot.num_sm,
+        pmu_snapshot.has_dcache,
+        pmu_snapshot.pipeline.data(),
+        pmu_snapshot.inst_class.data(),
+        nullptr,
+    };
+}
+
+#undef COPY_PIPELINE_PMU
+#undef COPY_INST_CLASS_PMU
 
 void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     uint64_t sim_end_time = contextp->time();
@@ -533,6 +666,17 @@ void ventus_rtlsim_t::destructor(bool snapshot_rollback_forcing) {
     g_instances.erase(std::remove(g_instances.begin(), g_instances.end(), this), g_instances.end());
 }
 
+void ventus_rtlsim_t::dump_testcase_pmu_summary() {
+    if (!dut || !contextp) {
+        return;
+    }
+    need_perf_dump_summary = true;
+    for (int i = 0; i < 4 && need_perf_dump_summary; i++) {
+        step();
+    }
+    dut->io_perfDumpSummary = 0;
+}
+
 void ventus_rtlsim_t::snapshot_fork() {
     if (!config.snapshot.enable || snapshots.is_child)
         return;
@@ -573,8 +717,8 @@ void ventus_rtlsim_t::snapshot_fork() {
         siginfo_t info;
         sigemptyset(&set);
         sigaddset(&set, SNAPSHOT_WAKEUP_SIGNAL);
-        sigprocmask(SIG_BLOCK, &set, &oldset);   // Block SIG for using sigwait
-        sigwaitinfo(&set, &info);                // Wait for snapshot-rollback
+        sigprocmask(SIG_BLOCK, &set, &oldset); // Block SIG for using sigwait
+        sigwaitinfo(&set, &info);              // Wait for snapshot-rollback
         // main process invoked snapshot rollback
         sigprocmask(SIG_SETMASK, &oldset, NULL); // Change signal blocking mask back
         assert(info.si_signo == SNAPSHOT_WAKEUP_SIGNAL);
@@ -650,6 +794,8 @@ void ventus_rtlsim_t::dut_reset() const {
     contextp->time(0);
     dut->io_host_req_valid = 0;
     dut->io_host_rsp_ready = 0;
+    dut->io_perfDump = 0;
+    dut->io_perfDumpSummary = 0;
     dut->reset = 1;
     dut->clock = 0;
     dut->eval();
@@ -675,6 +821,9 @@ void ventus_rtlsim_t::dut_reset() const {
     dut->reset = 0;
     dut->eval();
     waveform_dump();
+#ifdef ENABLE_GVM
+    gvm_clear_global_trace_buffers();
+#endif // ENABLE_GVM
     logger->trace("Hardware reset ok");
 }
 
