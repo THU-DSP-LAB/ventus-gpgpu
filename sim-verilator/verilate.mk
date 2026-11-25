@@ -12,6 +12,7 @@ PREFIX ?= $(CURDIR)/install
 export RTL_GVM_ENABLED = false
 VLIB_MILL = ./mill --no-server
 VLIB_MILL_LOCK = ../build/mill-generate.lock
+FLOCK := $(shell which flock 2>/dev/null)
 
 #=====================================================================
 # Helpers
@@ -47,6 +48,12 @@ CC  = ccache gcc
 CXX = ccache g++
 endif
 MOLD = $(shell which mold)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+LIBATOMIC :=
+else
+LIBATOMIC := -latomic
+endif
 VLIB_HAS_SYSTEM_LZ4 = $(shell printf '\#include <lz4.h>\n' | $(CXX) -x c++ -E - >/dev/null 2>&1 && echo 1)
 
 # Verilated model parallelism is part of both the object layout and the
@@ -169,6 +176,9 @@ VLIB_CXXFLAGS += -DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE
 VLIB_CXXFLAGS += -I$(abspath $(VLIB_GEN_DIR))
 VLIB_CXXFLAGS += -I$(abspath .)
 VLIB_LDFLAGS += -lc
+ifeq ($(UNAME_S),Darwin)
+VLIB_LDFLAGS += -Wl,-undefined,dynamic_lookup
+endif
 ifeq ($(VLIB_HAS_SYSTEM_LZ4),1)
 VLIB_LDLIBS += -llz4
 else
@@ -190,10 +200,16 @@ VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 default: lib
 
-$(VLIB_SRC_V) $(VLIB_PARAMS_JSON) &: $(VLIB_SRC_SCALA)
+$(VLIB_PARAMS_JSON): $(VLIB_SRC_V)
+
+$(VLIB_SRC_V): $(VLIB_SRC_SCALA)
 	mkdir -p $(VLIB_GEN_DIR)
 	mkdir -p $(dir $(VLIB_MILL_LOCK))
+ifeq ($(FLOCK),)
+	cd .. && $(VLIB_MILL) ventus[6.4.0].runMain top.emitVerilog --target-dir sim-verilator/$(VLIB_GEN_DIR) --params-json sim-verilator/$(VLIB_PARAMS_JSON)
+else
 	flock $(VLIB_MILL_LOCK) -c 'cd .. && $(VLIB_MILL) ventus[6.4.0].runMain top.emitVerilog --target-dir sim-verilator/$(VLIB_GEN_DIR) --params-json sim-verilator/$(VLIB_PARAMS_JSON)'
+endif
 	mv $(VLIB_GEN_DIR)/GPGPU_SimTop.v $(VLIB_SRC_V)
 
 $(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
@@ -204,7 +220,9 @@ $(VLIB_PMU_SNAPSHOT_INC): $(VLIB_PARAMS_JSON) gen_pmu_snapshot_inc.py
 	mkdir -p $(dir $@)
 	python3 gen_pmu_snapshot_inc.py $< $@
 
-$(VLIB_MODEL_IDENTITY_CPP) $(VLIB_MODEL_IDENTITY_JSON) &: $(VLIB_MODEL_INPUT_FILES)
+$(VLIB_MODEL_IDENTITY_JSON): $(VLIB_MODEL_IDENTITY_CPP)
+
+$(VLIB_MODEL_IDENTITY_CPP): $(VLIB_MODEL_INPUT_FILES)
 	mkdir -p $(VLIB_MODEL_IDENTITY_DIR)
 	python3 gen_model_identity.py \
 	  --root $(CURDIR) \
@@ -229,7 +247,7 @@ $(VLIB_TARGET): $(VLIB_VERILATOR_OUTPUT)
 	$(CXX) $(VLIB_CXXFLAGS) $(VLIB_LDFLAGS) -shared -o $@ \
 	  $(VLIB_OBJ_EXPORT) \
 	  $(VLIB_DIR_BUILDOBJ)/libVdut.a $(VLIB_DIR_BUILDOBJ)/libverilated.a \
-	  -lspdlog -lfmt -pthread -lpthread -lz -latomic $(VLIB_LDLIBS)
+	  -lspdlog -lfmt -pthread -lpthread -lz $(LIBATOMIC) $(VLIB_LDLIBS)
 	ln -sf $(abspath $(VLIB_TARGET)) $(VLIB_DIR_BUILD)/lib$(VLIB_TARGET_NAME).so
 
 lib: $(VLIB_TARGET)

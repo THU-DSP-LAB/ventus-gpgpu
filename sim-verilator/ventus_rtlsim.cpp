@@ -8,6 +8,11 @@
 #include <cstdio>   // bfs4096-008 Phase 0.2: printf actual seed
 #include <cstring>
 
+// Verilator time stamp callback
+double sc_time_stamp() {
+    return 0;
+}
+
 namespace {
 bool validate_config(const ventus_rtlsim_config_t* config) {
     if (config == nullptr) {
