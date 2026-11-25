@@ -12,6 +12,7 @@ PREFIX ?= $(CURDIR)/install
 export RTL_GVM_ENABLED = false
 VLIB_MILL = ./mill --no-server
 VLIB_MILL_LOCK = ../build/mill-generate.lock
+FLOCK := $(shell which flock 2>/dev/null)
 
 #=====================================================================
 # Helpers
@@ -199,10 +200,16 @@ VLIB_VERILATOR_FLAGS += --prefix Vdut -Mdir $(VLIB_DIR_BUILDOBJ)
 
 default: lib
 
-$(VLIB_SRC_V) $(VLIB_PARAMS_JSON) &: $(VLIB_SRC_SCALA)
+$(VLIB_PARAMS_JSON): $(VLIB_SRC_V)
+
+$(VLIB_SRC_V): $(VLIB_SRC_SCALA)
 	mkdir -p $(VLIB_GEN_DIR)
 	mkdir -p $(dir $(VLIB_MILL_LOCK))
+ifeq ($(FLOCK),)
+	cd .. && $(VLIB_MILL) ventus[6.4.0].runMain top.emitVerilog --target-dir sim-verilator/$(VLIB_GEN_DIR) --params-json sim-verilator/$(VLIB_PARAMS_JSON)
+else
 	flock $(VLIB_MILL_LOCK) -c 'cd .. && $(VLIB_MILL) ventus[6.4.0].runMain top.emitVerilog --target-dir sim-verilator/$(VLIB_GEN_DIR) --params-json sim-verilator/$(VLIB_PARAMS_JSON)'
+endif
 	mv $(VLIB_GEN_DIR)/GPGPU_SimTop.v $(VLIB_SRC_V)
 
 $(VLIB_RTL_PARAMS_CPP): $(VLIB_PARAMS_JSON) json2cpp.py
@@ -213,7 +220,9 @@ $(VLIB_PMU_SNAPSHOT_INC): $(VLIB_PARAMS_JSON) gen_pmu_snapshot_inc.py
 	mkdir -p $(dir $@)
 	python3 gen_pmu_snapshot_inc.py $< $@
 
-$(VLIB_MODEL_IDENTITY_CPP) $(VLIB_MODEL_IDENTITY_JSON) &: $(VLIB_MODEL_INPUT_FILES)
+$(VLIB_MODEL_IDENTITY_JSON): $(VLIB_MODEL_IDENTITY_CPP)
+
+$(VLIB_MODEL_IDENTITY_CPP): $(VLIB_MODEL_INPUT_FILES)
 	mkdir -p $(VLIB_MODEL_IDENTITY_DIR)
 	python3 gen_model_identity.py \
 	  --root $(CURDIR) \
